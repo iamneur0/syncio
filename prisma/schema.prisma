@@ -1,0 +1,200 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id               String   @id @default(cuid())
+  displayName      String   // Friendly name for the user
+  email            String   @unique
+  username         String   @unique
+  password         String?  // Optional for Stremio-only users
+  firstName        String?
+  lastName         String?
+  avatar           String?
+  role             UserRole @default(USER)
+  isActive         Boolean  @default(true)
+  
+  // Stremio-specific fields
+  stremioEmail     String?  @unique // Stremio account email
+  stremioUsername  String?  // Stremio username
+  stremioAuthKey   String?  // Encrypted Stremio auth token
+  stremioUserId    String?  // Stremio user ID
+  stremioAddons    Json?    // Stremio addons data
+  lastStremioSync  DateTime? // Last time we synced with Stremio
+  
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  // Relationships
+  memberships    GroupMember[]
+  invitations    GroupInvite[]
+  addonSettings  AddonSetting[]
+  activityLogs   ActivityLog[]
+
+  @@map("users")
+}
+
+model Group {
+  id          String    @id @default(cuid())
+  name        String
+  description String?
+  avatar      String?
+  isActive    Boolean   @default(true)
+  maxMembers  Int       @default(10)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  // Relationships
+  members      GroupMember[]
+  invites      GroupInvite[]
+  addons       GroupAddon[]
+  activityLogs ActivityLog[]
+
+  @@map("groups")
+}
+
+model GroupMember {
+  id       String           @id @default(cuid())
+  role     GroupMemberRole  @default(MEMBER)
+  joinedAt DateTime         @default(now())
+
+  // Relationships
+  userId  String
+  user    User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  groupId String
+  group   Group  @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, groupId])
+  @@map("group_members")
+}
+
+model GroupInvite {
+  id        String            @id @default(cuid())
+  email     String
+  role      GroupMemberRole   @default(MEMBER)
+  status    GroupInviteStatus @default(PENDING)
+  token     String            @unique
+  expiresAt DateTime
+  createdAt DateTime          @default(now())
+
+  // Relationships
+  groupId   String
+  group     Group  @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  inviterId String
+  inviter   User   @relation(fields: [inviterId], references: [id], onDelete: Cascade)
+
+  @@unique([email, groupId])
+  @@map("group_invites")
+}
+
+model Addon {
+  id              String   @id @default(cuid())
+  name            String   @unique
+  description     String?
+  manifestUrl     String   @unique
+  stremioAddonId  String?  @unique // Stremio's internal addon ID
+  iconUrl         String?
+  version         String?
+  author          String?
+  tags            String[] // Array of tags: Stream, Catalog, Subtitles, Meta
+  isOfficial      Boolean  @default(false)
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Relationships
+  groupAddons   GroupAddon[]
+  addonSettings AddonSetting[]
+
+  @@map("addons")
+}
+
+model GroupAddon {
+  id        String    @id @default(cuid())
+  isEnabled Boolean   @default(true)
+  settings  Json?     // Store addon-specific settings as JSON
+  addedAt   DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  // Relationships
+  groupId String
+  group   Group  @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  addonId String
+  addon   Addon  @relation(fields: [addonId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, addonId])
+  @@map("group_addons")
+}
+
+model AddonSetting {
+  id        String   @id @default(cuid())
+  key       String
+  value     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relationships
+  userId  String
+  user    User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  addonId String
+  addon   Addon  @relation(fields: [addonId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, addonId, key])
+  @@map("addon_settings")
+}
+
+model ActivityLog {
+  id        String           @id @default(cuid())
+  action    ActivityAction
+  details   String?
+  metadata  Json?
+  createdAt DateTime         @default(now())
+
+  // Relationships
+  userId  String
+  user    User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  groupId String?
+  group   Group? @relation(fields: [groupId], references: [id], onDelete: SetNull)
+
+  @@map("activity_logs")
+}
+
+// Enums
+enum UserRole {
+  ADMIN
+  USER
+}
+
+enum GroupMemberRole {
+  ADMIN
+  MODERATOR
+  MEMBER
+}
+
+enum GroupInviteStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  EXPIRED
+}
+
+enum ActivityAction {
+  USER_JOINED
+  USER_LEFT
+  ADDON_ADDED
+  ADDON_REMOVED
+  ADDON_CONFIGURED
+  GROUP_CREATED
+  GROUP_UPDATED
+  INVITE_SENT
+  INVITE_ACCEPTED
+}

@@ -1,0 +1,58 @@
+{
+  "name": "stremio-family-manager",
+  "version": "1.0.0",
+  "description": "A family-friendly Stremio addon and user management system",
+  "main": "server/database-backend.js",
+  "scripts": {
+    "dev": "concurrently \"npm run server:dev\" \"npm run client:dev\"",
+    "server:dev": "DATABASE_URL=\"postgresql://stremio_user:stremio_password@localhost:5432/stremio_family_manager_temp\" REDIS_URL=\"redis://localhost:6379\" JWT_SECRET=\"temp-jwt-secret-key\" ENCRYPTION_KEY=\"temp-encryption-key-32-chars-long\" nodemon server/database-backend.js",
+    "client:dev": "cd client && npm run dev",
+    "build": "cd client && npm run build",
+    "start": "concurrently \"npm run server:start\" \"npm run client:start\"",
+    "server:start": "node server/database-backend.js",
+    "client:start": "cd client && npm start",
+    "install:all": "npm install && cd client && npm install",
+    "setup": "npm run install:all && npm run db:migrate",
+    "db:migrate": "npx prisma migrate dev",
+    "db:generate": "npx prisma generate",
+    "db:studio": "npx prisma studio",
+    "docker:dev": "docker-compose -f docker-compose.dev.yml up -d",
+    "docker:prod": "docker-compose up -d",
+    "docker:build": "docker-compose build --no-cache",
+    "docker:down": "docker-compose down",
+    "docker:logs": "docker-compose logs -f",
+    "docker:clean": "docker-compose down -v --remove-orphans && docker system prune -f"
+  },
+  "keywords": [
+    "stremio",
+    "family",
+    "addon",
+    "manager",
+    "parental-control"
+  ],
+  "author": "Hamza",
+  "license": "MIT",
+  "dependencies": {
+    "@prisma/client": "^5.6.0",
+    "axios": "^1.6.2",
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.6.1",
+    "express": "^4.21.2",
+    "express-rate-limit": "^7.5.1",
+    "helmet": "^7.2.0",
+    "joi": "^17.11.0",
+    "jsonwebtoken": "^9.0.2",
+    "lucide-react": "^0.542.0",
+    "multer": "^2.0.2",
+    "node-cron": "^3.0.3",
+    "socket.io": "^4.7.4",
+    "stremio-api-client": "^1.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.9.0",
+    "concurrently": "^8.2.2",
+    "nodemon": "^3.1.10",
+    "prisma": "^5.6.0"
+  }
+}
