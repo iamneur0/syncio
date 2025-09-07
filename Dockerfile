@@ -27,11 +27,8 @@ RUN cd client && npm run build
 # Create simple startup script
 RUN echo '#!/bin/sh' > /app/start.sh && \
     echo 'echo "Starting Syncio..."' >> /app/start.sh && \
-    echo 'echo "Setting up database schema..."' >> /app/start.sh && \
-    echo 'npx prisma db push' >> /app/start.sh && \
     echo 'echo "Starting both frontend and backend..."' >> /app/start.sh && \
-    echo 'node server/database-backend.js &' >> /app/start.sh && \
-    echo 'cd client && node .next/standalone/server.js' >> /app/start.sh && \
+    echo 'npm start' >> /app/start.sh && \
     chmod +x /app/start.sh
 
 # Expose ports
