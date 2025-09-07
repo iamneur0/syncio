@@ -44,6 +44,7 @@ jobs:
             type=ref,event=branch
             type=ref,event=tag
             type=sha
+          flavor: |
             latest=true
 
       - name: Build and push (multi-arch)
