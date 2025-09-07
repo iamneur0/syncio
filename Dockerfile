@@ -66,13 +66,6 @@ RUN echo '#!/bin/sh' > /app/start.sh && \
     echo '' >> /app/start.sh && \
     echo 'echo "🚀 Starting Syncio..."' >> /app/start.sh && \
     echo '' >> /app/start.sh && \
-    echo '# Wait for database to be ready' >> /app/start.sh && \
-    echo 'echo "📊 Waiting for database to be ready..."' >> /app/start.sh && \
-    echo 'until pg_isready -h postgres -p 5432 -U ${POSTGRES_USER:-stremio_user}; do' >> /app/start.sh && \
-    echo '  echo "Waiting for database..."' >> /app/start.sh && \
-    echo '  sleep 2' >> /app/start.sh && \
-    echo 'done' >> /app/start.sh && \
-    echo '' >> /app/start.sh && \
     echo '# Run database migrations' >> /app/start.sh && \
     echo 'echo "📊 Running database migrations..."' >> /app/start.sh && \
     echo 'npx prisma migrate deploy' >> /app/start.sh && \
