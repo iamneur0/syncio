@@ -6,10 +6,10 @@ services:
     container_name: syncio
     restart: unless-stopped
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-user}:${POSTGRES_PASSWORD:-password}@postgres:5432/${POSTGRES_DB:-syncio}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-syncio_user}:${POSTGRES_PASSWORD:-syncio_password}@postgres:5432/${POSTGRES_DB:-syncio}
+      JWT_SECRET: ${JWT_SECRET:-jwt-secret-key}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-encryption-key}
       REDIS_URL: redis://redis:6379
-      JWT_SECRET: ${JWT_SECRET:-temp-jwt-secret-key}
-      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-temp-encryption-key-32-chars-long}
     ports:
       - "3000:3000"
       #- "4000:4000"
@@ -29,12 +29,12 @@ services:
   # PostgreSQL Database
   postgres:
     image: postgres:15-alpine
-    container_name: stremio-db
+    container_name: syncio-db
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-syncio}
-      POSTGRES_USER: ${POSTGRES_USER:-user}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
+      POSTGRES_USER: ${POSTGRES_USER:-syncio_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-syncio_password}
     volumes:
       - ./syncio/postgres_data:/var/lib/postgresql/data
       - ./syncio/init-db:/docker-entrypoint-initdb.d
@@ -49,7 +49,7 @@ services:
   # Redis (for session storage and caching)
   redis:
     image: redis:7-alpine
-    container_name: stremio-redis
+    container_name: syncio-redis
     restart: unless-stopped
     ports:
       - "${REDIS_PORT:-6379}:6379"

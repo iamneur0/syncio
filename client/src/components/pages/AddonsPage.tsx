@@ -640,12 +640,16 @@ export default function AddonsPage() {
             }
           </p>
           {!debouncedSearchTerm && (
-            <button
-              onClick={() => setShowAddModal(true)}
-              className="mt-4 px-4 py-2 bg-stremio-purple text-white rounded-lg hover:bg-purple-700 transition-colors"
-            >
-              Add Your First Addon
-            </button>
+            <div className="mt-6">
+              <button
+                onClick={() => setShowAddModal(true)}
+                className="flex items-center justify-center px-3 py-2 sm:px-4 bg-stremio-purple text-white rounded-lg hover:bg-purple-700 transition-colors text-sm sm:text-base mx-auto"
+              >
+                <Plus className="w-4 h-4 sm:w-5 sm:h-5 mr-2" />
+                <span className="hidden sm:inline">Add Your First Addon</span>
+                <span className="sm:hidden">Add Addon</span>
+              </button>
+            </div>
           )}
         </div>
       )}
