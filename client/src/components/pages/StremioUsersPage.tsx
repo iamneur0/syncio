@@ -144,6 +144,16 @@ function UserSyncBadge({ userId, userExcludedSet, userProtectedSet, isSyncing }:
         return
       }
 
+      // Check if user was recently synced by looking at recent sync events
+      const recentSync = localStorage.getItem(`sfm_user_sync:${userId}`)
+      const syncTime = recentSync ? parseInt(recentSync) : 0
+      const isRecentlySynced = (Date.now() - syncTime) < 5000 // 5 seconds
+      
+      if (isRecentlySynced) {
+        setStatus('synced')
+        return
+      }
+
       // If data is still loading, show checking state
       if (!userDetail || !live) {
         setStatus('checking')
@@ -754,7 +764,9 @@ export default function StremioUsersPage() {
       }
       return res.json()
     },
-    onSuccess: (data) => {
+    onSuccess: (data, userId) => {
+      // Mark user as recently synced in localStorage
+      localStorage.setItem(`sfm_user_sync:${userId}`, Date.now().toString())
       // refresh live addons and users list to reflect counts
       if (selectedUser?.id) {
         queryClient.invalidateQueries({ queryKey: ['user', selectedUser.id, 'stremio-addons'] })
@@ -1419,6 +1431,8 @@ export default function StremioUsersPage() {
     onSuccess: () => {
       // Invalidate the Stremio addons query to refresh the list
       queryClient.invalidateQueries({ queryKey: ['user', selectedUser?.id, 'stremio-addons'] })
+      // Also invalidate users list to update addon counts
+      queryClient.invalidateQueries({ queryKey: ['users'] })
       toast.success('Addon removed from Stremio account!')
     },
     onError: (error: any) => {
@@ -1930,24 +1944,28 @@ export default function StremioUsersPage() {
 
       {/* Empty State */}
       {!isLoading && !error && displayUsers.length === 0 && (
-        <div className="text-center py-8 sm:py-12 px-4">
-          <UserCircle className="w-16 h-16 sm:w-20 sm:h-20 text-gray-400 mx-auto mb-4" />
-          <h3 className={`text-lg sm:text-xl font-medium mb-2 ${isDark ? 'text-white' : 'text-gray-900'}`}>
+        <div className="text-center py-12">
+          <UserCircle className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+          <h3 className={`text-lg font-medium mb-2 ${isDark ? 'text-white' : 'text-gray-900'}`}>
             {debouncedSearchTerm ? 'No users found' : 'No users yet'}
           </h3>
-          <p className={`text-sm sm:text-base mb-6 ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
+          <p className={`${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
             {debouncedSearchTerm 
               ? 'Try adjusting your search criteria' 
               : 'Start by connecting your first Stremio user'
             }
           </p>
           {!debouncedSearchTerm && (
-            <button
-              onClick={() => setShowConnectModal(true)}
-              className="px-6 py-3 sm:px-8 sm:py-4 bg-stremio-purple text-white rounded-lg hover:bg-purple-700 transition-colors text-sm sm:text-base font-medium"
-            >
-              Connect Your First User
-            </button>
+            <div className="mt-6">
+              <button
+                onClick={() => setShowConnectModal(true)}
+                className="flex items-center justify-center px-3 py-2 sm:px-4 bg-stremio-purple text-white rounded-lg hover:bg-purple-700 transition-colors text-sm sm:text-base mx-auto"
+              >
+                <Plus className="w-4 h-4 sm:w-5 sm:h-5 mr-2" />
+                <span className="hidden sm:inline">Connect Your First User</span>
+                <span className="sm:hidden">Connect User</span>
+              </button>
+            </div>
           )}
         </div>
       )}

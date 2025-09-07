@@ -105,6 +105,17 @@ function GroupSyncBadge({ groupId, onSync, isSyncing }: { groupId: string; onSyn
           return
         }
         
+        // Check if group was just synced by looking at recent sync events
+        const recentSync = localStorage.getItem(`sfm_group_sync:${groupId}`)
+        const syncTime = recentSync ? parseInt(recentSync) : 0
+        const isRecentlySynced = (Date.now() - syncTime) < 5000 // 5 seconds
+        
+        if (isRecentlySynced) {
+          setStatus('synced')
+          setIsLoading(false)
+          return
+        }
+
         // Determine per-user status using UserSyncBadge persisted results
         const userSyncPromises = groupUsers.map(async (user: any) => {
           try {
@@ -742,6 +753,16 @@ export default function GroupsPage() {
         newSet.delete(groupId)
         return newSet
       })
+      // Mark group as recently synced in localStorage
+      localStorage.setItem(`sfm_group_sync:${groupId}`, Date.now().toString())
+      // Mark all users in this group as recently synced
+      const groupDetails = queryClient.getQueryData(['group', groupId, 'sync-status']) as any
+      if (groupDetails?.users) {
+        const now = Date.now().toString()
+        groupDetails.users.forEach((user: any) => {
+          localStorage.setItem(`sfm_user_sync:${user.id}`, now)
+        })
+      }
       // Invalidate user queries to refresh sync status
       queryClient.invalidateQueries({ queryKey: ['users'] })
       queryClient.invalidateQueries({ queryKey: ['user'] })
@@ -828,6 +849,19 @@ export default function GroupsPage() {
       } else {
         toast.success(message)
       }
+      // Mark all groups as recently synced in localStorage
+      const groupsToSync = groups || []
+      const now = Date.now().toString()
+      groupsToSync.forEach((group: any) => {
+        localStorage.setItem(`sfm_group_sync:${group.id}`, now)
+        // Also mark all users in this group as recently synced
+        const groupDetails = queryClient.getQueryData(['group', group.id, 'sync-status']) as any
+        if (groupDetails?.users) {
+          groupDetails.users.forEach((user: any) => {
+            localStorage.setItem(`sfm_user_sync:${user.id}`, now)
+          })
+        }
+      })
       // Invalidate queries to refresh the UI
       queryClient.invalidateQueries({ queryKey: ['groups'] })
       queryClient.invalidateQueries({ queryKey: ['users'] })
@@ -929,16 +963,16 @@ export default function GroupsPage() {
   }
 
   const getGroupColorClass = (color: string) => {
-    if (!color) return 'bg-gray-500'
+    if (!color) return 'bg-stremio-purple'
     if (typeof color === 'string' && color.trim().startsWith('#')) return ''
     switch (color) {
       case 'blue': return 'bg-blue-500'
       case 'green': return 'bg-green-500'
-      case 'purple': return 'bg-purple-500'
+      case 'purple': return 'bg-stremio-purple'
       case 'orange': return 'bg-orange-500'
       case 'red': return 'bg-red-500'
       case 'gray': return 'bg-gray-500'
-      default: return 'bg-gray-500'
+      default: return 'bg-stremio-purple'
     }
   }
 
@@ -1109,8 +1143,27 @@ export default function GroupsPage() {
       {filteredGroups.length === 0 && (
         <div className="text-center py-12">
           <Users className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-          <h3 className={`text-lg font-medium mb-2 ${isDark ? 'text-white' : 'text-gray-900'}`}>No groups found</h3>
-          <p className={`${isDark ? 'text-gray-400' : 'text-gray-600'}`}>Try adjusting your search or filter criteria</p>
+          <h3 className={`text-lg font-medium mb-2 ${isDark ? 'text-white' : 'text-gray-900'}`}>
+            {groups.length === 0 ? 'No groups yet' : 'No groups found'}
+          </h3>
+          <p className={`${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
+            {groups.length === 0 
+              ? 'Start by creating your first group to organize addons' 
+              : 'Try adjusting your search or filter criteria'
+            }
+          </p>
+          {groups.length === 0 && (
+            <div className="mt-6">
+              <button
+                onClick={() => setShowAddModal(true)}
+                className="flex items-center justify-center px-3 py-2 sm:px-4 bg-stremio-purple text-white rounded-lg hover:bg-purple-700 transition-colors text-sm sm:text-base mx-auto"
+              >
+                <Plus className="w-4 h-4 sm:w-5 sm:h-5 mr-2" />
+                <span className="hidden sm:inline">Add Your First Group</span>
+                <span className="sm:hidden">Add Group</span>
+              </button>
+            </div>
+          )}
         </div>
       )}
 

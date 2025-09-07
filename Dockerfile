@@ -1,39 +1,120 @@
-# Simple Dockerfile for Syncio
-FROM node:18-alpine
+# Multi-stage Dockerfile for Syncio
+FROM node:18-alpine AS base
 
-# Install dependencies
-RUN apk add --no-cache curl postgresql-client openssl
-
+# Install dependencies only when needed
+FROM base AS deps
+RUN apk add --no-cache libc6-compat openssl3 curl
 WORKDIR /app
 
-# Copy package files
+# Copy package files for both frontend and backend
 COPY package*.json ./
 COPY client/package*.json ./client/
 COPY prisma ./prisma/
 
-# Install dependencies
+# Install all dependencies
 RUN npm install --no-package-lock
 RUN cd client && npm install --no-package-lock
 
-# Copy source code
+# Build stage
+FROM base AS builder
+WORKDIR /app
+COPY --from=deps /app/node_modules ./node_modules
+COPY --from=deps /app/client/node_modules ./client/node_modules
 COPY . .
 
-# Generate Prisma client with correct binary targets
-ENV PRISMA_CLI_BINARY_TARGETS="linux-musl-openssl-3.0.x"
+# Generate Prisma client with correct engine
+ENV PRISMA_CLI_BINARY_TARGETS="linux-musl-openssl-3.0.x,linux-musl-arm64-openssl-3.0.x"
+RUN rm -rf node_modules/.prisma node_modules/@prisma/client/runtime/libquery_engine-*.so.node 2>/dev/null || true
 RUN npx prisma generate
 
+# Set build-time environment variables
+ARG NEXT_PUBLIC_API_URL=http://localhost:4000/api
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+
+# Build Next.js frontend
 RUN cd client && npm run build
 
-# Create simple startup script
+# Production stage
+FROM base AS production
+WORKDIR /app
+
+# Create app user for security
+RUN addgroup --system --gid 1001 nodejs
+RUN adduser --system --uid 1001 appuser
+
+# Install runtime dependencies
+RUN apk add --no-cache curl postgresql-client openssl3
+
+# Set environment variables for Prisma
+ENV PRISMA_CLI_BINARY_TARGETS="linux-musl-openssl-3.0.x,linux-musl-arm64-openssl-3.0.x"
+
+# Copy built application
+COPY --from=builder --chown=appuser:nodejs /app/package*.json ./
+COPY --from=builder --chown=appuser:nodejs /app/node_modules ./node_modules
+COPY --from=builder --chown=appuser:nodejs /app/server ./server
+COPY --from=builder --chown=appuser:nodejs /app/prisma ./prisma
+COPY --from=builder --chown=appuser:nodejs /app/node_modules/.prisma ./node_modules/.prisma
+COPY --from=builder --chown=appuser:nodejs /app/client/.next ./client/.next
+COPY --from=builder --chown=appuser:nodejs /app/client/package*.json ./client/
+COPY --from=builder --chown=appuser:nodejs /app/client/node_modules ./client/node_modules
+COPY --from=builder --chown=appuser:nodejs /app/client/public ./client/public
+COPY --from=builder --chown=appuser:nodejs /app/client/next.config.js ./client/
+
+# Create startup script
 RUN echo '#!/bin/sh' > /app/start.sh && \
-    echo 'echo "Starting Syncio..."' >> /app/start.sh && \
-    echo 'echo "Starting both frontend and backend..."' >> /app/start.sh && \
-    echo 'npm start' >> /app/start.sh && \
-    chmod +x /app/start.sh
+    echo 'set -e' >> /app/start.sh && \
+    echo '' >> /app/start.sh && \
+    echo 'echo "🚀 Starting Syncio..."' >> /app/start.sh && \
+    echo '' >> /app/start.sh && \
+    echo '# Wait for database to be ready' >> /app/start.sh && \
+    echo 'echo "📊 Waiting for database to be ready..."' >> /app/start.sh && \
+    echo 'until pg_isready -h postgres -p 5432 -U ${POSTGRES_USER:-stremio_user}; do' >> /app/start.sh && \
+    echo '  echo "Waiting for database..."' >> /app/start.sh && \
+    echo '  sleep 2' >> /app/start.sh && \
+    echo 'done' >> /app/start.sh && \
+    echo '' >> /app/start.sh && \
+    echo '# Run database migrations' >> /app/start.sh && \
+    echo 'echo "📊 Running database migrations..."' >> /app/start.sh && \
+    echo 'npx prisma migrate deploy' >> /app/start.sh && \
+    echo '' >> /app/start.sh && \
+    echo '# Start both services using a process manager approach' >> /app/start.sh && \
+    echo 'echo "🌐 Starting frontend server on port ${FRONTEND_PORT:-3000}..."' >> /app/start.sh && \
+    echo 'cd /app/client && PORT=${FRONTEND_PORT:-3000} npm start &' >> /app/start.sh && \
+    echo 'FRONTEND_PID=$!' >> /app/start.sh && \
+    echo '' >> /app/start.sh && \
+    echo '# Wait a moment for frontend to start' >> /app/start.sh && \
+    echo 'sleep 5' >> /app/start.sh && \
+    echo '' >> /app/start.sh && \
+    echo 'echo "🔧 Starting backend server on port ${BACKEND_PORT:-4000}..."' >> /app/start.sh && \
+    echo 'cd /app && PORT=${BACKEND_PORT:-4000} node server/database-backend.js &' >> /app/start.sh && \
+    echo 'BACKEND_PID=$!' >> /app/start.sh && \
+    echo '' >> /app/start.sh && \
+    echo '# Function to handle shutdown' >> /app/start.sh && \
+    echo 'cleanup() {' >> /app/start.sh && \
+    echo '    echo "🛑 Shutting down services..."' >> /app/start.sh && \
+    echo '    kill $BACKEND_PID 2>/dev/null || true' >> /app/start.sh && \
+    echo '    kill $FRONTEND_PID 2>/dev/null || true' >> /app/start.sh && \
+    echo '    wait' >> /app/start.sh && \
+    echo '    exit 0' >> /app/start.sh && \
+    echo '}' >> /app/start.sh && \
+    echo '' >> /app/start.sh && \
+    echo '# Set up signal handlers' >> /app/start.sh && \
+    echo 'trap cleanup SIGTERM SIGINT' >> /app/start.sh && \
+    echo '' >> /app/start.sh && \
+    echo '# Wait for both processes' >> /app/start.sh && \
+    echo 'wait $BACKEND_PID $FRONTEND_PID' >> /app/start.sh
+
+RUN chmod +x /app/start.sh
+
+# Switch to non-root user
+USER appuser
 
 # Expose ports
 EXPOSE 3000 4000
 
-# Start the application
-CMD ["/app/start.sh"]
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+  CMD curl -f http://localhost:3000/ || exit 1
 
+# Start the application
+CMD ["./start.sh"]
