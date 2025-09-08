@@ -129,7 +129,7 @@ function UserSyncBadge({ userId, userExcludedSet, userProtectedSet, isSyncing }:
   }, [status, userId])
 
   React.useEffect(() => {
-    const checkSync = async () => {
+    const checkSync = () => {
       // If currently syncing, show syncing state
       if (isSyncing) {
         setStatus('syncing')
@@ -166,114 +166,45 @@ function UserSyncBadge({ userId, userExcludedSet, userProtectedSet, isSyncing }:
         return
       }
 
+      // Get group addons (excluding user-excluded ones)
       const allGroupAddons = Array.isArray(userDetail?.addons) ? userDetail!.addons : []
       const groupAddons = allGroupAddons.filter((ga: any) => !userExcludedSet.has(ga?.manifestUrl) && ga?.isEnabled !== false)
+      
+      // Get Stremio addons (excluding protected/locked ones)
       const liveList = Array.isArray(live?.addons) ? live!.addons : []
-      if (groupAddons.length === 0) { setStatus('synced'); return }
-      if (liveList.length === 0) { setStatus('unsynced'); return }
+      const stremioAddons = liveList.filter((a: any) => !isAddonProtected(a))
 
-      // Build sets from ALL live addons for presence checks (include protected)
-      const allLiveById = new Map<string, any[]>()
-      const allLiveUrlSet = new Set<string>()
-      for (const a of liveList) {
-        const id = a?.id || a?.manifest?.id || ''
-        if (id) {
-          if (!allLiveById.has(id)) allLiveById.set(id, [])
-          allLiveById.get(id)!.push(a)
-        }
-        const url = a?.manifestUrl || a?.transportUrl || a?.url
-        if (url) allLiveUrlSet.add(url.toString().trim().toLowerCase())
+      // If no group addons but there are Stremio addons, consider unsynced
+      if (groupAddons.length === 0 && stremioAddons.length > 0) { 
+        setStatus('unsynced')
+        return 
       }
 
-      // Use non-protected live only to detect extras that should not be present
-      const nonProtectedLive = liveList.filter((a: any) => !isAddonProtected(a))
-
-      // Deep manifest comparison helper reused below
-      const liveManifestStrings = new Set<string>()
-      const liveUrlSet = new Set<string>()
-      const liveById = new Map<string, any[]>() // Track addons by ID for duplicate detection
-      
-      for (const a of nonProtectedLive) {
-        const provided = a?.manifest
-        const url = a?.manifestUrl || a?.transportUrl || a?.url
-        if (url) liveUrlSet.add(url.toString().trim().toLowerCase())
-        const manifest = provided || await fetchManifestCached(url)
-        if (manifest) {
-          liveManifestStrings.add(JSON.stringify(deepSort(manifest)))
-          
-          // Track by ID for duplicate detection
-          const id = a?.id || a?.manifest?.id || ''
-          if (id) {
-            if (!liveById.has(id)) liveById.set(id, [])
-            liveById.get(id)!.push(a)
-          }
-        }
+      // If no Stremio addons but there are group addons, consider unsynced
+      if (stremioAddons.length === 0 && groupAddons.length > 0) { 
+        setStatus('unsynced')
+        return 
       }
 
-      // Check if all group addons exist in live (by ID/URL), allowing them to be protected
-      for (const ga of groupAddons) {
-        const groupId = ga?.id || ga?.manifest?.id
-        const groupUrl = (ga?.manifestUrl || '').toString().trim().toLowerCase()
-
-        if (groupUrl && allLiveUrlSet.has(groupUrl)) {
-          continue
-        }
-
-        if (groupId && allLiveById.has(groupId)) {
-          // If we care about exact manifest match, compare against any instance in the account (protected or not)
-          const userAddonsWithId = allLiveById.get(groupId) || []
-          let foundMatchingManifest = false
-          for (const userAddon of userAddonsWithId) {
-            try {
-              const groupManifest = await fetchManifestCached(ga?.manifestUrl)
-              const userManifest = userAddon?.manifest
-              if (groupManifest && userManifest) {
-                const groupKey = JSON.stringify(deepSort(groupManifest))
-                const userKey = JSON.stringify(deepSort(userManifest))
-                if (groupKey === userKey) { foundMatchingManifest = true; break }
-              }
-            } catch {}
-          }
-          if (!foundMatchingManifest) { setStatus('unsynced'); return }
-        } else {
-          setStatus('unsynced'); return
-        }
+      // If both are empty, consider synced
+      if (groupAddons.length === 0 && stremioAddons.length === 0) {
+        setStatus('synced')
+        return
       }
 
-      // Check order: group addons should appear in the same order in Stremio account
-      const groupAddonUrls = groupAddons.map((ga: any) => (ga?.manifestUrl || '').toString().trim().toLowerCase()).filter(Boolean)
-      const liveAddonUrls = nonProtectedLive.map((a: any) => (a?.manifestUrl || a?.transportUrl || a?.url || '').toString().trim().toLowerCase()).filter(Boolean)
-      
-      // Find the positions of group addons in the live addons list
-      const groupAddonPositions: number[] = []
-      for (const groupUrl of groupAddonUrls) {
-        const position = liveAddonUrls.findIndex((liveUrl: string) => liveUrl === groupUrl)
-        if (position === -1) { setStatus('unsynced'); return }
-        groupAddonPositions.push(position)
-      }
-      
-      // Check if group addons are in the same order (positions should be ascending)
-      for (let i = 1; i < groupAddonPositions.length; i++) {
-        if (groupAddonPositions[i] <= groupAddonPositions[i - 1]) {
-          setStatus('unsynced'); return
-        }
-      }
+      // Simple set comparison: check if the two sets are identical
+      const groupUrls = new Set(groupAddons.map((ga: any) => (ga?.manifestUrl || '').toString().trim().toLowerCase()).filter(Boolean))
+      const stremioUrls = new Set(stremioAddons.map((a: any) => (a?.manifestUrl || a?.transportUrl || a?.url || '').toString().trim().toLowerCase()).filter(Boolean))
 
-      // Extras: only consider non-protected live addons as extraneous
-      const groupAddonIds = new Set(groupAddons.map((ga: any) => ga?.id || ga?.manifest?.id).filter(Boolean))
-      const groupAddonUrlSet = new Set(groupAddonUrls)
-      for (const addon of nonProtectedLive) {
-        const addonId = addon?.id || addon?.manifest?.id
-        const addonUrl = (addon?.manifestUrl || addon?.transportUrl || addon?.url || '').toString().trim().toLowerCase()
-        const isInGroup = (addonId && groupAddonIds.has(addonId)) || (addonUrl && groupAddonUrlSet.has(addonUrl))
-        if (!isInGroup) { setStatus('unsynced'); return }
-      }
+      // Check if sets are identical
+      const isIdentical = groupUrls.size === stremioUrls.size && 
+        Array.from(groupUrls).every(url => stremioUrls.has(url))
 
-      setStatus('synced')
+      setStatus(isIdentical ? 'synced' : 'unsynced')
     }
 
     checkSync()
-  }, [userDetail, live, isDark, userExcludedSet, userProtectedSet, isSyncing, wasSyncing])
+  }, [userDetail, live, isDark, isSyncing, wasSyncing, userExcludedSet.size, userProtectedSet.size])
 
   const handleSync = () => {
     // Trigger sync for this user
@@ -498,6 +429,10 @@ export default function StremioUsersPage() {
       if (!selectedUser?.id) return null
       const response = await fetch(`/api/users/${selectedUser.id}/stremio-addons`)
       if (!response.ok) {
+        // If user is not connected to Stremio, return empty addons instead of throwing
+        if (response.status === 400) {
+          return { addons: [] }
+        }
         throw new Error('Failed to fetch Stremio addons')
       }
       return response.json()
@@ -1406,6 +1341,8 @@ export default function StremioUsersPage() {
       // Invalidate user queries to update sync badges in general view
       queryClient.invalidateQueries({ queryKey: ['user', uid] })
       queryClient.invalidateQueries({ queryKey: ['users'] })
+      // Invalidate Stremio addons query to update sync status immediately
+      queryClient.invalidateQueries({ queryKey: ['user', uid, 'stremio-addons'] })
       
       return next
     })
@@ -1654,7 +1591,7 @@ export default function StremioUsersPage() {
         justReorderedRef.current = false
       }, 1000)
     }
-  }, [isDetailModalOpen, selectedUser?.id, stremioAddonsData, addonOrder.length, isDragging])
+  }, [isDetailModalOpen, selectedUser?.id, stremioAddonsData, isDragging])
 
   const reorderMutation = useMutation({
     mutationFn: async (orderedManifestUrls: string[]) => {
@@ -2410,8 +2347,8 @@ export default function StremioUsersPage() {
                 <div className="flex items-center gap-3">
                   <UserSyncBadge 
                     userId={selectedUser.id} 
-                    userExcludedSet={userExcludedSet}
-                    userProtectedSet={userProtectedSet}
+                    userExcludedSet={globalUserExcludedSets.get(selectedUser.id) || new Set()}
+                    userProtectedSet={globalUserProtectedSets.get(selectedUser.id) || new Set()}
                     isSyncing={syncUserMutation.isPending && syncUserMutation.variables === selectedUser.id}
                   />
                 <button
@@ -2650,9 +2587,8 @@ export default function StremioUsersPage() {
                                     const isActive = activeId === murl
                                 
                                 return (
-                                      <SortableAddon id={murl} index={index}>
+                                      <SortableAddon key={`${murl}-${index}` || `addon-${index}`} id={murl} index={index}>
                                   <div
-                                    key={`${murl}-${index}` || `addon-${index}`}
                                     className={`relative p-3 pl-8 rounded-lg border transition-all duration-200 select-none touch-none ${
                                       isDark ? 'bg-gray-600 border-gray-500' : 'bg-white border-gray-200'
                                         } ${isDragged ? (isDark ? 'ring-2 ring-blue-500 opacity-50' : 'ring-2 ring-blue-400 opacity-50') : ''} ${isActive && isDragging ? 'opacity-0' : ''}`}

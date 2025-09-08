@@ -7,8 +7,8 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider = "sqlite"
+  url      = "file:./sqlite.db"
 }
 
 model User {
@@ -20,7 +20,7 @@ model User {
   firstName        String?
   lastName         String?
   avatar           String?
-  role             UserRole @default(USER)
+  role             String   @default("USER") // Changed from UserRole enum
   isActive         Boolean  @default(true)
   
   // Stremio-specific fields
@@ -28,7 +28,7 @@ model User {
   stremioUsername  String?  // Stremio username
   stremioAuthKey   String?  // Encrypted Stremio auth token
   stremioUserId    String?  // Stremio user ID
-  stremioAddons    Json?    // Stremio addons data
+  stremioAddons    String?  // Stremio addons data as JSON string
   lastStremioSync  DateTime? // Last time we synced with Stremio
   
   createdAt        DateTime @default(now())
@@ -63,9 +63,9 @@ model Group {
 }
 
 model GroupMember {
-  id       String           @id @default(cuid())
-  role     GroupMemberRole  @default(MEMBER)
-  joinedAt DateTime         @default(now())
+  id       String   @id @default(cuid())
+  role     String   @default("MEMBER") // Changed from GroupMemberRole enum
+  joinedAt DateTime @default(now())
 
   // Relationships
   userId  String
@@ -78,13 +78,13 @@ model GroupMember {
 }
 
 model GroupInvite {
-  id        String            @id @default(cuid())
+  id        String   @id @default(cuid())
   email     String
-  role      GroupMemberRole   @default(MEMBER)
-  status    GroupInviteStatus @default(PENDING)
-  token     String            @unique
+  role      String   @default("MEMBER") // Changed from GroupMemberRole enum
+  status    String   @default("PENDING") // Changed from GroupInviteStatus enum
+  token     String   @unique
   expiresAt DateTime
-  createdAt DateTime          @default(now())
+  createdAt DateTime @default(now())
 
   // Relationships
   groupId   String
@@ -105,7 +105,7 @@ model Addon {
   iconUrl         String?
   version         String?
   author          String?
-  tags            String[] // Array of tags: Stream, Catalog, Subtitles, Meta
+  tags            String   // Comma-separated tags: Stream, Catalog, Subtitles, Meta
   isOfficial      Boolean  @default(false)
   isActive        Boolean  @default(true)
   createdAt       DateTime @default(now())
@@ -119,11 +119,11 @@ model Addon {
 }
 
 model GroupAddon {
-  id        String    @id @default(cuid())
-  isEnabled Boolean   @default(true)
-  settings  Json?     // Store addon-specific settings as JSON
-  addedAt   DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  id        String   @id @default(cuid())
+  isEnabled Boolean  @default(true)
+  settings  String?  // Store addon-specific settings as JSON string
+  addedAt   DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // Relationships
   groupId String
@@ -153,11 +153,11 @@ model AddonSetting {
 }
 
 model ActivityLog {
-  id        String           @id @default(cuid())
-  action    ActivityAction
+  id        String   @id @default(cuid())
+  action    String   // Changed from ActivityAction enum
   details   String?
-  metadata  Json?
-  createdAt DateTime         @default(now())
+  metadata  String?  // Store metadata as JSON string
+  createdAt DateTime @default(now())
 
   // Relationships
   userId  String
@@ -168,33 +168,10 @@ model ActivityLog {
   @@map("activity_logs")
 }
 
-// Enums
-enum UserRole {
-  ADMIN
-  USER
-}
-
-enum GroupMemberRole {
-  ADMIN
-  MODERATOR
-  MEMBER
-}
-
-enum GroupInviteStatus {
-  PENDING
-  ACCEPTED
-  DECLINED
-  EXPIRED
-}
-
-enum ActivityAction {
-  USER_JOINED
-  USER_LEFT
-  ADDON_ADDED
-  ADDON_REMOVED
-  ADDON_CONFIGURED
-  GROUP_CREATED
-  GROUP_UPDATED
-  INVITE_SENT
-  INVITE_ACCEPTED
-}
+// Note: SQLite doesn't support enums, so we use String fields with constraints
+// Valid values:
+// User.role: "ADMIN", "USER"
+// GroupMember.role: "ADMIN", "MODERATOR", "MEMBER"  
+// GroupInvite.role: "ADMIN", "MODERATOR", "MEMBER"
+// GroupInvite.status: "PENDING", "ACCEPTED", "DECLINED", "EXPIRED"
+// ActivityLog.action: "USER_JOINED", "USER_LEFT", "ADDON_ADDED", "ADDON_REMOVED", "ADDON_CONFIGURED", "GROUP_CREATED", "GROUP_UPDATED", "INVITE_SENT", "INVITE_ACCEPTED"

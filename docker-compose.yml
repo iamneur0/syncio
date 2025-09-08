@@ -2,22 +2,23 @@ version: '3.8'
 
 services:
   syncio:
-    image: ghcr.io/iamneur0/syncio:latest
+    # image: ghcr.io/iamneur0/syncio:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: syncio
     restart: unless-stopped
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-syncio_user}:${POSTGRES_PASSWORD:-syncio_password}@postgres:5432/${POSTGRES_DB:-syncio}
       JWT_SECRET: ${JWT_SECRET:-jwt-secret-key}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:-encryption-key}
-      REDIS_URL: redis://redis:6379
+      REDIS_URL: redis://syncio_redis:6379
     ports:
       - "3000:3000"
-      #- "4000:4000"
     depends_on:
-      postgres:
+      syncio_redis:
         condition: service_healthy
-      redis:
-        condition: service_healthy
+    volumes:
+      - ./data:/app/data
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/"]
       interval: 30s
@@ -26,33 +27,11 @@ services:
       start_period: 60s
 
 
-  # PostgreSQL Database
-  postgres:
-    image: postgres:15-alpine
-    container_name: syncio-db
-    restart: unless-stopped
-    environment:
-      POSTGRES_DB: ${POSTGRES_DB:-syncio}
-      POSTGRES_USER: ${POSTGRES_USER:-syncio_user}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-syncio_password}
-    volumes:
-      - ./syncio/postgres_data:/var/lib/postgresql/data
-      - ./syncio/init-db:/docker-entrypoint-initdb.d
-    ports:
-      - "${POSTGRES_PORT:-5432}:5432"
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-user} -d ${POSTGRES_DB:-syncio}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
   # Redis (for session storage and caching)
-  redis:
+  syncio_redis:
     image: redis:7-alpine
-    container_name: syncio-redis
+    container_name: syncio_redis
     restart: unless-stopped
-    ports:
-      - "${REDIS_PORT:-6379}:6379"
     volumes:
       - ./syncio/redis_data:/data
     healthcheck:

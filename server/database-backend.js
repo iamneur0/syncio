@@ -161,10 +161,20 @@ app.get('/api/users', async (req, res) => {
           console.error(`Error fetching Stremio addons for user ${user.id}:`, error.message)
           // Fallback to database value if live fetch fails
           if (user.stremioAddons) {
-            if (Array.isArray(user.stremioAddons)) {
-              stremioAddonsCount = user.stremioAddons.length
-            } else if (typeof user.stremioAddons === 'object') {
-              stremioAddonsCount = Object.keys(user.stremioAddons).length
+            try {
+              const parsedAddons = JSON.parse(user.stremioAddons)
+              if (Array.isArray(parsedAddons)) {
+                stremioAddonsCount = parsedAddons.length
+              } else if (typeof parsedAddons === 'object') {
+                stremioAddonsCount = Object.keys(parsedAddons).length
+              }
+            } catch (e) {
+              // Fallback for old data format
+              if (Array.isArray(user.stremioAddons)) {
+                stremioAddonsCount = user.stremioAddons.length
+              } else if (typeof user.stremioAddons === 'object') {
+                stremioAddonsCount = Object.keys(user.stremioAddons).length
+              }
             }
           }
         }
@@ -241,13 +251,28 @@ app.get('/api/users/:id', async (req, res) => {
       ...user.memberships.map(m => ({ id: m.group.id, name: m.group.name, role: 'member' }))
     ]
 
-    // Calculate Stremio addons count
+    // Calculate Stremio addons count and parse addons data
     let stremioAddonsCount = 0
+    let stremioAddons = []
     if (user.stremioAddons) {
-      if (Array.isArray(user.stremioAddons)) {
-        stremioAddonsCount = user.stremioAddons.length
-      } else if (typeof user.stremioAddons === 'object') {
-        stremioAddonsCount = Object.keys(user.stremioAddons).length
+      try {
+        const parsedAddons = JSON.parse(user.stremioAddons)
+        if (Array.isArray(parsedAddons)) {
+          stremioAddonsCount = parsedAddons.length
+          stremioAddons = parsedAddons
+        } else if (typeof parsedAddons === 'object') {
+          stremioAddonsCount = Object.keys(parsedAddons).length
+          stremioAddons = Object.values(parsedAddons)
+        }
+      } catch (e) {
+        // Fallback for old data format
+        if (Array.isArray(user.stremioAddons)) {
+          stremioAddonsCount = user.stremioAddons.length
+          stremioAddons = user.stremioAddons
+        } else if (typeof user.stremioAddons === 'object') {
+          stremioAddonsCount = Object.keys(user.stremioAddons).length
+          stremioAddons = Object.values(user.stremioAddons)
+        }
       }
     }
 
@@ -269,7 +294,8 @@ app.get('/api/users/:id', async (req, res) => {
       avatar: null,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
-      stremioAddonsCount: stremioAddonsCount
+      stremioAddonsCount: stremioAddonsCount,
+      stremioAddons: stremioAddons
     }
 
     res.json(transformedUser)
@@ -626,6 +652,12 @@ app.post('/api/users/:id/stremio-addons/clear', async (req, res) => {
       throw e
     }
 
+    // Update the user's stremioAddons field in the database to empty array
+    await prisma.user.update({
+      where: { id },
+      data: { stremioAddons: JSON.stringify([]) }
+    })
+
     return res.json({ message: 'All addons cleared successfully' })
   } catch (error) {
     console.error('Error clearing Stremio addons:', error)
@@ -712,6 +744,12 @@ app.delete('/api/users/:id/stremio-addons/:addonId', async (req, res) => {
       console.error(`❌ Failed to remove addon:`, e.message)
       throw e
     }
+
+    // Update the user's stremioAddons field in the database with the filtered addons
+    await prisma.user.update({
+      where: { id },
+      data: { stremioAddons: JSON.stringify(filteredAddons) }
+    })
 
     return res.json({ message: 'Addon removed from Stremio account successfully' })
   } catch (error) {
@@ -1178,7 +1216,7 @@ app.post('/api/stremio/connect', async (req, res) => {
         stremioUsername: userData?.username || email.split('@')[0],
         stremioAuthKey: encryptedAuthKey,
         stremioUserId: userData?.id,
-        stremioAddons: addonsData,
+        stremioAddons: JSON.stringify(addonsData || {}),
         lastStremioSync: new Date(),
         role: 'USER'
       }
@@ -1487,7 +1525,7 @@ app.post('/api/addons', async (req, res) => {
     let suffix = 2
     // Try to avoid Prisma unique constraint on name by adjusting
     while (true) {
-      const clash = await prisma.addon.findFirst({ where: { name: { equals: finalName, mode: 'insensitive' } } })
+      const clash = await prisma.addon.findFirst({ where: { name: { equals: finalName } } })
       if (!clash) break
       finalName = `${baseName} (${suffix})`
       suffix += 1
@@ -1501,7 +1539,7 @@ app.post('/api/addons', async (req, res) => {
         description: description || manifestData?.description || '',
         manifestUrl: sanitizedUrl,
         version: manifestData?.version || null,
-        tags: tags || [],
+        tags: Array.isArray(tags) ? tags.join(',') : (tags || ''),
         iconUrl: manifestData?.logo || null, // Store logo URL from manifest
         isActive: true,
       }
@@ -2015,11 +2053,10 @@ app.get('/api/groups', async (req, res) => {
 app.get('/api/debug/addon/:name', async (req, res) => {
   try {
     const { name } = req.params
-    const addon = await prisma.familyAddon.findFirst({
+    const addon = await prisma.addon.findFirst({
       where: {
         OR: [
-          { name: { contains: name, mode: 'insensitive' } },
-          { manifest: { path: ['name'], string_contains: name } }
+          { name: { contains: name } }
         ]
       }
     })
@@ -2907,6 +2944,20 @@ async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'nor
     if (allMatch) {
       console.log('✅ Already synced. No changes needed.')
       const total = currentAddons.length
+      
+      // Update user's stremioAddons field even when already synced
+      try {
+        await prisma.user.update({
+          where: { id: userId },
+          data: {
+            stremioAddons: JSON.stringify(currentAddons || [])
+          }
+        })
+        console.log('💾 Updated user stremioAddons in database (already synced)')
+      } catch (updateError) {
+        console.warn('⚠️ Failed to update user stremioAddons:', updateError.message)
+      }
+      
       if (syncMode === 'advanced') {
         return { 
           success: true, 
@@ -2941,6 +2992,19 @@ async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'nor
     // Pull after to report counts
     const after = await apiClient.request('addonCollectionGet', {})
     const total = Array.isArray(after?.addons) ? after.addons.length : (after?.addons ? Object.keys(after.addons).length : 0)
+
+    // Update user's stremioAddons field with current addon collection
+    try {
+      await prisma.user.update({
+        where: { id: userId },
+        data: {
+          stremioAddons: JSON.stringify(after?.addons || [])
+        }
+      })
+      console.log('💾 Updated user stremioAddons in database')
+    } catch (updateError) {
+      console.warn('⚠️ Failed to update user stremioAddons:', updateError.message)
+    }
 
     console.log('✅ Sync complete, total addons:', total)
     if (syncMode === 'advanced') {
@@ -3326,7 +3390,7 @@ app.post('/api/users/:id/connect-stremio', async (req, res) => {
         stremioUsername: username || userData?.username || email.split('@')[0],
         stremioAuthKey: encryptedAuthKey,
         stremioUserId: userData?.id,
-        stremioAddons: addonsData,
+        stremioAddons: JSON.stringify(addonsData || {}),
         lastStremioSync: new Date(),
       }
     });

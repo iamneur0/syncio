@@ -43,7 +43,7 @@ RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 appuser
 
 # Install runtime dependencies
-RUN apk add --no-cache curl postgresql-client openssl3
+RUN apk add --no-cache curl openssl3
 
 # Set environment variables for Prisma
 ENV PRISMA_CLI_BINARY_TARGETS="linux-musl-openssl-3.0.x,linux-musl-arm64-openssl-3.0.x"
