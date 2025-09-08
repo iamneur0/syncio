@@ -79,6 +79,55 @@ function decrypt(text) {
   return decrypted;
 }
 
+// Validate Stremio auth key by calling official API
+async function validateStremioAuthKey(authKey) {
+  // 1) Try via official client: request('getUser') and require email
+  try {
+    const client = new StremioAPIClient({ endpoint: 'https://api.strem.io', authKey })
+    if (client && typeof client.request === 'function') {
+      const userRes = await client.request('getUser')
+      if (userRes && userRes.email) {
+        return { user: userRes }
+      }
+      const err = new Error('Missing user email')
+      err.code = 1
+      throw err
+    }
+  } catch (e) {
+    const msg = (e && (e.message || e.error || '')) || ''
+    if (/session does not exist|invalid/i.test(msg) || e.code === 1) {
+      const err = new Error('Invalid or expired Stremio auth key')
+      err.code = 1
+      throw err
+    }
+    // fall through to HTTP fallback
+  }
+
+  // 2) Fallback to HTTP pullUser to verify session
+  const resp = await fetch('https://api.strem.io/api/pullUser', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ authKey })
+  })
+  const data = await resp.json().catch(() => null)
+  if (!resp.ok) {
+    const msg = (data && (data.message || data.error)) || `HTTP ${resp.status}`
+    const err = new Error(msg)
+    throw err
+  }
+  if (data && (data.code === 1 || /session does not exist/i.test(String(data.message || '')))) {
+    const err = new Error('Invalid or expired Stremio auth key')
+    err.code = 1
+    throw err
+  }
+  if (data && data.user && data.user.email) {
+    return { user: data.user }
+  }
+  const err = new Error('Could not validate auth key (no user email)')
+  err.code = 1
+  throw err
+}
+
 // Health check endpoint
 const serverStartTime = new Date().toISOString()
 app.get('/health', async (req, res) => {
@@ -1330,6 +1379,124 @@ app.post('/api/stremio/connect', async (req, res) => {
     });
   }
 });
+
+// Connect using existing Stremio authKey (create new Syncio user)
+app.post('/api/stremio/connect-authkey', async (req, res) => {
+  try {
+    const { displayName, username, email, authKey, groupName } = req.body
+    if (!authKey) return res.status(400).json({ message: 'authKey is required' })
+
+    // Validate auth key against Stremio (must be an active session)
+    let addonsData = {}
+    let verifiedUser = null
+    try {
+      const validation = await validateStremioAuthKey(authKey)
+      addonsData = (validation && validation.addons) || {}
+      verifiedUser = validation && validation.user ? validation.user : null
+    } catch (e) {
+      const msg = (e && (e.message || e.error || '')) || ''
+      const code = (e && e.code) || 0
+      if (code === 1 || /session does not exist/i.test(String(msg))) {
+        return res.status(401).json({ message: 'Invalid or expired Stremio auth key' })
+      }
+      // Treat unknown function/other errors as invalid
+      return res.status(400).json({ message: 'Could not validate auth key' })
+    }
+
+    // Encrypt and persist
+    const encryptedAuthKey = encrypt(authKey)
+
+    // Ensure username uniqueness
+    const baseUsername = (username || `user_${Math.random().toString(36).slice(2, 8)}`).toLowerCase()
+    let finalUsername = baseUsername
+    let attempt = 0
+    while (await prisma.user.findFirst({ where: { username: finalUsername } })) {
+      attempt += 1
+      finalUsername = `${baseUsername}${attempt}`
+      if (attempt > 50) break
+    }
+
+    const created = await prisma.user.create({
+      data: {
+        displayName: displayName || (verifiedUser?.name || verifiedUser?.username || verifiedUser?.email || email || finalUsername || 'User'),
+        email: (verifiedUser?.email || email || `${Date.now()}@example.invalid`).toLowerCase(),
+        username: finalUsername,
+        role: 'USER',
+        stremioEmail: verifiedUser?.email || email || null,
+        // Stremio does not provide a stable username; keep Syncio username only
+        stremioUsername: null,
+        stremioAuthKey: encryptedAuthKey,
+        stremioAddons: JSON.stringify(addonsData || {}),
+      },
+    })
+
+    // Optional: create group and add user
+    if (groupName) {
+      let group = await prisma.group.findFirst({ where: { name: groupName } })
+      if (!group) {
+        group = await prisma.group.create({ data: { name: groupName } })
+      }
+      await prisma.groupMember.create({ data: { userId: created.id, groupId: group.id } })
+    }
+
+    // Hide sensitive fields
+    delete created.password
+    delete created.stremioAuthKey
+    return res.json(created)
+  } catch (e) {
+    console.error('connect-authkey failed:', e)
+    return res.status(500).json({ message: 'Failed to connect with authKey' })
+  }
+})
+
+// Connect existing user to Stremio using authKey
+app.post('/api/users/:id/connect-stremio-authkey', async (req, res) => {
+  try {
+    const { id } = req.params
+    const { authKey } = req.body
+    if (!authKey) return res.status(400).json({ message: 'authKey is required' })
+
+    const user = await prisma.user.findUnique({ where: { id } })
+    if (!user) return res.status(404).json({ message: 'User not found' })
+
+    // Validate auth key
+    let addonsData = {}
+    let verifiedUser = null
+    try {
+      const validation = await validateStremioAuthKey(authKey)
+      addonsData = (validation && validation.addons) || {}
+      verifiedUser = validation && validation.user ? validation.user : null
+    } catch (e) {
+      const msg = (e && (e.message || e.error || '')) || ''
+      const code = (e && e.code) || 0
+      if (code === 1 || /session does not exist/i.test(String(msg))) {
+        return res.status(401).json({ message: 'Invalid or expired Stremio auth key' })
+      }
+      return res.status(400).json({ message: 'Could not validate auth key' })
+    }
+
+    const encryptedAuthKey = encrypt(authKey)
+
+    const updated = await prisma.user.update({
+      where: { id },
+      data: {
+        stremioAuthKey: encryptedAuthKey,
+        stremioAddons: JSON.stringify(addonsData || {}),
+        stremioEmail: verifiedUser?.email || undefined,
+        // Do not override Syncio username from Stremio
+        stremioUsername: undefined,
+        email: verifiedUser?.email ? verifiedUser.email.toLowerCase() : undefined,
+      },
+    })
+
+    delete updated.password
+    delete updated.stremioAuthKey
+    return res.json(updated)
+  } catch (e) {
+    console.error('connect-stremio-authkey failed:', e)
+    return res.status(500).json({ message: 'Failed to connect existing user with authKey' })
+  }
+})
 
 // Addons API
 app.get('/api/addons', async (req, res) => {
