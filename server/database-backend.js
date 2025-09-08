@@ -3539,10 +3539,11 @@ app.post('/api/test/users', async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
+// Bind explicitly to 0.0.0.0 so it is reachable inside Docker even when ::1 is resolved
+app.listen(PORT, '0.0.0.0', () => {
   console.log('🚀 Syncio (Database) running on port', PORT);
-  console.log('📊 Health check: http://localhost:' + PORT + '/health');
-  console.log('🔌 API endpoints: http://localhost:' + PORT + '/api/');
+  console.log('📊 Health check: http://127.0.0.1:' + PORT + '/health');
+  console.log('🔌 API endpoints: http://127.0.0.1:' + PORT + '/api/');
   console.log('🎬 Stremio integration: ENABLED');
   console.log('💾 Storage: PostgreSQL with Prisma');
 });

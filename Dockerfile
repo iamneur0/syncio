@@ -28,7 +28,8 @@ RUN rm -rf node_modules/.prisma node_modules/@prisma/client/runtime/libquery_eng
 RUN npx prisma generate
 
 # Set build-time environment variables
-ARG NEXT_PUBLIC_API_URL=http://localhost:4000/api
+# Use relative API path so the browser hits the same origin and Next.js rewrites proxy to the backend inside the container
+ARG NEXT_PUBLIC_API_URL=/api
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 
 # Build Next.js frontend
@@ -74,6 +75,9 @@ RUN echo '#!/bin/sh' > /app/start.sh && \
     echo '  echo "ℹ️ No migrations found, pushing schema to DB..."' >> /app/start.sh && \
     echo '  npx prisma db push --accept-data-loss' >> /app/start.sh && \
     echo 'fi' >> /app/start.sh && \
+    echo '' >> /app/start.sh && \
+    echo '# Prefer IPv4 for localhost resolution (avoid ::1 issues)' >> /app/start.sh && \
+    echo 'export NODE_OPTIONS="--dns-result-order=ipv4first"' >> /app/start.sh && \
     echo '' >> /app/start.sh && \
     echo '# Start both services using a process manager approach' >> /app/start.sh && \
     echo 'echo "🌐 Starting frontend server on port ${FRONTEND_PORT:-3000}..."' >> /app/start.sh && \
