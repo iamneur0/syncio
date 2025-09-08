@@ -283,9 +283,11 @@ export default function StremioUsersPage() {
   const isAddonProtected = (addon: any) => isAddonProtectedBuiltIn(addon) || userProtectedSet.has(addon?.manifestUrl || addon?.transportUrl || addon?.url || '')
   
   const [showConnectModal, setShowConnectModal] = useState(false)
+  const [authMode, setAuthMode] = useState<'email' | 'authkey'>('email')
   const [stremioEmail, setStremioEmail] = useState('')
   const [stremioPassword, setStremioPassword] = useState('')
   const [stremioUsername, setStremioUsername] = useState('')
+  const [stremioAuthKey, setStremioAuthKey] = useState('')
   const [selectedGroup, setSelectedGroup] = useState('')
   const [newGroupName, setNewGroupName] = useState('')
   
@@ -843,6 +845,39 @@ export default function StremioUsersPage() {
     },
   })
 
+  // Connect Stremio using authKey mutation
+  const connectStremioWithAuthKeyMutation = useMutation({
+    mutationFn: async (payload: { authKey: string; username?: string; groupName?: string; userId?: string }) => {
+      if (payload.userId) {
+        const resp = await fetch(`/api/users/${payload.userId}/connect-stremio-authkey`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ authKey: payload.authKey })
+        })
+        if (!resp.ok) throw new Error((await resp.json()).message || 'Failed to connect with auth key')
+        return resp.json()
+      } else {
+        const resp = await fetch('/api/stremio/connect-authkey', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ authKey: payload.authKey, username: payload.username, displayName: payload.username, groupName: payload.groupName })
+        })
+        if (!resp.ok) throw new Error((await resp.json()).message || 'Failed to connect with auth key')
+        return resp.json()
+      }
+    },
+    onSuccess: (data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['users'] })
+      if (variables.userId) queryClient.invalidateQueries({ queryKey: ['user', variables.userId] })
+      setShowConnectModal(false)
+      setStremioAuthKey('')
+      setStremioEmail(''); setStremioPassword(''); setStremioUsername('')
+      setSelectedGroup(''); setNewGroupName(''); setEditingUser(null)
+      toast.success('Connected to Stremio via auth key')
+    },
+    onError: (err: any) => toast.error(err?.message || 'Failed to connect with auth key')
+  })
+
   // Delete user mutation (inline fetch with better error details)
   const deleteUserMutation = useMutation({
     mutationFn: async (id: string) => {
@@ -1037,9 +1072,19 @@ export default function StremioUsersPage() {
 
   const handleConnectStremio = (e: React.FormEvent) => {
     e.preventDefault()
-    if (!stremioEmail || !stremioPassword || (!editingUser && !stremioUsername)) {
-      toast.error('Please fill in all required fields')
+    if (authMode === 'authkey') {
+      if (!stremioAuthKey || (!editingUser && !stremioUsername)) {
+        toast.error('Please provide auth key and username')
+        return
+      }
+      const groupToAssign = selectedGroup === 'new' ? newGroupName : selectedGroup
+      connectStremioWithAuthKeyMutation.mutate({ authKey: stremioAuthKey.trim(), username: stremioUsername, groupName: groupToAssign || undefined, userId: editingUser?.id })
       return
+    } else {
+      if (!stremioEmail || !stremioPassword || (!editingUser && !stremioUsername)) {
+        toast.error('Please fill in all required fields')
+        return
+      }
     }
     // Handle group assignment
     const groupToAssign = selectedGroup === 'new' ? newGroupName : selectedGroup
@@ -1933,6 +1978,25 @@ export default function StremioUsersPage() {
               </button>
             </div>
             <form onSubmit={handleConnectStremio} className="p-6 space-y-4">
+              {/* Auth method toggle */}
+              <div className="w-full mb-2 flex justify-center">
+                <div className="grid grid-cols-2 gap-2 w-full max-w-sm">
+                  <button
+                    type="button"
+                    onClick={() => setAuthMode('email')}
+                    className={`w-full py-2 text-sm font-medium rounded-md border ${authMode==='email' ? 'bg-stremio-purple text-white border-stremio-purple' : (isDark ? 'text-gray-300 border-gray-600' : 'text-gray-700 border-gray-300')}`}
+                  >
+                    Email & Password
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAuthMode('authkey')}
+                    className={`w-full py-2 text-sm font-medium rounded-md border ${authMode==='authkey' ? 'bg-stremio-purple text-white border-stremio-purple' : (isDark ? 'text-gray-300 border-gray-600' : 'text-gray-700 border-gray-300')}`}
+                  >
+                    Auth Key
+                  </button>
+                </div>
+              </div>
               {!editingUser && (
                 <div>
                   <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
@@ -1952,40 +2016,79 @@ export default function StremioUsersPage() {
                   />
                 </div>
               )}
-              <div>
-                <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
-                  Stremio Email *
-                </label>
-                <input
-                  type="email"
-                  value={stremioEmail}
-                  onChange={(e) => setStremioEmail(e.target.value)}
-                  placeholder="your@stremio-email.com"
-                  required
-                  className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-stremio-purple focus:border-transparent ${
-                    isDark 
-                      ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
-                      : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
-                  }`}
-                />
-              </div>
-              <div>
-                <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
-                  Stremio Password *
-                </label>
-                <input
-                  type="password"
-                  value={stremioPassword}
-                  onChange={(e) => setStremioPassword(e.target.value)}
-                  placeholder="Your Stremio password"
-                  required
-                  className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-stremio-purple focus:border-transparent ${
-                    isDark 
-                      ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
-                      : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
-                  }`}
-                />
-              </div>
+              {authMode === 'email' ? (
+                <>
+                  <div>
+                    <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
+                      Stremio Email *
+                    </label>
+                    <input
+                      type="email"
+                      value={stremioEmail}
+                      onChange={(e) => setStremioEmail(e.target.value)}
+                      placeholder="your@stremio-email.com"
+                      required
+                      className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-stremio-purple focus:border-transparent ${
+                        isDark 
+                          ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
+                          : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
+                      }`}
+                    />
+                  </div>
+                  <div>
+                    <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
+                      Stremio Password *
+                    </label>
+                    <input
+                      type="password"
+                      value={stremioPassword}
+                      onChange={(e) => setStremioPassword(e.target.value)}
+                      placeholder="Your Stremio password"
+                      required
+                      className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-stremio-purple focus:border-transparent ${
+                        isDark 
+                          ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
+                          : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
+                      }`}
+                    />
+                  </div>
+                </>
+              ) : (
+                <div>
+                  <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
+                    Stremio Auth Key *
+                  </label>
+                  <input
+                    type="text"
+                    value={stremioAuthKey}
+                    onChange={(e) => setStremioAuthKey(e.target.value)}
+                    placeholder="Paste your auth key"
+                    required
+                    className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-stremio-purple focus:border-transparent ${
+                      isDark 
+                        ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
+                        : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
+                    }`}
+                  />
+                  <div className={`mt-1 text-xs ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+                    Go to{' '}
+                    <a href="https://web.stremio.com/" target="_blank" rel="noreferrer" className="underline text-stremio-purple">web.stremio.com</a>
+                    , open the console and paste{' '}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const snippet = 'JSON.parse(localStorage.getItem("profile")).auth.key'
+                        try { navigator.clipboard.writeText(snippet); toast.success('Snippet copied') } catch {}
+                      }}
+                      className={`underline text-stremio-purple hover:opacity-80`}
+                      title="Click to copy snippet"
+                    >
+                      this
+                    </button>
+                    .
+                  </div>
+                </div>
+              )}
               {!editingUser && (
                 <>
                   <div>
