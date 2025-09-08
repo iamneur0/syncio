@@ -70,12 +70,9 @@ RUN echo '#!/bin/sh' > /app/start.sh && \
     echo '' >> /app/start.sh && \
     echo '# Apply Prisma schema (migrations or push fallback)' >> /app/start.sh && \
     echo 'echo "📊 Applying Prisma schema..."' >> /app/start.sh && \
-    echo 'if npx prisma migrate deploy 2>/dev/null; then' >> /app/start.sh && \
-    echo '  echo "✅ Migrations applied"' >> /app/start.sh && \
-    echo 'else' >> /app/start.sh && \
-    echo '  echo "ℹ️ No migrations found, pushing schema to DB..."' >> /app/start.sh && \
-    echo '  npx prisma db push --accept-data-loss' >> /app/start.sh && \
-    echo 'fi' >> /app/start.sh && \
+    echo 'npx prisma migrate deploy || true' >> /app/start.sh && \
+    echo 'echo "ℹ️ Ensuring schema is applied (db push)..."' >> /app/start.sh && \
+    echo 'npx prisma db push --accept-data-loss' >> /app/start.sh && \
     echo '' >> /app/start.sh && \
     echo '# Prefer IPv4 for localhost resolution (avoid ::1 issues)' >> /app/start.sh && \
     echo 'export NODE_OPTIONS="--dns-result-order=ipv4first"' >> /app/start.sh && \
