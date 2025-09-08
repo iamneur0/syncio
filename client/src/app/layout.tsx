@@ -28,6 +28,8 @@ export default function RootLayout({
     <html lang="en">
       <Head>
         <title>Syncio</title>
+        <meta name="application-name" content="Syncio" />
+        <meta name="apple-mobile-web-app-title" content="Syncio" />
         <meta name="description" content="Syncio - Stremio Group Manager" />
         <link rel="icon" href="/favicon.ico" />
         <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
