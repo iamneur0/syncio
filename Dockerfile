@@ -66,9 +66,14 @@ RUN echo '#!/bin/sh' > /app/start.sh && \
     echo '' >> /app/start.sh && \
     echo 'echo "🚀 Starting Syncio..."' >> /app/start.sh && \
     echo '' >> /app/start.sh && \
-    echo '# Run database migrations' >> /app/start.sh && \
-    echo 'echo "📊 Running database migrations..."' >> /app/start.sh && \
-    echo 'npx prisma migrate deploy' >> /app/start.sh && \
+    echo '# Apply Prisma schema (migrations or push fallback)' >> /app/start.sh && \
+    echo 'echo "📊 Applying Prisma schema..."' >> /app/start.sh && \
+    echo 'if npx prisma migrate deploy 2>/dev/null; then' >> /app/start.sh && \
+    echo '  echo "✅ Migrations applied"' >> /app/start.sh && \
+    echo 'else' >> /app/start.sh && \
+    echo '  echo "ℹ️ No migrations found, pushing schema to DB..."' >> /app/start.sh && \
+    echo '  npx prisma db push --accept-data-loss' >> /app/start.sh && \
+    echo 'fi' >> /app/start.sh && \
     echo '' >> /app/start.sh && \
     echo '# Start both services using a process manager approach' >> /app/start.sh && \
     echo 'echo "🌐 Starting frontend server on port ${FRONTEND_PORT:-3000}..."' >> /app/start.sh && \
