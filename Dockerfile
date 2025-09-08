@@ -68,6 +68,16 @@ RUN echo '#!/bin/sh' > /app/start.sh && \
     echo '' >> /app/start.sh && \
     echo 'echo "🚀 Starting Syncio..."' >> /app/start.sh && \
     echo '' >> /app/start.sh && \
+    echo '# Ensure SQLite directory exists and is writable' >> /app/start.sh && \
+    echo 'DB_URL="${DATABASE_URL:-file:/app/data/sqlite.db}"' >> /app/start.sh && \
+    echo 'if echo "$DB_URL" | grep -q "^file:"; then' >> /app/start.sh && \
+    echo '  DB_FILE=${DB_URL#file:}' >> /app/start.sh && \
+    echo '  DB_DIR=$(dirname "$DB_FILE")' >> /app/start.sh && \
+    echo '  mkdir -p "$DB_DIR" || true' >> /app/start.sh && \
+    echo '  chown -R appuser:nodejs "$DB_DIR" || true' >> /app/start.sh && \
+    echo '  chmod -R 775 "$DB_DIR" || true' >> /app/start.sh && \
+    echo 'fi' >> /app/start.sh && \
+    echo '' >> /app/start.sh && \
     echo '# Apply Prisma schema (migrations or push fallback)' >> /app/start.sh && \
     echo 'echo "📊 Applying Prisma schema..."' >> /app/start.sh && \
     echo 'npx prisma migrate deploy || true' >> /app/start.sh && \
