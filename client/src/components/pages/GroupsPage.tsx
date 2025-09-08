@@ -1506,9 +1506,8 @@ export default function GroupsPage() {
                       const isActive = activeId === murl
                       
                       return (
-                        <SortableAddon id={murl} index={index}>
+                        <SortableAddon key={`${murl}-${index}` || `addon-${index}`} id={murl} index={index}>
                         <div
-                          key={`${murl}-${index}` || `addon-${index}`}
                           data-addon-index={index}
                           className={`relative p-3 pl-8 rounded-lg border transition-all duration-200 select-none touch-none ${
                             isDark ? 'bg-gray-600 border-gray-500' : 'bg-white border-gray-200'

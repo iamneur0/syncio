@@ -5,7 +5,7 @@
   "main": "server/database-backend.js",
   "scripts": {
     "dev": "concurrently \"npm run server:dev\" \"npm run client:dev\"",
-    "server:dev": "DATABASE_URL=\"postgresql://stremio_user:stremio_password@localhost:5432/stremio_family_manager_temp\" REDIS_URL=\"redis://localhost:6379\" JWT_SECRET=\"temp-jwt-secret-key\" ENCRYPTION_KEY=\"temp-encryption-key-32-chars-long\" nodemon server/database-backend.js",
+    "server:dev": "DATABASE_URL=\"file:./sqlite.db\" REDIS_URL=\"redis://localhost:6379\" JWT_SECRET=\"temp-jwt-secret-key\" ENCRYPTION_KEY=\"temp-encryption-key-32-chars-long\" nodemon server/database-backend.js",
     "client:dev": "cd client && npm run dev",
     "build": "cd client && npm run build",
     "start": "concurrently \"npm run server:start\" \"npm run client:start\"",

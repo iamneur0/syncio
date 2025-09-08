@@ -38,12 +38,6 @@ The application will be available at `http://localhost:3000`.
 Create a `.env` file in your project root with the following variables:
 
 ```bash
-# Database Configuration
-POSTGRES_DB=syncio
-POSTGRES_USER=syncio_user
-POSTGRES_PASSWORD=syncio_password
-POSTGRES_PORT=5432
-
 # Redis Configuration
 REDIS_PORT=6379
 
