@@ -48,6 +48,7 @@ RUN apk add --no-cache curl openssl3
 
 # Set environment variables for Prisma
 ENV PRISMA_CLI_BINARY_TARGETS="linux-musl-openssl-3.0.x,linux-musl-arm64-openssl-3.0.x"
+ENV DATABASE_URL="file:/app/data/sqlite.db"
 
 # Copy built application
 COPY --from=builder --chown=appuser:nodejs /app/package*.json ./
