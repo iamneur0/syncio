@@ -557,6 +557,11 @@ app.post('/api/users/sync-all', async (req, res) => {
 app.post('/api/users/:id/sync', async (req, res) => {
   try {
     console.log('🚀 Sync endpoint called with:', req.params.id, req.body)
+    console.log('🔍 Request headers:', {
+      'user-agent': req.headers['user-agent'],
+      'origin': req.headers['origin'],
+      'x-sync-mode': req.headers['x-sync-mode']
+    })
     const { id } = req.params
     const { excludedManifestUrls = [] } = req.body || {}
     const syncMode = getSyncMode(req)
@@ -779,9 +784,10 @@ app.delete('/api/users/:id/stremio-addons/:addonId', async (req, res) => {
     const targetUrl = target?.transportUrl || target?.manifestUrl || target?.url
 
     // Use proper format to remove the addon
+    let filteredAddons = currentAddons
     try {
-      // Filter out the target addon
-      const filteredAddons = currentAddons.filter((a) => {
+      // Filter out the target addon (if not found, keep list as-is)
+      filteredAddons = currentAddons.filter((a) => {
         const curUrl = a?.manifestUrl || a?.transportUrl || a?.url || ''
         return curUrl !== addonId
       })
@@ -797,7 +803,7 @@ app.delete('/api/users/:id/stremio-addons/:addonId', async (req, res) => {
     // Update the user's stremioAddons field in the database with the filtered addons
     await prisma.user.update({
       where: { id },
-      data: { stremioAddons: JSON.stringify(filteredAddons) }
+      data: { stremioAddons: JSON.stringify(filteredAddons || []) }
     })
 
     return res.json({ message: 'Addon removed from Stremio account successfully' })
@@ -1778,8 +1784,6 @@ app.post('/api/addons/:id/reload', async (req, res) => {
         name: addon.name, // explicitly preserve name
         description: manifestData?.description || addon.description,
         version: manifestData?.version || addon.version,
-        // Keep existing tags
-        tags: addon.tags || [],
         // Update logo URL from manifest
         iconUrl: manifestData?.logo || addon.iconUrl || null,
       }
@@ -1793,7 +1797,6 @@ app.post('/api/addons/:id/reload', async (req, res) => {
         description: updatedAddon.description,
         url: updatedAddon.manifestUrl,
         version: updatedAddon.version,
-        tags: updatedAddon.tags,
         iconUrl: updatedAddon.iconUrl,
         status: updatedAddon.isActive ? 'active' : 'inactive'
       }
@@ -2814,6 +2817,7 @@ async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'nor
     const familyGroup = user.memberships?.[0]?.group
     const familyAddons = Array.isArray(familyGroup?.addons)
       ? familyGroup.addons
+          .sort((a, b) => new Date(a.addedAt || 0) - new Date(b.addedAt || 0)) // Sort by addedAt to match API order
           .filter((ga) => ga?.addon?.isActive !== false)
           .map((ga) => ({
             id: ga.addon.id,
@@ -2905,6 +2909,7 @@ async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'nor
     let authKeyPlain
     try { authKeyPlain = decrypt(user.stremioAuthKey) } catch { return { success: false, error: 'Failed to decrypt Stremio credentials' } }
 
+    // Create StremioAPIClient for this user
     const apiClient = new StremioAPIClient({ endpoint: 'https://api.strem.io', authKey: authKeyPlain })
 
     // Helper function for URL normalization
@@ -3024,58 +3029,43 @@ async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'nor
       url: normalize(a?.transportUrl || a?.manifestUrl || a?.url)
     })))
 
-    // Advanced sync logic: Preserve protected addon positions, sync non-protected addons in order
-    const currentProtected = currentAddons.filter(a => isProtected(a))
-    const currentNonProtected = currentAddons.filter(a => !isProtected(a))
+    // Build desired collection: first add all protected addons, then add all group addons
     const desiredCollection = []
     
-    // Create a map of protected addons by their position for preservation
-    const protectedAddonsByPosition = new Map()
-    currentProtected.forEach((addon, index) => {
-      protectedAddonsByPosition.set(index, addon)
-    })
+    console.log('🔍 Current addons order:', currentAddons.map(a => ({ 
+      name: a?.manifest?.name || a?.name, 
+      protected: isProtected(a),
+      url: normalize(a?.transportUrl || a?.manifestUrl || a?.url)
+    })))
+    console.log('🔍 Excluded addons:', excludedManifestUrls)
+    console.log('🔍 Current addons count:', currentAddons.length)
     
-    // Create a map of group addons by their ID for quick lookup
-    const groupAddonsMap = new Map()
-    for (const groupAddon of nonProtectedGroupAddons) {
-      const id = groupAddon?.manifest?.id
-      if (id) {
-        groupAddonsMap.set(id, groupAddon)
-      }
-    }
-    
-    // Build the desired collection by iterating through current addons in order
-    // and replacing non-protected addons with group addons while preserving protected positions
-    let groupAddonIndex = 0
-    for (let i = 0; i < currentAddons.length; i++) {
-      const currentAddon = currentAddons[i]
-      
+    console.log('🔍 Group addons order:', nonProtectedGroupAddons.map(a => ({ 
+      name: a?.manifest?.name || a?.name, 
+      url: normalize(a?.transportUrl || a?.manifestUrl || a?.url)
+    })))
+
+    // First, add all protected addons from current addons
+    for (const currentAddon of currentAddons) {
       if (isProtected(currentAddon)) {
-        // Preserve protected addon in its exact position
-        const preservedAddon = {
-          ...currentAddon,
-          transportName: currentAddon.transportName || currentAddon.manifest?.name || currentAddon.name
-        }
-        desiredCollection.push(preservedAddon)
-      } else {
-        // Replace non-protected addon with group addon in order
-        if (groupAddonIndex < nonProtectedGroupAddons.length) {
-          const groupAddon = nonProtectedGroupAddons[groupAddonIndex]
-          desiredCollection.push(groupAddon)
-          groupAddonIndex++
-        }
-        // If we run out of group addons, skip this position (effectively removing the addon)
+        console.log(`🔒 Preserved protected addon: ${currentAddon?.manifest?.name || currentAddon?.name}`)
+        desiredCollection.push(currentAddon)
       }
     }
-    
-    // Add any remaining group addons that couldn't fit in existing positions
-    while (groupAddonIndex < nonProtectedGroupAddons.length) {
-      const groupAddon = nonProtectedGroupAddons[groupAddonIndex]
+
+    // Then, add all group addons in their defined order
+    for (const groupAddon of nonProtectedGroupAddons) {
+      console.log(`➕ Added group addon: ${groupAddon?.manifest?.name || groupAddon?.name}`)
       desiredCollection.push(groupAddon)
-      groupAddonIndex++
     }
     
-    console.log('🔒 Protected addons preserved in their positions:', currentProtected.map(a => ({ 
+    console.log('🔍 Desired collection order:', desiredCollection.map(a => ({ 
+      name: a?.manifest?.name || a?.name, 
+      protected: isProtected(a),
+      url: normalize(a?.transportUrl || a?.manifestUrl || a?.url)
+    })))
+    
+    console.log('🔒 Protected addons preserved in their positions:', currentAddons.filter(a => isProtected(a)).map(a => ({ 
       name: a?.manifest?.name || a?.name, 
       transportName: a?.transportName,
       id: a?.manifest?.id || a?.id,
@@ -3083,23 +3073,24 @@ async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'nor
     })))
 
     // Early no-op check: if current collection already equals desired, skip update
-    // Only compare non-protected addons for sync status
+    // Compare the entire desired collection with current collection
     const toKey = (a) => {
       const id = a?.manifest?.id || a?.id || ''
       const url = normalize(a?.transportUrl || a?.manifestUrl || a?.url)
       return `${id}@@${url}`
     }
-    const currentNonProtectedKeys = new Set(currentNonProtected.map(toKey))
-    const desiredNonProtectedKeys = new Set(nonProtectedGroupAddons.map(toKey))
-    const sameSize = currentNonProtectedKeys.size === desiredNonProtectedKeys.size
+    const currentKeys = new Set(currentAddons.map(toKey))
+    const desiredKeys = new Set(desiredCollection.map(toKey))
+    const sameSize = currentKeys.size === desiredKeys.size
     let allMatch = sameSize
     if (allMatch) {
-      for (const k of desiredNonProtectedKeys) { if (!currentNonProtectedKeys.has(k)) { allMatch = false; break } }
+      for (const k of desiredKeys) { if (!currentKeys.has(k)) { allMatch = false; break } }
     }
-    // If sets match, also ensure order matches exactly by normalized URL (ignoring protected addons)
+    // If sets match, also ensure order matches exactly
+    let curSeq, desSeq
     if (allMatch) {
-      const curSeq = currentNonProtected.map((a) => normalize(a?.transportUrl || a?.manifestUrl || a?.url))
-      const desSeq = nonProtectedGroupAddons.map((a) => normalize(a?.transportUrl || a?.manifestUrl || a?.url))
+      curSeq = currentAddons.map((a) => normalize(a?.transportUrl || a?.manifestUrl || a?.url))
+      desSeq = desiredCollection.map((a) => normalize(a?.transportUrl || a?.manifestUrl || a?.url))
       if (curSeq.length !== desSeq.length) {
         allMatch = false
       } else {
@@ -3109,18 +3100,30 @@ async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'nor
       }
     }
     if (allMatch) {
-      console.log('✅ Already synced. No changes needed.')
+      console.log('✅ Collections match, but ensuring Stremio API is updated...')
+      console.log('🔍 Current sequence:', curSeq)
+      console.log('🔍 Desired sequence:', desSeq)
+      
+      // Even if collections match, push to Stremio API to ensure order is correct
+      try {
+        await apiClient.request('addonCollectionSet', { addons: desiredCollection })
+        console.log('✅ Pushed addon collection to Stremio API')
+      } catch (error) {
+        console.error('Error pushing to Stremio API:', error)
+        return res.status(502).json({ message: 'Failed to update Stremio addons', error: error?.message })
+      }
+      
       const total = currentAddons.length
       
-      // Update user's stremioAddons field even when already synced
+      // Update user's stremioAddons field
       try {
         await prisma.user.update({
           where: { id: userId },
           data: {
-            stremioAddons: JSON.stringify(currentAddons || [])
+            stremioAddons: JSON.stringify(desiredCollection || [])
           }
         })
-        console.log('💾 Updated user stremioAddons in database (already synced)')
+        console.log('💾 Updated user stremioAddons in database')
       } catch (updateError) {
         console.warn('⚠️ Failed to update user stremioAddons:', updateError.message)
       }
@@ -3129,12 +3132,12 @@ async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'nor
         return { 
           success: true, 
           total, 
-          alreadySynced: true, 
+          alreadySynced: false, 
           reloadedCount, 
           totalAddons 
         }
       }
-      return { success: true, total, alreadySynced: true }
+      return { success: true, total, alreadySynced: false }
     }
 
     // Set the addon collection using the proper format (replaces, removes extras not included)
@@ -3148,7 +3151,10 @@ async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'nor
         url: normalize(a?.transportUrl || a?.manifestUrl || a?.url)
       })))
       console.log('🔍 Full desired collection being sent to Stremio:', JSON.stringify(desiredCollection, null, 2))
+      
+      // Set the addon collection using the proper format (replaces, removes extras not included)
       await apiClient.request('addonCollectionSet', { addons: desiredCollection })
+      
       // small wait for propagation
       await new Promise((r) => setTimeout(r, 1500))
     } catch (e) {

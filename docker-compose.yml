@@ -9,7 +9,7 @@ services:
       JWT_SECRET: ${JWT_SECRET:-jwt-secret-key}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:-encryption-key}
       REDIS_URL: redis://syncio_redis:6379
-      DATABASE_URL: file:/app/data/sqlite.db
+      # DATABASE_URL: file:/app/data/sqlite.db
     ports:
       - "3000:3000"
       - "4000:4000"

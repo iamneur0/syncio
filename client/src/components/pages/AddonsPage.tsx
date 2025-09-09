@@ -10,8 +10,11 @@ import {
   Edit,
   Users,
   AlertTriangle,
-  RotateCcw,
-  User
+  RefreshCw,
+  User,
+  Settings,
+  Grid3X3,
+  List
 } from 'lucide-react'
 import { useTheme } from '@/contexts/ThemeContext'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -55,6 +58,14 @@ export default function AddonsPage() {
   const [editUrl, setEditUrl] = useState('')
   const [editTags, setEditTags] = useState<string[]>([])
   const [editGroupIds, setEditGroupIds] = useState<string[]>([])
+  
+  // View mode state (card or list)
+  const [viewMode, setViewMode] = useState<'card' | 'list'>(() => {
+    if (typeof window !== 'undefined') {
+      return (localStorage.getItem('global-view-mode') as 'card' | 'list') || 'card'
+    }
+    return 'card'
+  })
   
   const { isDark } = useTheme()
   const queryClient = useQueryClient()
@@ -409,6 +420,14 @@ export default function AddonsPage() {
     return Array.isArray(filteredAddons) ? filteredAddons : []
   }, [filteredAddons])
 
+  // Handle view mode change and persist to localStorage
+  const handleViewModeChange = (mode: 'card' | 'list') => {
+    setViewMode(mode)
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('global-view-mode', mode)
+    }
+  }
+
   return (
     <div className="p-4 sm:p-6">
       {/* Header */}
@@ -424,7 +443,7 @@ export default function AddonsPage() {
               disabled={reloadAllMutation.isPending || isReloadingAll || reloadAddonMutation.isPending || addons.length === 0}
               className="flex items-center justify-center px-3 py-2 sm:px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 text-sm sm:text-base"
             >
-              <RotateCcw className={`w-4 h-4 sm:w-5 sm:h-5 mr-2 ${isReloadingAll ? 'animate-spin' : ''}`} />
+              <RefreshCw className={`w-4 h-4 sm:w-5 sm:h-5 mr-2 ${isReloadingAll ? 'animate-spin' : ''}`} />
               <span className="hidden sm:inline">{isReloadingAll ? 'Reloading...' : 'Reload All Addons'}</span>
               <span className="sm:hidden">{isReloadingAll ? 'Reloading...' : 'Reload All'}</span>
             </button>
@@ -439,7 +458,7 @@ export default function AddonsPage() {
           </div>
         </div>
 
-        {/* Search */}
+        {/* Search and View Toggle */}
         <div className="flex flex-col sm:flex-row gap-4">
           <div className="relative flex-1">
             <Search className={`absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 sm:w-5 sm:h-5 ${isDark ? 'text-gray-400' : 'text-gray-500'}`} />
@@ -454,6 +473,44 @@ export default function AddonsPage() {
                   : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
               }`}
             />
+          </div>
+          
+          {/* View Mode Toggle */}
+          <div className="flex items-center">
+            <div className={`flex rounded-lg border ${isDark ? 'border-gray-600' : 'border-gray-300'}`}>
+              <button
+                onClick={() => handleViewModeChange('card')}
+                className={`flex items-center gap-2 px-3 py-2 sm:py-3 text-sm rounded-l-lg transition-colors h-10 sm:h-12 ${
+                  viewMode === 'card'
+                    ? isDark
+                      ? 'bg-stremio-purple text-white'
+                      : 'bg-stremio-purple text-white'
+                    : isDark
+                      ? 'text-gray-300 hover:bg-gray-700'
+                      : 'text-gray-700 hover:bg-gray-100'
+                }`}
+                title="Card view"
+              >
+                <Grid3X3 className="w-4 h-4" />
+                <span className="hidden sm:inline">Cards</span>
+              </button>
+              <button
+                onClick={() => handleViewModeChange('list')}
+                className={`flex items-center gap-2 px-3 py-2 sm:py-3 text-sm rounded-r-lg transition-colors h-10 sm:h-12 ${
+                  viewMode === 'list'
+                    ? isDark
+                      ? 'bg-stremio-purple text-white'
+                      : 'bg-stremio-purple text-white'
+                    : isDark
+                      ? 'text-gray-300 hover:bg-gray-700'
+                      : 'text-gray-700 hover:bg-gray-100'
+                }`}
+                title="List view"
+              >
+                <List className="w-4 h-4" />
+                <span className="hidden sm:inline">List</span>
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -483,147 +540,308 @@ export default function AddonsPage() {
         </div>
       )}
 
-      {/* Addons Grid */}
+      {/* Addons Display */}
       {!isLoading && !error && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {displayAddons.map((addon: any) => (
-          <div key={addon.id} className={`rounded-lg shadow-sm border p-6 hover:shadow-md transition-shadow flex flex-col h-full ${
-            isDark 
-              ? 'bg-gray-800 border-gray-700' 
-              : 'bg-white border-gray-200'
-          } ${addon.status === 'inactive' ? 'opacity-50' : ''}`}>
-            <div className="flex items-start justify-between mb-4">
-              <div className="flex items-center flex-1 min-w-0">
-                <div className="w-12 h-12 rounded-lg flex items-center justify-center mr-3 flex-shrink-0 overflow-hidden">
-                  {addon.iconUrl ? (
-                    <img 
-                      src={addon.iconUrl} 
-                      alt={`${addon.name} logo`}
-                      className="w-full h-full object-contain"
-                      onError={(e) => {
-                        // Fallback to generic icon if image fails to load
-                        e.currentTarget.style.display = 'none'
-                        const nextElement = e.currentTarget.nextElementSibling as HTMLElement
-                        if (nextElement) {
-                          nextElement.style.display = 'flex'
+        <>
+          {viewMode === 'card' ? (
+            /* Card Grid View */
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {displayAddons.map((addon: any) => (
+                <div key={addon.id} className={`rounded-lg shadow-sm border p-6 hover:shadow-md transition-shadow flex flex-col h-full ${
+                  isDark 
+                    ? 'bg-gray-800 border-gray-700' 
+                    : 'bg-white border-gray-200'
+                } ${addon.status === 'inactive' ? 'opacity-50' : ''}`}>
+                  <div className="flex items-start justify-between mb-4">
+                    <div className="flex items-center flex-1 min-w-0">
+                      <div className="w-12 h-12 rounded-lg flex items-center justify-center mr-3 flex-shrink-0 overflow-hidden">
+                        {addon.iconUrl ? (
+                          <img 
+                            src={addon.iconUrl} 
+                            alt={`${addon.name} logo`}
+                            className="w-full h-full object-contain"
+                            onError={(e) => {
+                              // Fallback to generic icon if image fails to load
+                              e.currentTarget.style.display = 'none'
+                              const nextElement = e.currentTarget.nextElementSibling as HTMLElement
+                              if (nextElement) {
+                                nextElement.style.display = 'flex'
+                              }
+                            }}
+                          />
+                        ) : null}
+                        <div className={`w-full h-full ${addon.iconUrl ? 'hidden' : 'flex'} bg-stremio-purple items-center justify-center`}>
+                          <Puzzle className="w-6 h-6 text-white" />
+                        </div>
+                      </div>
+                      <div className="min-w-0 flex-1 max-w-[calc(100%-120px)]">
+                        <div className="flex items-center gap-2">
+                          <h3 className={`font-semibold truncate ${isDark ? 'text-white' : 'text-gray-900'}`}>{addon.name}</h3>
+                          {addon.version && (
+                            <span className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium flex-shrink-0 ${
+                              isDark ? 'bg-purple-600 text-white' : 'bg-purple-100 text-purple-800'
+                            }`}>
+                              v{addon.version}
+                            </span>
+                          )}
+                        </div>
+                        {addon.tags && addon.tags.length > 0 && (
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            {addon.tags.map((tag: string, index: number) => (
+                              <span
+                                key={index}
+                                className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium ${
+                                  isDark 
+                                    ? 'bg-purple-500 text-purple-200' 
+                                    : 'bg-purple-100 text-purple-800'
+                                }`}
+                              >
+                                {tag}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    {/* Enable/Disable toggle */}
+                    <button
+                      onClick={async () => {
+                        try {
+                          if (addon.status === 'active') {
+                            await addonsAPI.disable(addon.id)
+                            toast.success(`Disabled "${addon.name}"`)
+                          } else {
+                            await addonsAPI.enable(addon.id)
+                            toast.success(`Enabled "${addon.name}"`)
+                          }
+                          queryClient.invalidateQueries({ queryKey: ['addons'] })
+                        } catch (e: any) {
+                          toast.error('Failed to toggle addon')
                         }
                       }}
-                    />
-                  ) : null}
-                  <div className={`w-full h-full ${addon.iconUrl ? 'hidden' : 'flex'} bg-stremio-purple items-center justify-center`}>
-                    <Puzzle className="w-6 h-6 text-white" />
+                      className={`ml-3 relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                        addon.status === 'active' ? 'bg-stremio-purple' : (isDark ? 'bg-gray-700' : 'bg-gray-300')
+                      }`}
+                      aria-pressed={addon.status === 'active'}
+                      title={addon.status === 'active' ? 'Click to disable' : 'Click to enable'}
+                    >
+                      <span
+                        className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${
+                          addon.status === 'active' ? 'translate-x-5' : 'translate-x-1'
+                        }`}
+                      />
+                    </button>
                   </div>
-                </div>
-                <div className="min-w-0 flex-1 max-w-[calc(100%-120px)]">
-                  <div className="flex items-center gap-2">
-                    <h3 className={`font-semibold truncate ${isDark ? 'text-white' : 'text-gray-900'}`}>{addon.name}</h3>
-                    {addon.version && (
-                      <span className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium flex-shrink-0 ${
-                        isDark ? 'bg-purple-600 text-white' : 'bg-purple-100 text-purple-800'
-                      }`}>
-                        v{addon.version}
-                      </span>
-                    )}
-                  </div>
-                  {addon.tags && addon.tags.length > 0 && (
-                    <div className="flex flex-wrap gap-1 mt-1">
-                      {addon.tags.map((tag: string, index: number) => (
-                        <span
-                          key={index}
-                          className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium ${
-                            isDark 
-                              ? 'bg-purple-500 text-purple-200' 
-                              : 'bg-purple-100 text-purple-800'
-                          }`}
-                        >
-                          {tag}
-                        </span>
-                      ))}
+
+                  <div className="grid grid-cols-2 gap-4 mb-4">
+                    <div className="flex items-center">
+                      <User className="w-4 h-4 text-gray-400 mr-2" />
+                      <div>
+                        <p className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>{addon.users}</p>
+                        <p className={`text-xs ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>{addon.users === 1 ? 'User' : 'Users'}</p>
+                      </div>
                     </div>
-                  )}
+                    <div className="flex items-center">
+                      <Users className="w-4 h-4 text-gray-400 mr-2" />
+                      <div>
+                        <p className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>{addon.groups}</p>
+                        <p className={`text-xs ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>{addon.groups === 1 ? 'Group' : 'Groups'}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 mt-auto">
+                    <button 
+                      onClick={() => handleEditAddon(addon)}
+                      className={`flex-1 flex items-center justify-center px-3 py-2 text-sm rounded-lg transition-colors ${
+                        isDark 
+                          ? 'bg-gray-700 text-gray-300 hover:bg-gray-600' 
+                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      }`}
+                    >
+                      <Eye className="w-4 h-4 mr-1" />
+                      View
+                    </button>
+                    <button 
+                      onClick={() => reloadAddonMutation.mutate(addon.id)}
+                      disabled={reloadAddonMutation.isPending}
+                      className="flex items-center justify-center px-3 py-2 text-sm bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors disabled:opacity-50"
+                      title="Reload addon manifest"
+                    >
+                      <RefreshCw className={`w-4 h-4 ${reloadAddonMutation.isPending ? 'animate-spin' : ''}`} />
+                    </button>
+                    {/* Settings: open configure URL in new tab */}
+                    <button
+                      onClick={() => {
+                        try {
+                          const raw = addon.url || addon.manifestUrl || ''
+                          if (!raw) return
+                          const configureUrl = raw.replace(/manifest\.json$/i, 'configure')
+                          window.open(configureUrl, '_blank', 'noreferrer')
+                        } catch {}
+                      }}
+                      className="flex items-center justify-center px-3 py-2 text-sm bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors disabled:opacity-50"
+                      title="Open addon settings"
+                    >
+                      <Settings className="w-4 h-4" />
+                    </button>
+                    {/* Keep Remove (hard delete) always present */}
+                    <button 
+                      onClick={() => handleDeleteAddon(addon.id, addon.name)}
+                      disabled={deleteAddonMutation.isPending}
+                      className="flex items-center justify-center px-3 py-2 text-sm bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors disabled:opacity-50"
+                      title="Delete addon"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
-              </div>
-              {/* Enable/Disable toggle */}
-              <button
-                onClick={async () => {
-                  try {
-                    if (addon.status === 'active') {
-                      await addonsAPI.disable(addon.id)
-                      toast.success(`Disabled "${addon.name}"`)
-                    } else {
-                      await addonsAPI.enable(addon.id)
-                      toast.success(`Enabled "${addon.name}"`)
-                    }
-                    queryClient.invalidateQueries({ queryKey: ['addons'] })
-                  } catch (e: any) {
-                    toast.error('Failed to toggle addon')
-                  }
-                }}
-                className={`ml-3 relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                  addon.status === 'active' ? 'bg-stremio-purple' : (isDark ? 'bg-gray-700' : 'bg-gray-300')
-                }`}
-                aria-pressed={addon.status === 'active'}
-                title={addon.status === 'active' ? 'Click to disable' : 'Click to enable'}
-              >
-                <span
-                  className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${
-                    addon.status === 'active' ? 'translate-x-5' : 'translate-x-1'
-                  }`}
-                />
-              </button>
+              ))}
             </div>
-
-
-            <div className="grid grid-cols-2 gap-4 mb-4">
-              <div className="flex items-center">
-                <User className="w-4 h-4 text-gray-400 mr-2" />
-                <div>
-                  <p className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>{addon.users}</p>
-                  <p className={`text-xs ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>Users</p>
-                </div>
-              </div>
-              <div className="flex items-center">
-                <Users className="w-4 h-4 text-gray-400 mr-2" />
-                <div>
-                  <p className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>{addon.groups}</p>
-                  <p className={`text-xs ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>Groups</p>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2 mt-auto">
-              <button 
-                onClick={() => handleEditAddon(addon)}
-                className={`flex-1 flex items-center justify-center px-3 py-2 text-sm rounded-lg transition-colors ${
+          ) : (
+            /* List View */
+            <div className="space-y-3">
+              {displayAddons.map((addon: any) => (
+                <div key={addon.id} className={`rounded-lg border p-4 hover:shadow-md transition-shadow ${
                   isDark 
-                    ? 'bg-gray-700 text-gray-300 hover:bg-gray-600' 
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
-              >
-                <Eye className="w-4 h-4 mr-1" />
-                View
-              </button>
-              <button 
-                onClick={() => reloadAddonMutation.mutate(addon.id)}
-                disabled={reloadAddonMutation.isPending}
-                className="flex items-center justify-center px-3 py-2 text-sm bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors disabled:opacity-50"
-                title="Reload addon manifest"
-              >
-                <RotateCcw className={`w-4 h-4 ${reloadAddonMutation.isPending ? 'animate-spin' : ''}`} />
-              </button>
-              {/* Keep Remove (hard delete) always present */}
-              <button 
-                onClick={() => handleDeleteAddon(addon.id, addon.name)}
-                disabled={deleteAddonMutation.isPending}
-                className="flex items-center justify-center px-3 py-2 text-sm bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors disabled:opacity-50"
-                title="Delete addon"
-              >
-                <Trash2 className="w-4 h-4" />
-              </button>
+                    ? 'bg-gray-800 border-gray-700' 
+                    : 'bg-white border-gray-200'
+                } ${addon.status === 'inactive' ? 'opacity-50' : ''}`}>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center flex-1 min-w-0">
+                      <div className="w-10 h-10 rounded-lg flex items-center justify-center mr-3 flex-shrink-0 overflow-hidden">
+                        {addon.iconUrl ? (
+                          <img 
+                            src={addon.iconUrl} 
+                            alt={`${addon.name} logo`}
+                            className="w-full h-full object-contain"
+                            onError={(e) => {
+                              e.currentTarget.style.display = 'none'
+                              const nextElement = e.currentTarget.nextElementSibling as HTMLElement
+                              if (nextElement) {
+                                nextElement.style.display = 'flex'
+                              }
+                            }}
+                          />
+                        ) : null}
+                        <div className={`w-full h-full ${addon.iconUrl ? 'hidden' : 'flex'} bg-stremio-purple items-center justify-center`}>
+                          <Puzzle className="w-5 h-5 text-white" />
+                        </div>
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 mb-1">
+                          <h3 className={`font-semibold truncate ${isDark ? 'text-white' : 'text-gray-900'}`}>{addon.name}</h3>
+                          {addon.version && (
+                            <span className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium flex-shrink-0 ${
+                              isDark ? 'bg-purple-600 text-white' : 'bg-purple-100 text-purple-800'
+                            }`}>
+                              v{addon.version}
+                            </span>
+                          )}
+                        </div>
+                        {addon.description && (
+                          <p className={`text-sm truncate ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
+                            {addon.description}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    
+                    <div className="flex items-center gap-4 ml-4">
+                      {/* Stats */}
+                      <div className="flex items-center gap-4 text-sm">
+                        <div className="flex items-center gap-1">
+                          <User className="w-4 h-4 text-gray-400" />
+                          <span className={`font-medium ${isDark ? 'text-white' : 'text-gray-900'}`}>{addon.users}</span>
+                          <span className={`${isDark ? 'text-gray-400' : 'text-gray-500'}`}>{addon.users === 1 ? 'user' : 'users'}</span>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <Users className="w-4 h-4 text-gray-400" />
+                          <span className={`font-medium ${isDark ? 'text-white' : 'text-gray-900'}`}>{addon.groups}</span>
+                          <span className={`${isDark ? 'text-gray-400' : 'text-gray-500'}`}>{addon.groups === 1 ? 'group' : 'groups'}</span>
+                        </div>
+                      </div>
+                      
+                      {/* Enable/Disable toggle */}
+                      <button
+                        onClick={async () => {
+                          try {
+                            if (addon.status === 'active') {
+                              await addonsAPI.disable(addon.id)
+                              toast.success(`Disabled "${addon.name}"`)
+                            } else {
+                              await addonsAPI.enable(addon.id)
+                              toast.success(`Enabled "${addon.name}"`)
+                            }
+                            queryClient.invalidateQueries({ queryKey: ['addons'] })
+                          } catch (e: any) {
+                            toast.error('Failed to toggle addon')
+                          }
+                        }}
+                        className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                          addon.status === 'active' ? 'bg-stremio-purple' : (isDark ? 'bg-gray-700' : 'bg-gray-300')
+                        }`}
+                        aria-pressed={addon.status === 'active'}
+                        title={addon.status === 'active' ? 'Click to disable' : 'Click to enable'}
+                      >
+                        <span
+                          className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                            addon.status === 'active' ? 'translate-x-4' : 'translate-x-0.5'
+                          }`}
+                        />
+                      </button>
+                      
+                      {/* Action buttons */}
+                      <div className="flex items-center gap-1">
+                        <button 
+                          onClick={() => handleEditAddon(addon)}
+                          className={`flex items-center justify-center px-2 py-1 text-sm rounded transition-colors ${
+                            isDark 
+                              ? 'text-gray-300 hover:bg-gray-700' 
+                              : 'text-gray-700 hover:bg-gray-100'
+                          }`}
+                          title="View details"
+                        >
+                          <Eye className="w-4 h-4" />
+                        </button>
+                        <button 
+                          onClick={() => reloadAddonMutation.mutate(addon.id)}
+                          disabled={reloadAddonMutation.isPending}
+                          className="flex items-center justify-center px-2 py-1 text-sm text-green-700 hover:bg-green-100 rounded transition-colors disabled:opacity-50"
+                          title="Reload addon manifest"
+                        >
+                          <RefreshCw className={`w-4 h-4 ${reloadAddonMutation.isPending ? 'animate-spin' : ''}`} />
+                        </button>
+                        <button
+                          onClick={() => {
+                            try {
+                              const raw = addon.url || addon.manifestUrl || ''
+                              if (!raw) return
+                              const configureUrl = raw.replace(/manifest\.json$/i, 'configure')
+                              window.open(configureUrl, '_blank', 'noreferrer')
+                            } catch {}
+                          }}
+                          className="flex items-center justify-center px-2 py-1 text-sm text-blue-700 hover:bg-blue-100 rounded transition-colors"
+                          title="Open addon settings"
+                        >
+                          <Settings className="w-4 h-4" />
+                        </button>
+                        <button 
+                          onClick={() => handleDeleteAddon(addon.id, addon.name)}
+                          disabled={deleteAddonMutation.isPending}
+                          className="flex items-center justify-center px-2 py-1 text-sm text-red-700 hover:bg-red-100 rounded transition-colors disabled:opacity-50"
+                          title="Delete addon"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
             </div>
-          </div>
-          ))}
-        </div>
+          )}
+        </>
       )}
 
       {/* Empty State */}
@@ -656,7 +874,14 @@ export default function AddonsPage() {
 
       {/* Add Addon Modal */}
       {showAddModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+        <div 
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setShowAddModal(false)
+            }
+          }}
+        >
           <div className={`rounded-lg max-w-md w-full p-6 ${isDark ? 'bg-gray-800' : 'bg-white'}`}>
             <div className="flex items-center justify-between mb-4">
               <h2 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>Add New Addon</h2>
@@ -784,7 +1009,14 @@ export default function AddonsPage() {
 
       {/* Edit Addon Modal */}
       {showEditModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div 
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setShowEditModal(false)
+            }
+          }}
+        >
           <div className={`w-full max-w-md p-6 rounded-lg shadow-xl ${
             isDark ? 'bg-gray-800' : 'bg-white'
           }`}>
@@ -801,7 +1033,7 @@ export default function AddonsPage() {
                 </svg>
               </button>
             </div>
-            <div className="space-y-4">
+            <form onSubmit={(e) => { e.preventDefault(); handleUpdateAddon(); }} className="space-y-4">
               <div>
                 <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>Name</label>
                 <input
@@ -901,7 +1133,7 @@ export default function AddonsPage() {
                   {updateAddonMutation.isPending ? 'Updating...' : 'Update Addon'}
                 </button>
               </div>
-            </div>
+            </form>
           </div>
         </div>
       )}
