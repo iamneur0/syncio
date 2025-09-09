@@ -8,13 +8,15 @@ interface SyncBadgeProps {
   isClickable?: boolean
   onClick?: () => void
   title?: string
+  isListMode?: boolean
 }
 
 export default function SyncBadge({ 
   status, 
   isClickable = false, 
   onClick, 
-  title 
+  title,
+  isListMode = false
 }: SyncBadgeProps) {
   const { isDark } = useTheme()
 
@@ -68,6 +70,29 @@ export default function SyncBadge({
   const config = getStatusConfig()
   const isSpinning = status === 'syncing' || status === 'checking'
 
+  if (isListMode) {
+    // Circular mode - same proportions as pill but circular
+    const content = (
+      <div 
+        className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-medium ${config.bgColor} ${isClickable ? 'cursor-pointer hover:opacity-80 transition-opacity' : 'cursor-default'}`}
+        title={title}
+      >
+        <div className={`w-2 h-2 rounded-full ${config.dotColor} ${isSpinning ? 'animate-spin' : ''}`} />
+      </div>
+    )
+
+    if (isClickable && onClick) {
+      return (
+        <button onClick={onClick} className="focus:outline-none">
+          {content}
+        </button>
+      )
+    }
+
+    return content
+  }
+
+  // Regular pill mode
   const baseClasses = `inline-flex items-center px-2 py-1 text-xs font-medium ${config.bgColor}`
   const clickableClasses = isClickable ? 'cursor-pointer hover:opacity-80 transition-opacity' : 'cursor-default'
 

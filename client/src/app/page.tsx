@@ -14,7 +14,7 @@ import { useTheme } from '@/contexts/ThemeContext'
 
 // Import page components
 import AddonsPage from '@/components/pages/AddonsPage'
-import StremioUsersPage from '@/components/pages/StremioUsersPage'
+import UsersPage from '@/components/pages/UsersPage'
 import GroupsPage from '@/components/pages/GroupsPage'
 import SettingsPage from '@/components/pages/SettingsPage'
 
@@ -49,7 +49,7 @@ export default function HomePage() {
       case 'addons':
         return <AddonsPage key={`addons-${tabKeys.addons}`} />
       case 'users':
-        return <StremioUsersPage key={`users-${tabKeys.users}`} />
+        return <UsersPage key={`users-${tabKeys.users}`} />
       case 'groups':
         return <GroupsPage key={`groups-${tabKeys.groups}`} />
       case 'settings':

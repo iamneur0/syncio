@@ -14,8 +14,10 @@ import {
   Edit,
   Puzzle,
   ShieldAlert,
-  RotateCcw,
-  Copy
+  RefreshCw,
+  Copy,
+  Grid3X3,
+  List
 } from 'lucide-react'
 import { useTheme } from '@/contexts/ThemeContext'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -27,7 +29,7 @@ import { useDebounce } from '../../hooks/useDebounce'
 
 
 // Group sync status badge component
-function GroupSyncBadge({ groupId, onSync, isSyncing }: { groupId: string; onSync: (groupId: string) => void; isSyncing: boolean }) {
+function GroupSyncBadge({ groupId, onSync, isSyncing, isListMode = false }: { groupId: string; onSync: (groupId: string) => void; isSyncing: boolean; isListMode?: boolean }) {
   const [status, setStatus] = React.useState<'synced' | 'unsynced' | 'stale' | 'syncing' | 'checking'>('checking')
   const [isLoading, setIsLoading] = React.useState(true)
 
@@ -180,6 +182,7 @@ function GroupSyncBadge({ groupId, onSync, isSyncing }: { groupId: string; onSyn
       isClickable={status === 'unsynced'}
       onClick={status === 'unsynced' ? () => onSync(groupId) : undefined}
       title={getTitle()}
+      isListMode={isListMode}
     />
   )
 }
@@ -187,6 +190,14 @@ function GroupSyncBadge({ groupId, onSync, isSyncing }: { groupId: string; onSyn
 export default function GroupsPage() {
   const [searchTerm, setSearchTerm] = useState('')
   const debouncedSearchTerm = useDebounce(searchTerm, 300)
+  
+  // View mode state (card or list)
+  const [viewMode, setViewMode] = useState<'card' | 'list'>(() => {
+    if (typeof window !== 'undefined') {
+      return (localStorage.getItem('global-view-mode') as 'card' | 'list') || 'card'
+    }
+    return 'card'
+  })
   const [showAddModal, setShowAddModal] = useState(false)
   const [showEditModal, setShowEditModal] = useState(false)
   const [showDetailModal, setShowDetailModal] = useState(false)
@@ -505,6 +516,14 @@ export default function GroupsPage() {
       return matchesSearch
     })
   }, [groups, debouncedSearchTerm])
+
+  // Handle view mode change and persist to localStorage
+  const handleViewModeChange = (mode: 'card' | 'list') => {
+    setViewMode(mode)
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('global-view-mode', mode)
+    }
+  }
 
   const createGroupMutation = useMutation({
     mutationFn: (data: { name: string; description?: string }) => groupsAPI.create({
@@ -991,7 +1010,7 @@ export default function GroupsPage() {
               disabled={syncAllGroupsMutation.isPending || isSyncingAll || groups.length === 0}
               className="flex items-center justify-center px-3 py-2 sm:px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 text-sm sm:text-base"
             >
-              <RotateCcw className={`w-4 h-4 sm:w-5 sm:h-5 mr-2 ${isSyncingAll ? 'animate-spin' : ''}`} />
+              <RefreshCw className={`w-4 h-4 sm:w-5 sm:h-5 mr-2 ${isSyncingAll ? 'animate-spin' : ''}`} />
               <span className="hidden sm:inline">{isSyncingAll ? 'Syncing...' : 'Sync All Groups'}</span>
               <span className="sm:hidden">{isSyncingAll ? 'Syncing...' : 'Sync All'}</span>
             </button>
@@ -1006,7 +1025,7 @@ export default function GroupsPage() {
           </div>
         </div>
 
-        {/* Search */}
+        {/* Search and View Toggle */}
         <div className="flex flex-col sm:flex-row gap-4">
           <div className="relative flex-1">
             <Search className={`absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 sm:w-5 sm:h-5 ${isDark ? 'text-gray-400' : 'text-gray-500'}`} />
@@ -1022,123 +1041,280 @@ export default function GroupsPage() {
               }`}
             />
           </div>
-        </div>
-      </div>
-
-      {/* Groups Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {filteredGroups.map((group) => (
-          <div key={group.id} className={`rounded-lg shadow-sm border p-6 hover:shadow-md transition-shadow flex flex-col h-full ${
-            isDark 
-              ? 'bg-gray-800 border-gray-700' 
-              : 'bg-white border-gray-200'
-          } ${!group.isActive ? 'opacity-50' : ''}`}>
-            <div className="flex items-start justify-between mb-4">
-              <div className="flex items-center">
-                <div
-                  className={`w-12 h-12 rounded-lg flex items-center justify-center mr-3 text-white ${!group?.color ? 'bg-stremio-purple' : (typeof group.color === 'string' && group.color.trim().startsWith('#') ? '' : getGroupColorClass(group.color))}`}
-                  style={typeof group?.color === 'string' && group.color.trim().startsWith('#') ? ({ backgroundColor: group.color } as React.CSSProperties) : undefined}
-                >
-                  <span className="text-white font-semibold text-lg">
-                    {group.name ? group.name.charAt(0).toUpperCase() : 'G'}
-                  </span>
-                </div>
-                <div>
-                  <h3 className={`font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>{group.name}</h3>
-                  <div className="mt-1">
-                    <GroupSyncBadge 
-                      groupId={group.id} 
-                      onSync={handleGroupSync}
-                      isSyncing={syncingGroups.has(group.id)}
-                    />
-                  </div>
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => handleToggleGroupStatus(group.id, group.isActive)}
-                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                    group.isActive ? 'bg-stremio-purple' : (isDark ? 'bg-gray-700' : 'bg-gray-300')
-                    }`}
-                  aria-pressed={group.isActive}
-                  title={group.isActive ? 'Click to disable' : 'Click to enable'}
-                  >
-                    <span
-                    className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${
-                        group.isActive ? 'translate-x-5' : 'translate-x-1'
-                      }`}
-                    />
-                  </button>
-              </div>
-            </div>
-
-
-            <div className="grid grid-cols-2 gap-4 mb-4">
-              <div className="flex items-center">
-                <Puzzle className="w-4 h-4 text-gray-400 mr-2" />
-                <div>
-                  <p className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>{group.addons}</p>
-                  <p className={`text-xs ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>Addons</p>
-                </div>
-              </div>
-              <div className="flex items-center">
-                <Users className="w-4 h-4 text-gray-400 mr-2" />
-                <div>
-                  <p className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>{group.members}</p>
-                  <p className={`text-xs ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>Members</p>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2 mt-auto">
-              <button 
-                onClick={() => handleViewGroupDetails(group)}
-                className={`flex-1 flex items-center justify-center px-3 py-2 text-sm rounded-lg transition-colors ${
-                  isDark 
-                    ? 'bg-gray-700 text-gray-300 hover:bg-gray-600' 
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+          
+          {/* View Mode Toggle */}
+          <div className="flex items-center">
+            <div className={`flex rounded-lg border ${isDark ? 'border-gray-600' : 'border-gray-300'}`}>
+              <button
+                onClick={() => handleViewModeChange('card')}
+                className={`flex items-center gap-2 px-3 py-2 sm:py-3 text-sm rounded-l-lg transition-colors h-10 sm:h-12 ${
+                  viewMode === 'card'
+                    ? isDark
+                      ? 'bg-stremio-purple text-white'
+                      : 'bg-stremio-purple text-white'
+                    : isDark
+                      ? 'text-gray-300 hover:bg-gray-700'
+                      : 'text-gray-700 hover:bg-gray-100'
                 }`}
+                title="Card view"
               >
-                <Eye className="w-4 h-4 mr-1" />
-                View
+                <Grid3X3 className="w-4 h-4" />
+                <span className="hidden sm:inline">Cards</span>
               </button>
               <button
-                onClick={() => handleCloneGroup(group)}
-                className="flex items-center justify-center px-3 py-2 text-sm bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors"
-                title="Clone this group"
+                onClick={() => handleViewModeChange('list')}
+                className={`flex items-center gap-2 px-3 py-2 sm:py-3 text-sm rounded-r-lg transition-colors h-10 sm:h-12 ${
+                  viewMode === 'list'
+                    ? isDark
+                      ? 'bg-stremio-purple text-white'
+                      : 'bg-stremio-purple text-white'
+                    : isDark
+                      ? 'text-gray-300 hover:bg-gray-700'
+                      : 'text-gray-700 hover:bg-gray-100'
+                }`}
+                title="List view"
               >
-                <Copy className="w-4 h-4" />
-              </button>
-              <button
-                onClick={() => handleGroupSync(group.id)}
-                disabled={syncingGroups.has(group.id)}
-                className="flex items-center justify-center px-3 py-2 text-sm bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors disabled:opacity-50"
-                title="Sync all users in this group"
-              >
-                <RotateCcw className={`w-4 h-4 ${syncingGroups.has(group.id) ? 'animate-spin' : ''}`} />
-              </button>
-              <button
-                onClick={() => handleEditGroup(group)}
-                className="hidden"
-              />
-              <button 
-                onClick={() => {
-                  openConfirm({
-                    title: `Delete group ${group.name}`,
-                    description: 'This action cannot be undone.',
-                    isDanger: true,
-                    onConfirm: () => deleteGroupMutation.mutate(group.id)
-                  })
-                }}
-                disabled={deleteGroupMutation.isPending}
-                className="flex items-center justify-center px-3 py-2 text-sm bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors disabled:opacity-50"
-              >
-                <Trash2 className="w-4 h-4" />
+                <List className="w-4 h-4" />
+                <span className="hidden sm:inline">List</span>
               </button>
             </div>
           </div>
-        ))}
+        </div>
       </div>
+
+      {/* Groups Display */}
+      {viewMode === 'card' ? (
+        /* Card Grid View */
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {filteredGroups.map((group) => (
+            <div key={group.id} className={`rounded-lg shadow-sm border p-6 hover:shadow-md transition-shadow flex flex-col h-full ${
+              isDark 
+                ? 'bg-gray-800 border-gray-700' 
+                : 'bg-white border-gray-200'
+            } ${!group.isActive ? 'opacity-50' : ''}`}>
+              <div className="flex items-start justify-between mb-4">
+                <div className="flex items-center">
+                  <div
+                    className={`w-12 h-12 rounded-lg flex items-center justify-center mr-3 text-white ${!group?.color ? 'bg-stremio-purple' : (typeof group.color === 'string' && group.color.trim().startsWith('#') ? '' : getGroupColorClass(group.color))}`}
+                    style={typeof group?.color === 'string' && group.color.trim().startsWith('#') ? ({ backgroundColor: group.color } as React.CSSProperties) : undefined}
+                  >
+                    <span className="text-white font-semibold text-lg">
+                      {group.name ? group.name.charAt(0).toUpperCase() : 'G'}
+                    </span>
+                  </div>
+                  <div>
+                    <h3 className={`font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>{group.name}</h3>
+                    <div className="mt-1">
+                      <GroupSyncBadge 
+                        groupId={group.id} 
+                        onSync={handleGroupSync}
+                        isSyncing={syncingGroups.has(group.id)}
+                      />
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => handleToggleGroupStatus(group.id, group.isActive)}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                      group.isActive ? 'bg-stremio-purple' : (isDark ? 'bg-gray-700' : 'bg-gray-300')
+                      }`}
+                    aria-pressed={group.isActive}
+                    title={group.isActive ? 'Click to disable' : 'Click to enable'}
+                    >
+                      <span
+                      className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${
+                          group.isActive ? 'translate-x-5' : 'translate-x-1'
+                        }`}
+                      />
+                    </button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4 mb-4">
+                <div className="flex items-center">
+                  <Puzzle className="w-4 h-4 text-gray-400 mr-2" />
+                  <div>
+                    <p className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>{group.addons}</p>
+                    <p className={`text-xs ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>{group.addons === 1 ? 'Addon' : 'Addons'}</p>
+                  </div>
+                </div>
+                <div className="flex items-center">
+                  <Users className="w-4 h-4 text-gray-400 mr-2" />
+                  <div>
+                    <p className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>{group.members}</p>
+                    <p className={`text-xs ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>{group.members === 1 ? 'Member' : 'Members'}</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 mt-auto">
+                <button 
+                  onClick={() => handleViewGroupDetails(group)}
+                  className={`flex-1 flex items-center justify-center px-3 py-2 text-sm rounded-lg transition-colors ${
+                    isDark 
+                      ? 'bg-gray-700 text-gray-300 hover:bg-gray-600' 
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  <Eye className="w-4 h-4 mr-1" />
+                  View
+                </button>
+                <button
+                  onClick={() => handleCloneGroup(group)}
+                  className="flex items-center justify-center px-3 py-2 text-sm bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors"
+                  title="Clone this group"
+                >
+                  <Copy className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => handleGroupSync(group.id)}
+                  disabled={syncingGroups.has(group.id)}
+                  className="flex items-center justify-center px-3 py-2 text-sm bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors disabled:opacity-50"
+                  title="Sync all users in this group"
+                >
+                  <RefreshCw className={`w-4 h-4 ${syncingGroups.has(group.id) ? 'animate-spin' : ''}`} />
+                </button>
+                <button
+                  onClick={() => handleEditGroup(group)}
+                  className="hidden"
+                />
+                <button 
+                  onClick={() => {
+                    openConfirm({
+                      title: `Delete group ${group.name}`,
+                      description: 'This action cannot be undone.',
+                      isDanger: true,
+                      onConfirm: () => deleteGroupMutation.mutate(group.id)
+                    })
+                  }}
+                  disabled={deleteGroupMutation.isPending}
+                  className="flex items-center justify-center px-3 py-2 text-sm bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors disabled:opacity-50"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        /* List View */
+        <div className="space-y-3">
+          {filteredGroups.map((group) => (
+            <div key={group.id} className={`rounded-lg border p-4 hover:shadow-md transition-shadow ${
+              isDark 
+                ? 'bg-gray-800 border-gray-700' 
+                : 'bg-white border-gray-200'
+            } ${!group.isActive ? 'opacity-50' : ''}`}>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center flex-1 min-w-0">
+                  <div
+                    className={`w-10 h-10 rounded-lg flex items-center justify-center mr-3 flex-shrink-0 text-white ${!group?.color ? 'bg-stremio-purple' : (typeof group.color === 'string' && group.color.trim().startsWith('#') ? '' : getGroupColorClass(group.color))}`}
+                    style={typeof group?.color === 'string' && group.color.trim().startsWith('#') ? ({ backgroundColor: group.color } as React.CSSProperties) : undefined}
+                  >
+                    <span className="text-white font-semibold text-sm">
+                      {group.name ? group.name.charAt(0).toUpperCase() : 'G'}
+                    </span>
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 mb-1">
+                      <h3 className={`font-semibold truncate ${isDark ? 'text-white' : 'text-gray-900'}`}>{group.name}</h3>
+                      <GroupSyncBadge 
+                        groupId={group.id} 
+                        onSync={handleGroupSync}
+                        isSyncing={syncingGroups.has(group.id)}
+                        isListMode={true}
+                      />
+                    </div>
+                    {group.description && (
+                      <p className={`text-sm truncate ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
+                        {group.description}
+                      </p>
+                    )}
+                  </div>
+                </div>
+                
+                <div className="flex items-center gap-4 ml-4">
+                  {/* Stats */}
+                  <div className="flex items-center gap-4 text-sm">
+                    <div className="flex items-center gap-1">
+                      <Puzzle className="w-4 h-4 text-gray-400" />
+                      <span className={`font-medium ${isDark ? 'text-white' : 'text-gray-900'}`}>{group.addons}</span>
+                      <span className={`${isDark ? 'text-gray-400' : 'text-gray-500'}`}>{group.addons === 1 ? 'addon' : 'addons'}</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <Users className="w-4 h-4 text-gray-400" />
+                      <span className={`font-medium ${isDark ? 'text-white' : 'text-gray-900'}`}>{group.members}</span>
+                      <span className={`${isDark ? 'text-gray-400' : 'text-gray-500'}`}>{group.members === 1 ? 'member' : 'members'}</span>
+                    </div>
+                  </div>
+                  
+                  {/* Enable/Disable toggle */}
+                  <button
+                    onClick={() => handleToggleGroupStatus(group.id, group.isActive)}
+                    className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                      group.isActive ? 'bg-stremio-purple' : (isDark ? 'bg-gray-700' : 'bg-gray-300')
+                    }`}
+                    aria-pressed={group.isActive}
+                    title={group.isActive ? 'Click to disable' : 'Click to enable'}
+                  >
+                    <span
+                      className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                        group.isActive ? 'translate-x-4' : 'translate-x-0.5'
+                      }`}
+                    />
+                  </button>
+                  
+                  {/* Action buttons */}
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => handleViewGroupDetails(group)}
+                      className={`flex items-center justify-center px-2 py-1 text-sm rounded transition-colors ${
+                        isDark 
+                          ? 'text-gray-300 hover:bg-gray-700' 
+                          : 'text-gray-700 hover:bg-gray-100'
+                      }`}
+                      title="View details"
+                    >
+                      <Eye className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => handleCloneGroup(group)}
+                      className="flex items-center justify-center px-2 py-1 text-sm text-blue-700 hover:bg-blue-100 rounded transition-colors"
+                      title="Clone this group"
+                    >
+                      <Copy className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => handleGroupSync(group.id)}
+                      disabled={syncingGroups.has(group.id)}
+                      className="flex items-center justify-center px-2 py-1 text-sm text-green-700 hover:bg-green-100 rounded transition-colors disabled:opacity-50"
+                      title="Sync all users in this group"
+                    >
+                      <RefreshCw className={`w-4 h-4 ${syncingGroups.has(group.id) ? 'animate-spin' : ''}`} />
+                    </button>
+                    <button 
+                      onClick={() => {
+                        openConfirm({
+                          title: `Delete group ${group.name}`,
+                          description: 'This action cannot be undone.',
+                          isDanger: true,
+                          onConfirm: () => deleteGroupMutation.mutate(group.id)
+                        })
+                      }}
+                      disabled={deleteGroupMutation.isPending}
+                      className="flex items-center justify-center px-2 py-1 text-sm text-red-700 hover:bg-red-100 rounded transition-colors disabled:opacity-50"
+                      title="Delete group"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {filteredGroups.length === 0 && (
         <div className="text-center py-12">
@@ -1169,7 +1345,14 @@ export default function GroupsPage() {
 
       {/* Add Group Modal */}
       {showAddModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+        <div 
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setShowAddModal(false)
+            }
+          }}
+        >
           <div className={`rounded-lg max-w-md w-full p-6 ${isDark ? 'bg-gray-800' : 'bg-white'}`}>
             <div className="flex items-center justify-between mb-4">
               <h2 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>Create New Group</h2>
@@ -1274,7 +1457,14 @@ export default function GroupsPage() {
       )}
       {/* Edit Group Modal */}
       {showEditModal && editingGroupId && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+        <div 
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setShowEditModal(false)
+            }
+          }}
+        >
           <div className={`rounded-lg max-w-lg w-full p-6 ${isDark ? 'bg-gray-800' : 'bg-white'}`}>
             <div className="flex items-center justify-between mb-4">
               <h2 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>Edit Group</h2>
@@ -1371,7 +1561,14 @@ export default function GroupsPage() {
 
       {/* Group Detail Modal */}
       {showDetailModal && selectedGroup && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+        <div 
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setShowDetailModal(false)
+            }
+          }}
+        >
           <div className={`w-full max-w-4xl max-h-[90vh] ${isDndActive ? 'overflow-hidden' : 'overflow-y-auto'} rounded-lg shadow-xl ${
             isDark ? 'bg-gray-800' : 'bg-white'
           }`}>
