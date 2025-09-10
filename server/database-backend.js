@@ -229,6 +229,26 @@ app.get('/api/users', async (req, res) => {
         }
       }
       
+      // Parse excluded and protected addons
+      let excludedAddons = []
+      let protectedAddons = []
+      
+      try {
+        if (user.excludedAddons) {
+          excludedAddons = JSON.parse(user.excludedAddons)
+        }
+      } catch (e) {
+        console.error('Error parsing excluded addons for user', user.id, ':', e)
+      }
+      
+      try {
+        if (user.protectedAddons) {
+          protectedAddons = JSON.parse(user.protectedAddons)
+        }
+      } catch (e) {
+        console.error('Error parsing protected addons for user', user.id, ':', e)
+      }
+      
       return {
         id: user.id,
         username: user.username || user.stremioUsername,
@@ -241,7 +261,9 @@ app.get('/api/users', async (req, res) => {
         lastActive: user.lastStremioSync || user.createdAt,
         avatar: null,
         hasStremioConnection: !!user.stremioAuthKey,
-        isActive: user.isActive
+        isActive: user.isActive,
+        excludedAddons: excludedAddons,
+        protectedAddons: protectedAddons
       }
     }));
 
@@ -325,6 +347,26 @@ app.get('/api/users/:id', async (req, res) => {
       }
     }
 
+    // Parse excluded and protected addons from database
+    let excludedAddons = []
+    let protectedAddons = []
+    
+    try {
+      if (user.excludedAddons) {
+        excludedAddons = JSON.parse(user.excludedAddons)
+      }
+    } catch (e) {
+      console.error('Error parsing excluded addons:', e)
+    }
+    
+    try {
+      if (user.protectedAddons) {
+        protectedAddons = JSON.parse(user.protectedAddons)
+      }
+    } catch (e) {
+      console.error('Error parsing protected addons:', e)
+    }
+
     // Transform for frontend
     const transformedUser = {
       id: user.id,
@@ -344,13 +386,65 @@ app.get('/api/users/:id', async (req, res) => {
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
       stremioAddonsCount: stremioAddonsCount,
-      stremioAddons: stremioAddons
+      stremioAddons: stremioAddons,
+      excludedAddons: excludedAddons,
+      protectedAddons: protectedAddons
     }
 
     res.json(transformedUser)
   } catch (error) {
     console.error('Error fetching user details:', error)
     res.status(500).json({ error: 'Failed to fetch user details' })
+  }
+})
+
+// Update user excluded addons
+app.put('/api/users/:id/excluded-addons', async (req, res) => {
+  try {
+    const { id } = req.params
+    const { excludedAddons } = req.body
+    
+    console.log(`🔍 PUT /api/users/${id}/excluded-addons called with:`, excludedAddons)
+    
+    const updatedUser = await prisma.user.update({
+      where: { id },
+      data: {
+        excludedAddons: JSON.stringify(excludedAddons || [])
+      }
+    })
+    
+    res.json({ 
+      message: 'Excluded addons updated successfully',
+      excludedAddons: excludedAddons || []
+    })
+  } catch (error) {
+    console.error('Error updating excluded addons:', error)
+    res.status(500).json({ error: 'Failed to update excluded addons' })
+  }
+})
+
+// Update user protected addons
+app.put('/api/users/:id/protected-addons', async (req, res) => {
+  try {
+    const { id } = req.params
+    const { protectedAddons } = req.body
+    
+    console.log(`🔍 PUT /api/users/${id}/protected-addons called with:`, protectedAddons)
+    
+    const updatedUser = await prisma.user.update({
+      where: { id },
+      data: {
+        protectedAddons: JSON.stringify(protectedAddons || [])
+      }
+    })
+    
+    res.json({ 
+      message: 'Protected addons updated successfully',
+      protectedAddons: protectedAddons || []
+    })
+  } catch (error) {
+    console.error('Error updating protected addons:', error)
+    res.status(500).json({ error: 'Failed to update protected addons' })
   }
 })
 
@@ -3053,13 +3147,41 @@ async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'nor
       }
     }
 
-    // Then, add all group addons in their defined order
+    // Then, add all group addons in their defined order (only non-excluded ones)
     for (const groupAddon of nonProtectedGroupAddons) {
       console.log(`➕ Added group addon: ${groupAddon?.manifest?.name || groupAddon?.name}`)
       desiredCollection.push(groupAddon)
     }
+
+    // Remove any current addons that are excluded (not in the desired collection)
+    // This ensures excluded addons are removed from the user's account
+    const desiredUrls = new Set(desiredCollection.map(a => normalize(a?.transportUrl || a?.manifestUrl || a?.url)))
+    const excludedUrls = new Set(excludedManifestUrls.map(url => normalize(url)))
     
-    console.log('🔍 Desired collection order:', desiredCollection.map(a => ({ 
+    console.log('🔍 Excluded URLs to remove:', Array.from(excludedUrls))
+    console.log('🔍 Desired URLs to keep:', Array.from(desiredUrls))
+    
+    // Filter out any current addons that are excluded and not protected
+    const filteredCurrentAddons = currentAddons.filter(currentAddon => {
+      const currentUrl = normalize(currentAddon?.transportUrl || currentAddon?.manifestUrl || currentAddon?.url)
+      const isExcluded = excludedUrls.has(currentUrl)
+      const isCurrentAddonProtected = isProtected(currentAddon)
+      
+      if (isExcluded && !isCurrentAddonProtected) {
+        console.log(`➖ Removing excluded addon: ${currentAddon?.manifest?.name || currentAddon?.name}`)
+        return false
+      }
+      
+      return true
+    })
+    
+    // Update the desired collection to only include non-excluded addons
+    const finalDesiredCollection = desiredCollection.filter(addon => {
+      const addonUrl = normalize(addon?.transportUrl || addon?.manifestUrl || addon?.url)
+      return !excludedUrls.has(addonUrl)
+    })
+    
+    console.log('🔍 Final desired collection (excluding excluded addons):', finalDesiredCollection.map(a => ({ 
       name: a?.manifest?.name || a?.name, 
       protected: isProtected(a),
       url: normalize(a?.transportUrl || a?.manifestUrl || a?.url)
@@ -3080,7 +3202,7 @@ async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'nor
       return `${id}@@${url}`
     }
     const currentKeys = new Set(currentAddons.map(toKey))
-    const desiredKeys = new Set(desiredCollection.map(toKey))
+    const desiredKeys = new Set(finalDesiredCollection.map(toKey))
     const sameSize = currentKeys.size === desiredKeys.size
     let allMatch = sameSize
     if (allMatch) {
@@ -3090,7 +3212,7 @@ async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'nor
     let curSeq, desSeq
     if (allMatch) {
       curSeq = currentAddons.map((a) => normalize(a?.transportUrl || a?.manifestUrl || a?.url))
-      desSeq = desiredCollection.map((a) => normalize(a?.transportUrl || a?.manifestUrl || a?.url))
+      desSeq = finalDesiredCollection.map((a) => normalize(a?.transportUrl || a?.manifestUrl || a?.url))
       if (curSeq.length !== desSeq.length) {
         allMatch = false
       } else {
@@ -3106,7 +3228,7 @@ async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'nor
       
       // Even if collections match, push to Stremio API to ensure order is correct
       try {
-        await apiClient.request('addonCollectionSet', { addons: desiredCollection })
+        await apiClient.request('addonCollectionSet', { addons: finalDesiredCollection })
         console.log('✅ Pushed addon collection to Stremio API')
       } catch (error) {
         console.error('Error pushing to Stremio API:', error)
@@ -3120,7 +3242,7 @@ async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'nor
         await prisma.user.update({
           where: { id: userId },
           data: {
-            stremioAddons: JSON.stringify(desiredCollection || [])
+            stremioAddons: JSON.stringify(finalDesiredCollection || [])
           }
         })
         console.log('💾 Updated user stremioAddons in database')
@@ -3142,18 +3264,18 @@ async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'nor
 
     // Set the addon collection using the proper format (replaces, removes extras not included)
     try {
-      console.log('🔄 Setting addon collection (preserve protected addons + add group addons)')
-      console.log('📊 Desired collection addons:', desiredCollection.map(a => ({ 
+      console.log('🔄 Setting addon collection (preserve protected addons + add group addons, exclude excluded addons)')
+      console.log('📊 Desired collection addons:', finalDesiredCollection.map(a => ({ 
         name: a?.manifest?.name || a?.name, 
         id: a?.manifest?.id || a?.id,
         version: a?.manifest?.version,
         description: a?.manifest?.description,
         url: normalize(a?.transportUrl || a?.manifestUrl || a?.url)
       })))
-      console.log('🔍 Full desired collection being sent to Stremio:', JSON.stringify(desiredCollection, null, 2))
+      console.log('🔍 Full desired collection being sent to Stremio:', JSON.stringify(finalDesiredCollection, null, 2))
       
       // Set the addon collection using the proper format (replaces, removes extras not included)
-      await apiClient.request('addonCollectionSet', { addons: desiredCollection })
+      await apiClient.request('addonCollectionSet', { addons: finalDesiredCollection })
       
       // small wait for propagation
       await new Promise((r) => setTimeout(r, 1500))

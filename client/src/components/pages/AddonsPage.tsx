@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useLayoutEffect } from 'react'
 import { 
   Plus, 
   Search,
@@ -14,7 +14,9 @@ import {
   User,
   Settings,
   Grid3X3,
-  List
+  List,
+  ExternalLink,
+  Star
 } from 'lucide-react'
 import { useTheme } from '@/contexts/ThemeContext'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -36,6 +38,154 @@ function canonicalizeManifestUrl(raw: string): string {
   } catch {
     return String(raw || '').trim().toLowerCase()
   }
+}
+
+// Discovery card component
+function DiscoveryCard({ isDark }: { isDark: boolean }) {
+  const [showDiscovery, setShowDiscovery] = useState(false)
+  
+  const addonProjects = [
+    {
+      name: "AIOMetadata",
+      description: "The Ultimate Stremio Metadata Addon",
+      icon: "/assets/aiometadata.png",
+      projectUrl: "https://github.com/cedya77/aiometadata",
+      category: "Metadata",
+      providers: [
+        { name: "Omni", url: "https://aiometadata.12312023.xyz/" },
+        { name: "Yeb", url: "https://aiometadatafortheweak.nhyira.dev/" },
+        { name: "Midnight", url: "https://aiometadatafortheweebs.midnightignite.me/" },
+        { name: "Viren", url: "https://aiometadata.viren070.me/" }
+      ]
+    },
+    {
+      name: "AIOStreams",
+      description: "Consolidates multiple Stremio addons and debrid services into a single, highly customisable super-addon.",
+      icon: "/assets/aiostreams.ico",
+      projectUrl: "https://github.com/Viren070/AIOStreams",
+      category: "Streaming",
+      providers: [
+        { name: "Elf", url: "https://aiostreams.elfhosted.com/" },
+        { name: "Yeb", url: "https://aiostreamsfortheweak.nhyira.dev/" },
+        { name: "Midnight", url: "https://aiostreams.midnightignite.me/" },
+        { name: "Viren", url: "https://aiostreams.viren070.me/" }
+      ]
+    }
+  ]
+
+  return (
+    <div 
+      className={`rounded-lg shadow-sm border p-6 hover:shadow-md transition-all duration-200 cursor-pointer flex flex-col ${
+        isDark 
+          ? 'bg-gradient-to-br from-purple-900/20 to-blue-900/20 border-purple-700/50' 
+          : 'bg-gradient-to-br from-purple-50 to-blue-50 border-purple-200'
+      } ${!showDiscovery ? 'h-full' : ''}`}
+      onClick={() => setShowDiscovery(!showDiscovery)}
+    >
+      <div className="flex items-start justify-between mb-4">
+        <div className="flex items-center">
+          <div className="w-12 h-12 rounded-lg flex items-center justify-center mr-3 bg-gradient-to-br from-purple-500 to-blue-500 text-white">
+            <Star className="w-6 h-6" />
+          </div>
+          <div>
+            <h3 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>
+              Discover Addons
+            </h3>
+            <p className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
+              Popular addon projects with multiple providers
+            </p>
+          </div>
+        </div>
+        {/* Placeholder for toggle switch area to match other cards */}
+        <div className="w-9 h-5"></div>
+      </div>
+
+
+      {showDiscovery && (
+        <div className="space-y-4 mt-4">
+          {addonProjects.map((project, index) => (
+            <div
+              key={index}
+              className={`p-4 rounded-lg border ${
+                isDark 
+                  ? 'bg-gray-800/50 border-gray-700' 
+                  : 'bg-white/50 border-gray-200'
+              }`}
+            >
+              <div className="flex items-start space-x-3 mb-3">
+                <img 
+                  src={project.icon} 
+                  alt={project.name}
+                  className="w-8 h-8 rounded flex-shrink-0"
+                  onError={(e) => {
+                    e.currentTarget.style.display = 'none'
+                  }}
+                />
+                <div className="flex-1 min-w-0">
+                  <h4 className={`font-medium ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                    {project.name}
+                  </h4>
+                  <p className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-600'} mb-2`}>
+                    {project.description}
+                  </p>
+                  <span className={`inline-block px-2 py-1 rounded-full text-xs font-medium ${
+                    isDark 
+                      ? 'bg-purple-900/50 text-purple-300' 
+                      : 'bg-purple-100 text-purple-700'
+                  }`}>
+                    {project.category}
+                  </span>
+                </div>
+                <a
+                  href={project.projectUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={`p-1 rounded transition-colors ${
+                    isDark 
+                      ? 'hover:bg-gray-600 text-gray-400 hover:text-white' 
+                      : 'hover:bg-gray-200 text-gray-500 hover:text-gray-700'
+                  }`}
+                  title="Visit project page"
+                >
+                  <ExternalLink className="w-4 h-4" />
+                </a>
+              </div>
+              
+              <div className="grid grid-cols-2 gap-2">
+                {project.providers.map((provider, providerIndex) => (
+                  <a
+                    key={providerIndex}
+                    href={provider.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={(e) => e.stopPropagation()}
+                    className={`p-2 rounded-lg text-sm font-medium transition-colors text-center ${
+                      isDark 
+                        ? 'bg-gray-700 hover:bg-gray-600 text-gray-200' 
+                        : 'bg-gray-100 hover:bg-gray-200 text-gray-700'
+                    }`}
+                    title={`Visit ${provider.name} addon`}
+                  >
+                    {provider.name}
+                  </a>
+                ))}
+              </div>
+            </div>
+          ))}
+          
+          <div className={`mt-4 p-3 rounded-lg border ${
+            isDark 
+              ? 'bg-gray-800/30 border-gray-700' 
+              : 'bg-gray-50 border-gray-200'
+          }`}>
+            <p className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
+              💡 <strong>Tip:</strong> Click on any provider button to visit their addon page, then copy the manifest URL to install it.
+            </p>
+          </div>
+        </div>
+      )}
+    </div>
+  )
 }
 
 export default function AddonsPage() {
@@ -62,13 +212,24 @@ export default function AddonsPage() {
   // View mode state (card or list)
   const [viewMode, setViewMode] = useState<'card' | 'list'>(() => {
     if (typeof window !== 'undefined') {
-      return (localStorage.getItem('global-view-mode') as 'card' | 'list') || 'card'
+      const raw = String(localStorage.getItem('global-view-mode') || 'card').toLowerCase().trim()
+      return raw === 'list' ? 'list' : 'card'
     }
     return 'card'
   })
+  // Ensure highlight persists after refresh/hydration
+  useLayoutEffect(() => {
+    try {
+      const raw = String(localStorage.getItem('global-view-mode') || 'card').toLowerCase().trim()
+      const stored = raw === 'list' ? 'list' : 'card'
+      setViewMode(stored)
+    } catch {}
+  }, [])
   
   const { isDark } = useTheme()
   const queryClient = useQueryClient()
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => { setMounted(true) }, [])
 
 
   // Fetch addons from API
@@ -459,7 +620,7 @@ export default function AddonsPage() {
         </div>
 
         {/* Search and View Toggle */}
-        <div className="flex flex-col sm:flex-row gap-4">
+        <div className="flex flex-row items-center gap-4">
           <div className="relative flex-1">
             <Search className={`absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 sm:w-5 sm:h-5 ${isDark ? 'text-gray-400' : 'text-gray-500'}`} />
             <input
@@ -476,42 +637,40 @@ export default function AddonsPage() {
           </div>
           
           {/* View Mode Toggle */}
-          <div className="flex items-center">
-            <div className={`flex rounded-lg border ${isDark ? 'border-gray-600' : 'border-gray-300'}`}>
-              <button
-                onClick={() => handleViewModeChange('card')}
-                className={`flex items-center gap-2 px-3 py-2 sm:py-3 text-sm rounded-l-lg transition-colors h-10 sm:h-12 ${
-                  viewMode === 'card'
-                    ? isDark
+          {mounted && (
+            <div className="flex items-center">
+              <div className={`flex rounded-lg border ${isDark ? 'border-gray-600' : 'border-gray-300'}`}>
+                <button
+                  onClick={() => handleViewModeChange('card')}
+                  className={`flex items-center gap-2 px-3 py-2 sm:py-3 text-sm rounded-l-lg transition-colors h-10 sm:h-12 ${
+                    viewMode === 'card'
                       ? 'bg-stremio-purple text-white'
-                      : 'bg-stremio-purple text-white'
-                    : isDark
-                      ? 'text-gray-300 hover:bg-gray-700'
-                      : 'text-gray-700 hover:bg-gray-100'
-                }`}
-                title="Card view"
-              >
-                <Grid3X3 className="w-4 h-4" />
-                <span className="hidden sm:inline">Cards</span>
-              </button>
-              <button
-                onClick={() => handleViewModeChange('list')}
-                className={`flex items-center gap-2 px-3 py-2 sm:py-3 text-sm rounded-r-lg transition-colors h-10 sm:h-12 ${
-                  viewMode === 'list'
-                    ? isDark
+                      : isDark
+                        ? 'text-gray-300 hover:bg-gray-700'
+                        : 'text-gray-700 hover:bg-gray-100'
+                  }`}
+                  title="Card view"
+                >
+                  <Grid3X3 className="w-4 h-4" />
+                  <span className="hidden sm:inline">Cards</span>
+                </button>
+                <button
+                  onClick={() => handleViewModeChange('list')}
+                  className={`flex items-center gap-2 px-3 py-2 sm:py-3 text-sm rounded-r-lg transition-colors h-10 sm:h-12 ${
+                    viewMode === 'list'
                       ? 'bg-stremio-purple text-white'
-                      : 'bg-stremio-purple text-white'
-                    : isDark
-                      ? 'text-gray-300 hover:bg-gray-700'
-                      : 'text-gray-700 hover:bg-gray-100'
-                }`}
-                title="List view"
-              >
-                <List className="w-4 h-4" />
-                <span className="hidden sm:inline">List</span>
-              </button>
+                      : isDark
+                        ? 'text-gray-300 hover:bg-gray-700'
+                        : 'text-gray-700 hover:bg-gray-100'
+                  }`}
+                  title="List view"
+                >
+                  <List className="w-4 h-4" />
+                  <span className="hidden sm:inline">List</span>
+                </button>
+              </div>
             </div>
-          </div>
+          )}
         </div>
       </div>
 
@@ -545,9 +704,9 @@ export default function AddonsPage() {
         <>
           {viewMode === 'card' ? (
             /* Card Grid View */
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 items-start">
               {displayAddons.map((addon: any) => (
-                <div key={addon.id} className={`rounded-lg shadow-sm border p-6 hover:shadow-md transition-shadow flex flex-col h-full ${
+                <div key={addon.id} className={`rounded-lg shadow-sm border p-6 hover:shadow-md transition-shadow flex flex-col ${
                   isDark 
                     ? 'bg-gray-800 border-gray-700' 
                     : 'bg-white border-gray-200'
@@ -697,17 +856,24 @@ export default function AddonsPage() {
                   </div>
                 </div>
               ))}
+              
+              {/* Discovery Card at the end */}
+              <DiscoveryCard isDark={isDark} />
             </div>
           ) : (
             /* List View */
             <div className="space-y-3">
               {displayAddons.map((addon: any) => (
-                <div key={addon.id} className={`rounded-lg border p-4 hover:shadow-md transition-shadow ${
+                <div
+                  key={addon.id}
+                  className={`rounded-lg border p-4 hover:shadow-md transition-shadow cursor-pointer ${
                   isDark 
                     ? 'bg-gray-800 border-gray-700' 
                     : 'bg-white border-gray-200'
-                } ${addon.status === 'inactive' ? 'opacity-50' : ''}`}>
-                  <div className="flex items-center justify-between">
+                } ${addon.status === 'inactive' ? 'opacity-50' : ''}`}
+                  onClick={() => handleEditAddon(addon)}
+                >
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                     <div className="flex items-center flex-1 min-w-0">
                       <div className="w-10 h-10 rounded-lg flex items-center justify-center mr-3 flex-shrink-0 overflow-hidden">
                         {addon.iconUrl ? (
@@ -747,9 +913,9 @@ export default function AddonsPage() {
                       </div>
                     </div>
                     
-                    <div className="flex items-center gap-4 ml-4">
+                    <div className="flex items-center gap-2 sm:gap-4 sm:ml-4 flex-wrap">
                       {/* Stats */}
-                      <div className="flex items-center gap-4 text-sm">
+                      <div className="hidden sm:flex items-center gap-4 text-sm">
                         <div className="flex items-center gap-1">
                           <User className="w-4 h-4 text-gray-400" />
                           <span className={`font-medium ${isDark ? 'text-white' : 'text-gray-900'}`}>{addon.users}</span>
@@ -764,7 +930,8 @@ export default function AddonsPage() {
                       
                       {/* Enable/Disable toggle */}
                       <button
-                        onClick={async () => {
+                        onClick={async (e) => {
+                          e.stopPropagation()
                           try {
                             if (addon.status === 'active') {
                               await addonsAPI.disable(addon.id)
@@ -794,18 +961,7 @@ export default function AddonsPage() {
                       {/* Action buttons */}
                       <div className="flex items-center gap-1">
                         <button 
-                          onClick={() => handleEditAddon(addon)}
-                          className={`flex items-center justify-center px-2 py-1 text-sm rounded transition-colors ${
-                            isDark 
-                              ? 'text-gray-300 hover:bg-gray-700' 
-                              : 'text-gray-700 hover:bg-gray-100'
-                          }`}
-                          title="View details"
-                        >
-                          <Eye className="w-4 h-4" />
-                        </button>
-                        <button 
-                          onClick={() => reloadAddonMutation.mutate(addon.id)}
+                          onClick={(e) => { e.stopPropagation(); reloadAddonMutation.mutate(addon.id) }}
                           disabled={reloadAddonMutation.isPending}
                           className="flex items-center justify-center px-2 py-1 text-sm text-green-700 hover:bg-green-100 rounded transition-colors disabled:opacity-50"
                           title="Reload addon manifest"
@@ -813,7 +969,7 @@ export default function AddonsPage() {
                           <RefreshCw className={`w-4 h-4 ${reloadAddonMutation.isPending ? 'animate-spin' : ''}`} />
                         </button>
                         <button
-                          onClick={() => {
+                          onClick={(e) => { e.stopPropagation();
                             try {
                               const raw = addon.url || addon.manifestUrl || ''
                               if (!raw) return
@@ -827,7 +983,7 @@ export default function AddonsPage() {
                           <Settings className="w-4 h-4" />
                         </button>
                         <button 
-                          onClick={() => handleDeleteAddon(addon.id, addon.name)}
+                          onClick={(e) => { e.stopPropagation(); handleDeleteAddon(addon.id, addon.name) }}
                           disabled={deleteAddonMutation.isPending}
                           className="flex items-center justify-center px-2 py-1 text-sm text-red-700 hover:bg-red-100 rounded transition-colors disabled:opacity-50"
                           title="Delete addon"
@@ -839,6 +995,9 @@ export default function AddonsPage() {
                   </div>
                 </div>
               ))}
+              
+              {/* Discovery Card at the end */}
+              <DiscoveryCard isDark={isDark} />
             </div>
           )}
         </>
