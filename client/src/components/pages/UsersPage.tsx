@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useMemo, useEffect, useRef } from 'react'
+import React, { useState, useMemo, useEffect, useRef, useLayoutEffect } from 'react'
 import { DndContext, DragOverlay, PointerSensor, TouchSensor, useSensor, useSensors, closestCenter } from '@dnd-kit/core'
 import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
@@ -54,8 +54,8 @@ function UserSyncBadge({ userId, userExcludedSet, userProtectedSet, isSyncing, l
     'https://opensubtitles.strem.io/manifest.json'
   ]
 
-  // Check if an addon is protected (built-in + user-defined) - same logic as main component
-  const isAddonProtected = (addon: any) => {
+  // Check if an addon is built-in protected (Stremio default)
+  const isAddonProtectedBuiltIn = (addon: any) => {
     const addonId = addon?.id || addon?.manifest?.id
     const manifestUrl = addon?.manifestUrl || addon?.transportUrl || addon?.url
     
@@ -67,6 +67,16 @@ function UserSyncBadge({ userId, userExcludedSet, userProtectedSet, isSyncing, l
     
     // Check if manifest URL contains any protected addon ID
     if (manifestUrl && protectedAddonIds.some(id => manifestUrl.includes(id))) return true
+    
+    return false
+  }
+
+  // Check if an addon is protected (built-in + user-defined) - same logic as main component
+  const isAddonProtected = (addon: any) => {
+    const manifestUrl = addon?.manifestUrl || addon?.transportUrl || addon?.url
+    
+    // Check if built-in protected
+    if (isAddonProtectedBuiltIn(addon)) return true
     
     // Check if user-protected
     return userProtectedSet.has(manifestUrl || '')
@@ -143,6 +153,16 @@ function UserSyncBadge({ userId, userExcludedSet, userProtectedSet, isSyncing, l
 
   const [status, setStatus] = React.useState<'synced' | 'unsynced' | 'stale' | 'connect' | 'syncing' | 'checking'>('checking')
   const [manuallySet, setManuallySet] = React.useState(false)
+  const currentUserIdRef = React.useRef(userId)
+
+  // Reset status when userId changes to avoid showing stale data
+  React.useLayoutEffect(() => {
+    if (currentUserIdRef.current !== userId) {
+      currentUserIdRef.current = userId
+      setStatus('checking')
+      setManuallySet(false)
+    }
+  }, [userId])
 
   // Persist last-known user sync status for cross-tab consumers (e.g., Groups page)
   React.useEffect(() => {
@@ -158,6 +178,12 @@ function UserSyncBadge({ userId, userExcludedSet, userProtectedSet, isSyncing, l
     const checkSync = () => {
       console.log(`UserSyncBadge [${location}] checkSync running for userId:`, userId)
       console.log(`UserSyncBadge [${location}] isSyncing:`, isSyncing, 'manuallySet:', manuallySet)
+      
+      // Skip if this is not the current user (avoid stale data)
+      if (currentUserIdRef.current !== userId) {
+        console.log(`UserSyncBadge [${location}] skipping checkSync - userId mismatch`)
+        return
+      }
       
       // Skip checkSync if status was manually set recently
       if (manuallySet) {
@@ -194,53 +220,90 @@ function UserSyncBadge({ userId, userExcludedSet, userProtectedSet, isSyncing, l
       const liveList = Array.isArray(live?.addons) ? live!.addons : []
       const allStremioAddons = liveList
 
-      console.log('Group addons (non-excluded):', groupAddons.map((a: any) => a?.name || a?.manifestUrl))
-      console.log('Stremio addons (all):', allStremioAddons.map((a: any) => a?.name || a?.manifestUrl))
+      console.log('🔍 Sync Status Debug for', userDetail?.username || userId, ':')
+      console.log('Group addon URLs:', groupAddons.map((a: any) => a?.manifestUrl))
+      console.log('Live addon URLs:', allStremioAddons.map((a: any) => a?.manifestUrl || a?.transportUrl || a?.url))
+      console.log('User protected set:', Array.from(userProtectedSet))
+      console.log('Live addons details:', allStremioAddons.map((a: any) => ({ 
+        name: a?.manifest?.name, 
+        url: a?.manifestUrl || a?.transportUrl || a?.url, 
+        protected: isAddonProtected(a),
+        builtInProtected: isAddonProtectedBuiltIn(a),
+        userProtected: userProtectedSet.has(a?.manifestUrl || a?.transportUrl || a?.url || '')
+      })))
 
-      // Build expected order: protected addons in their positions + group addons
-      const expectedOrder = []
-      let groupAddonIndex = 0
+      // Build sets for easier comparison
+      const groupAddonUrls = new Set(groupAddons.map((a: any) => a?.manifestUrl))
+      const allLiveAddonUrls = allStremioAddons.map((a: any) => a?.manifestUrl || a?.transportUrl || a?.url)
       
-      // First, preserve protected addons in their exact positions
-      for (const addon of allStremioAddons) {
-        if (isAddonProtected(addon)) {
-          expectedOrder.push(addon)
-        } else if (groupAddonIndex < groupAddons.length) {
-          // Replace non-protected addon with group addon
-          expectedOrder.push(groupAddons[groupAddonIndex])
-          groupAddonIndex++
+      // Check if all non-excluded group addons exist in Stremio account
+      const allGroupAddonsExist = groupAddons.every((groupAddon: any) => {
+        const groupUrl = groupAddon?.manifestUrl
+        return allLiveAddonUrls.some((liveUrl: string) => {
+          if (!liveUrl || !groupUrl) return false
+          return liveUrl === groupUrl
+        })
+      })
+
+      console.log('All group addons exist in Stremio account:', allGroupAddonsExist)
+
+      if (!allGroupAddonsExist) {
+        console.log('Setting status to unsynced - missing group addons')
+        setStatus('unsynced')
+        return
+      }
+
+      // Check order: find group addon URLs within all live addon URLs
+      const groupAddonPositions: number[] = []
+      for (const groupUrl of groupAddonUrls) {
+        const position = allLiveAddonUrls.findIndex(url => url === groupUrl)
+        if (position !== -1) {
+          groupAddonPositions.push(position)
         }
-        // If no more group addons, skip this position (effectively removing the addon)
       }
       
-      // Add any remaining group addons that couldn't fit in existing positions
-      while (groupAddonIndex < groupAddons.length) {
-        expectedOrder.push(groupAddons[groupAddonIndex])
-        groupAddonIndex++
+      // Check if group addons are in correct order
+      const isOrderCorrect = groupAddonPositions.length === groupAddons.length && 
+        groupAddonPositions.every((pos, index) => index === 0 || pos > groupAddonPositions[index - 1])
+
+      console.log('Group addon positions:', groupAddonPositions)
+      console.log('Is order correct:', isOrderCorrect)
+
+      if (!isOrderCorrect) {
+        console.log('Setting status to unsynced - wrong order')
+        setStatus('unsynced')
+        return
       }
 
-      console.log('Expected order:', expectedOrder.map((a: any) => a?.name || a?.manifestUrl))
-      console.log('Actual order:', allStremioAddons.map((a: any) => a?.name || a?.manifestUrl))
+      // Check for extras: non-protected live addons must all be in group
+      // Protected live addons that are not in group are ignored (personal addons)
+      const hasExtras = allStremioAddons.some((liveAddon: any) => {
+        const liveUrl = liveAddon?.manifestUrl || liveAddon?.transportUrl || liveAddon?.url
+        const isProtected = isAddonProtected(liveAddon)
+        const isInGroup = groupAddonUrls.has(liveUrl)
+        
+        // If it's not protected and not in group, it's an extra
+        if (!isProtected && !isInGroup) {
+          console.log('Found extra addon:', liveAddon?.manifest?.name, liveUrl)
+          return true
+        }
+        
+        // If it's protected and not in group, it's a personal addon (ignore)
+        if (isProtected && !isInGroup) {
+          console.log('Found personal protected addon (ignoring):', liveAddon?.manifest?.name, liveUrl)
+          return false
+        }
+        
+        return false
+      })
 
-      // Compare actual order with expected order
-      const normalizeUrl = (url: string) => (url || '').toString().trim().toLowerCase()
-      const actualUrls = allStremioAddons.map((a: any) => normalizeUrl(a?.manifestUrl || a?.transportUrl || a?.url)).filter(Boolean)
-      const expectedUrls = expectedOrder.map((a: any) => normalizeUrl(a?.manifestUrl || a?.transportUrl || a?.url)).filter(Boolean)
-
-      console.log('Actual URLs (ordered):', actualUrls)
-      console.log('Expected URLs (ordered):', expectedUrls)
-
-      // Check if arrays are identical (including order)
-      const isIdentical = actualUrls.length === expectedUrls.length && 
-        actualUrls.every((url: string, index: number) => url === expectedUrls[index])
-
-      console.log('Is identical (including order):', isIdentical)
-      console.log('Setting status to:', isIdentical ? 'synced' : 'unsynced')
-      setStatus(isIdentical ? 'synced' : 'unsynced')
+      console.log('Has extras:', hasExtras)
+      console.log('Setting status to:', hasExtras ? 'unsynced' : 'synced')
+      setStatus(hasExtras ? 'unsynced' : 'synced')
     }
 
     checkSync()
-  }, [userDetail, live, isDark, isSyncing, userExcludedSet.size, userProtectedSet.size, manuallySet])
+  }, [userDetail, live, isDark, isSyncing, userExcludedSet, userProtectedSet, manuallySet])
 
   const handleSync = () => {
     // Trigger sync for this user
@@ -266,6 +329,18 @@ function UserSyncBadge({ userId, userExcludedSet, userProtectedSet, isSyncing, l
     }
   }
 
+  // Only render if this is the current user (avoid showing stale data)
+  if (currentUserIdRef.current !== userId) {
+    return (
+      <SyncBadge
+        status="checking"
+        isClickable={false}
+        title="Checking sync status..."
+        isListMode={isListMode}
+      />
+    )
+  }
+
   return (
     <SyncBadge
       status={status}
@@ -284,10 +359,19 @@ export default function UsersPage() {
   // View mode state (card or list)
   const [viewMode, setViewMode] = useState<'card' | 'list'>(() => {
     if (typeof window !== 'undefined') {
-      return (localStorage.getItem('global-view-mode') as 'card' | 'list') || 'card'
+      const raw = String(localStorage.getItem('global-view-mode') || 'card').toLowerCase().trim()
+      return raw === 'list' ? 'list' : 'card'
     }
     return 'card'
   })
+  // Ensure highlight persists after refresh/hydration
+  useLayoutEffect(() => {
+    try {
+      const raw = String(localStorage.getItem('global-view-mode') || 'card').toLowerCase().trim()
+      const stored = raw === 'list' ? 'list' : 'card'
+      setViewMode(stored)
+    } catch {}
+  }, [])
   
   // Protected addon lists
   const protectedAddonIds = [
@@ -359,6 +443,8 @@ export default function UsersPage() {
   const [tempDetailGroup, setTempDetailGroup] = useState<string>('')
   const { isDark } = useTheme()
   const queryClient = useQueryClient()
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => { setMounted(true) }, [])
   
   // Delete mode state
   const [deleteMode, setDeleteMode] = useState<'safe' | 'unsafe'>('safe')
@@ -491,19 +577,15 @@ export default function UsersPage() {
   const [isUserSynced, setIsUserSynced] = React.useState(false)
   const [hideSensitive, setHideSensitive] = React.useState<boolean>(false)
 
-  // Per-user excluded group addons (manifestUrl) — declare early for effects below
+  // Per-user excluded group addons (manifestUrl) — now from database
   const [userExcludedSet, setUserExcludedSet] = useState<Set<string>>(new Set())
   useEffect(() => {
-    const uid = selectedUser?.id
-    if (!uid) { setUserExcludedSet(new Set()); return }
-    try {
-      const raw = localStorage.getItem(`sfm_user_excluded_addons:${uid}`)
-      if (raw) setUserExcludedSet(new Set(JSON.parse(raw)))
-      else setUserExcludedSet(new Set())
-    } catch {
+    if (userDetailsData?.excludedAddons) {
+      setUserExcludedSet(new Set(userDetailsData.excludedAddons))
+    } else {
       setUserExcludedSet(new Set())
     }
-  }, [selectedUser?.id])
+  }, [userDetailsData?.excludedAddons])
 
   // Global states for all users (used by UserSyncBadge components)
   const [globalUserExcludedSets, setGlobalUserExcludedSets] = useState<Map<string, Set<string>>>(new Map())
@@ -520,29 +602,12 @@ export default function UsersPage() {
       const uid = user.id
       if (!uid) return
       
-      // Load excluded addons
-      try {
-        const rawExcluded = localStorage.getItem(`sfm_user_excluded_addons:${uid}`)
-        if (rawExcluded) {
-          newExcludedSets.set(uid, new Set(JSON.parse(rawExcluded)))
-        } else {
-          newExcludedSets.set(uid, new Set())
-        }
-      } catch {
-        newExcludedSets.set(uid, new Set())
-      }
+      // Load excluded and protected addons from user data
+      const excludedAddons = user.excludedAddons || []
+      const protectedAddons = user.protectedAddons || []
       
-      // Load protected addons
-      try {
-        const rawProtected = localStorage.getItem(`sfm_user_protected_addons:${uid}`)
-        if (rawProtected) {
-          newProtectedSets.set(uid, new Set(JSON.parse(rawProtected)))
-        } else {
-          newProtectedSets.set(uid, new Set())
-        }
-      } catch {
-        newProtectedSets.set(uid, new Set())
-      }
+      newExcludedSets.set(uid, new Set(excludedAddons))
+      newProtectedSets.set(uid, new Set(protectedAddons))
     })
     
     // Only update state if the data has actually changed
@@ -577,15 +642,33 @@ export default function UsersPage() {
     })
   }, [users])
 
-  const toggleUserExcluded = (manifestUrl?: string) => {
+  const toggleUserExcluded = async (manifestUrl?: string) => {
     const uid = selectedUser?.id
     if (!uid || !manifestUrl) return
+    
     setUserExcludedSet((prev) => {
       const next = new Set(prev)
       const key = manifestUrl
       if (next.has(key)) next.delete(key)
       else next.add(key)
-      try { localStorage.setItem(`sfm_user_excluded_addons:${uid}`, JSON.stringify(Array.from(next))) } catch {}
+      
+      // Update database
+      fetch(`/api/users/${uid}/excluded-addons`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ excludedAddons: Array.from(next) })
+      }).then(() => {
+        // Update global sets for this user
+        setGlobalUserExcludedSets(prev => {
+          const newMap = new Map(prev)
+          newMap.set(uid, next)
+          return newMap
+        })
+        
+        // Invalidate queries to update sync badges
+        queryClient.invalidateQueries({ queryKey: ['user', uid] })
+        queryClient.invalidateQueries({ queryKey: ['user', uid, 'stremio-addons'] })
+      }).catch(error => console.error('Failed to update excluded addons:', error))
       
       // Update global state for all users
       setGlobalUserExcludedSets(prev => {
@@ -694,33 +777,92 @@ export default function UsersPage() {
 
       // Check order: group addons should appear in the same order in Stremio account
       const groupAddonUrls = groupAddons.map((ga: any) => (ga?.manifestUrl || '').toString().trim().toLowerCase()).filter(Boolean)
-      const liveAddonUrls = nonProtectedLive.map((a: any) => (a?.manifestUrl || a?.transportUrl || a?.url || '').toString().trim().toLowerCase()).filter(Boolean)
+      
+      // For order checking, we need to consider ALL live addons (including protected ones)
+      // because protected addons that are in the group should be treated as group addons
+      const allLiveAddonUrls = live.map((a: any) => (a?.manifestUrl || a?.transportUrl || a?.url || '').toString().trim().toLowerCase()).filter(Boolean)
+      
+      console.log('🔍 Sync Status Debug for neur0:')
+      console.log('Group addon URLs:', groupAddonUrls)
+      console.log('Live addon URLs:', allLiveAddonUrls)
+      console.log('User protected set:', Array.from(userProtectedSet))
+      console.log('Live addons details:', live.map((a: any) => ({ 
+        name: a?.manifest?.name, 
+        url: a?.manifestUrl, 
+        protected: isAddonProtected(a),
+        builtInProtected: isAddonProtectedBuiltIn(a),
+        userProtected: userProtectedSet.has(a?.manifestUrl || a?.transportUrl || a?.url || '')
+      })))
       
       // Find the positions of group addons in the live addons list
       const groupAddonPositions: number[] = []
       for (const groupUrl of groupAddonUrls) {
-        const position = liveAddonUrls.findIndex((liveUrl: string) => liveUrl === groupUrl)
-        if (position === -1) { setIsUserSynced(false); return }
+        const position = allLiveAddonUrls.findIndex((liveUrl: string) => liveUrl === groupUrl)
+        console.log(`Looking for group addon "${groupUrl}" in live addons, found at position:`, position)
+        if (position === -1) { 
+          console.log('❌ Group addon not found in live addons')
+          setIsUserSynced(false); return 
+        }
         groupAddonPositions.push(position)
       }
+      
+      console.log('Group addon positions:', groupAddonPositions)
       
       // Check if group addons are in the same order (positions should be ascending)
       for (let i = 1; i < groupAddonPositions.length; i++) {
         if (groupAddonPositions[i] <= groupAddonPositions[i - 1]) {
+          console.log(`❌ Order check failed: position ${i} (${groupAddonPositions[i]}) <= position ${i-1} (${groupAddonPositions[i-1]})`)
           setIsUserSynced(false); return
         }
       }
+      
+      console.log('✅ Order check passed')
 
-      // Extras: only consider non-protected live addons as extraneous
+      // Extras: check for addons that shouldn't be there
       const groupAddonIds = new Set(groupAddons.map((ga: any) => ga?.id || ga?.manifest?.id).filter(Boolean))
       const groupAddonUrlSet = new Set(groupAddonUrls)
+      
+      // Check non-protected addons - they should all be in the group
+      console.log('🔍 Checking non-protected addons:')
+      console.log('Non-protected live addons:', nonProtectedLive.map((a: any) => ({ 
+        name: a?.manifest?.name, 
+        url: a?.manifestUrl 
+      })))
+      
       for (const addon of nonProtectedLive) {
         const addonId = addon?.id || addon?.manifest?.id
         const addonUrl = (addon?.manifestUrl || addon?.transportUrl || addon?.url || '').toString().trim().toLowerCase()
         const isInGroup = (addonId && groupAddonIds.has(addonId)) || (addonUrl && groupAddonUrlSet.has(addonUrl))
-        if (!isInGroup) { setIsUserSynced(false); return }
+        console.log(`  ${addon?.manifest?.name || addon?.name} (${addonUrl}): in group = ${isInGroup}`)
+        if (!isInGroup) { 
+          console.log('❌ Non-protected addon not in group')
+          setIsUserSynced(false); return 
+        }
+      }
+      
+      // Check protected addons - they should either be in the group OR be personal protected addons
+      // If a protected addon is in the group, it should be treated as a group addon
+      // If a protected addon is NOT in the group, it should be ignored (personal addon)
+      const protectedLive = live.filter((addon: any) => isAddonProtected(addon))
+      console.log('🔍 Checking protected addons:')
+      console.log('Protected live addons:', protectedLive.map((a: any) => ({ 
+        name: a?.manifest?.name, 
+        url: a?.manifestUrl,
+        userProtected: userProtectedSet.has(a?.manifestUrl || a?.transportUrl || a?.url || '')
+      })))
+      
+      for (const addon of protectedLive) {
+        const addonId = addon?.id || addon?.manifest?.id
+        const addonUrl = (addon?.manifestUrl || addon?.transportUrl || addon?.url || '').toString().trim().toLowerCase()
+        const isInGroup = (addonId && groupAddonIds.has(addonId)) || (addonUrl && groupAddonUrlSet.has(addonUrl))
+        console.log(`  ${addon?.manifest?.name || addon?.name} (${addonUrl}): in group = ${isInGroup} - ${isInGroup ? 'treated as group addon' : 'personal addon (ignored)'}`)
+        
+        // If protected addon is in group, it should be treated as a group addon (already checked above)
+        // If protected addon is NOT in group, it's a personal addon and should be ignored
+        // So we don't need to do anything here - personal protected addons are allowed
       }
 
+      console.log('✅ All checks passed - setting synced to true')
       setIsUserSynced(true)
     }
 
@@ -731,13 +873,26 @@ export default function UsersPage() {
   const syncUserMutation = useMutation({
     mutationFn: async (userId: string) => {
       const syncMode = localStorage.getItem('sfm_sync_mode') || 'normal'
+      
+      // Get excluded addons for this user from database
+      let excludedManifestUrls: string[] = []
+      try {
+        const userRes = await fetch(`/api/users/${userId}`)
+        if (userRes.ok) {
+          const userData = await userRes.json()
+          excludedManifestUrls = userData.excludedAddons || []
+        }
+      } catch (error) {
+        console.error('Failed to fetch excluded addons from database:', error)
+      }
+      
       const res = await fetch(`/api/users/${userId}/sync`, {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
           'x-sync-mode': syncMode
         },
-        body: JSON.stringify({ excludedManifestUrls: [] })
+        body: JSON.stringify({ excludedManifestUrls })
       })
       if (!res.ok) {
         const text = await res.text()
@@ -1383,19 +1538,36 @@ export default function UsersPage() {
   }
 
 
-  // User-defined protected addons, persisted per user (by manifestUrl)
+  // User-defined protected addons, persisted per user (by manifestUrl) — now from database
   const [userProtectedSet, setUserProtectedSet] = useState<Set<string>>(new Set())
   useEffect(() => {
-    const uid = selectedUser?.id
-    if (!uid) { setUserProtectedSet(new Set()); return }
-    try {
-      const raw = localStorage.getItem(`sfm_user_protected_addons:${uid}`)
-      if (raw) setUserProtectedSet(new Set(JSON.parse(raw)))
-      else setUserProtectedSet(new Set())
-    } catch {
+    if (userDetailsData?.protectedAddons) {
+      setUserProtectedSet(new Set(userDetailsData.protectedAddons))
+    } else {
       setUserProtectedSet(new Set())
     }
-  }, [selectedUser?.id])
+  }, [userDetailsData?.protectedAddons])
+
+  // Update global sets when userDetailsData changes
+  useEffect(() => {
+    if (userDetailsData?.id) {
+      const uid = userDetailsData.id
+      
+      // Update excluded addons
+      setGlobalUserExcludedSets(prev => {
+        const newMap = new Map(prev)
+        newMap.set(uid, userExcludedSet)
+        return newMap
+      })
+      
+      // Update protected addons
+      setGlobalUserProtectedSets(prev => {
+        const newMap = new Map(prev)
+        newMap.set(uid, userProtectedSet)
+        return newMap
+      })
+    }
+  }, [userDetailsData?.id, userExcludedSet, userProtectedSet])
 
   const toggleUserProtected = (manifestUrl?: string) => {
     if (!manifestUrl) return
@@ -1422,7 +1594,24 @@ export default function UsersPage() {
       const key = manifestUrl
       if (next.has(key)) next.delete(key)
       else next.add(key)
-      try { localStorage.setItem(`sfm_user_protected_addons:${uid}`, JSON.stringify(Array.from(next))) } catch {}
+      
+      // Update database
+      fetch(`/api/users/${uid}/protected-addons`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ protectedAddons: Array.from(next) })
+      }).then(() => {
+        // Update global sets for this user
+        setGlobalUserProtectedSets(prev => {
+          const newMap = new Map(prev)
+          newMap.set(uid, next)
+          return newMap
+        })
+        
+        // Invalidate queries to update sync badges
+        queryClient.invalidateQueries({ queryKey: ['user', uid] })
+        queryClient.invalidateQueries({ queryKey: ['user', uid, 'stremio-addons'] })
+      }).catch(error => console.error('Failed to update protected addons:', error))
       
       // Update global state for all users
       setGlobalUserProtectedSets(prev => {
@@ -1811,7 +2000,7 @@ export default function UsersPage() {
         </div>
         </div>
         {/* Search and View Toggle */}
-        <div className="flex flex-col sm:flex-row gap-4">
+        <div className="flex flex-row items-center gap-4">
           <div className="relative flex-1">
             <Search className={`absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 sm:w-5 sm:h-5 ${isDark ? 'text-gray-400' : 'text-gray-500'}`} />
             <input
@@ -1828,42 +2017,40 @@ export default function UsersPage() {
           </div>
           
           {/* View Mode Toggle */}
-          <div className="flex items-center">
-            <div className={`flex rounded-lg border ${isDark ? 'border-gray-600' : 'border-gray-300'}`}>
-              <button
-                onClick={() => handleViewModeChange('card')}
-                className={`flex items-center gap-2 px-3 py-2 sm:py-3 text-sm rounded-l-lg transition-colors h-10 sm:h-12 ${
-                  viewMode === 'card'
-                    ? isDark
+          {mounted && (
+            <div className="flex items-center">
+              <div className={`flex rounded-lg border ${isDark ? 'border-gray-600' : 'border-gray-300'}`}>
+                <button
+                  onClick={() => handleViewModeChange('card')}
+                  className={`flex items-center gap-2 px-3 py-2 sm:py-3 text-sm rounded-l-lg transition-colors h-10 sm:h-12 ${
+                    viewMode === 'card'
                       ? 'bg-stremio-purple text-white'
-                      : 'bg-stremio-purple text-white'
-                    : isDark
-                      ? 'text-gray-300 hover:bg-gray-700'
-                      : 'text-gray-700 hover:bg-gray-100'
-                }`}
-                title="Card view"
-              >
-                <Grid3X3 className="w-4 h-4" />
-                <span className="hidden sm:inline">Cards</span>
-              </button>
-              <button
-                onClick={() => handleViewModeChange('list')}
-                className={`flex items-center gap-2 px-3 py-2 sm:py-3 text-sm rounded-r-lg transition-colors h-10 sm:h-12 ${
-                  viewMode === 'list'
-                    ? isDark
+                      : isDark
+                        ? 'text-gray-300 hover:bg-gray-700'
+                        : 'text-gray-700 hover:bg-gray-100'
+                  }`}
+                  title="Card view"
+                >
+                  <Grid3X3 className="w-4 h-4" />
+                  <span className="hidden sm:inline">Cards</span>
+                </button>
+                <button
+                  onClick={() => handleViewModeChange('list')}
+                  className={`flex items-center gap-2 px-3 py-2 sm:py-3 text-sm rounded-r-lg transition-colors h-10 sm:h-12 ${
+                    viewMode === 'list'
                       ? 'bg-stremio-purple text-white'
-                      : 'bg-stremio-purple text-white'
-                    : isDark
-                      ? 'text-gray-300 hover:bg-gray-700'
-                      : 'text-gray-700 hover:bg-gray-100'
-                }`}
-                title="List view"
-              >
-                <List className="w-4 h-4" />
-                <span className="hidden sm:inline">List</span>
-              </button>
+                      : isDark
+                        ? 'text-gray-300 hover:bg-gray-700'
+                        : 'text-gray-700 hover:bg-gray-100'
+                  }`}
+                  title="List view"
+                >
+                  <List className="w-4 h-4" />
+                  <span className="hidden sm:inline">List</span>
+                </button>
+              </div>
             </div>
-          </div>
+          )}
         </div>
       </div>
 
@@ -2042,12 +2229,16 @@ export default function UsersPage() {
             /* List View */
             <div className="space-y-3">
               {displayUsers.map((user: any) => (
-                <div key={user.id} className={`rounded-lg border p-4 hover:shadow-md transition-shadow ${
+                <div
+                  key={user.id}
+                  className={`rounded-lg border p-4 hover:shadow-md transition-shadow cursor-pointer ${
                   isDark 
                     ? 'bg-gray-800 border-gray-700' 
                     : 'bg-white border-gray-200'
-                } ${!user.isActive ? 'opacity-50' : ''}`}>
-                  <div className="flex items-center justify-between">
+                } ${!user.isActive ? 'opacity-50' : ''}`}
+                  onClick={() => handleViewUserDetails(user)}
+                >
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                     <div className="flex items-center flex-1 min-w-0">
                       <div className={`w-10 h-10 rounded-full flex items-center justify-center mr-3 flex-shrink-0 ${
                         isDark ? 'bg-stremio-purple text-white' : 'bg-stremio-purple text-white'
@@ -2073,9 +2264,9 @@ export default function UsersPage() {
                       </div>
                     </div>
                     
-                    <div className="flex items-center gap-4 ml-4">
+                    <div className="flex items-center gap-2 sm:gap-4 sm:ml-4 flex-wrap">
                       {/* Stats */}
-                      <div className="flex items-center gap-4 text-sm">
+                      <div className="hidden sm:flex items-center gap-4 text-sm">
                         <div className="flex items-center gap-1">
                           <Puzzle className="w-4 h-4 text-gray-400" />
                           <span className={`font-medium ${isDark ? 'text-white' : 'text-gray-900'}`}>{user.stremioAddonsCount || 0}</span>
@@ -2089,7 +2280,7 @@ export default function UsersPage() {
                       
                       {/* Enable/Disable toggle */}
                       <button
-                        onClick={() => handleToggleUserStatus(user.id, user.isActive)}
+                        onClick={(e) => { e.stopPropagation(); handleToggleUserStatus(user.id, user.isActive) }}
                         className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
                           user.isActive ? 'bg-stremio-purple' : (isDark ? 'bg-gray-700' : 'bg-gray-300')
                         }`}
@@ -2106,18 +2297,7 @@ export default function UsersPage() {
                       {/* Action buttons */}
                       <div className="flex items-center gap-1">
                         <button
-                          onClick={() => handleViewUserDetails(user)}
-                          className={`flex items-center justify-center px-2 py-1 text-sm rounded transition-colors ${
-                            isDark 
-                              ? 'text-gray-300 hover:bg-gray-700' 
-                              : 'text-gray-700 hover:bg-gray-100'
-                          }`}
-                          title="View details"
-                        >
-                          <Eye className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => syncUserMutation.mutate(user.id)}
+                          onClick={(e) => { e.stopPropagation(); syncUserMutation.mutate(user.id) }}
                           disabled={syncUserMutation.isPending}
                           className="flex items-center justify-center px-2 py-1 text-sm text-green-700 hover:bg-green-100 rounded transition-colors disabled:opacity-50"
                           title="Sync user addons"
@@ -2125,7 +2305,7 @@ export default function UsersPage() {
                           <RefreshCw className={`w-4 h-4 ${syncUserMutation.isPending ? 'animate-spin' : ''}`} />
                         </button>
                         <button 
-                          onClick={() => handleDeleteUser(user.id, user.username)}
+                          onClick={(e) => { e.stopPropagation(); handleDeleteUser(user.id, user.username) }}
                           disabled={deleteUserMutation.isPending}
                           className="flex items-center justify-center px-2 py-1 text-sm text-red-700 hover:bg-red-100 rounded transition-colors disabled:opacity-50"
                           title="Delete user"
