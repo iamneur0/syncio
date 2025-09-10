@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useMemo, useEffect, useRef } from 'react'
+import React, { useState, useMemo, useEffect, useRef, useLayoutEffect } from 'react'
 import { DndContext, DragOverlay, PointerSensor, TouchSensor, useSensor, useSensors, closestCenter } from '@dnd-kit/core'
 import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
@@ -194,10 +194,19 @@ export default function GroupsPage() {
   // View mode state (card or list)
   const [viewMode, setViewMode] = useState<'card' | 'list'>(() => {
     if (typeof window !== 'undefined') {
-      return (localStorage.getItem('global-view-mode') as 'card' | 'list') || 'card'
+      const raw = String(localStorage.getItem('global-view-mode') || 'card').toLowerCase().trim()
+      return raw === 'list' ? 'list' : 'card'
     }
     return 'card'
   })
+  // Ensure highlight persists after refresh/hydration
+  useLayoutEffect(() => {
+    try {
+      const raw = String(localStorage.getItem('global-view-mode') || 'card').toLowerCase().trim()
+      const stored = raw === 'list' ? 'list' : 'card'
+      setViewMode(stored)
+    } catch {}
+  }, [])
   const [showAddModal, setShowAddModal] = useState(false)
   const [showEditModal, setShowEditModal] = useState(false)
   const [showDetailModal, setShowDetailModal] = useState(false)
@@ -208,6 +217,8 @@ export default function GroupsPage() {
   const [newGroupColor, setNewGroupColor] = useState<string>('purple')
   const { isDark } = useTheme()
   const queryClient = useQueryClient()
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => { setMounted(true) }, [])
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [confirmConfig, setConfirmConfig] = useState<{ title: string; description: string; isDanger?: boolean; onConfirm: () => void }>({ title: '', description: '', isDanger: true, onConfirm: () => {} })
   
@@ -1026,7 +1037,7 @@ export default function GroupsPage() {
         </div>
 
         {/* Search and View Toggle */}
-        <div className="flex flex-col sm:flex-row gap-4">
+        <div className="flex flex-row items-center gap-4">
           <div className="relative flex-1">
             <Search className={`absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 sm:w-5 sm:h-5 ${isDark ? 'text-gray-400' : 'text-gray-500'}`} />
             <input
@@ -1043,42 +1054,40 @@ export default function GroupsPage() {
           </div>
           
           {/* View Mode Toggle */}
-          <div className="flex items-center">
-            <div className={`flex rounded-lg border ${isDark ? 'border-gray-600' : 'border-gray-300'}`}>
-              <button
-                onClick={() => handleViewModeChange('card')}
-                className={`flex items-center gap-2 px-3 py-2 sm:py-3 text-sm rounded-l-lg transition-colors h-10 sm:h-12 ${
-                  viewMode === 'card'
-                    ? isDark
+          {mounted && (
+            <div className="flex items-center">
+              <div className={`flex rounded-lg border ${isDark ? 'border-gray-600' : 'border-gray-300'}`}>
+                <button
+                  onClick={() => handleViewModeChange('card')}
+                  className={`flex items-center gap-2 px-3 py-2 sm:py-3 text-sm rounded-l-lg transition-colors h-10 sm:h-12 ${
+                    viewMode === 'card'
                       ? 'bg-stremio-purple text-white'
-                      : 'bg-stremio-purple text-white'
-                    : isDark
-                      ? 'text-gray-300 hover:bg-gray-700'
-                      : 'text-gray-700 hover:bg-gray-100'
-                }`}
-                title="Card view"
-              >
-                <Grid3X3 className="w-4 h-4" />
-                <span className="hidden sm:inline">Cards</span>
-              </button>
-              <button
-                onClick={() => handleViewModeChange('list')}
-                className={`flex items-center gap-2 px-3 py-2 sm:py-3 text-sm rounded-r-lg transition-colors h-10 sm:h-12 ${
-                  viewMode === 'list'
-                    ? isDark
+                      : isDark
+                        ? 'text-gray-300 hover:bg-gray-700'
+                        : 'text-gray-700 hover:bg-gray-100'
+                  }`}
+                  title="Card view"
+                >
+                  <Grid3X3 className="w-4 h-4" />
+                  <span className="hidden sm:inline">Cards</span>
+                </button>
+                <button
+                  onClick={() => handleViewModeChange('list')}
+                  className={`flex items-center gap-2 px-3 py-2 sm:py-3 text-sm rounded-r-lg transition-colors h-10 sm:h-12 ${
+                    viewMode === 'list'
                       ? 'bg-stremio-purple text-white'
-                      : 'bg-stremio-purple text-white'
-                    : isDark
-                      ? 'text-gray-300 hover:bg-gray-700'
-                      : 'text-gray-700 hover:bg-gray-100'
-                }`}
-                title="List view"
-              >
-                <List className="w-4 h-4" />
-                <span className="hidden sm:inline">List</span>
-              </button>
+                      : isDark
+                        ? 'text-gray-300 hover:bg-gray-700'
+                        : 'text-gray-700 hover:bg-gray-100'
+                  }`}
+                  title="List view"
+                >
+                  <List className="w-4 h-4" />
+                  <span className="hidden sm:inline">List</span>
+                </button>
+              </div>
             </div>
-          </div>
+          )}
         </div>
       </div>
 
@@ -1201,12 +1210,16 @@ export default function GroupsPage() {
         /* List View */
         <div className="space-y-3">
           {filteredGroups.map((group) => (
-            <div key={group.id} className={`rounded-lg border p-4 hover:shadow-md transition-shadow ${
+            <div
+              key={group.id}
+              className={`rounded-lg border p-4 hover:shadow-md transition-shadow cursor-pointer ${
               isDark 
                 ? 'bg-gray-800 border-gray-700' 
                 : 'bg-white border-gray-200'
-            } ${!group.isActive ? 'opacity-50' : ''}`}>
-              <div className="flex items-center justify-between">
+            } ${!group.isActive ? 'opacity-50' : ''}`}
+              onClick={() => handleViewGroupDetails(group)}
+            >
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                 <div className="flex items-center flex-1 min-w-0">
                   <div
                     className={`w-10 h-10 rounded-lg flex items-center justify-center mr-3 flex-shrink-0 text-white ${!group?.color ? 'bg-stremio-purple' : (typeof group.color === 'string' && group.color.trim().startsWith('#') ? '' : getGroupColorClass(group.color))}`}
@@ -1234,9 +1247,9 @@ export default function GroupsPage() {
                   </div>
                 </div>
                 
-                <div className="flex items-center gap-4 ml-4">
+                <div className="flex items-center gap-2 sm:gap-4 sm:ml-4 flex-wrap">
                   {/* Stats */}
-                  <div className="flex items-center gap-4 text-sm">
+                  <div className="hidden sm:flex items-center gap-4 text-sm">
                     <div className="flex items-center gap-1">
                       <Puzzle className="w-4 h-4 text-gray-400" />
                       <span className={`font-medium ${isDark ? 'text-white' : 'text-gray-900'}`}>{group.addons}</span>
@@ -1251,7 +1264,7 @@ export default function GroupsPage() {
                   
                   {/* Enable/Disable toggle */}
                   <button
-                    onClick={() => handleToggleGroupStatus(group.id, group.isActive)}
+                    onClick={(e) => { e.stopPropagation(); handleToggleGroupStatus(group.id, group.isActive) }}
                     className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
                       group.isActive ? 'bg-stremio-purple' : (isDark ? 'bg-gray-700' : 'bg-gray-300')
                     }`}
@@ -1268,25 +1281,14 @@ export default function GroupsPage() {
                   {/* Action buttons */}
                   <div className="flex items-center gap-1">
                     <button
-                      onClick={() => handleViewGroupDetails(group)}
-                      className={`flex items-center justify-center px-2 py-1 text-sm rounded transition-colors ${
-                        isDark 
-                          ? 'text-gray-300 hover:bg-gray-700' 
-                          : 'text-gray-700 hover:bg-gray-100'
-                      }`}
-                      title="View details"
-                    >
-                      <Eye className="w-4 h-4" />
-                    </button>
-                    <button
-                      onClick={() => handleCloneGroup(group)}
+                      onClick={(e) => { e.stopPropagation(); handleCloneGroup(group) }}
                       className="flex items-center justify-center px-2 py-1 text-sm text-blue-700 hover:bg-blue-100 rounded transition-colors"
                       title="Clone this group"
                     >
                       <Copy className="w-4 h-4" />
                     </button>
                     <button
-                      onClick={() => handleGroupSync(group.id)}
+                      onClick={(e) => { e.stopPropagation(); handleGroupSync(group.id) }}
                       disabled={syncingGroups.has(group.id)}
                       className="flex items-center justify-center px-2 py-1 text-sm text-green-700 hover:bg-green-100 rounded transition-colors disabled:opacity-50"
                       title="Sync all users in this group"
@@ -1294,7 +1296,7 @@ export default function GroupsPage() {
                       <RefreshCw className={`w-4 h-4 ${syncingGroups.has(group.id) ? 'animate-spin' : ''}`} />
                     </button>
                     <button 
-                      onClick={() => {
+                      onClick={(e) => { e.stopPropagation();
                         openConfirm({
                           title: `Delete group ${group.name}`,
                           description: 'This action cannot be undone.',
