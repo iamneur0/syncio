@@ -1,6 +1,6 @@
 {
   "name": "stremio-family-manager",
-  "version": "1.0.0",
+  "version": "0.0.1",
   "description": "A family-friendly Stremio addon and user management system",
   "main": "server/database-backend.js",
   "scripts": {
