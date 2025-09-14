@@ -1093,6 +1093,7 @@ export default function UsersPage() {
       // Also invalidate user details query to refresh detailed view
       if (variables.id) {
         queryClient.invalidateQueries({ queryKey: ['user', variables.id] })
+        queryClient.invalidateQueries({ queryKey: ['user', variables.id, 'sync-status'] })
       }
       // Invalidate groups query to refresh group details
       queryClient.invalidateQueries({ queryKey: ['groups'] })
@@ -1852,6 +1853,8 @@ export default function UsersPage() {
       setTimeout(() => {
         if (selectedUser?.id) {
           queryClient.invalidateQueries({ queryKey: ['user', selectedUser.id, 'stremio-addons'] })
+          queryClient.invalidateQueries({ queryKey: ['user', selectedUser.id, 'sync-status'] })
+          queryClient.invalidateQueries({ queryKey: ['users'] })
         }
       }, 500)
     },

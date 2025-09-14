@@ -383,6 +383,7 @@ app.get('/api/users/:id', async (req, res) => {
       addons: addons,
       groups: userGroups,
       groupName: user.memberships?.[0]?.group?.name || null,
+      groupId: user.memberships?.[0]?.group?.id || null,
       lastActive: user.lastStremioSync || user.updatedAt,
       avatar: null,
       createdAt: user.createdAt,
@@ -451,6 +452,36 @@ app.put('/api/users/:id/protected-addons', async (req, res) => {
   }
 })
 
+// Helper function to filter out Stremio default addons
+function filterDefaultAddons(addons) {
+  const defaultAddonNames = [
+    'Local Files',
+    'YouTube', 
+    'Twitch',
+    'Reddit',
+    'Vimeo',
+    'The Movie Database',
+    'OpenSubtitles',
+    'Local Files (without catalog support)'
+  ]
+  
+  const defaultAddonIds = [
+    'org.stremio.local',
+    'org.stremio.youtube',
+    'org.stremio.twitch', 
+    'org.stremio.reddit',
+    'org.stremio.vimeo',
+    'org.stremio.tmdb',
+    'org.stremio.opensubtitles'
+  ]
+  
+  return addons.filter(addon => {
+    const name = addon.name || addon.manifest?.name || ''
+    const id = addon.id || addon.manifest?.id || ''
+    return !defaultAddonNames.includes(name) && !defaultAddonIds.includes(id)
+  })
+}
+
 // Get user sync status (lightweight check)
 app.get('/api/users/:id/sync-status', async (req, res) => {
   try {
@@ -466,6 +497,7 @@ app.get('/api/users/:id/sync-status', async (req, res) => {
         stremioAuthKey: true, 
         stremioUserId: true,
         isActive: true,
+        excludedAddons: true,
         memberships: {
           include: {
             group: {
@@ -524,30 +556,72 @@ app.get('/api/users/:id/sync-status', async (req, res) => {
         (Array.isArray(user.stremioAddons) ? user.stremioAddons : Object.values(user.stremioAddons)) : []
     }
 
-    // Get expected addons from groups
-    const expectedAddons = user.memberships.flatMap(membership => 
-      membership.group.addons.map(ga => ({
-        id: ga.addon.id,
-        name: ga.addon.name,
-        manifestUrl: ga.addon.manifestUrl,
-        version: ga.addon.version
-      }))
-    )
+    // Check if user has no group memberships - show "Stale" status
+    if (!user.memberships || user.memberships.length === 0) {
+      return res.json({ 
+        isSynced: false,
+        status: 'stale',
+        message: 'User has no group assigned',
+        stremioAddonCount: 0,
+        expectedAddonCount: 0
+      })
+    }
 
-    // Compare live Stremio addons with expected addons
+    // Get expected addons from groups - fetch fresh addon data to get current manifest URLs
+    // We need to maintain the order from the group addons (sorted by addedAt)
+    const groupAddons = user.memberships.flatMap(membership => 
+      membership.group.addons
+        .sort((a, b) => new Date(a.addedAt || 0) - new Date(b.addedAt || 0)) // Sort by addedAt to match sync order
+        .map(ga => ({ 
+          id: ga.addon.id, 
+          name: ga.addon.name, 
+          manifestUrl: ga.addon.manifestUrl, 
+          version: ga.addon.version 
+        }))
+    )
+    
+    const expectedAddons = groupAddons
+
+    // Parse excluded addons from user data
+    let excludedAddons = []
+    try {
+      if (user.excludedAddons) {
+        excludedAddons = JSON.parse(user.excludedAddons)
+      }
+    } catch (e) {
+      console.error('Error parsing excluded addons:', e)
+    }
+    
+
+    // Filter out default addons from Stremio addons for sync comparison only
+    const filteredStremioAddons = filterDefaultAddons(stremioAddons)
+    
+    console.log(`🔍 Filtered out ${stremioAddons.length - filteredStremioAddons.length} default addons, ${filteredStremioAddons.length} custom addons remain`)
+
+    // Filter out excluded addons from expected addons
+    const excludedSet = new Set(excludedAddons.map(url => url.trim()))
+    const filteredExpectedAddons = expectedAddons.filter(addon => 
+      !excludedSet.has(addon.manifestUrl)
+    )
+    
+    console.log(`🔍 Expected addons before filtering:`, expectedAddons.map(a => ({ name: a.name, manifestUrl: a.manifestUrl })))
+    console.log(`🔍 Excluded addons:`, Array.from(excludedSet))
+    console.log(`🔍 Filtered out ${expectedAddons.length - filteredExpectedAddons.length} excluded addons, ${filteredExpectedAddons.length} expected addons remain`)
+
+    // Compare filtered Stremio addons with filtered expected addons
     // Match by transportUrl/manifestUrl since that's the reliable identifier
-    const isSynced = stremioAddons.length === expectedAddons.length && 
-      expectedAddons.every(expected => 
-        stremioAddons.some(stremio => 
-          (stremio.transportUrl || stremio.manifestUrl) === expected.manifestUrl
-        )
-      )
+    // Also check order by comparing the arrays element by element
+    const isSynced = filteredStremioAddons.length === filteredExpectedAddons.length && 
+      filteredExpectedAddons.every((expected, index) => {
+        const stremioAddon = filteredStremioAddons[index]
+        return stremioAddon && (stremioAddon.transportUrl || stremioAddon.manifestUrl) === expected.manifestUrl
+      })
 
     return res.json({ 
       isSynced,
       status: isSynced ? 'synced' : 'unsynced',
-      stremioAddonCount: stremioAddons.length,
-      expectedAddonCount: expectedAddons.length
+      stremioAddonCount: filteredStremioAddons.length,
+      expectedAddonCount: filteredExpectedAddons.length
     })
 
   } catch (error) {
@@ -598,7 +672,7 @@ app.get('/api/users/:id/stremio-addons', async (req, res) => {
       : (typeof rawAddons === 'object' ? Object.values(rawAddons) : [])
 
     // Keep only safe serializable fields (skip manifest fetching for performance)
-    const addons = addonsNormalized.map((a) => {
+    const allAddons = addonsNormalized.map((a) => {
       return {
         id: a?.id || a?.manifest?.id || 'unknown',
         name: a?.name || a?.manifest?.name || 'Unknown',
@@ -618,6 +692,9 @@ app.get('/api/users/:id/stremio-addons', async (req, res) => {
         }
       }
     })
+
+    // Keep all addons for display (don't filter default addons in the main endpoint)
+    const addons = allAddons
 
     return res.json({
       userId: id,
@@ -1797,7 +1874,7 @@ function canonicalizeManifestUrl(raw) {
 
 app.post('/api/addons', async (req, res) => {
   try {
-    const { url, tags, name, description } = req.body;
+    const { url, tags, name, description, groupIds } = req.body;
     
     if (!url) {
       return res.status(400).json({ message: 'Addon URL is required' });
@@ -1848,6 +1925,52 @@ app.post('/api/addons', async (req, res) => {
         },
         select: { id: true, name: true, description: true, manifestUrl: true, version: true, tags: true, isActive: true }
       })
+
+      // Handle group assignments for reactivated addon
+      let assignedGroups = [];
+      if (groupIds && Array.isArray(groupIds) && groupIds.length > 0) {
+        try {
+          console.log(`🔍 Assigning reactivated addon to groups:`, groupIds);
+          
+          // Create group addon relationships
+          for (const groupId of groupIds) {
+            try {
+              // Check if relationship already exists
+              const existingGroupAddon = await prisma.groupAddon.findFirst({
+                where: {
+                  groupId: groupId,
+                  addonId: reactivated.id,
+                },
+              });
+
+              if (!existingGroupAddon) {
+                const groupAddon = await prisma.groupAddon.create({
+                  data: {
+                    groupId: groupId,
+                    addonId: reactivated.id,
+                    isEnabled: true,
+                    settings: null,
+                  },
+                  include: {
+                    group: true,
+                  },
+                });
+                assignedGroups.push(groupAddon.group);
+                console.log(`✅ Added reactivated addon to group: ${groupAddon.group.name}`);
+              } else {
+                console.log(`⚠️ Addon already in group ${groupId}, skipping`);
+              }
+            } catch (groupError) {
+              console.error(`❌ Failed to add reactivated addon to group ${groupId}:`, groupError);
+              // Continue with other groups even if one fails
+            }
+          }
+        } catch (error) {
+          console.error(`❌ Failed to process group assignments for reactivated addon:`, error);
+          // Don't fail the entire addon reactivation if group assignment fails
+        }
+      }
+
       return res.status(200).json({
         id: reactivated.id,
         name: reactivated.name,
@@ -1857,7 +1980,7 @@ app.post('/api/addons', async (req, res) => {
         tags: reactivated.tags || [],
         status: reactivated.isActive ? 'active' : 'inactive',
         users: 0,
-        groups: 0
+        groups: assignedGroups.length
       })
     }
 
@@ -1887,6 +2010,39 @@ app.post('/api/addons', async (req, res) => {
       }
     });
 
+    // Handle group assignments if provided
+    let assignedGroups = [];
+    if (groupIds && Array.isArray(groupIds) && groupIds.length > 0) {
+      try {
+        console.log(`🔍 Assigning addon to groups:`, groupIds);
+        
+        // Create group addon relationships
+        for (const groupId of groupIds) {
+          try {
+            const groupAddon = await prisma.groupAddon.create({
+              data: {
+                groupId: groupId,
+                addonId: addon.id,
+                isEnabled: true,
+                settings: null,
+              },
+              include: {
+                group: true,
+              },
+            });
+            assignedGroups.push(groupAddon.group);
+            console.log(`✅ Added addon to group: ${groupAddon.group.name}`);
+          } catch (groupError) {
+            console.error(`❌ Failed to add addon to group ${groupId}:`, groupError);
+            // Continue with other groups even if one fails
+          }
+        }
+      } catch (error) {
+        console.error(`❌ Failed to process group assignments:`, error);
+        // Don't fail the entire addon creation if group assignment fails
+      }
+    }
+
     res.status(201).json({
       id: addon.id,
       name: addon.name,
@@ -1897,7 +2053,7 @@ app.post('/api/addons', async (req, res) => {
       iconUrl: addon.iconUrl,
       status: 'active',
       users: 0,
-      groups: 0
+      groups: assignedGroups.length
     });
   } catch (error) {
     console.error('Error creating addon:', error);
@@ -3202,9 +3358,7 @@ async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'nor
       url: normalize(a?.transportUrl || a?.manifestUrl || a?.url)
     })))
 
-    // Build desired collection: first add all protected addons, then add all group addons
-    const desiredCollection = []
-    
+    // Build desired collection: preserve protected addons in their original positions, add group addons in correct order
     console.log('🔍 Current addons order:', currentAddons.map(a => ({ 
       name: a?.manifest?.name || a?.name, 
       protected: isProtected(a),
@@ -3218,19 +3372,50 @@ async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'nor
       url: normalize(a?.transportUrl || a?.manifestUrl || a?.url)
     })))
 
-    // First, add all protected addons from current addons
-    for (const currentAddon of currentAddons) {
+    // Build the desired collection by preserving protected addons in their original positions
+    // and inserting group addons in the correct order
+    
+    // First, identify all protected addons and their positions
+    const protectedAddons = []
+    const protectedPositions = new Set()
+    
+    for (let i = 0; i < currentAddons.length; i++) {
+      const currentAddon = currentAddons[i]
       if (isProtected(currentAddon)) {
-        console.log(`🔒 Preserved protected addon: ${currentAddon?.manifest?.name || currentAddon?.name}`)
-        desiredCollection.push(currentAddon)
+        protectedAddons.push({ addon: currentAddon, position: i })
+        protectedPositions.add(i)
+        console.log(`🔒 Found protected addon at position ${i}: ${currentAddon?.manifest?.name || currentAddon?.name}`)
       }
     }
-
-    // Then, add all group addons in their defined order (only non-excluded ones)
-    for (const groupAddon of nonProtectedGroupAddons) {
-      console.log(`➕ Added group addon: ${groupAddon?.manifest?.name || groupAddon?.name}`)
-      desiredCollection.push(groupAddon)
+    
+    // Create a new array with the same length as current addons, filled with nulls
+    const result = new Array(currentAddons.length).fill(null)
+    
+    // Place protected addons in their original positions
+    for (const { addon, position } of protectedAddons) {
+      result[position] = addon
     }
+    
+    // Now place group addons in the correct order, skipping protected positions
+    let groupAddonIndex = 0
+    for (let i = 0; i < result.length && groupAddonIndex < nonProtectedGroupAddons.length; i++) {
+      if (result[i] === null) {
+        // This position is available for a group addon
+        result[i] = nonProtectedGroupAddons[groupAddonIndex]
+        console.log(`✅ Placed group addon at position ${i}: ${nonProtectedGroupAddons[groupAddonIndex]?.manifest?.name || nonProtectedGroupAddons[groupAddonIndex]?.name}`)
+        groupAddonIndex++
+      }
+    }
+    
+    // Add any remaining group addons at the end
+    while (groupAddonIndex < nonProtectedGroupAddons.length) {
+      result.push(nonProtectedGroupAddons[groupAddonIndex])
+      console.log(`➕ Added remaining group addon: ${nonProtectedGroupAddons[groupAddonIndex]?.manifest?.name || nonProtectedGroupAddons[groupAddonIndex]?.name}`)
+      groupAddonIndex++
+    }
+    
+    // Filter out null values to get the final desired collection
+    const desiredCollection = result.filter(addon => addon !== null)
 
     // Remove any current addons that are excluded (not in the desired collection)
     // This ensures excluded addons are removed from the user's account

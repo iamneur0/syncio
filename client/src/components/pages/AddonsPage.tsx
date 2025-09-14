@@ -684,6 +684,7 @@ export default function AddonsPage() {
     createAddonMutation.mutate({
       name: newAddonName,
       url: newAddonUrl,
+      groupIds: selectedGroupIds.length > 0 ? selectedGroupIds : undefined,
     })
   }
 
