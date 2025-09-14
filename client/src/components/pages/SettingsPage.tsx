@@ -4,10 +4,10 @@ import React from 'react'
 import { useTheme } from '@/contexts/ThemeContext'
 import { useMutation } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
-import { Upload, RotateCcw, Sun, Moon } from 'lucide-react'
+import { Upload, RotateCcw, Sun, Moon, Sparkles, User, Users } from 'lucide-react'
 
 export default function SettingsPage() {
-  const { isDark, toggleTheme } = useTheme()
+  const { isDark, isModern, isModernDark, theme, setTheme } = useTheme()
   const [hideSensitive, setHideSensitive] = React.useState<boolean>(false)
   const [syncMode, setSyncMode] = React.useState<'normal' | 'advanced'>('normal')
   const [deleteMode, setDeleteMode] = React.useState<'safe' | 'unsafe'>('safe')
@@ -228,35 +228,112 @@ export default function SettingsPage() {
       <div className={`p-4 rounded-lg border mt-6 ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
         <h2 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>Appearance</h2>
         <p className={`text-sm mt-1 ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
-          Control the visual theme of the application.
+          Choose your preferred visual theme for the application.
         </p>
-        <div className="mt-4 flex items-center justify-between">
+        <div className="mt-4 space-y-3">
           <div className="flex items-center">
-            <div className="flex items-center">
-              {isDark ? (
-                <Moon className="w-5 h-5 mr-3 text-gray-400" />
-              ) : (
-                <Sun className="w-5 h-5 mr-3 text-gray-500" />
-              )}
+            <input
+              type="radio"
+              id="theme-light"
+              name="theme"
+              value="light"
+              checked={theme === 'light'}
+              onChange={() => setTheme('light')}
+              className="mr-3"
+            />
+            <label htmlFor="theme-light" className={`flex items-center ${isDark ? 'text-white' : 'text-gray-900'}`}>
+              <Sun className="w-5 h-5 mr-3 text-yellow-500" />
               <div>
-                <div className={`font-medium ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                  {isDark ? 'Dark Mode' : 'Light Mode'}
-                </div>
-                <div className={`${isDark ? 'text-gray-400' : 'text-gray-500'} text-sm`}>
-                  {isDark ? 'Switch to light theme' : 'Switch to dark theme'}
+                <div className="font-medium">Light Mode</div>
+                <div className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+                  Clean and bright interface
                 </div>
               </div>
-            </div>
+            </label>
           </div>
-          <button
-            onClick={toggleTheme}
-            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${isDark ? 'bg-stremio-purple' : (isDark ? 'bg-gray-700' : 'bg-gray-300')}`}
-            aria-pressed={isDark}
-          >
-            <span
-              className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${isDark ? 'translate-x-5' : 'translate-x-1'}`}
+          <div className="flex items-center">
+            <input
+              type="radio"
+              id="theme-dark"
+              name="theme"
+              value="dark"
+              checked={theme === 'dark'}
+              onChange={() => setTheme('dark')}
+              className="mr-3"
             />
-          </button>
+            <label htmlFor="theme-dark" className={`flex items-center ${isDark ? 'text-white' : 'text-gray-900'}`}>
+              <Moon className="w-5 h-5 mr-3 text-blue-400" />
+              <div>
+                <div className="font-medium">Dark Mode</div>
+                <div className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+                  Easy on the eyes in low light
+                </div>
+              </div>
+            </label>
+          </div>
+          {/* Modern themes disabled - keeping code for future use */}
+          {/* 
+          <div className="flex items-center">
+            <input
+              type="radio"
+              id="theme-modern"
+              name="theme"
+              value="modern"
+              checked={theme === 'modern'}
+              onChange={() => setTheme('modern')}
+              className="mr-3"
+            />
+            <label htmlFor="theme-modern" className={`flex items-center ${isDark ? 'text-white' : 'text-gray-900'}`}>
+              <Sparkles className="w-5 h-5 mr-3 text-purple-500" />
+              <div>
+                <div className="font-medium">Modern Mode</div>
+                <div className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+                  Beautiful gradients and modern styling
+                </div>
+              </div>
+            </label>
+          </div>
+          <div className="flex items-center">
+            <input
+              type="radio"
+              id="theme-modern-dark"
+              name="theme"
+              value="modern-dark"
+              checked={theme === 'modern-dark'}
+              onChange={() => setTheme('modern-dark')}
+              className="mr-3"
+            />
+            <label htmlFor="theme-modern-dark" className={`flex items-center ${isDark ? 'text-white' : 'text-gray-900'}`}>
+              <Sparkles className="w-5 h-5 mr-3 text-purple-400" />
+              <div>
+                <div className="font-medium">Modern Dark Mode</div>
+                <div className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+                  Dark gradients with modern styling
+                </div>
+              </div>
+            </label>
+          </div>
+          */}
+          <div className="flex items-center">
+            <input
+              type="radio"
+              id="theme-mono"
+              name="theme"
+              value="mono"
+              checked={(theme as any) === 'mono'}
+              onChange={() => setTheme('mono' as any)}
+              className="mr-3"
+            />
+            <label htmlFor="theme-mono" className={`flex items-center ${isDark ? 'text-white' : 'text-gray-900'}`}>
+              <div className="w-5 h-5 mr-3 bg-black rounded border border-gray-600"></div>
+              <div>
+                <div className="font-medium">Black</div>
+                <div className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+                  Black
+                </div>
+              </div>
+            </label>
+          </div>
         </div>
       </div>
 

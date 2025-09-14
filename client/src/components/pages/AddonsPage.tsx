@@ -19,6 +19,7 @@ import {
   Star
 } from 'lucide-react'
 import { useTheme } from '@/contexts/ThemeContext'
+import { getColorBgClass } from '@/utils/colorMapping'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { addonsAPI, groupsAPI, type Addon, type CreateAddonData } from '@/services/api'
 import toast from 'react-hot-toast'
@@ -41,7 +42,7 @@ function canonicalizeManifestUrl(raw: string): string {
 }
 
 // Discovery card component
-function DiscoveryCard({ isDark }: { isDark: boolean }) {
+function DiscoveryCard({ isDark, isModern, isModernDark, isMono, viewMode }: { isDark: boolean; isModern: boolean; isModernDark: boolean; isMono: boolean; viewMode: 'card' | 'list' }) {
   const [showDiscovery, setShowDiscovery] = useState(false)
   
   const addonProjects = [
@@ -75,61 +76,171 @@ function DiscoveryCard({ isDark }: { isDark: boolean }) {
 
   return (
     <div 
-      className={`rounded-lg shadow-sm border p-6 hover:shadow-md transition-all duration-200 cursor-pointer flex flex-col ${
-        isDark 
-          ? 'bg-gradient-to-br from-purple-900/20 to-blue-900/20 border-purple-700/50' 
-          : 'bg-gradient-to-br from-purple-50 to-blue-50 border-purple-200'
-      } ${!showDiscovery ? 'h-full' : ''}`}
+      className={`rounded-lg border cursor-pointer ${
+        viewMode === 'list' 
+          ? `p-4 ${
+              isMono
+                ? 'bg-black border-white/20 shadow-none'
+                : isModern
+                ? 'bg-gradient-to-r from-purple-50/90 to-blue-50/90 border-purple-200/50 shadow-md shadow-purple-100/20'
+                : isModernDark
+                ? 'bg-gradient-to-r from-purple-800/40 to-blue-800/40 border-purple-600/50 shadow-md shadow-purple-900/20'
+                : isDark 
+                ? 'bg-gradient-to-br from-purple-900/20 to-blue-900/20 border-purple-700/50 hover:shadow-md' 
+                : 'bg-gradient-to-br from-purple-50 to-blue-50 border-purple-200 hover:shadow-md'
+            }`
+          : `p-6 flex flex-col ${
+              isMono
+                ? 'bg-black border-white/20 shadow-none'
+                : isModern
+                ? 'bg-gradient-to-br from-purple-100/90 to-blue-100/90 border-purple-300/60 shadow-lg shadow-purple-100/50 hover:shadow-md'
+                : isModernDark
+                ? 'bg-gradient-to-br from-purple-800/50 to-blue-800/50 border-purple-600/60 shadow-lg shadow-purple-900/50 hover:shadow-md'
+                : isDark 
+                ? 'bg-gradient-to-br from-purple-900/20 to-blue-900/20 border-purple-700/50 hover:shadow-md' 
+                : 'bg-gradient-to-br from-purple-50 to-blue-50 border-purple-200 hover:shadow-md'
+            } ${!showDiscovery ? 'h-full' : ''}`
+      }`}
       onClick={() => setShowDiscovery(!showDiscovery)}
     >
-      <div className="flex items-start justify-between mb-4">
-        <div className="flex items-center">
-          <div className="w-12 h-12 rounded-lg flex items-center justify-center mr-3 bg-gradient-to-br from-purple-500 to-blue-500 text-white">
-            <Star className="w-6 h-6" />
+      {viewMode === 'list' ? (
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div className="flex items-center flex-1 min-w-0">
+            <div className={`w-10 h-10 rounded-lg flex items-center justify-center mr-3 flex-shrink-0 ${isMono ? 'bg-black border border-white/20 text-white' : 'bg-gradient-to-br from-purple-500 to-blue-500 text-white'}`}>
+              <Star className="w-5 h-5" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2 mb-1">
+                <h3 className={`font-semibold truncate ${
+                  isMono
+                    ? 'text-white'
+                    : isModern 
+                    ? 'text-purple-800' 
+                    : isModernDark
+                    ? 'text-purple-100'
+                    : isDark ? 'text-white' : 'text-gray-900'
+                }`}>
+                  Discover Addons
+                </h3>
+              </div>
+              <p className={`text-sm truncate ${
+                isMono
+                  ? 'text-white/70'
+                  : isModern 
+                  ? 'text-purple-600' 
+                  : isModernDark
+                  ? 'text-purple-300'
+                  : isDark ? 'text-gray-400' : 'text-gray-600'
+              }`}>
+                Popular addon projects with multiple providers
+              </p>
+            </div>
           </div>
-          <div>
-            <h3 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>
-              Discover Addons
-            </h3>
-            <p className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
-              Popular addon projects with multiple providers
-            </p>
-          </div>
+          {/* Placeholder for toggle switch area to match other cards */}
+          <div className="w-9 h-5 flex-shrink-0"></div>
         </div>
-        {/* Placeholder for toggle switch area to match other cards */}
-        <div className="w-9 h-5"></div>
-      </div>
+      ) : (
+        <div className="flex items-start justify-between mb-4">
+          <div className="flex items-center">
+            <div className={`w-12 h-12 rounded-lg flex items-center justify-center mr-3 ${isMono ? 'bg-black border border-white/20 text-white' : 'bg-gradient-to-br from-purple-500 to-blue-500 text-white'}`}>
+              <Star className="w-6 h-6" />
+            </div>
+            <div>
+              <h3 className={`text-lg font-semibold ${
+                isMono
+                  ? 'text-white'
+                  : isModern 
+                  ? 'text-purple-800' 
+                  : isModernDark
+                  ? 'text-purple-100'
+                  : isDark ? 'text-white' : 'text-gray-900'
+              }`}>
+                Discover Addons
+              </h3>
+              <p className={`text-sm ${
+                isMono
+                  ? 'text-white/70'
+                  : isModern 
+                  ? 'text-purple-600' 
+                  : isModernDark
+                  ? 'text-purple-300'
+                  : isDark ? 'text-gray-400' : 'text-gray-600'
+              }`}>
+                Popular addon projects with multiple providers
+              </p>
+            </div>
+          </div>
+          {/* Placeholder for toggle switch area to match other cards */}
+          <div className="w-9 h-5"></div>
+        </div>
+      )}
 
 
       {showDiscovery && (
         <div className="space-y-4 mt-4">
           {addonProjects.map((project, index) => (
-            <div
-              key={index}
-              className={`p-4 rounded-lg border ${
-                isDark 
-                  ? 'bg-gray-800/50 border-gray-700' 
-                  : 'bg-white/50 border-gray-200'
-              }`}
-            >
+                       <div
+                         key={index}
+                         className={`p-4 rounded-lg border ${
+                           isMono
+                             ? 'bg-black border-white/20 shadow-none'
+                             : isModern
+                             ? 'bg-purple-50/80 border-purple-200/60 shadow-md shadow-purple-100/30'
+                             : isModernDark
+                             ? 'bg-purple-800/40 border-purple-600/60 shadow-md shadow-purple-900/30'
+                             : isDark 
+                             ? 'bg-gray-800/50 border-gray-700' 
+                             : 'bg-white/50 border-gray-200'
+                         }`}
+                       >
               <div className="flex items-start space-x-3 mb-3">
-                <img 
-                  src={project.icon} 
-                  alt={project.name}
-                  className="w-8 h-8 rounded flex-shrink-0"
-                  onError={(e) => {
-                    e.currentTarget.style.display = 'none'
-                  }}
-                />
+                <div className="w-8 h-8 rounded flex-shrink-0 flex items-center justify-center bg-gradient-to-br from-purple-500 to-blue-500 text-white">
+                  <img 
+                    src={project.icon} 
+                    alt={project.name}
+                    className="w-8 h-8 rounded"
+                    onError={(e) => {
+                      e.currentTarget.style.display = 'none'
+                      e.currentTarget.nextElementSibling.style.display = 'flex'
+                    }}
+                  />
+                  <div className="w-8 h-8 rounded flex items-center justify-center bg-gradient-to-br from-purple-500 to-blue-500 text-white hidden">
+                    <span className="text-xs font-bold">
+                      {project.name.charAt(0).toUpperCase()}
+                    </span>
+                  </div>
+                </div>
                 <div className="flex-1 min-w-0">
-                  <h4 className={`font-medium ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                    {project.name}
-                  </h4>
-                  <p className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-600'} mb-2`}>
-                    {project.description}
-                  </p>
+                             <h4 className={`font-medium ${
+                               isMono
+                                 ? 'text-white'
+                                 : isModern 
+                                 ? 'text-purple-800' 
+                                 : isModernDark
+                                 ? 'text-purple-100'
+                                 : isDark ? 'text-white' : 'text-gray-900'
+                             }`}>
+                               {project.name}
+                             </h4>
+                             <p className={`text-sm ${
+                               isMono
+                                 ? 'text-white/70'
+                                 : isModern 
+                                 ? 'text-purple-600' 
+                                 : isModernDark
+                                 ? 'text-purple-300'
+                                 : isDark ? 'text-gray-400' : 'text-gray-600'
+                             } mb-2`}>
+                               {project.description}
+                             </p>
                   <span className={`inline-block px-2 py-1 rounded-full text-xs font-medium ${
-                    isDark 
+                    isMono
+                      ? 'bg-white/10 text-white border border-white/20'
+                      : isModern
+                      ? 'bg-gradient-to-r from-purple-200 to-blue-200 text-purple-800 shadow-sm'
+                      : isModernDark
+                      ? 'bg-gradient-to-r from-purple-700/50 to-blue-700/50 text-purple-200 shadow-sm'
+                      : isDark 
                       ? 'bg-purple-900/50 text-purple-300' 
                       : 'bg-purple-100 text-purple-700'
                   }`}>
@@ -140,8 +251,10 @@ function DiscoveryCard({ isDark }: { isDark: boolean }) {
                   href={project.projectUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className={`p-1 rounded transition-colors ${
-                    isDark 
+                  className={`p-1 rounded ${
+                    isMono
+                      ? 'hover:bg-white/10 text-white/70 hover:text-white'
+                      : isDark 
                       ? 'hover:bg-gray-600 text-gray-400 hover:text-white' 
                       : 'hover:bg-gray-200 text-gray-500 hover:text-gray-700'
                   }`}
@@ -159,11 +272,17 @@ function DiscoveryCard({ isDark }: { isDark: boolean }) {
                     target="_blank"
                     rel="noopener noreferrer"
                     onClick={(e) => e.stopPropagation()}
-                    className={`p-2 rounded-lg text-sm font-medium transition-colors text-center ${
-                      isDark 
-                        ? 'bg-gray-700 hover:bg-gray-600 text-gray-200' 
-                        : 'bg-gray-100 hover:bg-gray-200 text-gray-700'
-                    }`}
+                               className={`p-2 rounded-lg text-sm font-medium text-center ${
+                                 isMono
+                                   ? 'bg-black border border-white/20 text-white hover:bg-white/10'
+                                   : isModern
+                                   ? 'bg-gradient-to-r from-purple-100 to-blue-100 hover:from-purple-200 hover:to-blue-200 text-purple-800 shadow-sm'
+                                   : isModernDark
+                                   ? 'bg-gradient-to-r from-purple-700/50 to-blue-700/50 hover:from-purple-600/50 hover:to-blue-600/50 text-purple-200 shadow-sm'
+                                   : isDark 
+                                   ? 'bg-gray-700 hover:bg-gray-600 text-gray-200' 
+                                   : 'bg-gray-100 hover:bg-gray-200 text-gray-700'
+                               }`}
                     title={`Visit ${provider.name} addon`}
                   >
                     {provider.name}
@@ -173,12 +292,26 @@ function DiscoveryCard({ isDark }: { isDark: boolean }) {
             </div>
           ))}
           
-          <div className={`mt-4 p-3 rounded-lg border ${
-            isDark 
-              ? 'bg-gray-800/30 border-gray-700' 
-              : 'bg-gray-50 border-gray-200'
-          }`}>
-            <p className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
+                     <div className={`mt-4 p-3 rounded-lg border ${
+                       isMono
+                         ? 'bg-black border-white/20 shadow-none'
+                         : isModern
+                         ? 'bg-purple-50/70 border-purple-200/60 shadow-sm'
+                         : isModernDark
+                         ? 'bg-purple-800/30 border-purple-600/60 shadow-sm'
+                         : isDark 
+                         ? 'bg-gray-800/30 border-gray-700' 
+                         : 'bg-gray-50 border-gray-200'
+                     }`}>
+                       <p className={`text-sm ${
+                         isMono
+                           ? 'text-white/70'
+                           : isModern 
+                           ? 'text-purple-600' 
+                           : isModernDark
+                           ? 'text-purple-300'
+                           : isDark ? 'text-gray-400' : 'text-gray-600'
+                       }`}>
               💡 <strong>Tip:</strong> Click on any provider button to visit their addon page, then copy the manifest URL to install it.
             </p>
           </div>
@@ -226,7 +359,13 @@ export default function AddonsPage() {
     } catch {}
   }, [])
   
-  const { isDark } = useTheme()
+  const { isDark, isModern, isModernDark, isMono } = useTheme()
+
+  // Helper function to get group color class
+  const getGroupColorClass = (colorIndex: number | null | undefined) => {
+    const theme = isMono ? 'mono' : isModern ? 'modern' : isModernDark ? 'modern-dark' : isDark ? 'dark' : 'light'
+    return getColorBgClass(colorIndex, theme)
+  }
   const queryClient = useQueryClient()
   const [mounted, setMounted] = useState(false)
   useEffect(() => { setMounted(true) }, [])
@@ -385,6 +524,7 @@ export default function AddonsPage() {
     mutationFn: (payload: { id: string; data: any }) => addonsAPI.update(payload.id, payload.data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['addons'] })
+      queryClient.invalidateQueries({ queryKey: ['addon', editingAddonId] })
       setShowEditModal(false)
       setEditingAddonId(null)
       setEditingAddon(null)
@@ -476,7 +616,7 @@ export default function AddonsPage() {
       updateData.url = editUrl.trim()
     }
     
-    // Always send groupIds (even if empty) to handle group removal
+    // Always send groupIds to preserve existing associations or handle group changes
     updateData.groupIds = editGroupIds
 
     updateAddonMutation.mutate({
@@ -595,14 +735,34 @@ export default function AddonsPage() {
       <div className="mb-6 sm:mb-8">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4 gap-4">
           <div>
-            <h1 className={`hidden sm:block text-xl sm:text-2xl font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>Addons</h1>
-            <p className={`text-sm sm:text-base ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>Manage Stremio addons for your groups</p>
+            <h1 className={`hidden sm:block text-xl sm:text-2xl font-bold ${
+              isModern 
+                ? 'text-purple-800' 
+                : isModernDark
+                ? 'text-purple-100'
+                : isDark ? 'text-white' : 'text-gray-900'
+            }`}>Addons</h1>
+            <p className={`text-sm sm:text-base ${
+              isModern 
+                ? 'text-purple-600' 
+                : isModernDark
+                ? 'text-purple-300'
+                : isDark ? 'text-gray-400' : 'text-gray-600'
+            }`}>Manage Stremio addons for your groups</p>
           </div>
           <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
             <button
               onClick={() => reloadAllMutation.mutate()}
               disabled={reloadAllMutation.isPending || isReloadingAll || reloadAddonMutation.isPending || addons.length === 0}
-              className="flex items-center justify-center px-3 py-2 sm:px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 text-sm sm:text-base"
+              className={`flex items-center justify-center px-3 py-2 sm:px-4 text-white rounded-lg transition-colors disabled:opacity-50 text-sm sm:text-base ${
+                isModern
+                  ? 'bg-gradient-to-br from-purple-600 via-purple-700 to-blue-800 hover:from-purple-700 hover:via-purple-800 hover:to-blue-900'
+                  : isModernDark
+                  ? 'bg-gradient-to-br from-purple-800 via-purple-900 to-blue-900 hover:from-purple-900 hover:via-purple-950 hover:to-indigo-900'
+                  : isMono
+                  ? 'bg-black hover:bg-gray-800'
+                  : 'bg-blue-600 hover:bg-blue-700'
+              }`}
             >
               <RefreshCw className={`w-4 h-4 sm:w-5 sm:h-5 mr-2 ${isReloadingAll ? 'animate-spin' : ''}`} />
               <span className="hidden sm:inline">{isReloadingAll ? 'Reloading...' : 'Reload All Addons'}</span>
@@ -610,7 +770,15 @@ export default function AddonsPage() {
             </button>
             <button
               onClick={() => setShowAddModal(true)}
-              className="flex items-center justify-center px-3 py-2 sm:px-4 bg-stremio-purple text-white rounded-lg hover:bg-purple-700 transition-colors text-sm sm:text-base"
+              className={`flex items-center justify-center px-3 py-2 sm:px-4 text-white rounded-lg transition-colors text-sm sm:text-base ${
+                isModern
+                  ? 'bg-gradient-to-br from-purple-600 via-purple-700 to-blue-800 hover:from-purple-700 hover:via-purple-800 hover:to-blue-900'
+                  : isModernDark
+                  ? 'bg-gradient-to-br from-purple-800 via-purple-900 to-blue-900 hover:from-purple-900 hover:via-purple-950 hover:to-indigo-900'
+                  : isMono
+                  ? 'bg-black hover:bg-gray-800'
+                  : 'bg-stremio-purple hover:bg-purple-700'
+              }`}
             >
               <Plus className="w-4 h-4 sm:w-5 sm:h-5 mr-2" />
               <span className="hidden sm:inline">Add Addon</span>
@@ -622,14 +790,24 @@ export default function AddonsPage() {
         {/* Search and View Toggle */}
         <div className="flex flex-row items-center gap-4">
           <div className="relative flex-1">
-            <Search className={`absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 sm:w-5 sm:h-5 ${isDark ? 'text-gray-400' : 'text-gray-500'}`} />
+            <Search className={`absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 sm:w-5 sm:h-5 ${
+              isModern 
+                ? 'text-purple-500' 
+                : isModernDark
+                ? 'text-purple-400'
+                : isDark ? 'text-gray-400' : 'text-gray-500'
+            }`} />
             <input
               type="text"
               placeholder="Search addons..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className={`w-full pl-9 sm:pl-10 pr-4 py-2 sm:py-3 border rounded-lg focus:ring-2 focus:ring-stremio-purple focus:border-transparent text-sm sm:text-base ${
-                isDark 
+                isModern
+                  ? 'bg-purple-50/80 border-purple-300/50 text-purple-900 placeholder-purple-500 focus:ring-purple-500'
+                  : isModernDark
+                  ? 'bg-purple-800/30 border-purple-600/50 text-purple-100 placeholder-purple-400 focus:ring-purple-500'
+                  : isDark 
                   ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
                   : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
               }`}
@@ -639,13 +817,35 @@ export default function AddonsPage() {
           {/* View Mode Toggle */}
           {mounted && (
             <div className="flex items-center">
-              <div className={`flex rounded-lg border ${isDark ? 'border-gray-600' : 'border-gray-300'}`}>
+              <div className={`flex rounded-lg ${isMono ? '' : 'border'} ${
+                isMono
+                  ? ''
+                  : isModern 
+                  ? 'border-purple-300/50' 
+                  : isModernDark
+                  ? 'border-purple-600/50'
+                  : isDark ? 'border-gray-600' : 'border-gray-300'
+              }`}>
                 <button
                   onClick={() => handleViewModeChange('card')}
                   className={`flex items-center gap-2 px-3 py-2 sm:py-3 text-sm rounded-l-lg transition-colors h-10 sm:h-12 ${
                     viewMode === 'card'
-                      ? 'bg-stremio-purple text-white'
-                      : isDark
+                      ? isMono
+                        ? '!bg-white/10 text-white'
+                        : isModern
+                        ? 'bg-stremio-purple text-white'
+                        : isModernDark
+                        ? 'bg-stremio-purple text-white'
+                        : isDark
+                        ? 'bg-purple-600 text-white'
+                        : 'bg-stremio-purple text-white'
+                      : isMono
+                        ? 'text-white/70 hover:bg-white/10'
+                        : isModern
+                        ? 'text-purple-700 hover:bg-purple-100/50'
+                        : isModernDark
+                        ? 'text-purple-300 hover:bg-purple-700/50'
+                        : isDark
                         ? 'text-gray-300 hover:bg-gray-700'
                         : 'text-gray-700 hover:bg-gray-100'
                   }`}
@@ -658,8 +858,22 @@ export default function AddonsPage() {
                   onClick={() => handleViewModeChange('list')}
                   className={`flex items-center gap-2 px-3 py-2 sm:py-3 text-sm rounded-r-lg transition-colors h-10 sm:h-12 ${
                     viewMode === 'list'
-                      ? 'bg-stremio-purple text-white'
-                      : isDark
+                      ? isMono
+                        ? '!bg-white/10 text-white'
+                        : isModern
+                        ? 'bg-stremio-purple text-white'
+                        : isModernDark
+                        ? 'bg-stremio-purple text-white'
+                        : isDark
+                        ? 'bg-purple-600 text-white'
+                        : 'bg-stremio-purple text-white'
+                      : isMono
+                        ? 'text-white/70 hover:bg-white/10'
+                        : isModern
+                        ? 'text-purple-700 hover:bg-purple-100/50'
+                        : isModernDark
+                        ? 'text-purple-300 hover:bg-purple-700/50'
+                        : isDark
                         ? 'text-gray-300 hover:bg-gray-700'
                         : 'text-gray-700 hover:bg-gray-100'
                   }`}
@@ -684,15 +898,35 @@ export default function AddonsPage() {
 
       {/* Error State */}
       {error && (
-        <div className={`text-center py-12 ${isDark ? 'bg-gray-800' : 'bg-red-50'} rounded-lg border ${isDark ? 'border-gray-700' : 'border-red-200'}`}>
-          <AlertTriangle className="w-12 h-12 text-red-500 mx-auto mb-4" />
-          <h3 className={`text-lg font-medium mb-2 ${isDark ? 'text-white' : 'text-gray-900'}`}>Unable to load addons</h3>
-          <p className={`${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
+        <div className={`text-center py-12 ${
+          isMono 
+            ? 'bg-black border border-white/20' 
+            : isDark 
+            ? 'bg-gray-800 border-gray-700' 
+            : 'bg-red-50 border-red-200'
+        } rounded-lg border`}>
+          <AlertTriangle className={`w-12 h-12 mx-auto mb-4 ${
+            isMono ? 'text-white' : 'text-red-500'
+          }`} />
+          <h3 className={`text-lg font-medium mb-2 ${
+            isMono ? 'text-white' : isDark ? 'text-white' : 'text-gray-900'
+          }`}>Unable to load addons</h3>
+          <p className={`${
+            isMono ? 'text-white/70' : isDark ? 'text-gray-400' : 'text-gray-600'
+          }`}>
             Make sure the backend server is running on port 4000
           </p>
           <button 
             onClick={() => queryClient.invalidateQueries({ queryKey: ['addons'] })}
-            className="mt-4 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+            className={`mt-4 px-4 py-2 text-white rounded-lg transition-colors ${
+              isMono
+                ? 'bg-black hover:bg-gray-800 border border-white/20'
+                : isModern
+                ? 'bg-gradient-to-br from-purple-600 via-purple-700 to-blue-800 hover:from-purple-700 hover:via-purple-800 hover:to-blue-900'
+                : isModernDark
+                ? 'bg-gradient-to-br from-purple-800 via-purple-900 to-blue-900 hover:from-purple-900 hover:via-purple-950 hover:to-indigo-900'
+                : 'bg-red-600 hover:bg-red-700'
+            }`}
           >
             Try Again
           </button>
@@ -707,7 +941,11 @@ export default function AddonsPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 items-start">
               {displayAddons.map((addon: any) => (
                 <div key={addon.id} className={`rounded-lg shadow-sm border p-6 hover:shadow-md transition-shadow flex flex-col ${
-                  isDark 
+                  isModern
+                    ? 'bg-gradient-to-br from-purple-50/90 to-blue-50/90 border-purple-200/50 shadow-lg shadow-purple-100/30'
+                    : isModernDark
+                    ? 'bg-gradient-to-br from-purple-800/40 to-blue-800/40 border-purple-600/50 shadow-lg shadow-purple-900/30'
+                    : isDark 
                     ? 'bg-gray-800 border-gray-700' 
                     : 'bg-white border-gray-200'
                 } ${addon.status === 'inactive' ? 'opacity-50' : ''}`}>
@@ -735,7 +973,13 @@ export default function AddonsPage() {
                       </div>
                       <div className="min-w-0 flex-1 max-w-[calc(100%-120px)]">
                         <div className="flex items-center gap-2">
-                          <h3 className={`font-semibold truncate ${isDark ? 'text-white' : 'text-gray-900'}`}>{addon.name}</h3>
+                          <h3 className={`font-semibold truncate ${
+                            isModern 
+                              ? 'text-purple-800' 
+                              : isModernDark
+                              ? 'text-purple-100'
+                              : isDark ? 'text-white' : 'text-gray-900'
+                          }`}>{addon.name}</h3>
                           {addon.version && (
                             <span className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium flex-shrink-0 ${
                               isDark ? 'bg-purple-600 text-white' : 'bg-purple-100 text-purple-800'
@@ -779,7 +1023,7 @@ export default function AddonsPage() {
                         }
                       }}
                       className={`ml-3 relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                        addon.status === 'active' ? 'bg-stremio-purple' : (isDark ? 'bg-gray-700' : 'bg-gray-300')
+                        addon.status === 'active' ? (isMono ? 'bg-white/30 border border-white/20' : 'bg-stremio-purple') : (isMono ? 'bg-white/15 border border-white/20' : (isDark ? 'bg-gray-700' : 'bg-gray-300'))
                       }`}
                       aria-pressed={addon.status === 'active'}
                       title={addon.status === 'active' ? 'Click to disable' : 'Click to enable'}
@@ -796,15 +1040,23 @@ export default function AddonsPage() {
                     <div className="flex items-center">
                       <User className="w-4 h-4 text-gray-400 mr-2" />
                       <div>
-                        <p className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>{addon.users}</p>
-                        <p className={`text-xs ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>{addon.users === 1 ? 'User' : 'Users'}</p>
+                        <p className={`text-lg font-semibold ${
+                          isModern ? 'text-purple-100' : isModernDark ? 'text-purple-100' : (isDark ? 'text-white' : 'text-gray-900')
+                        }`}>{addon.users}</p>
+                        <p className={`text-xs ${
+                          isModern ? 'text-purple-300' : isModernDark ? 'text-purple-300' : (isDark ? 'text-gray-400' : 'text-gray-500')
+                        }`}>{addon.users === 1 ? 'User' : 'Users'}</p>
                       </div>
                     </div>
                     <div className="flex items-center">
                       <Users className="w-4 h-4 text-gray-400 mr-2" />
                       <div>
-                        <p className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>{addon.groups}</p>
-                        <p className={`text-xs ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>{addon.groups === 1 ? 'Group' : 'Groups'}</p>
+                        <p className={`text-lg font-semibold ${
+                          isModern ? 'text-purple-100' : isModernDark ? 'text-purple-100' : (isDark ? 'text-white' : 'text-gray-900')
+                        }`}>{addon.groups}</p>
+                        <p className={`text-xs ${
+                          isModern ? 'text-purple-300' : isModernDark ? 'text-purple-300' : (isDark ? 'text-gray-400' : 'text-gray-500')
+                        }`}>{addon.groups === 1 ? 'Group' : 'Groups'}</p>
                       </div>
                     </div>
                   </div>
@@ -812,9 +1064,15 @@ export default function AddonsPage() {
                   <div className="flex items-center gap-2 mt-auto">
                     <button 
                       onClick={() => handleEditAddon(addon)}
-                      className={`flex-1 flex items-center justify-center px-3 py-2 text-sm rounded-lg transition-colors ${
-                        isDark 
-                          ? 'bg-gray-700 text-gray-300 hover:bg-gray-600' 
+                      className={`flex-1 flex items-center justify-center px-3 py-2 h-8 min-h-8 max-h-8 text-sm rounded transition-colors ${
+                        isModern
+                          ? 'bg-gradient-to-r from-purple-100 to-blue-100 text-purple-800 hover:from-purple-200 hover:to-blue-200'
+                          : isModernDark
+                          ? 'bg-gradient-to-r from-purple-800 to-blue-800 text-purple-100 hover:from-purple-700 hover:to-blue-700'
+                          : isMono
+                          ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                          : isDark
+                          ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
                           : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                       }`}
                     >
@@ -824,7 +1082,15 @@ export default function AddonsPage() {
                     <button 
                       onClick={() => reloadAddonMutation.mutate(addon.id)}
                       disabled={reloadAddonMutation.isPending}
-                      className="flex items-center justify-center px-3 py-2 text-sm bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors disabled:opacity-50"
+                      className={`flex items-center justify-center px-3 py-2 h-8 min-h-8 max-h-8 text-sm rounded transition-colors disabled:opacity-50 ${
+                        isModern
+                          ? 'bg-gradient-to-br from-purple-100 to-blue-100 text-purple-800 hover:from-purple-200 hover:to-blue-200'
+                          : isModernDark
+                          ? 'bg-gradient-to-br from-purple-800 to-blue-800 text-purple-100 hover:from-purple-700 hover:to-blue-700'
+                          : isMono
+                          ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                          : 'bg-green-100 text-green-700 hover:bg-green-200'
+                      }`}
                       title="Reload addon manifest"
                     >
                       <RefreshCw className={`w-4 h-4 ${reloadAddonMutation.isPending ? 'animate-spin' : ''}`} />
@@ -839,7 +1105,15 @@ export default function AddonsPage() {
                           window.open(configureUrl, '_blank', 'noreferrer')
                         } catch {}
                       }}
-                      className="flex items-center justify-center px-3 py-2 text-sm bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors disabled:opacity-50"
+                      className={`flex items-center justify-center px-3 py-2 h-8 min-h-8 max-h-8 text-sm rounded transition-colors disabled:opacity-50 ${
+                        isModern
+                          ? 'bg-gradient-to-br from-purple-100 to-blue-100 text-purple-800 hover:from-purple-200 hover:to-blue-200'
+                          : isModernDark
+                          ? 'bg-gradient-to-br from-purple-800 to-blue-800 text-purple-100 hover:from-purple-700 hover:to-blue-700'
+                          : isMono
+                          ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                          : 'bg-blue-100 text-blue-700 hover:bg-blue-200'
+                      }`}
                       title="Open addon settings"
                     >
                       <Settings className="w-4 h-4" />
@@ -848,7 +1122,15 @@ export default function AddonsPage() {
                     <button 
                       onClick={() => handleDeleteAddon(addon.id, addon.name)}
                       disabled={deleteAddonMutation.isPending}
-                      className="flex items-center justify-center px-3 py-2 text-sm bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors disabled:opacity-50"
+                      className={`flex items-center justify-center px-3 py-2 h-8 min-h-8 max-h-8 text-sm rounded transition-colors disabled:opacity-50 ${
+                        isModern
+                          ? 'bg-gradient-to-br from-purple-100 to-blue-100 text-purple-800 hover:from-purple-200 hover:to-blue-200'
+                          : isModernDark
+                          ? 'bg-gradient-to-br from-purple-800 to-blue-800 text-purple-100 hover:from-purple-700 hover:to-blue-700'
+                          : isMono
+                          ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                          : 'bg-red-100 text-red-700 hover:bg-red-200'
+                      }`}
                       title="Delete addon"
                     >
                       <Trash2 className="w-4 h-4" />
@@ -858,7 +1140,7 @@ export default function AddonsPage() {
               ))}
               
               {/* Discovery Card at the end */}
-              <DiscoveryCard isDark={isDark} />
+              <DiscoveryCard isDark={isDark} isModern={isModern} isModernDark={isModernDark} isMono={isMono} viewMode="card" />
             </div>
           ) : (
             /* List View */
@@ -867,7 +1149,13 @@ export default function AddonsPage() {
                 <div
                   key={addon.id}
                   className={`rounded-lg border p-4 hover:shadow-md transition-shadow cursor-pointer ${
-                  isDark 
+                  isModern
+                    ? 'bg-gradient-to-r from-purple-50/90 to-blue-50/90 border-purple-200/50 shadow-md shadow-purple-100/20'
+                    : isModernDark
+                    ? 'bg-gradient-to-r from-purple-800/40 to-blue-800/40 border-purple-600/50 shadow-md shadow-purple-900/20'
+                    : isMono
+                    ? 'bg-black border-white/20 shadow-none'
+                    : isDark 
                     ? 'bg-gray-800 border-gray-700' 
                     : 'bg-white border-gray-200'
                 } ${addon.status === 'inactive' ? 'opacity-50' : ''}`}
@@ -896,7 +1184,13 @@ export default function AddonsPage() {
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 mb-1">
-                          <h3 className={`font-semibold truncate ${isDark ? 'text-white' : 'text-gray-900'}`}>{addon.name}</h3>
+                          <h3 className={`font-semibold truncate ${
+                            isModern 
+                              ? 'text-purple-800' 
+                              : isModernDark
+                              ? 'text-purple-100'
+                              : isDark ? 'text-white' : 'text-gray-900'
+                          }`}>{addon.name}</h3>
                           {addon.version && (
                             <span className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium flex-shrink-0 ${
                               isDark ? 'bg-purple-600 text-white' : 'bg-purple-100 text-purple-800'
@@ -906,7 +1200,13 @@ export default function AddonsPage() {
                           )}
                         </div>
                         {addon.description && (
-                          <p className={`text-sm truncate ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
+                          <p className={`text-sm truncate ${
+                            isModern 
+                              ? 'text-purple-600' 
+                              : isModernDark
+                              ? 'text-purple-300'
+                              : isDark ? 'text-gray-400' : 'text-gray-600'
+                          }`}>
                             {addon.description}
                           </p>
                         )}
@@ -963,7 +1263,15 @@ export default function AddonsPage() {
                         <button 
                           onClick={(e) => { e.stopPropagation(); reloadAddonMutation.mutate(addon.id) }}
                           disabled={reloadAddonMutation.isPending}
-                          className="flex items-center justify-center px-2 py-1 text-sm text-green-700 hover:bg-green-100 rounded transition-colors disabled:opacity-50"
+                          className={`flex items-center justify-center px-2 py-1 h-8 min-h-8 max-h-8 text-sm rounded transition-colors disabled:opacity-50 ${
+                            isMono
+                              ? 'text-white hover:bg-white/10'
+                              : isModern
+                              ? 'text-purple-800 hover:bg-gradient-to-br hover:from-purple-100 hover:to-blue-100'
+                              : isModernDark
+                              ? 'text-purple-300 hover:bg-gradient-to-br hover:from-purple-800 hover:to-blue-800'
+                              : 'text-green-700 hover:bg-green-100'
+                          }`}
                           title="Reload addon manifest"
                         >
                           <RefreshCw className={`w-4 h-4 ${reloadAddonMutation.isPending ? 'animate-spin' : ''}`} />
@@ -977,7 +1285,15 @@ export default function AddonsPage() {
                               window.open(configureUrl, '_blank', 'noreferrer')
                             } catch {}
                           }}
-                          className="flex items-center justify-center px-2 py-1 text-sm text-blue-700 hover:bg-blue-100 rounded transition-colors"
+                          className={`flex items-center justify-center px-2 py-1 h-8 min-h-8 max-h-8 text-sm rounded transition-colors ${
+                            isMono
+                              ? 'text-white hover:bg-white/10'
+                              : isModern
+                              ? 'text-purple-800 hover:bg-gradient-to-br hover:from-purple-100 hover:to-blue-100'
+                              : isModernDark
+                              ? 'text-purple-300 hover:bg-gradient-to-br hover:from-purple-800 hover:to-blue-800'
+                              : 'text-blue-700 hover:bg-blue-100'
+                          }`}
                           title="Open addon settings"
                         >
                           <Settings className="w-4 h-4" />
@@ -985,7 +1301,15 @@ export default function AddonsPage() {
                         <button 
                           onClick={(e) => { e.stopPropagation(); handleDeleteAddon(addon.id, addon.name) }}
                           disabled={deleteAddonMutation.isPending}
-                          className="flex items-center justify-center px-2 py-1 text-sm text-red-700 hover:bg-red-100 rounded transition-colors disabled:opacity-50"
+                          className={`flex items-center justify-center px-2 py-1 h-8 min-h-8 max-h-8 text-sm rounded transition-colors disabled:opacity-50 ${
+                            isMono
+                              ? 'text-white hover:bg-white/10'
+                              : isModern
+                              ? 'text-purple-800 hover:bg-gradient-to-br hover:from-purple-100 hover:to-blue-100'
+                              : isModernDark
+                              ? 'text-purple-300 hover:bg-gradient-to-br hover:from-purple-800 hover:to-blue-800'
+                              : 'text-red-700 hover:bg-red-100'
+                          }`}
                           title="Delete addon"
                         >
                           <Trash2 className="w-4 h-4" />
@@ -997,7 +1321,7 @@ export default function AddonsPage() {
               ))}
               
               {/* Discovery Card at the end */}
-              <DiscoveryCard isDark={isDark} />
+              <DiscoveryCard isDark={isDark} isModern={isModern} isModernDark={isModernDark} isMono={isMono} viewMode="list" />
             </div>
           )}
         </>
@@ -1020,7 +1344,15 @@ export default function AddonsPage() {
             <div className="mt-6">
               <button
                 onClick={() => setShowAddModal(true)}
-                className="flex items-center justify-center px-3 py-2 sm:px-4 bg-stremio-purple text-white rounded-lg hover:bg-purple-700 transition-colors text-sm sm:text-base mx-auto"
+                className={`flex items-center justify-center px-3 py-2 sm:px-4 text-white rounded-lg transition-colors text-sm sm:text-base mx-auto ${
+                  isModern
+                    ? 'bg-gradient-to-br from-purple-600 via-purple-700 to-blue-800 hover:from-purple-700 hover:via-purple-800 hover:to-blue-900'
+                    : isModernDark
+                    ? 'bg-gradient-to-br from-purple-800 via-purple-900 to-blue-900 hover:from-purple-900 hover:via-purple-950 hover:to-indigo-900'
+                    : isMono
+                    ? 'bg-black hover:bg-gray-800'
+                    : 'bg-stremio-purple hover:bg-purple-700'
+                }`}
               >
                 <Plus className="w-4 h-4 sm:w-5 sm:h-5 mr-2" />
                 <span className="hidden sm:inline">Add Your First Addon</span>
@@ -1096,46 +1428,44 @@ export default function AddonsPage() {
                   {urlError ? urlError : 'Enter the full URL to the Stremio addon manifest'}
                 </p>
               </div>
-              {/* Groups carousel */}
+              {/* Groups selection */}
               <div>
-                <label className={`block text-sm font-medium mb-2 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>Assign to groups (optional)</label>
-                <div className="flex overflow-x-auto gap-2 pb-2">
-                  {safeGroups.map((g: any) => {
-                    const active = selectedGroupIds.includes(g.id)
+                <label className={`block text-sm font-medium mb-3 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
+                  Assign to groups (optional)
+                </label>
+                <div className="flex flex-wrap gap-2 max-h-32 overflow-auto">
+                  {safeGroups.map((group: any) => {
+                    const active = selectedGroupIds.includes(group.id)
                     return (
                       <button
-                        key={g.id}
+                        key={group.id}
                         type="button"
                         onClick={() => {
-                          setSelectedGroupIds(prev => active ? prev.filter(id => id !== g.id) : [...prev, g.id])
+                          setSelectedGroupIds(prev => active ? prev.filter(id => id !== group.id) : [...prev, group.id])
                         }}
-                        className={`shrink-0 flex items-center gap-2 px-3 py-2 rounded-lg border text-sm transition-all duration-200 hover:scale-105 hover:shadow-md ${
+                        className={`group flex items-center gap-2 px-4 py-2 rounded-lg border text-sm font-medium transition-all duration-200 ${
                           active 
-                            ? 'bg-stremio-purple text-white border-stremio-purple shadow-md' 
+                            ? `bg-stremio-purple text-white border-stremio-purple ${isMono ? '' : 'shadow-md'}` 
                             : isDark 
-                              ? 'bg-gray-700 text-gray-200 border-gray-600 hover:bg-gray-600 hover:border-gray-500' 
-                              : 'bg-gray-100 text-gray-700 border-gray-300 hover:bg-gray-200 hover:border-gray-400'
+                              ? `bg-gray-700 text-gray-200 border-gray-600 hover:bg-gray-600 hover:border-gray-500 ${isMono ? '' : ''}` 
+                              : `bg-gray-100 text-gray-700 border-gray-300 hover:bg-gray-200 hover:border-gray-400 ${isMono ? '' : ''}`
                         }`}
                       >
-                        <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
-                          isDark ? 'bg-stremio-purple text-white' : 'bg-stremio-purple text-white'
-                        }`}>
-                          <span className="text-white font-semibold text-sm">
-                            {g.name ? g.name.charAt(0).toUpperCase() : 'G'}
+                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-white ${getGroupColorClass(group?.colorIndex)}`}
+                        style={{
+                          backgroundColor: group?.colorIndex === 2 && isMono ? '#1f2937' : undefined
+                        }}>
+                          <span className="text-sm font-semibold">
+                            {group.name ? group.name.charAt(0).toUpperCase() : 'G'}
                           </span>
                         </div>
-                        <span>{g.name}</span>
-                        {active && (
-                          <div className="w-4 h-4 rounded-full bg-white bg-opacity-20 flex items-center justify-center">
-                            <span className="text-xs font-bold">✓</span>
-                          </div>
-                        )}
+                        <span>{group.name}</span>
                       </button>
                     )
                   })}
                 </div>
               </div>
-              <div className="flex gap-3 pt-4">
+              <div className="flex flex-col sm:flex-row sm:justify-end gap-2 sm:gap-3 pt-4">
                 <button
                   type="button"
                   onClick={() => {
@@ -1145,18 +1475,14 @@ export default function AddonsPage() {
                     setSelectedGroupIds([])
                   }}
                   disabled={createAddonMutation.isPending}
-                  className={`flex-1 px-4 py-2 rounded-lg transition-colors disabled:opacity-50 ${
-                    isDark 
-                      ? 'text-gray-300 bg-gray-700 hover:bg-gray-600' 
-                      : 'text-gray-700 bg-gray-100 hover:bg-gray-200'
-                  }`}
+                  className="px-3 py-2 text-sm rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-400 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600 dark:focus:ring-gray-500 disabled:opacity-50"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={createAddonMutation.isPending || !!urlError}
-                  className="flex-1 px-4 py-2 bg-stremio-purple text-white rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50"
+                  className="px-3 py-2 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
                 >
                   {createAddonMutation.isPending ? 'Adding...' : 'Add Addon'}
                 </button>
@@ -1241,21 +1567,18 @@ export default function AddonsPage() {
                         key={group.id}
                         type="button"
                         onClick={() => setEditGroupIds(prev => active ? prev.filter(id => id !== group.id) : [...prev, group.id])}
-                        className={`group flex items-center gap-2 px-4 py-2 rounded-lg border text-sm font-medium transition-all duration-200 hover:scale-105 hover:shadow-md ${
+                        className={`group flex items-center gap-2 px-4 py-2 rounded-lg border text-sm font-medium transition-all duration-200 ${
                           active 
-                            ? 'bg-stremio-purple text-white border-stremio-purple shadow-md' 
+                            ? `bg-stremio-purple text-white border-stremio-purple ${isMono ? '' : 'shadow-md'}` 
                             : isDark 
-                              ? 'bg-gray-700 text-gray-200 border-gray-600 hover:bg-gray-600 hover:border-gray-500' 
-                              : 'bg-gray-100 text-gray-700 border-gray-300 hover:bg-gray-200 hover:border-gray-400'
+                              ? `bg-gray-700 text-gray-200 border-gray-600 hover:bg-gray-600 hover:border-gray-500 ${isMono ? '' : ''}` 
+                              : `bg-gray-100 text-gray-700 border-gray-300 hover:bg-gray-200 hover:border-gray-400 ${isMono ? '' : ''}`
                         }`}
                       >
-                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
-                          active
-                            ? 'bg-stremio-purple text-white'
-                            : isDark
-                              ? 'bg-gray-600 text-gray-200'
-                              : 'bg-gray-200 text-gray-700'
-                        }`}>
+                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-white ${getGroupColorClass(group?.colorIndex)}`}
+                        style={{
+                          backgroundColor: group?.colorIndex === 2 && isMono ? '#1f2937' : undefined
+                        }}>
                           <span className="text-sm font-semibold">
                             {group.name ? group.name.charAt(0).toUpperCase() : 'G'}
                           </span>
@@ -1287,7 +1610,13 @@ export default function AddonsPage() {
                 <button
                   onClick={handleUpdateAddon}
                   disabled={updateAddonMutation.isPending}
-                  className="flex-1 px-4 py-2 bg-stremio-purple text-white rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50"
+                  className={`flex-1 px-4 py-2 text-white rounded-lg transition-colors disabled:opacity-50 ${
+                    isModern
+                      ? 'bg-gradient-to-br from-purple-600 via-purple-700 to-blue-800 hover:from-purple-700 hover:via-purple-800 hover:to-blue-900'
+                      : isModernDark
+                      ? 'bg-gradient-to-br from-purple-800 via-purple-900 to-blue-900 hover:from-purple-900 hover:via-purple-950 hover:to-indigo-900'
+                      : 'bg-stremio-purple hover:bg-purple-700'
+                  }`}
                 >
                   {updateAddonMutation.isPending ? 'Updating...' : 'Update Addon'}
                 </button>

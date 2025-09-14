@@ -35,6 +35,9 @@ model User {
   excludedAddons   String?  // JSON array of excluded addon URLs
   protectedAddons  String?  // JSON array of protected addon URLs
   
+  // User color
+  colorIndex       Int?     // User's selected color index (1-5)
+  
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
@@ -52,6 +55,7 @@ model Group {
   name        String
   description String?
   avatar      String?
+  colorIndex  Int?     // Group's selected color index (1-5)
   isActive    Boolean   @default(true)
   maxMembers  Int       @default(10)
   createdAt   DateTime  @default(now())

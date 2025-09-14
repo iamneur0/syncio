@@ -65,7 +65,7 @@ router.get('/profile', authenticateToken, async (req, res, next) => {
 // Update user profile
 router.put('/profile', authenticateToken, validate(updateUserSchema), async (req, res, next) => {
   try {
-    const { firstName, lastName, username } = req.body;
+    const { firstName, lastName, username, colorIndex } = req.body;
 
     // Check if username is already taken (if provided)
     if (username) {
@@ -87,6 +87,7 @@ router.put('/profile', authenticateToken, validate(updateUserSchema), async (req
         ...(firstName !== undefined && { firstName }),
         ...(lastName !== undefined && { lastName }),
         ...(username && { username }),
+        ...(colorIndex !== undefined && { colorIndex }),
       },
       select: {
         id: true,
@@ -95,6 +96,7 @@ router.put('/profile', authenticateToken, validate(updateUserSchema), async (req
         firstName: true,
         lastName: true,
         avatar: true,
+        colorIndex: true,
         role: true,
         updatedAt: true,
       },

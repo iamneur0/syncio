@@ -31,12 +31,14 @@ const createGroupSchema = Joi.object({
   name: Joi.string().min(1).max(100).required(),
   description: Joi.string().max(500).optional(),
   maxMembers: Joi.number().integer().min(2).max(50).optional(),
+  colorIndex: Joi.number().integer().min(1).max(5).optional(),
 });
 
 const updateGroupSchema = Joi.object({
   name: Joi.string().min(1).max(100).optional(),
   description: Joi.string().max(500).optional().allow(''),
   maxMembers: Joi.number().integer().min(2).max(50).optional(),
+  colorIndex: Joi.number().integer().min(1).max(5).optional(),
 });
 
 const inviteUserSchema = Joi.object({

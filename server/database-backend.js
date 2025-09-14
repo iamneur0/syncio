@@ -263,7 +263,8 @@ app.get('/api/users', async (req, res) => {
         hasStremioConnection: !!user.stremioAuthKey,
         isActive: user.isActive,
         excludedAddons: excludedAddons,
-        protectedAddons: protectedAddons
+        protectedAddons: protectedAddons,
+        colorIndex: user.colorIndex
       }
     }));
 
@@ -279,7 +280,8 @@ app.get('/api/users', async (req, res) => {
 app.get('/api/users/:id', async (req, res) => {
   try {
     const { id } = req.params
-    console.log(`🔍 GET /api/users/${id} called`)
+    const { basic } = req.query
+    console.log(`🔍 GET /api/users/${id} called${basic ? ' (basic mode)' : ''}`)
     
     const user = await prisma.user.findUnique({
       where: { id },
@@ -322,10 +324,10 @@ app.get('/api/users/:id', async (req, res) => {
       ...user.memberships.map(m => ({ id: m.group.id, name: m.group.name, role: 'member' }))
     ]
 
-    // Calculate Stremio addons count and parse addons data
+    // Calculate Stremio addons count and parse addons data (skip in basic mode)
     let stremioAddonsCount = 0
     let stremioAddons = []
-    if (user.stremioAddons) {
+    if (!basic && user.stremioAddons) {
       try {
         const parsedAddons = JSON.parse(user.stremioAddons)
         if (Array.isArray(parsedAddons)) {
@@ -388,7 +390,8 @@ app.get('/api/users/:id', async (req, res) => {
       stremioAddonsCount: stremioAddonsCount,
       stremioAddons: stremioAddons,
       excludedAddons: excludedAddons,
-      protectedAddons: protectedAddons
+      protectedAddons: protectedAddons,
+      colorIndex: user.colorIndex
     }
 
     res.json(transformedUser)
@@ -448,6 +451,111 @@ app.put('/api/users/:id/protected-addons', async (req, res) => {
   }
 })
 
+// Get user sync status (lightweight check)
+app.get('/api/users/:id/sync-status', async (req, res) => {
+  try {
+    const { id } = req.params
+    console.log(`🔍 GET /api/users/${id}/sync-status called`)
+    
+    const user = await prisma.user.findUnique({
+      where: { id },
+      select: { 
+        id: true,
+        stremioEmail: true, 
+        stremioUsername: true, 
+        stremioAuthKey: true, 
+        stremioUserId: true,
+        isActive: true,
+        memberships: {
+          include: {
+            group: {
+              include: {
+                addons: {
+                  include: { addon: true },
+                  orderBy: { addedAt: 'asc' }
+                }
+              }
+            }
+          }
+        }
+      }
+    })
+
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' })
+    }
+
+    if (!user.stremioAuthKey) {
+      return res.json({ 
+        isSynced: false, 
+        status: 'connect',
+        message: 'User not connected to Stremio' 
+      })
+    }
+
+    if (!user.isActive) {
+      return res.json({ 
+        isSynced: false, 
+        status: 'inactive',
+        message: 'User is inactive' 
+      })
+    }
+
+    // Fetch live Stremio addons for accurate sync status
+    let stremioAddons = []
+    try {
+      // Decrypt stored auth key
+      const authKeyPlain = decrypt(user.stremioAuthKey)
+      
+      // Use stateless client with authKey to fetch addon collection directly
+      const apiClient = new StremioAPIClient({ endpoint: 'https://api.strem.io', authKey: authKeyPlain })
+      const collection = await apiClient.request('addonCollectionGet', {})
+      
+      const rawAddons = collection?.addons || collection || {}
+      stremioAddons = Array.isArray(rawAddons)
+        ? rawAddons
+        : (typeof rawAddons === 'object' ? Object.values(rawAddons) : [])
+        
+      console.log(`🔍 Fetched ${stremioAddons.length} live Stremio addons for sync check`)
+    } catch (error) {
+      console.error(`❌ Error fetching live Stremio addons for sync check:`, error.message)
+      // Fallback to cached data if live fetch fails
+      stremioAddons = user.stremioAddons ? 
+        (Array.isArray(user.stremioAddons) ? user.stremioAddons : Object.values(user.stremioAddons)) : []
+    }
+
+    // Get expected addons from groups
+    const expectedAddons = user.memberships.flatMap(membership => 
+      membership.group.addons.map(ga => ({
+        id: ga.addon.id,
+        name: ga.addon.name,
+        manifestUrl: ga.addon.manifestUrl,
+        version: ga.addon.version
+      }))
+    )
+
+    // Compare live Stremio addons with expected addons
+    // Match by transportUrl/manifestUrl since that's the reliable identifier
+    const isSynced = stremioAddons.length === expectedAddons.length && 
+      expectedAddons.every(expected => 
+        stremioAddons.some(stremio => 
+          (stremio.transportUrl || stremio.manifestUrl) === expected.manifestUrl
+        )
+      )
+
+    return res.json({ 
+      isSynced,
+      status: isSynced ? 'synced' : 'unsynced',
+      stremioAddonCount: stremioAddons.length,
+      expectedAddonCount: expectedAddons.length
+    })
+
+  } catch (error) {
+    console.error('Error checking sync status:', error)
+    res.status(500).json({ message: 'Failed to check sync status', error: error?.message })
+  }
+})
+
 // Get live addons from Stremio for a given user
 app.get('/api/users/:id/stremio-addons', async (req, res) => {
   try {
@@ -489,44 +597,27 @@ app.get('/api/users/:id/stremio-addons', async (req, res) => {
       ? rawAddons
       : (typeof rawAddons === 'object' ? Object.values(rawAddons) : [])
 
-    // Keep only safe serializable fields and fetch manifest data if needed
-    const addons = await Promise.all(addonsNormalized.map(async (a) => {
-      let manifestData = null
-      
-      // Always try to fetch manifest if we have a URL and no proper manifest data
-      if ((a?.manifestUrl || a?.transportUrl || a?.url) && (!a?.manifest || !a?.name || a.name === 'Unknown')) {
-        try {
-          const manifestUrl = a?.manifestUrl || a?.transportUrl || a?.url
-          console.log(`🔍 Fetching manifest for: ${manifestUrl}`)
-          const response = await fetch(manifestUrl)
-          if (response.ok) {
-            manifestData = await response.json()
-            console.log(`✅ Fetched manifest:`, manifestData?.name, manifestData?.version)
-          }
-        } catch (e) {
-          console.warn(`⚠️ Failed to fetch manifest:`, e.message)
-        }
-      }
-
+    // Keep only safe serializable fields (skip manifest fetching for performance)
+    const addons = addonsNormalized.map((a) => {
       return {
-        id: a?.id || a?.manifest?.id || manifestData?.id || 'unknown',
-        name: a?.name || a?.manifest?.name || manifestData?.name || 'Unknown',
+        id: a?.id || a?.manifest?.id || 'unknown',
+        name: a?.name || a?.manifest?.name || 'Unknown',
         manifestUrl: a?.manifestUrl || a?.transportUrl || a?.url || null,
-        version: a?.version || a?.manifest?.version || manifestData?.version || null,
-        description: a?.description || a?.manifest?.description || manifestData?.description || '',
+        version: a?.version || a?.manifest?.version || 'unknown',
+        description: a?.description || a?.manifest?.description || '',
         // Include manifest object for frontend compatibility - ensure it's never null
-        manifest: manifestData || a?.manifest || {
-          id: manifestData?.id || a?.manifest?.id || a?.id || 'unknown',
-          name: manifestData?.name || a?.manifest?.name || a?.name || 'Unknown',
-          version: manifestData?.version || a?.manifest?.version || a?.version || null,
-          description: manifestData?.description || a?.manifest?.description || a?.description || '',
+        manifest: a?.manifest || {
+          id: a?.manifest?.id || a?.id || 'unknown',
+          name: a?.manifest?.name || a?.name || 'Unknown',
+          version: a?.manifest?.version || a?.version || 'unknown',
+          description: a?.manifest?.description || a?.description || '',
           // Include other essential manifest fields to prevent null errors
-          types: manifestData?.types || a?.manifest?.types || ['other'],
-          resources: manifestData?.resources || a?.manifest?.resources || [],
-          catalogs: manifestData?.catalogs || a?.manifest?.catalogs || []
+          types: a?.manifest?.types || ['other'],
+          resources: a?.manifest?.resources || [],
+          catalogs: a?.manifest?.catalogs || []
         }
       }
-    }))
+    })
 
     return res.json({
       userId: id,
@@ -911,9 +1002,9 @@ app.delete('/api/users/:id/stremio-addons/:addonId', async (req, res) => {
 app.put('/api/users/:id', async (req, res) => {
   try {
     const { id } = req.params
-    const { username, email, password, groupName } = req.body
+    const { username, email, password, groupId } = req.body
     
-    console.log(`🔍 PUT /api/users/${id} called with:`, { username, email, groupName })
+    console.log(`🔍 PUT /api/users/${id} called with:`, { username, email, groupId })
 
     // Check if user exists
     const existingUser = await prisma.user.findUnique({
@@ -966,70 +1057,52 @@ app.put('/api/users/:id', async (req, res) => {
     })
 
     // Handle group assignment
-    console.log(`🔍 Group assignment - groupName: "${groupName}", type: ${typeof groupName}`)
-    if (groupName !== undefined) {
+    console.log(`🔍 Group assignment - groupId: "${groupId}", type: ${typeof groupId}`)
+    if (groupId !== undefined) {
       // Always remove user from current member groups first
       await prisma.groupMember.deleteMany({
         where: { userId: id }
       })
       console.log(`🔍 Removed user from all groups`)
 
-      // If a group name is provided and not empty, assign to that group
-      if (groupName.trim() !== '') {
-        console.log(`🔍 Assigning user to group: "${groupName}"`)
-        // Find or create the new group
-        let group = await prisma.group.findFirst({
-          where: { name: groupName.trim() }
+      // If a group ID is provided and not empty, assign to that group
+      if (groupId.trim() !== '') {
+        console.log(`🔍 Assigning user to group: "${groupId}"`)
+        // Find the group by ID
+        const group = await prisma.group.findUnique({
+          where: { id: groupId.trim() }
         })
         
         if (!group) {
-          group = await prisma.group.create({
-            data: {
-              name: groupName.trim(),
-              description: `Group for ${groupName.trim()}`
-            }
-          })
+          return res.status(400).json({ error: 'Group not found' })
         }
-
-        // Add user to the new group
+        
+        // Create the group membership
         await prisma.groupMember.create({
           data: {
             userId: id,
-            groupId: group.id
+            groupId: group.id,
+            role: 'MEMBER'
           }
         })
-      } else {
-        console.log(`🔍 Group name is empty, user will have no groups`)
+        console.log(`🔍 User assigned to group: ${group.name}`)
       }
-      // If groupName is empty, user is removed from all groups (no additional action needed)
-    } else {
-      console.log(`🔍 No group assignment - groupName is undefined`)
     }
 
     // Fetch updated user for response
     const userWithGroups = await prisma.user.findUnique({
       where: { id },
-      select: {
-        id: true,
-        displayName: true,
-        email: true,
-        username: true,
-        stremioEmail: true,
-        stremioUsername: true,
-        stremioAddons: true,
-        role: true,
-        isActive: true,
-        lastStremioSync: true,
-        createdAt: true,
-        _count: {
-          select: {
-            memberships: true
+      include: {
+        memberships: {
+          include: {
+            group: true
           }
         }
       }
     })
 
     // Transform for frontend response
+    const userGroup = userWithGroups.memberships?.[0]?.group
     const transformedUser = {
       id: userWithGroups.id,
       username: userWithGroups.username || userWithGroups.stremioUsername,
@@ -1038,7 +1111,9 @@ app.put('/api/users/:id', async (req, res) => {
       status: userWithGroups.isActive ? 'active' : 'inactive',
       addons: userWithGroups.stremioAddons ? 
         (Array.isArray(userWithGroups.stremioAddons) ? userWithGroups.stremioAddons.length : Object.keys(userWithGroups.stremioAddons).length) : 0,
-      groups: userWithGroups._count?.memberships || 0,
+      groups: userWithGroups.memberships?.length || 0,
+      groupName: userGroup?.name || null,
+      groupId: userGroup?.id || null,
       lastActive: userWithGroups.lastStremioSync || userWithGroups.createdAt,
       avatar: null
     }
@@ -2302,9 +2377,11 @@ app.get('/api/groups', async (req, res) => {
       restrictions: 'none', // TODO: Implement restrictions logic
       createdAt: group.createdAt,
       isActive: group.isActive,
-      // Expose color for UI. We reuse `avatar` column to store the color token/hex.
-      color: group.avatar || 'purple'
+      // Expose color index for UI
+      colorIndex: group.colorIndex || 1
     }));
+    
+    
 
     res.json(transformedGroups);
   } catch (error) {
@@ -2555,7 +2632,7 @@ app.get('/api/debug/sync/:userId', async (req, res) => {
 // Create new group
 app.post('/api/groups', async (req, res) => {
   try {
-    const { name, description, color } = req.body;
+    const { name, description, colorIndex } = req.body;
     
     if (!name || !name.trim()) {
       return res.status(400).json({ message: 'Group name is required' });
@@ -2574,8 +2651,7 @@ app.post('/api/groups', async (req, res) => {
       data: {
         name: name.trim(),
         description: description || '',
-        // Store selected color token or hex in `avatar` field
-        avatar: color || 'purple',
+        colorIndex: colorIndex || 1,
       }
     });
 
@@ -2588,7 +2664,7 @@ app.post('/api/groups', async (req, res) => {
       restrictions: 'none',
       createdAt: newGroup.createdAt,
       isActive: newGroup.isActive,
-      color: newGroup.avatar || 'purple',
+      colorIndex: newGroup.colorIndex || 1,
     });
   } catch (error) {
     console.error('Error creating group:', error);
@@ -2728,6 +2804,7 @@ app.get('/api/groups/:id', async (req, res) => {
       name: group.name,
       description: group.description,
       createdAt: group.createdAt,
+      colorIndex: group.colorIndex || 1,
       users: memberUsers,
       addons: group.addons.map((ga) => ({ 
         id: ga.addon.id, 
@@ -2747,7 +2824,7 @@ app.get('/api/groups/:id', async (req, res) => {
 // Update group fields and membership/addons
 app.put('/api/groups/:id', async (req, res) => {
   const { id } = req.params
-  const { name, description, userIds = [], addonIds = [] } = req.body
+  const { name, description, userIds, addonIds } = req.body
   try {
     const group = await prisma.group.findUnique({ 
       where: { id }, 
@@ -2767,27 +2844,29 @@ app.put('/api/groups/:id', async (req, res) => {
     const nextDesc = (typeof description === 'string' && description.trim() === '') ? undefined : description
     await prisma.group.update({ where: { id }, data: { name: nextName ?? group.name, description: nextDesc ?? group.description } })
 
-    // Sync members
-    const currentUserIds = new Set(group.members.map((m) => m.userId))
-    const desiredUserIds = new Set(Array.isArray(userIds) ? userIds : [])
-    const toRemoveMembers = group.members.filter((m) => !desiredUserIds.has(m.userId)).map((m) => m.userId)
-    const toAddMembers = [...desiredUserIds].filter((uid) => !currentUserIds.has(uid))
+    // Sync members only if userIds is explicitly provided
+    if (userIds !== undefined) {
+      const currentUserIds = new Set(group.members.map((m) => m.userId))
+      const desiredUserIds = new Set(Array.isArray(userIds) ? userIds : [])
+      const toRemoveMembers = group.members.filter((m) => !desiredUserIds.has(m.userId)).map((m) => m.userId)
+      const toAddMembers = [...desiredUserIds].filter((uid) => !currentUserIds.has(uid))
 
-    // Enforce one-group-per-user rule:
-    // - remove desired users from any other groups
-    // - then ensure membership in this group
-    await prisma.$transaction([
-      prisma.groupMember.deleteMany({ where: { groupId: id, userId: { in: toRemoveMembers } } }),
-      // Remove all memberships for users we are adding (from other groups)
-      prisma.groupMember.deleteMany({ where: { userId: { in: toAddMembers } } }),
-      ...toAddMembers.map((uid) => prisma.groupMember.upsert({
-        where: { userId_groupId: { userId: uid, groupId: id } },
-        update: { role: 'MEMBER' },
-        create: { groupId: id, userId: uid, role: 'MEMBER' },
-      })),
-    ])
+      // Enforce one-group-per-user rule:
+      // - remove desired users from any other groups
+      // - then ensure membership in this group
+      await prisma.$transaction([
+        prisma.groupMember.deleteMany({ where: { groupId: id, userId: { in: toRemoveMembers } } }),
+        // Remove all memberships for users we are adding (from other groups)
+        prisma.groupMember.deleteMany({ where: { userId: { in: toAddMembers } } }),
+        ...toAddMembers.map((uid) => prisma.groupMember.upsert({
+          where: { userId_groupId: { userId: uid, groupId: id } },
+          update: { role: 'MEMBER' },
+          create: { groupId: id, userId: uid, role: 'MEMBER' },
+        })),
+      ])
+    }
 
-    // Sync addons only if addonIds is provided
+    // Sync addons only if addonIds is explicitly provided
     if (addonIds !== undefined) {
       const currentAddonIds = new Set(group.addons.map((ga) => ga.addonId))
       const desiredAddonIds = new Set(Array.isArray(addonIds) ? addonIds : [])
