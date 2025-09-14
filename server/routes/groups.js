@@ -91,13 +91,15 @@ router.get('/', authenticateToken, async (req, res, next) => {
 // Create new group
 router.post('/', authenticateToken, validate(createGroupSchema), async (req, res, next) => {
   try {
-    const { name, description, maxMembers } = req.body;
+    const { name, description, maxMembers, colorIndex } = req.body;
+    console.log('🔍 Backend received:', { name, colorIndex });
 
     const group = await prisma.group.create({
       data: {
         name,
         description,
         maxMembers,
+        colorIndex,
         ownerId: req.user.id,
       },
       include: {
@@ -126,6 +128,7 @@ router.post('/', authenticateToken, validate(createGroupSchema), async (req, res
       },
     });
 
+    console.log('✅ Group created in DB:', { id: group.id, name: group.name, colorIndex: group.colorIndex });
     res.status(201).json({
       message: 'Group created successfully',
       group,
@@ -192,7 +195,7 @@ router.get('/:groupId', authenticateToken, requireGroupAccess, async (req, res, 
 router.put('/:groupId', authenticateToken, requireGroupAdmin, validate(updateGroupSchema), async (req, res, next) => {
   try {
     const { groupId } = req.params;
-    const { name, description, maxMembers } = req.body;
+    const { name, description, maxMembers, colorIndex } = req.body;
 
     const updatedGroup = await prisma.group.update({
       where: { id: groupId },
@@ -200,6 +203,7 @@ router.put('/:groupId', authenticateToken, requireGroupAdmin, validate(updateGro
         ...(name && { name }),
         ...(description !== undefined && { description }),
         ...(maxMembers && { maxMembers }),
+        ...(colorIndex !== undefined && { colorIndex }),
       },
       include: {
         owner: {

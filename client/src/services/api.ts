@@ -59,7 +59,7 @@ export interface Group {
   members: number
   addons: number
   restrictions: 'none' | 'low' | 'medium' | 'high'
-  color: string
+  colorIndex: number
   created: string
 }
 
@@ -88,7 +88,7 @@ export interface CreateGroupData {
   name: string
   description: string
   restrictions: 'none' | 'low' | 'medium' | 'high'
-  color: string
+  colorIndex: number
 }
 
 export interface CreateAddonData {
@@ -127,6 +127,12 @@ export const usersAPI = {
     if (response.data && typeof response.data === 'object' && response.data.data) {
       return response.data.data
     }
+    return response.data
+  },
+
+  // Get user sync status (lightweight)
+  getSyncStatus: async (id: string): Promise<any> => {
+    const response: AxiosResponse<any> = await api.get(`/users/${id}/sync-status`)
     return response.data
   },
 

@@ -18,45 +18,47 @@ export default function SyncBadge({
   title,
   isListMode = false
 }: SyncBadgeProps) {
-  const { isDark } = useTheme()
+  const { isDark, isMono } = useTheme()
 
   const getStatusConfig = () => {
+    // Treat mono theme like dark for contrast purposes
+    const prefersDark = isDark || isMono
     switch (status) {
       case 'synced':
         return {
           text: 'Synced',
           dotColor: 'bg-green-500',
-          bgColor: isDark ? 'bg-green-900 text-green-300' : 'bg-green-100 text-green-800'
+          bgColor: isMono ? 'bg-black text-white border border-white/20' : (prefersDark ? 'bg-green-900 text-green-300' : 'bg-green-100 text-green-800')
         }
       case 'unsynced':
         return {
           text: 'Unsynced',
           dotColor: 'bg-red-500',
-          bgColor: isDark ? 'bg-red-900 text-red-300' : 'bg-red-100 text-red-800'
+          bgColor: isMono ? 'bg-black text-white border border-white/20' : (prefersDark ? 'bg-red-900 text-red-300' : 'bg-red-100 text-red-800')
         }
       case 'stale':
         return {
           text: 'Stale',
           dotColor: 'bg-gray-400',
-          bgColor: isDark ? 'bg-gray-700 text-gray-100' : 'bg-gray-600 text-gray-100'
+          bgColor: isMono ? 'bg-black text-white' : (prefersDark ? 'bg-gray-700 text-gray-100' : 'bg-gray-600 text-gray-100')
         }
       case 'connect':
         return {
           text: 'Connect Stremio',
           dotColor: 'bg-stremio-purple',
-          bgColor: isDark ? 'bg-stremio-purple text-white' : 'bg-stremio-purple text-white'
+          bgColor: 'bg-stremio-purple text-white'
         }
       case 'syncing':
         return {
           text: 'Syncing',
           dotColor: 'bg-red-500',
-          bgColor: isDark ? 'bg-red-800 text-red-200' : 'bg-red-100 text-red-800'
+          bgColor: isMono ? 'bg-black text-white border border-white/20' : (prefersDark ? 'bg-red-800 text-red-200' : 'bg-red-100 text-red-800')
         }
       case 'checking':
         return {
           text: 'Checking',
           dotColor: 'bg-gray-400',
-          bgColor: isDark ? 'bg-gray-700 text-gray-300' : 'bg-gray-200 text-gray-600'
+          bgColor: isMono ? 'bg-black text-white border border-white/20' : (prefersDark ? 'bg-gray-700 text-gray-300' : 'bg-gray-200 text-gray-600')
         }
       default:
         return {
@@ -82,6 +84,14 @@ export default function SyncBadge({
     )
 
     if (isClickable && onClick) {
+      if (isMono) {
+        // Avoid generic .mono button styles adding unwanted borders by not using <button>
+        return (
+          <div onClick={onClick} className="cursor-pointer select-none">
+            {content}
+          </div>
+        )
+      }
       return (
         <button onClick={onClick} className="focus:outline-none">
           {content}
@@ -116,6 +126,14 @@ export default function SyncBadge({
   )
 
   if (isClickable && onClick) {
+    if (isMono) {
+      // Avoid generic .mono button styles adding unwanted borders by not using <button>
+      return (
+        <div onClick={onClick} className="cursor-pointer select-none">
+          {content}
+        </div>
+      )
+    }
     return (
       <button onClick={onClick} className="focus:outline-none">
         {content}

@@ -26,6 +26,7 @@ import {
   List
 } from 'lucide-react'
 import { useTheme } from '@/contexts/ThemeContext'
+import { getColorBgClass, getColorTextClass, getColorOptions } from '@/utils/colorMapping'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { usersAPI, groupsAPI, type User } from '@/services/api'
 import toast from 'react-hot-toast'
@@ -37,15 +38,27 @@ import { fetchManifestCached } from '../../utils/manifestCache'
 
 // Small badge that shows per-user sync status in list view
 function UserSyncBadge({ userId, userExcludedSet, userProtectedSet, isSyncing, location = 'unknown', isListMode = false }: { userId: string, userExcludedSet: Set<string>, userProtectedSet: Set<string>, isSyncing?: boolean, location?: string, isListMode?: boolean }) {
-  const { isDark } = useTheme()
-  const { data: userDetail } = useQuery({
-    queryKey: ['user', userId],
-    queryFn: async () => usersAPI.getById(userId),
+  const { isDark, isModern, isModernDark, isMono } = useTheme()
+  const { data: syncStatus } = useQuery({
+    queryKey: ['user', userId, 'sync-status'],
+    queryFn: async () => usersAPI.getSyncStatus(userId),
     staleTime: 30_000,
     refetchOnMount: 'always',
   })
 
   // userExcludedSet and userProtectedSet are now passed as props from parent component
+  const [status, setStatus] = React.useState<'synced' | 'unsynced' | 'stale' | 'connect' | 'syncing' | 'checking'>('checking')
+  const [manuallySet, setManuallySet] = React.useState(false)
+  const currentUserIdRef = React.useRef<string | null>(null)
+
+  // Use sync status from API
+  React.useEffect(() => {
+    if (!syncStatus) return
+
+    if (!manuallySet) {
+      setStatus(syncStatus.status || 'checking')
+    }
+  }, [syncStatus, manuallySet])
 
   // Protected addon IDs and URLs - same as main component
   const protectedAddonIds = ['org.stremio.local', 'com.stremio.opensubtitles']
@@ -83,10 +96,10 @@ function UserSyncBadge({ userId, userExcludedSet, userProtectedSet, isSyncing, l
   }
 
   const handleConnectStremio = () => {
-    if (userDetail) {
+    if (syncStatus) {
       // This will be handled by the parent component
       // We'll use a custom event to communicate with the parent
-      window.dispatchEvent(new CustomEvent('connectStremio', { detail: userDetail }))
+      window.dispatchEvent(new CustomEvent('connectStremio', { detail: { id: userId } }))
     }
   }
   const { data: live } = useQuery({
@@ -99,7 +112,7 @@ function UserSyncBadge({ userId, userExcludedSet, userProtectedSet, isSyncing, l
     staleTime: 60_000, // 1 minute
     refetchOnMount: 'always',
     refetchInterval: 120_000, // 2 minutes
-    enabled: !!userDetail?.hasStremioConnection, // Only fetch if user is connected to Stremio
+    enabled: !!syncStatus && syncStatus.status !== 'connect', // Only fetch if user is connected to Stremio
   })
 
   // Listen for Users tab activation and force a re-check
@@ -151,9 +164,7 @@ function UserSyncBadge({ userId, userExcludedSet, userProtectedSet, isSyncing, l
 
 
 
-  const [status, setStatus] = React.useState<'synced' | 'unsynced' | 'stale' | 'connect' | 'syncing' | 'checking'>('checking')
-  const [manuallySet, setManuallySet] = React.useState(false)
-  const currentUserIdRef = React.useRef(userId)
+  // Remove duplicate - already defined above
 
   // Reset status when userId changes to avoid showing stale data
   React.useLayoutEffect(() => {
@@ -198,112 +209,19 @@ function UserSyncBadge({ userId, userExcludedSet, userProtectedSet, isSyncing, l
         return
       }
 
-
       // If data is still loading, show checking state
-      if (!userDetail || !live) {
+      if (!syncStatus) {
         console.log('Setting status to checking (data loading)')
         setStatus('checking')
         return
       }
 
-      // If user doesn't have Stremio credentials, show connect button
-      if (!userDetail?.hasStremioConnection) {
-        setStatus('connect')
-        return
-      }
-
-      // Get group addons (excluding user-excluded ones)
-      const allGroupAddons = Array.isArray(userDetail?.addons) ? userDetail!.addons : []
-      const groupAddons = allGroupAddons.filter((ga: any) => !userExcludedSet.has(ga?.manifestUrl) && ga?.isEnabled !== false)
-      
-      // Get all Stremio addons
-      const liveList = Array.isArray(live?.addons) ? live!.addons : []
-      const allStremioAddons = liveList
-
-      console.log('🔍 Sync Status Debug for', userDetail?.username || userId, ':')
-      console.log('Group addon URLs:', groupAddons.map((a: any) => a?.manifestUrl))
-      console.log('Live addon URLs:', allStremioAddons.map((a: any) => a?.manifestUrl || a?.transportUrl || a?.url))
-      console.log('User protected set:', Array.from(userProtectedSet))
-      console.log('Live addons details:', allStremioAddons.map((a: any) => ({ 
-        name: a?.manifest?.name, 
-        url: a?.manifestUrl || a?.transportUrl || a?.url, 
-        protected: isAddonProtected(a),
-        builtInProtected: isAddonProtectedBuiltIn(a),
-        userProtected: userProtectedSet.has(a?.manifestUrl || a?.transportUrl || a?.url || '')
-      })))
-
-      // Build sets for easier comparison
-      const groupAddonUrls = new Set(groupAddons.map((a: any) => a?.manifestUrl))
-      const allLiveAddonUrls = allStremioAddons.map((a: any) => a?.manifestUrl || a?.transportUrl || a?.url)
-      
-      // Check if all non-excluded group addons exist in Stremio account
-      const allGroupAddonsExist = groupAddons.every((groupAddon: any) => {
-        const groupUrl = groupAddon?.manifestUrl
-        return allLiveAddonUrls.some((liveUrl: string) => {
-          if (!liveUrl || !groupUrl) return false
-          return liveUrl === groupUrl
-        })
-      })
-
-      console.log('All group addons exist in Stremio account:', allGroupAddonsExist)
-
-      if (!allGroupAddonsExist) {
-        console.log('Setting status to unsynced - missing group addons')
-        setStatus('unsynced')
-        return
-      }
-
-      // Check order: find group addon URLs within all live addon URLs
-      const groupAddonPositions: number[] = []
-      for (const groupUrl of groupAddonUrls) {
-        const position = allLiveAddonUrls.findIndex(url => url === groupUrl)
-        if (position !== -1) {
-          groupAddonPositions.push(position)
-        }
-      }
-      
-      // Check if group addons are in correct order
-      const isOrderCorrect = groupAddonPositions.length === groupAddons.length && 
-        groupAddonPositions.every((pos, index) => index === 0 || pos > groupAddonPositions[index - 1])
-
-      console.log('Group addon positions:', groupAddonPositions)
-      console.log('Is order correct:', isOrderCorrect)
-
-      if (!isOrderCorrect) {
-        console.log('Setting status to unsynced - wrong order')
-        setStatus('unsynced')
-        return
-      }
-
-      // Check for extras: non-protected live addons must all be in group
-      // Protected live addons that are not in group are ignored (personal addons)
-      const hasExtras = allStremioAddons.some((liveAddon: any) => {
-        const liveUrl = liveAddon?.manifestUrl || liveAddon?.transportUrl || liveAddon?.url
-        const isProtected = isAddonProtected(liveAddon)
-        const isInGroup = groupAddonUrls.has(liveUrl)
-        
-        // If it's not protected and not in group, it's an extra
-        if (!isProtected && !isInGroup) {
-          console.log('Found extra addon:', liveAddon?.manifest?.name, liveUrl)
-          return true
-        }
-        
-        // If it's protected and not in group, it's a personal addon (ignore)
-        if (isProtected && !isInGroup) {
-          console.log('Found personal protected addon (ignoring):', liveAddon?.manifest?.name, liveUrl)
-          return false
-        }
-        
-        return false
-      })
-
-      console.log('Has extras:', hasExtras)
-      console.log('Setting status to:', hasExtras ? 'unsynced' : 'synced')
-      setStatus(hasExtras ? 'unsynced' : 'synced')
+      // Use the status from the API
+      setStatus(syncStatus.status || 'checking')
     }
 
     checkSync()
-  }, [userDetail, live, isDark, isSyncing, userExcludedSet, userProtectedSet, manuallySet])
+  }, [syncStatus, isSyncing, manuallySet])
 
   const handleSync = () => {
     // Trigger sync for this user
@@ -441,7 +359,7 @@ export default function UsersPage() {
   const [tempDetailUsername, setTempDetailUsername] = useState<string>('')
   const [editingDetailGroup, setEditingDetailGroup] = useState<boolean>(false)
   const [tempDetailGroup, setTempDetailGroup] = useState<string>('')
-  const { isDark } = useTheme()
+  const { isDark, isModern, isModernDark, isMono } = useTheme()
   const queryClient = useQueryClient()
   const [mounted, setMounted] = useState(false)
   useEffect(() => { setMounted(true) }, [])
@@ -544,18 +462,19 @@ export default function UsersPage() {
     refetchOnWindowFocus: false,
   })
 
-  // Fetch user details with Stremio addons
+  // Fetch user details (without Stremio addons to avoid duplicate API calls)
   const { data: userDetailsData, isLoading: isLoadingDetails } = useQuery({
-    queryKey: ['user', selectedUser?.id],
+    queryKey: ['user', selectedUser?.id, 'basic'],
     queryFn: async () => {
       if (!selectedUser?.id) return null
-      const response = await usersAPI.getById(selectedUser.id)
-      return response
+      const response = await fetch(`/api/users/${selectedUser.id}?basic=true`)
+      if (!response.ok) throw new Error('Failed to fetch user details')
+      return response.json()
     },
     enabled: !!selectedUser?.id
   })
 
-  // Fetch live Stremio addons for the selected user
+  // Fetch live Stremio addons for the selected user (this will be the single source of truth)
   const { data: stremioAddonsData, isLoading: isLoadingStremioAddons } = useQuery({
     queryKey: ['user', selectedUser?.id, 'stremio-addons'],
     queryFn: async () => {
@@ -570,11 +489,15 @@ export default function UsersPage() {
       }
       return response.json()
     },
-    enabled: !!selectedUser?.id && !!selectedUser?.hasStremioConnection
+    enabled: !!selectedUser?.id && !!selectedUser?.hasStremioConnection,
+    staleTime: 5 * 60 * 1000, // Cache for 5 minutes
+    refetchOnMount: false, // Don't refetch on mount if we have cached data
+    refetchOnWindowFocus: false
   })
 
-  // Determine sync status by comparing full manifest JSON contents
-  const [isUserSynced, setIsUserSynced] = React.useState(false)
+  // Calculate sync status from cached Stremio addons data (no additional API call needed)
+  const [isUserSynced, setIsUserSynced] = React.useState<boolean>(false)
+  
   const [hideSensitive, setHideSensitive] = React.useState<boolean>(false)
 
   // Per-user excluded group addons (manifestUrl) — now from database
@@ -906,11 +829,13 @@ export default function UsersPage() {
       // refresh live addons and users list to reflect counts
       queryClient.invalidateQueries({ queryKey: ['user', userId, 'stremio-addons'] })
       queryClient.invalidateQueries({ queryKey: ['user', userId] })
+      queryClient.invalidateQueries({ queryKey: ['user', userId, 'sync-status'] })
       queryClient.invalidateQueries({ queryKey: ['users'] })
       
       // Force refetch the data immediately to show updated order
       queryClient.refetchQueries({ queryKey: ['user', userId, 'stremio-addons'] })
       queryClient.refetchQueries({ queryKey: ['user', userId] })
+      queryClient.refetchQueries({ queryKey: ['user', userId, 'sync-status'] })
       
       toast.success(data?.message || 'Synced successfully!')
     },
@@ -1318,6 +1243,11 @@ export default function UsersPage() {
     })
   }
 
+  const getUserColorClass = (colorIndex: number | null | undefined) => {
+    const theme = isMono ? 'mono' : isModern ? 'modern' : isModernDark ? 'modern-dark' : isDark ? 'dark' : 'light'
+    return getColorBgClass(colorIndex, theme)
+  }
+
   const handleStartEditUsername = (userId: string, currentUsername: string) => {
     setEditingUsername(userId)
     setTempUsername(currentUsername)
@@ -1362,7 +1292,7 @@ export default function UsersPage() {
       username: '',
       email: '',
       password: '',
-      groupName: user.groupName || ''
+      groupName: user.groupId || ''
     })
     setEditingUser(user)
     setIsEditModalOpen(true)
@@ -1507,11 +1437,11 @@ export default function UsersPage() {
   }
 
   const handleSaveDetailGroup = () => {
-    if (tempDetailGroup.trim() !== (userDetailsData?.groupName || 'No group assigned')) {
+    if (tempDetailGroup.trim() !== (userDetailsData?.groupId || '')) {
       // Update user's group
       updateUserMutation.mutate({
         id: selectedUser.id,
-        userData: { groupName: tempDetailGroup.trim() }
+        userData: { groupId: tempDetailGroup.trim() }
       })
     }
     setEditingDetailGroup(false)
@@ -1519,11 +1449,11 @@ export default function UsersPage() {
   }
 
   const handleBlurDetailGroup = () => {
-    if (tempDetailGroup.trim() !== (userDetailsData?.groupName || 'No group assigned')) {
+    if (tempDetailGroup.trim() !== (userDetailsData?.groupId || '')) {
       // Update user's group
       updateUserMutation.mutate({
         id: selectedUser.id,
-        userData: { groupName: tempDetailGroup.trim() }
+        userData: { groupId: tempDetailGroup.trim() }
       })
     }
     setEditingDetailGroup(false)
@@ -1800,8 +1730,8 @@ export default function UsersPage() {
       userData.password = editFormData.password.trim()
     }
     
-    // Always send groupName (even if empty) to handle group removal
-    userData.groupName = editFormData.groupName.trim()
+    // Always send groupId (even if empty) to handle group removal
+    userData.groupId = editFormData.groupName.trim()
     
     updateUserMutation.mutate({
       id: editingUser.id,
@@ -1983,7 +1913,15 @@ export default function UsersPage() {
             <button
               onClick={() => syncAllUsersMutation.mutate()}
               disabled={syncAllUsersMutation.isPending || users.length === 0}
-              className="flex items-center justify-center px-3 py-2 sm:px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 text-sm sm:text-base"
+              className={`flex items-center justify-center px-3 py-2 sm:px-4 text-white rounded-lg transition-colors disabled:opacity-50 text-sm sm:text-base ${
+                isModern
+                  ? 'bg-gradient-to-br from-purple-600 via-purple-700 to-blue-800 hover:from-purple-700 hover:via-purple-800 hover:to-blue-900'
+                  : isModernDark
+                  ? 'bg-gradient-to-br from-purple-800 via-purple-900 to-blue-900 hover:from-purple-900 hover:via-purple-950 hover:to-indigo-900'
+                  : isMono
+                  ? 'bg-black hover:bg-gray-800'
+                  : 'bg-blue-600 hover:bg-blue-700'
+              }`}
             >
               <RefreshCw className={`w-4 h-4 sm:w-5 sm:h-5 mr-2 ${syncAllUsersMutation.isPending ? 'animate-spin' : ''}`} />
               <span className="hidden sm:inline">{syncAllUsersMutation.isPending ? 'Syncing...' : 'Sync All Users'}</span>
@@ -1991,8 +1929,16 @@ export default function UsersPage() {
             </button>
           <button
             onClick={() => setShowConnectModal(true)}
-              className="flex items-center justify-center px-3 py-2 sm:px-4 bg-stremio-purple text-white rounded-lg hover:bg-purple-700 transition-colors text-sm sm:text-base"
-          >
+              className={`flex items-center justify-center px-3 py-2 sm:px-4 text-white rounded-lg transition-colors text-sm sm:text-base ${
+                isModern
+                  ? 'bg-gradient-to-br from-purple-600 via-purple-700 to-blue-800 hover:from-purple-700 hover:via-purple-800 hover:to-blue-900'
+                  : isModernDark
+                  ? 'bg-gradient-to-br from-purple-800 via-purple-900 to-blue-900 hover:from-purple-900 hover:via-purple-950 hover:to-indigo-900'
+                  : isMono
+                  ? 'bg-black hover:bg-gray-800'
+                  : 'bg-stremio-purple hover:bg-purple-700'
+              }`}
+            >
               <Link className="w-4 h-4 sm:w-5 sm:h-5 mr-2" />
               <span className="hidden sm:inline">Connect Stremio User</span>
               <span className="sm:hidden">Connect User</span>
@@ -2019,13 +1965,19 @@ export default function UsersPage() {
           {/* View Mode Toggle */}
           {mounted && (
             <div className="flex items-center">
-              <div className={`flex rounded-lg border ${isDark ? 'border-gray-600' : 'border-gray-300'}`}>
+              <div className={`flex rounded-lg ${isMono ? '' : 'border'} ${isMono ? '' : (isDark ? 'border-gray-600' : 'border-gray-300')}`}>
                 <button
                   onClick={() => handleViewModeChange('card')}
                   className={`flex items-center gap-2 px-3 py-2 sm:py-3 text-sm rounded-l-lg transition-colors h-10 sm:h-12 ${
                     viewMode === 'card'
-                      ? 'bg-stremio-purple text-white'
-                      : isDark
+                      ? isMono
+                        ? '!bg-white/10 text-white'
+                        : isDark
+                        ? 'bg-purple-600 text-white'
+                        : 'bg-stremio-purple text-white'
+                      : isMono
+                        ? 'text-white/70 hover:bg-white/10'
+                        : isDark
                         ? 'text-gray-300 hover:bg-gray-700'
                         : 'text-gray-700 hover:bg-gray-100'
                   }`}
@@ -2038,8 +1990,14 @@ export default function UsersPage() {
                   onClick={() => handleViewModeChange('list')}
                   className={`flex items-center gap-2 px-3 py-2 sm:py-3 text-sm rounded-r-lg transition-colors h-10 sm:h-12 ${
                     viewMode === 'list'
-                      ? 'bg-stremio-purple text-white'
-                      : isDark
+                      ? isMono
+                        ? '!bg-white/10 text-white'
+                        : isDark
+                        ? 'bg-purple-600 text-white'
+                        : 'bg-stremio-purple text-white'
+                      : isMono
+                        ? 'text-white/70 hover:bg-white/10'
+                        : isDark
                         ? 'text-gray-300 hover:bg-gray-700'
                         : 'text-gray-700 hover:bg-gray-100'
                   }`}
@@ -2066,15 +2024,35 @@ export default function UsersPage() {
 
       {/* Error State */}
       {error && (
-        <div className={`text-center py-12 ${isDark ? 'bg-gray-800' : 'bg-red-50'} rounded-lg border ${isDark ? 'border-gray-700' : 'border-red-200'}`}>
-          <AlertTriangle className="w-12 h-12 text-red-500 mx-auto mb-4" />
-          <h3 className={`text-lg font-medium mb-2 ${isDark ? 'text-white' : 'text-gray-900'}`}>Unable to load users</h3>
-          <p className={`${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
+        <div className={`text-center py-12 ${
+          isMono 
+            ? 'bg-black border border-white/20' 
+            : isDark 
+            ? 'bg-gray-800 border-gray-700' 
+            : 'bg-red-50 border-red-200'
+        } rounded-lg border`}>
+          <AlertTriangle className={`w-12 h-12 mx-auto mb-4 ${
+            isMono ? 'text-white' : 'text-red-500'
+          }`} />
+          <h3 className={`text-lg font-medium mb-2 ${
+            isMono ? 'text-white' : isDark ? 'text-white' : 'text-gray-900'
+          }`}>Unable to load users</h3>
+          <p className={`${
+            isMono ? 'text-white/70' : isDark ? 'text-gray-400' : 'text-gray-600'
+          }`}>
             Make sure the backend server is running on port 4000
           </p>
           <button 
             onClick={() => queryClient.invalidateQueries({ queryKey: ['users'] })}
-            className="mt-4 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+            className={`mt-4 px-4 py-2 text-white rounded-lg transition-colors ${
+              isMono
+                ? 'bg-black hover:bg-gray-800 border border-white/20'
+                : isModern
+                ? 'bg-gradient-to-br from-purple-600 via-purple-700 to-blue-800 hover:from-purple-700 hover:via-purple-800 hover:to-blue-900'
+                : isModernDark
+                ? 'bg-gradient-to-br from-purple-800 via-purple-900 to-blue-900 hover:from-purple-900 hover:via-purple-950 hover:to-indigo-900'
+                : 'bg-red-600 hover:bg-red-700'
+            }`}
           >
             Try Again
           </button>
@@ -2089,14 +2067,24 @@ export default function UsersPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {displayUsers.map((user: any) => (
             <div key={user.id} className={`rounded-lg shadow-sm border p-6 hover:shadow-md transition-shadow ${
-              isDark 
+              isModern
+                ? 'bg-gradient-to-br from-purple-50/90 to-blue-50/90 backdrop-blur-sm border-purple-200/60'
+                : isModernDark
+                ? 'bg-gradient-to-br from-purple-800/40 to-blue-800/40 backdrop-blur-sm border-purple-600/50'
+                : isDark 
                 ? 'bg-gray-800 border-gray-700' 
                 : 'bg-white border-gray-200'
                 } ${!user.isActive ? 'opacity-50' : ''}`}>
               <div className="flex items-start justify-between mb-4">
                 <div className="flex items-center">
                   <div className={`w-12 h-12 rounded-full flex items-center justify-center ${
-                    isDark ? 'bg-stremio-purple text-white' : 'bg-stremio-purple text-white'
+                    isMono
+                      ? 'bg-black border border-white/20 text-white'
+                      : isModern
+                      ? 'bg-gradient-to-br from-purple-600 to-blue-800 text-white'
+                      : isModernDark
+                      ? 'bg-gradient-to-br from-purple-800 to-blue-900 text-white'
+                      : getUserColorClass(user?.colorIndex)
                   }`}>
                         <span className="text-white font-semibold text-lg">
                           {user.username ? user.username.charAt(0).toUpperCase() : 
@@ -2139,7 +2127,9 @@ export default function UsersPage() {
                     ) : (
                           <div>
                         <h3 
-                          className={`font-medium cursor-pointer hover:text-stremio-purple transition-colors ${isDark ? 'text-white' : 'text-gray-900'}`}
+                          className={`font-medium cursor-pointer transition-colors ${
+                            isModern ? 'text-purple-800 hover:text-purple-900' : isModernDark ? 'text-purple-200 hover:text-purple-100' : (isDark ? 'text-white hover:text-stremio-purple' : 'text-gray-900 hover:text-stremio-purple')
+                          }`}
                           onClick={() => handleStartEditUsername(user.id, user.username || user.email)}
                           title="Click to edit username"
                         >
@@ -2180,15 +2170,21 @@ export default function UsersPage() {
                     <div className="flex items-center">
                       <Puzzle className="w-4 h-4 text-gray-400 mr-2" />
                       <div>
-                        <p className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                        <p className={`text-lg font-semibold ${
+                          isModern ? 'text-purple-100' : isModernDark ? 'text-purple-100' : (isDark ? 'text-white' : 'text-gray-900')
+                        }`}>
                           {user.stremioAddonsCount || 0}
                         </p>
-                        <p className={`text-xs ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>Addons</p>
+                        <p className={`text-xs ${
+                          isModern ? 'text-purple-300' : isModernDark ? 'text-purple-300' : (isDark ? 'text-gray-400' : 'text-gray-500')
+                        }`}>Addons</p>
                 </div>
                 </div>
                     <div className="flex items-center">
                       <Users className="w-4 h-4 text-gray-400 mr-2" />
-                      <p className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                      <p className={`text-lg font-semibold ${
+                        isModern ? 'text-purple-100' : isModernDark ? 'text-purple-100' : (isDark ? 'text-white' : 'text-gray-900')
+                      }`}>
                         {user.groupName || 'No group'}
                       </p>
                 </div>
@@ -2197,9 +2193,15 @@ export default function UsersPage() {
               <div className="flex gap-2">
                 <button
                   onClick={() => handleViewUserDetails(user)}
-                  className={`flex-1 flex items-center justify-center px-3 py-2 text-sm rounded-lg transition-colors ${
-                    isDark 
-                      ? 'bg-gray-700 text-gray-300 hover:bg-gray-600' 
+                  className={`flex-1 flex items-center justify-center px-3 py-2 h-8 min-h-8 max-h-8 text-sm rounded transition-colors ${
+                    isModern
+                      ? 'bg-gradient-to-r from-purple-100 to-blue-100 text-purple-800 hover:from-purple-200 hover:to-blue-200'
+                      : isModernDark
+                      ? 'bg-gradient-to-r from-purple-800 to-blue-800 text-purple-100 hover:from-purple-700 hover:to-blue-700'
+                      : isMono
+                      ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      : isDark
+                      ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
                       : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                   }`}
                 >
@@ -2209,7 +2211,15 @@ export default function UsersPage() {
                 <button
                   onClick={() => syncUserMutation.mutate(user.id)}
                   disabled={syncUserMutation.isPending}
-                  className="flex items-center justify-center px-3 py-2 text-sm bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors disabled:opacity-50"
+                  className={`flex items-center justify-center px-3 py-2 h-8 min-h-8 max-h-8 text-sm rounded transition-colors disabled:opacity-50 ${
+                    isModern
+                      ? 'bg-gradient-to-br from-purple-100 to-blue-100 text-purple-800 hover:from-purple-200 hover:to-blue-200'
+                      : isModernDark
+                      ? 'bg-gradient-to-br from-purple-800 to-blue-800 text-purple-100 hover:from-purple-700 hover:to-blue-700'
+                      : isMono
+                      ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      : 'bg-green-100 text-green-700 hover:bg-green-200'
+                  }`}
                   title="Sync user addons"
                 >
                       <RefreshCw className={`w-4 h-4 ${syncUserMutation.isPending ? 'animate-spin' : ''}`} />
@@ -2217,7 +2227,15 @@ export default function UsersPage() {
                 <button 
                   onClick={() => handleDeleteUser(user.id, user.username)}
                   disabled={deleteUserMutation.isPending}
-                  className="flex items-center justify-center px-3 py-2 text-sm bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors disabled:opacity-50"
+                  className={`flex items-center justify-center px-3 py-2 h-8 min-h-8 max-h-8 text-sm rounded transition-colors disabled:opacity-50 ${
+                    isModern
+                      ? 'bg-gradient-to-br from-purple-100 to-blue-100 text-purple-800 hover:from-purple-200 hover:to-blue-200'
+                      : isModernDark
+                      ? 'bg-gradient-to-br from-purple-800 to-blue-800 text-purple-100 hover:from-purple-700 hover:to-blue-700'
+                      : isMono
+                      ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      : 'bg-red-100 text-red-700 hover:bg-red-200'
+                  }`}
                 >
                       <Trash2 className="w-4 h-4" />
                 </button>
@@ -2241,7 +2259,7 @@ export default function UsersPage() {
                   <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                     <div className="flex items-center flex-1 min-w-0">
                       <div className={`w-10 h-10 rounded-full flex items-center justify-center mr-3 flex-shrink-0 ${
-                        isDark ? 'bg-stremio-purple text-white' : 'bg-stremio-purple text-white'
+                        isMono ? 'bg-black border border-white/20 text-white' : getUserColorClass(user?.colorIndex)
                       }`}>
                         <span className="text-white font-semibold text-sm">
                           {user.username ? user.username.charAt(0).toUpperCase() : 
@@ -2282,7 +2300,7 @@ export default function UsersPage() {
                       <button
                         onClick={(e) => { e.stopPropagation(); handleToggleUserStatus(user.id, user.isActive) }}
                         className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-                          user.isActive ? 'bg-stremio-purple' : (isDark ? 'bg-gray-700' : 'bg-gray-300')
+                          user.isActive ? (isMono ? 'bg-white/30 border border-white/20' : 'bg-stremio-purple') : (isMono ? 'bg-white/15 border border-white/20' : (isDark ? 'bg-gray-700' : 'bg-gray-300'))
                         }`}
                         aria-pressed={user.isActive}
                         title={user.isActive ? 'Click to disable' : 'Click to enable'}
@@ -2297,9 +2315,32 @@ export default function UsersPage() {
                       {/* Action buttons */}
                       <div className="flex items-center gap-1">
                         <button
+                          onClick={(e) => { e.stopPropagation(); handleViewUserDetails(user) }}
+                          className={`flex items-center justify-center px-2 py-1 h-8 min-h-8 max-h-8 text-sm rounded transition-colors ${
+                            isMono
+                              ? 'bg-black border border-white/20 text-white hover:bg-white/10'
+                              : isModern
+                              ? 'bg-gradient-to-br from-purple-100 to-blue-100 text-purple-800 hover:from-purple-200 hover:to-blue-200'
+                              : isModernDark
+                              ? 'bg-gradient-to-br from-purple-800 to-blue-800 text-purple-100 hover:from-purple-700 hover:to-blue-700'
+                              : 'bg-blue-100 text-blue-700 hover:bg-blue-200'
+                          }`}
+                          title="View user details"
+                        >
+                          <Eye className="w-4 h-4" />
+                        </button>
+                        <button
                           onClick={(e) => { e.stopPropagation(); syncUserMutation.mutate(user.id) }}
                           disabled={syncUserMutation.isPending}
-                          className="flex items-center justify-center px-2 py-1 text-sm text-green-700 hover:bg-green-100 rounded transition-colors disabled:opacity-50"
+                          className={`flex items-center justify-center px-2 py-1 h-8 min-h-8 max-h-8 text-sm rounded transition-colors disabled:opacity-50 ${
+                            isMono
+                              ? 'bg-black border border-white/20 text-white hover:bg-white/10'
+                              : isModern
+                              ? 'bg-gradient-to-br from-purple-100 to-blue-100 text-purple-800 hover:from-purple-200 hover:to-blue-200'
+                              : isModernDark
+                              ? 'bg-gradient-to-br from-purple-800 to-blue-800 text-purple-100 hover:from-purple-700 hover:to-blue-700'
+                              : 'bg-green-100 text-green-700 hover:bg-green-200'
+                          }`}
                           title="Sync user addons"
                         >
                           <RefreshCw className={`w-4 h-4 ${syncUserMutation.isPending ? 'animate-spin' : ''}`} />
@@ -2307,7 +2348,15 @@ export default function UsersPage() {
                         <button 
                           onClick={(e) => { e.stopPropagation(); handleDeleteUser(user.id, user.username) }}
                           disabled={deleteUserMutation.isPending}
-                          className="flex items-center justify-center px-2 py-1 text-sm text-red-700 hover:bg-red-100 rounded transition-colors disabled:opacity-50"
+                          className={`flex items-center justify-center px-2 py-1 h-8 min-h-8 max-h-8 text-sm rounded transition-colors disabled:opacity-50 ${
+                            isMono
+                              ? 'bg-black border border-white/20 text-white hover:bg-white/10'
+                              : isModern
+                              ? 'bg-gradient-to-br from-purple-100 to-blue-100 text-purple-800 hover:from-purple-200 hover:to-blue-200'
+                              : isModernDark
+                              ? 'bg-gradient-to-br from-purple-800 to-blue-800 text-purple-100 hover:from-purple-700 hover:to-blue-700'
+                              : 'bg-red-100 text-red-700 hover:bg-red-200'
+                          }`}
                           title="Delete user"
                         >
                           <Trash2 className="w-4 h-4" />
@@ -2339,7 +2388,15 @@ export default function UsersPage() {
             <div className="mt-6">
             <button
               onClick={() => setShowConnectModal(true)}
-                className="flex items-center justify-center px-3 py-2 sm:px-4 bg-stremio-purple text-white rounded-lg hover:bg-purple-700 transition-colors text-sm sm:text-base mx-auto"
+                className={`flex items-center justify-center px-3 py-2 sm:px-4 text-white rounded-lg transition-colors text-sm sm:text-base mx-auto ${
+                  isModern
+                    ? 'bg-gradient-to-br from-purple-600 via-purple-700 to-blue-800 hover:from-purple-700 hover:via-purple-800 hover:to-blue-900'
+                    : isModernDark
+                    ? 'bg-gradient-to-br from-purple-800 via-purple-900 to-blue-900 hover:from-purple-900 hover:via-purple-950 hover:to-indigo-900'
+                    : isMono
+                    ? 'bg-black hover:bg-gray-800'
+                    : 'bg-stremio-purple hover:bg-purple-700'
+                }`}
             >
                 <Plus className="w-4 h-4 sm:w-5 sm:h-5 mr-2" />
                 <span className="hidden sm:inline">Connect Your First User</span>
@@ -2564,7 +2621,13 @@ export default function UsersPage() {
                 <button
                   type="submit"
                   disabled={connectStremioMutation.isPending}
-                  className="flex-1 px-4 py-2 bg-stremio-purple text-white rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50"
+                  className={`flex-1 px-4 py-2 text-white rounded-lg transition-colors disabled:opacity-50 ${
+                    isModern
+                      ? 'bg-gradient-to-br from-purple-600 via-purple-700 to-blue-800 hover:from-purple-700 hover:via-purple-800 hover:to-blue-900'
+                      : isModernDark
+                      ? 'bg-gradient-to-br from-purple-800 via-purple-900 to-blue-900 hover:from-purple-900 hover:via-purple-950 hover:to-indigo-900'
+                      : 'bg-stremio-purple hover:bg-purple-700'
+                  }`}
                 >
                   {connectStremioMutation.isPending ? 'Connecting...' : 'Connect to Stremio'}
                 </button>
@@ -2687,7 +2750,7 @@ export default function UsersPage() {
                   >
                     <option value="">No group</option>
                     {groups.map((group: any) => (
-                      <option key={group.id} value={group.name}>
+                      <option key={group.id} value={group.id}>
                         {group.name}
                       </option>
                     ))}
@@ -2745,7 +2808,13 @@ export default function UsersPage() {
                   <button
                     type="submit"
                     disabled={updateUserMutation.isPending || !isStremioValid || isValidatingStremio}
-                    className="flex-1 px-4 py-2 bg-stremio-purple text-white rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    className={`flex-1 px-4 py-2 text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                      isModern
+                        ? 'bg-gradient-to-br from-purple-600 via-purple-700 to-blue-800 hover:from-purple-700 hover:via-purple-800 hover:to-blue-900'
+                        : isModernDark
+                        ? 'bg-gradient-to-br from-purple-800 via-purple-900 to-blue-900 hover:from-purple-900 hover:via-purple-950 hover:to-indigo-900'
+                        : 'bg-stremio-purple hover:bg-purple-700'
+                    }`}
                   >
                     {updateUserMutation.isPending ? 'Updating...' : 
                      isValidatingStremio ? 'Validating...' :
@@ -2815,10 +2884,10 @@ export default function UsersPage() {
                             onChange={(e) => {
                               setTempDetailGroup(e.target.value)
                               // Immediately apply the change when a new group is selected
-                              if (e.target.value !== (userDetailsData?.groupName || 'No group assigned')) {
+                              if (e.target.value !== (userDetailsData?.groupId || '')) {
                                 updateUserMutation.mutate({
                                   id: selectedUser.id,
-                                  userData: { groupName: e.target.value.trim() }
+                                  userData: { groupId: e.target.value.trim() }
                                 })
                                 setEditingDetailGroup(false)
                                 setTempDetailGroup('')
@@ -2842,7 +2911,7 @@ export default function UsersPage() {
                           >
                             <option value="">No group assigned</option>
                             {groups.map((group: any) => (
-                              <option key={group.id} value={group.name}>
+                              <option key={group.id} value={group.id}>
                                 {group.name}
                               </option>
                             ))}
@@ -2851,7 +2920,7 @@ export default function UsersPage() {
                       ) : (
                         <div 
                           className="flex items-center gap-2 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 px-2 py-1 rounded transition-colors"
-                          onClick={() => handleStartEditDetailGroup(userDetailsData?.groupName || 'No group assigned')}
+                          onClick={() => handleStartEditDetailGroup(userDetailsData?.groupId || '')}
                           title="Click to change group"
                         >
                           <Users className="w-4 h-4 text-gray-400" />
@@ -3161,8 +3230,8 @@ export default function UsersPage() {
                                                 deleteMode === 'safe' && isBuiltIn
                                                   ? (isDark ? 'text-gray-500 cursor-not-allowed opacity-50' : 'text-gray-400 cursor-not-allowed opacity-50')
                                                   : isProt
-                                                  ? (isDark ? 'text-purple-300 hover:bg-purple-900' : 'text-purple-700 hover:bg-purple-100')
-                                                : (isDark ? 'text-gray-300 hover:bg-gray-700' : 'text-gray-500 hover:bg-gray-100')
+                                                  ? (isDark ? 'text-purple-300 hover:bg-purple-900/50' : 'text-purple-700 hover:bg-purple-100/50')
+                                                : (isDark ? 'text-gray-300 hover:bg-gray-700/50' : 'text-gray-500 hover:bg-gray-100/50')
                                             }`}
                                               title={
                                                 deleteMode === 'safe' && isBuiltIn

@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useMemo, useEffect, useRef, useLayoutEffect } from 'react'
+import React, { useState, useMemo, useEffect, useRef, useLayoutEffect, useCallback } from 'react'
 import { DndContext, DragOverlay, PointerSensor, TouchSensor, useSensor, useSensors, closestCenter } from '@dnd-kit/core'
 import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
@@ -17,9 +17,11 @@ import {
   RefreshCw,
   Copy,
   Grid3X3,
-  List
+  List,
+  AlertTriangle
 } from 'lucide-react'
 import { useTheme } from '@/contexts/ThemeContext'
+import { getColorBgClass, getColorTextClass, getColorOptions } from '@/utils/colorMapping'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { groupsAPI, usersAPI, addonsAPI } from '@/services/api'
 import toast from 'react-hot-toast'
@@ -212,10 +214,27 @@ export default function GroupsPage() {
   const [showDetailModal, setShowDetailModal] = useState(false)
   const [selectedGroup, setSelectedGroup] = useState<any>(null)
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null)
+  
+  // Group name editing state for detail modal
+  const [editingDetailGroupName, setEditingDetailGroupName] = useState<boolean>(false)
+  const [tempDetailGroupName, setTempDetailGroupName] = useState<string>('')
+  
+  // Inline group name editing state for general view
+  const [editingGroupName, setEditingGroupName] = useState<string | null>(null)
+  const [tempGroupName, setTempGroupName] = useState<string>('')
   const [newGroupName, setNewGroupName] = useState('')
   const [newGroupDescription, setNewGroupDescription] = useState('')
-  const [newGroupColor, setNewGroupColor] = useState<string>('purple')
-  const { isDark } = useTheme()
+  const [newGroupColorIndex, setNewGroupColorIndex] = useState<number>(1)
+  const newGroupColorIndexRef = useRef<number>(1)
+  const { isDark, isModern, isModernDark, isMono } = useTheme()
+
+  const resetAddModal = () => {
+    setNewGroupName('')
+    setNewGroupDescription('')
+    setNewGroupColorIndex(1)
+    newGroupColorIndexRef.current = 1
+  }
+
   const queryClient = useQueryClient()
   const [mounted, setMounted] = useState(false)
   useEffect(() => { setMounted(true) }, [])
@@ -266,11 +285,6 @@ export default function GroupsPage() {
     if (!active?.id || !over?.id || active.id === over.id) return
     const from = addonOrder.indexOf(active.id)
     const to = addonOrder.indexOf(over.id)
-  const handleDragCancelDnd = () => {
-    setActiveId(null)
-    setIsDndActive(false)
-    try { document.body.style.overflow = '' } catch {}
-  }
     if (from === -1 || to === -1) return
     const next = [...addonOrder]
     const [moved] = next.splice(from, 1)
@@ -325,11 +339,340 @@ export default function GroupsPage() {
   const handleViewGroupDetails = (group: any) => {
     setSelectedGroup(group)
     setShowDetailModal(true)
+    // Reset editing states when opening detail view
+    setEditingDetailGroupName(false)
+    setTempDetailGroupName('')
+  }
+
+  // Group name editing handlers for detail modal
+  const handleStartEditDetailGroupName = (currentGroupName: string) => {
+    setEditingDetailGroupName(true)
+    setTempDetailGroupName(currentGroupName)
+  }
+
+  const handleSaveDetailGroupName = (originalGroupName: string) => {
+    if (tempDetailGroupName.trim()) {
+      // Only update if the group name actually changed
+      if (tempDetailGroupName.trim() !== originalGroupName) {
+        // Optimistically update the cache immediately
+        queryClient.setQueryData(['group', selectedGroup.id, 'details'], (oldData: any) => {
+          if (oldData) {
+            return {
+              ...oldData,
+              group: {
+                ...oldData.group,
+                name: tempDetailGroupName.trim()
+              }
+            }
+          }
+          return oldData
+        })
+        
+        // Also update the groups list cache
+        queryClient.setQueryData(['groups'], (oldData: any) => {
+          if (oldData) {
+            return oldData.map((group: any) => 
+              group.id === selectedGroup.id 
+                ? { ...group, name: tempDetailGroupName.trim() }
+                : group
+            )
+          }
+          return oldData
+        })
+        
+        // Update the selectedGroup state as well
+        setSelectedGroup((prev: any) => ({
+          ...prev,
+          name: tempDetailGroupName.trim()
+        }))
+
+        // Make the API call
+        updateGroupMutation.mutate({
+          id: selectedGroup.id,
+          data: { 
+            name: tempDetailGroupName.trim() 
+          }
+        }, {
+          onSuccess: () => {
+            // Invalidate both detail and list queries to refresh the UI
+            queryClient.invalidateQueries({ queryKey: ['groups'] })
+            queryClient.invalidateQueries({ queryKey: ['group', selectedGroup.id, 'details'] })
+            queryClient.invalidateQueries({ queryKey: ['group', selectedGroup.id, 'sync-status'] })
+            // Reset editing state after successful update
+            setEditingDetailGroupName(false)
+            setTempDetailGroupName('')
+          },
+          onError: () => {
+            // Revert optimistic update on error
+            queryClient.setQueryData(['group', selectedGroup.id, 'details'], (oldData: any) => {
+              if (oldData) {
+                return {
+                  ...oldData,
+                  group: {
+                    ...oldData.group,
+                    name: originalGroupName
+                  }
+                }
+              }
+              return oldData
+            })
+            
+            // Also revert the groups list cache
+            queryClient.setQueryData(['groups'], (oldData: any) => {
+              if (oldData) {
+                return oldData.map((group: any) => 
+                  group.id === selectedGroup.id 
+                    ? { ...group, name: originalGroupName }
+                    : group
+                )
+              }
+              return oldData
+            })
+            
+            if (selectedGroup) {
+              selectedGroup.name = originalGroupName
+            }
+            // Keep editing state on error so user can try again
+          }
+        })
+      } else {
+        // No change, just exit edit mode
+        setEditingDetailGroupName(false)
+        setTempDetailGroupName('')
+      }
+    } else {
+      setEditingDetailGroupName(false)
+      setTempDetailGroupName('')
+    }
+  }
+
+  const handleBlurDetailGroupName = (originalGroupName: string) => {
+    if (tempDetailGroupName.trim()) {
+      // Only update if the group name actually changed
+      if (tempDetailGroupName.trim() !== originalGroupName) {
+        // Optimistically update the cache immediately
+        queryClient.setQueryData(['group', selectedGroup.id, 'details'], (oldData: any) => {
+          if (oldData) {
+            return {
+              ...oldData,
+              group: {
+                ...oldData.group,
+                name: tempDetailGroupName.trim()
+              }
+            }
+          }
+          return oldData
+        })
+        
+        // Also update the groups list cache
+        queryClient.setQueryData(['groups'], (oldData: any) => {
+          if (oldData) {
+            return oldData.map((group: any) => 
+              group.id === selectedGroup.id 
+                ? { ...group, name: tempDetailGroupName.trim() }
+                : group
+            )
+          }
+          return oldData
+        })
+        
+        // Update the selectedGroup state as well
+        setSelectedGroup((prev: any) => ({
+          ...prev,
+          name: tempDetailGroupName.trim()
+        }))
+
+        // Make the API call
+        updateGroupMutation.mutate({
+          id: selectedGroup.id,
+          data: { 
+            name: tempDetailGroupName.trim() 
+          }
+        }, {
+          onSuccess: () => {
+            // Invalidate both detail and list queries to refresh the UI
+            queryClient.invalidateQueries({ queryKey: ['groups'] })
+            queryClient.invalidateQueries({ queryKey: ['group', selectedGroup.id, 'details'] })
+            queryClient.invalidateQueries({ queryKey: ['group', selectedGroup.id, 'sync-status'] })
+            // Reset editing state after successful update
+            setEditingDetailGroupName(false)
+            setTempDetailGroupName('')
+          },
+          onError: () => {
+            // Revert optimistic update on error
+            queryClient.setQueryData(['group', selectedGroup.id, 'details'], (oldData: any) => {
+              if (oldData) {
+                return {
+                  ...oldData,
+                  group: {
+                    ...oldData.group,
+                    name: originalGroupName
+                  }
+                }
+              }
+              return oldData
+            })
+            
+            // Also revert the groups list cache
+            queryClient.setQueryData(['groups'], (oldData: any) => {
+              if (oldData) {
+                return oldData.map((group: any) => 
+                  group.id === selectedGroup.id 
+                    ? { ...group, name: originalGroupName }
+                    : group
+                )
+              }
+              return oldData
+            })
+            
+            if (selectedGroup) {
+              selectedGroup.name = originalGroupName
+            }
+            // Keep editing state on error so user can try again
+          }
+        })
+      } else {
+        // No change, just exit edit mode
+        setEditingDetailGroupName(false)
+        setTempDetailGroupName('')
+      }
+    } else {
+      // If empty, revert to original and exit edit mode
+      setEditingDetailGroupName(false)
+      setTempDetailGroupName('')
+    }
   }
 
   // Handle clone group
   const handleCloneGroup = (group: any) => {
     cloneGroupMutation.mutate(group.id)
+  }
+
+  // Inline group name editing handlers for general view
+  const handleStartEditGroupName = (groupId: string, currentGroupName: string) => {
+    setEditingGroupName(groupId)
+    setTempGroupName(currentGroupName)
+  }
+
+  const handleSaveGroupName = (groupId: string, originalGroupName: string) => {
+    if (tempGroupName.trim()) {
+      // Only update if the group name actually changed
+      if (tempGroupName.trim() !== originalGroupName) {
+        // Optimistically update the cache immediately
+        queryClient.setQueryData(['groups'], (oldData: any) => {
+          if (oldData) {
+            return oldData.map((group: any) => 
+              group.id === groupId 
+                ? { ...group, name: tempGroupName.trim() }
+                : group
+            )
+          }
+          return oldData
+        })
+
+        // Make the API call
+        updateGroupMutation.mutate({
+          id: groupId,
+          data: { 
+            name: tempGroupName.trim() 
+          }
+        }, {
+          onSuccess: () => {
+            // Invalidate queries to refresh the UI
+            queryClient.invalidateQueries({ queryKey: ['groups'] })
+            queryClient.invalidateQueries({ queryKey: ['users'] })
+            queryClient.invalidateQueries({ queryKey: ['addons'] })
+            queryClient.invalidateQueries({ queryKey: ['group', groupId, 'sync-status'] })
+            queryClient.invalidateQueries({ queryKey: ['group', groupId, 'details'] })
+            // Reset editing state after successful update
+            setEditingGroupName(null)
+            setTempGroupName('')
+          },
+          onError: () => {
+            // Revert optimistic update on error
+            queryClient.setQueryData(['groups'], (oldData: any) => {
+              if (oldData) {
+                return oldData.map((group: any) => 
+                  group.id === groupId 
+                    ? { ...group, name: originalGroupName }
+                    : group
+                )
+              }
+              return oldData
+            })
+            // Keep editing state on error so user can try again
+          }
+        })
+      } else {
+        // No change, just exit edit mode
+        setEditingGroupName(null)
+        setTempGroupName('')
+      }
+    } else {
+      setEditingGroupName(null)
+      setTempGroupName('')
+    }
+  }
+
+  const handleBlurGroupName = (groupId: string, originalGroupName: string) => {
+    if (tempGroupName.trim()) {
+      // Only update if the group name actually changed
+      if (tempGroupName.trim() !== originalGroupName) {
+        // Optimistically update the cache immediately
+        queryClient.setQueryData(['groups'], (oldData: any) => {
+          if (oldData) {
+            return oldData.map((group: any) => 
+              group.id === groupId 
+                ? { ...group, name: tempGroupName.trim() }
+                : group
+            )
+          }
+          return oldData
+        })
+
+        // Make the API call
+        updateGroupMutation.mutate({
+          id: groupId,
+          data: { 
+            name: tempGroupName.trim() 
+          }
+        }, {
+          onSuccess: () => {
+            // Invalidate queries to refresh the UI
+            queryClient.invalidateQueries({ queryKey: ['groups'] })
+            queryClient.invalidateQueries({ queryKey: ['users'] })
+            queryClient.invalidateQueries({ queryKey: ['addons'] })
+            queryClient.invalidateQueries({ queryKey: ['group', groupId, 'sync-status'] })
+            queryClient.invalidateQueries({ queryKey: ['group', groupId, 'details'] })
+            // Reset editing state after successful update
+            setEditingGroupName(null)
+            setTempGroupName('')
+          },
+          onError: () => {
+            // Revert optimistic update on error
+            queryClient.setQueryData(['groups'], (oldData: any) => {
+              if (oldData) {
+                return oldData.map((group: any) => 
+                  group.id === groupId 
+                    ? { ...group, name: originalGroupName }
+                    : group
+                )
+              }
+              return oldData
+            })
+            // Keep editing state on error so user can try again
+          }
+        })
+      } else {
+        // No change, just exit edit mode
+        setEditingGroupName(null)
+        setTempGroupName('')
+      }
+    } else {
+      // If empty, revert to original and exit edit mode
+      setEditingGroupName(null)
+      setTempGroupName('')
+    }
   }
 
   // Drag and drop handlers for addon reordering
@@ -516,6 +859,7 @@ export default function GroupsPage() {
     return [] as any[]
   }, [groupsRaw])
 
+
   // Ensure filteredGroups is always an array
   const filteredGroups = useMemo(() => {
     const base = Array.isArray(groups) ? groups : []
@@ -537,20 +881,22 @@ export default function GroupsPage() {
   }
 
   const createGroupMutation = useMutation({
-    mutationFn: (data: { name: string; description?: string }) => groupsAPI.create({
+    mutationFn: (data: { name: string; description?: string; colorIndex?: number }) => {
+      return groupsAPI.create({
       name: data.name,
       description: data.description || '',
       restrictions: 'none',
-      color: newGroupColor || 'purple'
-    }),
+        colorIndex: data.colorIndex || 1
+      })
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['groups'] })
       setShowAddModal(false)
-      setNewGroupName('')
-      setNewGroupDescription('')
+      resetAddModal()
       toast.success('Group created successfully!')
     },
     onError: (error: any) => {
+      console.error('❌ Group creation failed:', error)
       toast.error(error?.response?.data?.message || 'Failed to create group')
     },
   })
@@ -650,8 +996,12 @@ export default function GroupsPage() {
 
   const updateGroupMutation = useMutation({
     mutationFn: (payload: { id: string; data: any }) => groupsAPI.update(payload.id, payload.data),
-    onSuccess: () => {
+    onSuccess: (data, variables) => {
       queryClient.invalidateQueries({ queryKey: ['groups'] })
+      queryClient.invalidateQueries({ queryKey: ['users'] })
+      queryClient.invalidateQueries({ queryKey: ['addons'] })
+      queryClient.invalidateQueries({ queryKey: ['group', variables.id, 'sync-status'] })
+      queryClient.invalidateQueries({ queryKey: ['group', variables.id, 'details'] })
       setShowEditModal(false)
       setEditingGroupId(null)
       toast.success('Group updated successfully!')
@@ -992,18 +1342,38 @@ export default function GroupsPage() {
     setConfirmOpen(true)
   }
 
-  const getGroupColorClass = (color: string) => {
-    if (!color) return 'bg-stremio-purple'
-    if (typeof color === 'string' && color.trim().startsWith('#')) return ''
-    switch (color) {
-      case 'blue': return 'bg-blue-500'
-      case 'green': return 'bg-green-500'
-      case 'purple': return 'bg-stremio-purple'
-      case 'orange': return 'bg-orange-500'
-      case 'red': return 'bg-red-500'
-      case 'gray': return 'bg-gray-500'
-      default: return 'bg-stremio-purple'
+  const getGroupColorClass = useCallback((colorIndex: number | null | undefined) => {
+    const theme = isMono ? 'mono' : isModern ? 'modern' : isModernDark ? 'modern-dark' : isDark ? 'dark' : 'light'
+    const colorClass = getColorBgClass(colorIndex, theme)
+    return colorClass
+  }, [isMono, isModern, isModernDark, isDark])
+
+  // Helper function to convert Tailwind classes to actual color values
+  const getColorValue = (tailwindClass: string): string => {
+    const colorMap: Record<string, string> = {
+      'bg-black': '#000000',
+      'bg-gray-800': '#1f2937',
+      'bg-gray-600': '#4b5563',
+      'bg-gray-400': '#9ca3af',
+      'bg-gray-300': '#d1d5db',
+      'bg-blue-500': '#3b82f6',
+      'bg-green-500': '#10b981',
+      'bg-purple-500': '#8b5cf6',
+      'bg-orange-500': '#f97316',
+      'bg-red-500': '#ef4444',
+      // Add gradient classes for modern themes
+      'bg-gradient-to-br from-blue-500 to-blue-600': '#3b82f6',
+      'bg-gradient-to-br from-green-500 to-green-600': '#10b981',
+      'bg-gradient-to-br from-purple-500 to-purple-600': '#8b5cf6',
+      'bg-gradient-to-br from-orange-500 to-orange-600': '#f97316',
+      'bg-gradient-to-br from-red-500 to-red-600': '#ef4444',
+      'bg-gradient-to-br from-blue-600 to-blue-700': '#2563eb',
+      'bg-gradient-to-br from-green-600 to-green-700': '#059669',
+      'bg-gradient-to-br from-purple-600 to-purple-700': '#7c3aed',
+      'bg-gradient-to-br from-orange-600 to-orange-700': '#ea580c',
+      'bg-gradient-to-br from-red-600 to-red-700': '#dc2626'
     }
+    return colorMap[tailwindClass] || '#000000'
   }
 
   return (
@@ -1019,7 +1389,15 @@ export default function GroupsPage() {
             <button
               onClick={() => syncAllGroupsMutation.mutate()}
               disabled={syncAllGroupsMutation.isPending || isSyncingAll || groups.length === 0}
-              className="flex items-center justify-center px-3 py-2 sm:px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 text-sm sm:text-base"
+              className={`flex items-center justify-center px-3 py-2 sm:px-4 text-white rounded-lg transition-colors disabled:opacity-50 text-sm sm:text-base ${
+                isModern
+                  ? 'bg-gradient-to-br from-purple-600 via-purple-700 to-blue-800 hover:from-purple-700 hover:via-purple-800 hover:to-blue-900'
+                  : isModernDark
+                  ? 'bg-gradient-to-br from-purple-800 via-purple-900 to-blue-900 hover:from-purple-900 hover:via-purple-950 hover:to-indigo-900'
+                  : isMono
+                  ? 'bg-black hover:bg-gray-800'
+                  : 'bg-blue-600 hover:bg-blue-700'
+              }`}
             >
               <RefreshCw className={`w-4 h-4 sm:w-5 sm:h-5 mr-2 ${isSyncingAll ? 'animate-spin' : ''}`} />
               <span className="hidden sm:inline">{isSyncingAll ? 'Syncing...' : 'Sync All Groups'}</span>
@@ -1027,7 +1405,15 @@ export default function GroupsPage() {
             </button>
             <button
               onClick={() => setShowAddModal(true)}
-              className="flex items-center justify-center px-3 py-2 sm:px-4 bg-stremio-purple text-white rounded-lg hover:bg-purple-700 transition-colors text-sm sm:text-base"
+              className={`flex items-center justify-center px-3 py-2 sm:px-4 text-white rounded-lg transition-colors text-sm sm:text-base ${
+                isModern
+                  ? 'bg-gradient-to-br from-purple-600 via-purple-700 to-blue-800 hover:from-purple-700 hover:via-purple-800 hover:to-blue-900'
+                  : isModernDark
+                  ? 'bg-gradient-to-br from-purple-800 via-purple-900 to-blue-900 hover:from-purple-900 hover:via-purple-950 hover:to-indigo-900'
+                  : isMono
+                  ? 'bg-black hover:bg-gray-800'
+                  : 'bg-stremio-purple hover:bg-purple-700'
+              }`}
             >
               <Plus className="w-4 h-4 sm:w-5 sm:h-5 mr-2" />
               <span className="hidden sm:inline">Create Group</span>
@@ -1056,13 +1442,19 @@ export default function GroupsPage() {
           {/* View Mode Toggle */}
           {mounted && (
             <div className="flex items-center">
-              <div className={`flex rounded-lg border ${isDark ? 'border-gray-600' : 'border-gray-300'}`}>
+              <div className={`flex rounded-lg ${isMono ? '' : 'border'} ${isMono ? '' : (isDark ? 'border-gray-600' : 'border-gray-300')}`}>
                 <button
                   onClick={() => handleViewModeChange('card')}
                   className={`flex items-center gap-2 px-3 py-2 sm:py-3 text-sm rounded-l-lg transition-colors h-10 sm:h-12 ${
                     viewMode === 'card'
-                      ? 'bg-stremio-purple text-white'
-                      : isDark
+                      ? isMono
+                        ? '!bg-white/10 text-white'
+                        : isDark
+                        ? 'bg-purple-600 text-white'
+                        : 'bg-stremio-purple text-white'
+                      : isMono
+                        ? 'text-white/70 hover:bg-white/10'
+                        : isDark
                         ? 'text-gray-300 hover:bg-gray-700'
                         : 'text-gray-700 hover:bg-gray-100'
                   }`}
@@ -1075,8 +1467,14 @@ export default function GroupsPage() {
                   onClick={() => handleViewModeChange('list')}
                   className={`flex items-center gap-2 px-3 py-2 sm:py-3 text-sm rounded-r-lg transition-colors h-10 sm:h-12 ${
                     viewMode === 'list'
-                      ? 'bg-stremio-purple text-white'
-                      : isDark
+                      ? isMono
+                        ? '!bg-white/10 text-white'
+                        : isDark
+                        ? 'bg-purple-600 text-white'
+                        : 'bg-stremio-purple text-white'
+                      : isMono
+                        ? 'text-white/70 hover:bg-white/10'
+                        : isDark
                         ? 'text-gray-300 hover:bg-gray-700'
                         : 'text-gray-700 hover:bg-gray-100'
                   }`}
@@ -1091,28 +1489,111 @@ export default function GroupsPage() {
         </div>
       </div>
 
+      {/* Loading State */}
+      {isLoading && (
+        <div className="flex items-center justify-center py-12">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-stremio-purple"></div>
+          <span className={`ml-3 ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>Loading groups...</span>
+        </div>
+      )}
+
+      {/* Error State */}
+      {error && (
+        <div className={`text-center py-12 ${
+          isMono 
+            ? 'bg-black border border-white/20' 
+            : isDark 
+            ? 'bg-gray-800 border-gray-700' 
+            : 'bg-red-50 border-red-200'
+        } rounded-lg border`}>
+          <AlertTriangle className={`w-12 h-12 mx-auto mb-4 ${
+            isMono ? 'text-white' : 'text-red-500'
+          }`} />
+          <h3 className={`text-lg font-medium mb-2 ${
+            isMono ? 'text-white' : isDark ? 'text-white' : 'text-gray-900'
+          }`}>Unable to load groups</h3>
+          <p className={`${
+            isMono ? 'text-white/70' : isDark ? 'text-gray-400' : 'text-gray-600'
+          }`}>
+            Make sure the backend server is running on port 4000
+          </p>
+          <button 
+            onClick={() => queryClient.invalidateQueries({ queryKey: ['groups'] })}
+            className={`mt-4 px-4 py-2 text-white rounded-lg transition-colors ${
+              isMono
+                ? 'bg-black hover:bg-gray-800 border border-white/20'
+                : isModern
+                ? 'bg-gradient-to-br from-purple-600 via-purple-700 to-blue-800 hover:from-purple-700 hover:via-purple-800 hover:to-blue-900'
+                : isModernDark
+                ? 'bg-gradient-to-br from-purple-800 via-purple-900 to-blue-900 hover:from-purple-900 hover:via-purple-950 hover:to-indigo-900'
+                : 'bg-red-600 hover:bg-red-700'
+            }`}
+          >
+            Try Again
+          </button>
+        </div>
+      )}
+
       {/* Groups Display */}
       {viewMode === 'card' ? (
         /* Card Grid View */
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredGroups.map((group) => (
-            <div key={group.id} className={`rounded-lg shadow-sm border p-6 hover:shadow-md transition-shadow flex flex-col h-full ${
-              isDark 
-                ? 'bg-gray-800 border-gray-700' 
-                : 'bg-white border-gray-200'
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {filteredGroups.map((group) => (
+          <div key={group.id} className={`rounded-lg shadow-sm border p-6 hover:shadow-md transition-shadow flex flex-col h-full ${
+              isModern
+                ? 'bg-gradient-to-br from-purple-50/90 to-blue-50/90 backdrop-blur-sm border-purple-200/60'
+                : isModernDark
+                ? 'bg-gradient-to-br from-purple-800/40 to-blue-800/40 backdrop-blur-sm border-purple-600/50'
+                : isDark 
+              ? 'bg-gray-800 border-gray-700' 
+              : 'bg-white border-gray-200'
             } ${!group.isActive ? 'opacity-50' : ''}`}>
-              <div className="flex items-start justify-between mb-4">
-                <div className="flex items-center">
+            <div className="flex items-start justify-between mb-4">
+              <div className="flex items-center">
                   <div
-                    className={`w-12 h-12 rounded-lg flex items-center justify-center mr-3 text-white ${!group?.color ? 'bg-stremio-purple' : (typeof group.color === 'string' && group.color.trim().startsWith('#') ? '' : getGroupColorClass(group.color))}`}
-                    style={typeof group?.color === 'string' && group.color.trim().startsWith('#') ? ({ backgroundColor: group.color } as React.CSSProperties) : undefined}
+                    className={`w-12 h-12 rounded-lg flex items-center justify-center mr-3 text-white ${getGroupColorClass(group?.colorIndex)} ${
+                      isMono ? 'border border-white/20' : ''
+                    }`}
+                    style={{
+                      backgroundColor: group?.colorIndex === 2 && isMono ? '#1f2937' : undefined
+                    }}
                   >
                     <span className="text-white font-semibold text-lg">
                       {group.name ? group.name.charAt(0).toUpperCase() : 'G'}
                     </span>
-                  </div>
-                  <div>
-                    <h3 className={`font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>{group.name}</h3>
+                </div>
+                <div>
+                    {editingGroupName === group.id ? (
+                      <input
+                        type="text"
+                        value={tempGroupName}
+                        onChange={(e) => setTempGroupName(e.target.value)}
+                        onBlur={() => handleBlurGroupName(group.id, group.name)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            handleSaveGroupName(group.id, group.name)
+                          } else if (e.key === 'Escape') {
+                            setEditingGroupName(null)
+                            setTempGroupName('')
+                          }
+                        }}
+                        placeholder={group.name}
+                        className={`font-semibold bg-transparent border-none outline-none w-full ${
+                          isModern ? 'text-purple-800' : isModernDark ? 'text-purple-200' : (isDark ? 'text-white' : 'text-gray-900')
+                        }`}
+                        autoFocus
+                      />
+                    ) : (
+                      <h3 
+                        className={`font-semibold cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 px-1 py-0.5 rounded transition-colors ${
+                          isModern ? 'text-purple-800' : isModernDark ? 'text-purple-200' : (isDark ? 'text-white' : 'text-gray-900')
+                        }`}
+                        onClick={() => handleStartEditGroupName(group.id, group.name)}
+                        title="Click to edit group name"
+                      >
+                        {group.name}
+                      </h3>
+                    )}
                     <div className="mt-1">
                       <GroupSyncBadge 
                         groupId={group.id} 
@@ -1120,91 +1601,129 @@ export default function GroupsPage() {
                         isSyncing={syncingGroups.has(group.id)}
                       />
                     </div>
-                  </div>
                 </div>
-                <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => handleToggleGroupStatus(group.id, group.isActive)}
+              </div>
+              <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => handleToggleGroupStatus(group.id, group.isActive)}
                     className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
                       group.isActive ? 'bg-stremio-purple' : (isDark ? 'bg-gray-700' : 'bg-gray-300')
-                      }`}
+                    }`}
                     aria-pressed={group.isActive}
                     title={group.isActive ? 'Click to disable' : 'Click to enable'}
-                    >
-                      <span
+                  >
+                    <span
                       className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${
-                          group.isActive ? 'translate-x-5' : 'translate-x-1'
-                        }`}
-                      />
-                    </button>
-                </div>
+                        group.isActive ? 'translate-x-5' : 'translate-x-1'
+                      }`}
+                    />
+                  </button>
               </div>
+            </div>
 
-              <div className="grid grid-cols-2 gap-4 mb-4">
-                <div className="flex items-center">
+            <div className="grid grid-cols-2 gap-4 mb-4">
+              <div className="flex items-center">
                   <Puzzle className="w-4 h-4 text-gray-400 mr-2" />
-                  <div>
-                    <p className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>{group.addons}</p>
-                    <p className={`text-xs ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>{group.addons === 1 ? 'Addon' : 'Addons'}</p>
-                  </div>
-                </div>
-                <div className="flex items-center">
-                  <Users className="w-4 h-4 text-gray-400 mr-2" />
-                  <div>
-                    <p className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>{group.members}</p>
-                    <p className={`text-xs ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>{group.members === 1 ? 'Member' : 'Members'}</p>
-                  </div>
+                <div>
+                    <p className={`text-lg font-semibold ${
+                      isModern ? 'text-purple-100' : isModernDark ? 'text-purple-100' : (isDark ? 'text-white' : 'text-gray-900')
+                    }`}>{group.addons}</p>
+                    <p className={`text-xs ${
+                      isModern ? 'text-purple-300' : isModernDark ? 'text-purple-300' : (isDark ? 'text-gray-400' : 'text-gray-500')
+                    }`}>{group.addons === 1 ? 'Addon' : 'Addons'}</p>
                 </div>
               </div>
+              <div className="flex items-center">
+                  <Users className="w-4 h-4 text-gray-400 mr-2" />
+                <div>
+                    <p className={`text-lg font-semibold ${
+                      isModern ? 'text-purple-100' : isModernDark ? 'text-purple-100' : (isDark ? 'text-white' : 'text-gray-900')
+                    }`}>{group.members}</p>
+                    <p className={`text-xs ${
+                      isModern ? 'text-purple-300' : isModernDark ? 'text-purple-300' : (isDark ? 'text-gray-400' : 'text-gray-500')
+                    }`}>{group.members === 1 ? 'Member' : 'Members'}</p>
+                </div>
+              </div>
+            </div>
 
-              <div className="flex items-center gap-2 mt-auto">
-                <button 
+            <div className="flex items-center gap-2 mt-auto">
+              <button 
                   onClick={() => handleViewGroupDetails(group)}
-                  className={`flex-1 flex items-center justify-center px-3 py-2 text-sm rounded-lg transition-colors ${
-                    isDark 
-                      ? 'bg-gray-700 text-gray-300 hover:bg-gray-600' 
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  }`}
-                >
+                  className={`flex-1 flex items-center justify-center px-3 py-2 h-8 min-h-8 max-h-8 text-sm rounded transition-colors ${
+                    isModern
+                      ? 'bg-gradient-to-r from-purple-100 to-blue-100 text-purple-800 hover:from-purple-200 hover:to-blue-200'
+                      : isModernDark
+                      ? 'bg-gradient-to-r from-purple-800 to-blue-800 text-purple-100 hover:from-purple-700 hover:to-blue-700'
+                      : isMono
+                      ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      : isDark 
+                    ? 'bg-gray-700 text-gray-300 hover:bg-gray-600' 
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
                   <Eye className="w-4 h-4 mr-1" />
-                  View
-                </button>
+                View
+              </button>
                 <button
                   onClick={() => handleCloneGroup(group)}
-                  className="flex items-center justify-center px-3 py-2 text-sm bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors"
+                  className={`flex items-center justify-center px-3 py-2 h-8 min-h-8 max-h-8 text-sm rounded transition-colors ${
+                    isModern
+                      ? 'bg-gradient-to-br from-purple-100 to-blue-100 text-purple-800 hover:from-purple-200 hover:to-blue-200'
+                      : isModernDark
+                      ? 'bg-gradient-to-br from-purple-800 to-blue-800 text-purple-100 hover:from-purple-700 hover:to-blue-700'
+                      : isMono
+                      ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      : 'bg-blue-100 text-blue-700 hover:bg-blue-200'
+                  }`}
                   title="Clone this group"
                 >
                   <Copy className="w-4 h-4" />
-                </button>
-                <button
-                  onClick={() => handleGroupSync(group.id)}
-                  disabled={syncingGroups.has(group.id)}
-                  className="flex items-center justify-center px-3 py-2 text-sm bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors disabled:opacity-50"
-                  title="Sync all users in this group"
-                >
+              </button>
+              <button
+                onClick={() => handleGroupSync(group.id)}
+                disabled={syncingGroups.has(group.id)}
+                  className={`flex items-center justify-center px-3 py-2 h-8 min-h-8 max-h-8 text-sm rounded transition-colors disabled:opacity-50 ${
+                    isModern
+                      ? 'bg-gradient-to-br from-purple-100 to-blue-100 text-purple-800 hover:from-purple-200 hover:to-blue-200'
+                      : isModernDark
+                      ? 'bg-gradient-to-br from-purple-800 to-blue-800 text-purple-100 hover:from-purple-700 hover:to-blue-700'
+                      : isMono
+                      ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      : 'bg-green-100 text-green-700 hover:bg-green-200'
+                  }`}
+                title="Sync all users in this group"
+              >
                   <RefreshCw className={`w-4 h-4 ${syncingGroups.has(group.id) ? 'animate-spin' : ''}`} />
-                </button>
-                <button
-                  onClick={() => handleEditGroup(group)}
-                  className="hidden"
-                />
-                <button 
-                  onClick={() => {
-                    openConfirm({
+              </button>
+              <button
+                onClick={() => handleEditGroup(group)}
+                className="hidden"
+              />
+              <button 
+                onClick={() => {
+                  openConfirm({
                       title: `Delete group ${group.name}`,
                       description: 'This action cannot be undone.',
-                      isDanger: true,
-                      onConfirm: () => deleteGroupMutation.mutate(group.id)
-                    })
-                  }}
-                  disabled={deleteGroupMutation.isPending}
-                  className="flex items-center justify-center px-3 py-2 text-sm bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors disabled:opacity-50"
+                    isDanger: true,
+                    onConfirm: () => deleteGroupMutation.mutate(group.id)
+                  })
+                }}
+                disabled={deleteGroupMutation.isPending}
+                  className={`flex items-center justify-center px-3 py-2 h-8 min-h-8 max-h-8 text-sm rounded transition-colors disabled:opacity-50 ${
+                    isModern
+                      ? 'bg-gradient-to-br from-purple-100 to-blue-100 text-purple-800 hover:from-purple-200 hover:to-blue-200'
+                      : isModernDark
+                      ? 'bg-gradient-to-br from-purple-800 to-blue-800 text-purple-100 hover:from-purple-700 hover:to-blue-700'
+                      : isMono
+                      ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      : 'bg-red-100 text-red-700 hover:bg-red-200'
+                  }`}
                 >
                   <Trash2 className="w-4 h-4" />
-                </button>
-              </div>
+              </button>
             </div>
-          ))}
+          </div>
+        ))}
         </div>
       ) : (
         /* List View */
@@ -1222,8 +1741,12 @@ export default function GroupsPage() {
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                 <div className="flex items-center flex-1 min-w-0">
                   <div
-                    className={`w-10 h-10 rounded-lg flex items-center justify-center mr-3 flex-shrink-0 text-white ${!group?.color ? 'bg-stremio-purple' : (typeof group.color === 'string' && group.color.trim().startsWith('#') ? '' : getGroupColorClass(group.color))}`}
-                    style={typeof group?.color === 'string' && group.color.trim().startsWith('#') ? ({ backgroundColor: group.color } as React.CSSProperties) : undefined}
+                    className={`w-10 h-10 rounded-lg flex items-center justify-center mr-3 flex-shrink-0 text-white ${getGroupColorClass(group?.colorIndex)} ${
+                      isMono ? 'border border-white/20' : ''
+                    }`}
+                    style={{
+                      backgroundColor: group?.colorIndex === 2 && isMono ? '#1f2937' : undefined
+                    }}
                   >
                     <span className="text-white font-semibold text-sm">
                       {group.name ? group.name.charAt(0).toUpperCase() : 'G'}
@@ -1231,7 +1754,33 @@ export default function GroupsPage() {
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 mb-1">
-                      <h3 className={`font-semibold truncate ${isDark ? 'text-white' : 'text-gray-900'}`}>{group.name}</h3>
+                      {editingGroupName === group.id ? (
+                        <input
+                          type="text"
+                          value={tempGroupName}
+                          onChange={(e) => setTempGroupName(e.target.value)}
+                          onBlur={() => handleBlurGroupName(group.id, group.name)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              handleSaveGroupName(group.id, group.name)
+                            } else if (e.key === 'Escape') {
+                              setEditingGroupName(null)
+                              setTempGroupName('')
+                            }
+                          }}
+                          placeholder={group.name}
+                          className={`font-semibold bg-transparent border-none outline-none w-full ${isDark ? 'text-white' : 'text-gray-900'}`}
+                          autoFocus
+                        />
+                      ) : (
+                        <h3 
+                          className={`font-semibold truncate cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 px-1 py-0.5 rounded transition-colors ${isDark ? 'text-white' : 'text-gray-900'}`}
+                          onClick={() => handleStartEditGroupName(group.id, group.name)}
+                          title="Click to edit group name"
+                        >
+                          {group.name}
+                        </h3>
+                      )}
                       <GroupSyncBadge 
                         groupId={group.id} 
                         onSync={handleGroupSync}
@@ -1245,8 +1794,8 @@ export default function GroupsPage() {
                       </p>
                     )}
                   </div>
-                </div>
-                
+      </div>
+
                 <div className="flex items-center gap-2 sm:gap-4 sm:ml-4 flex-wrap">
                   {/* Stats */}
                   <div className="hidden sm:flex items-center gap-4 text-sm">
@@ -1266,7 +1815,7 @@ export default function GroupsPage() {
                   <button
                     onClick={(e) => { e.stopPropagation(); handleToggleGroupStatus(group.id, group.isActive) }}
                     className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-                      group.isActive ? 'bg-stremio-purple' : (isDark ? 'bg-gray-700' : 'bg-gray-300')
+                      group.isActive ? (isMono ? 'bg-white/30 border border-white/20' : 'bg-stremio-purple') : (isMono ? 'bg-white/15 border border-white/20' : (isDark ? 'bg-gray-700' : 'bg-gray-300'))
                     }`}
                     aria-pressed={group.isActive}
                     title={group.isActive ? 'Click to disable' : 'Click to enable'}
@@ -1282,7 +1831,15 @@ export default function GroupsPage() {
                   <div className="flex items-center gap-1">
                     <button
                       onClick={(e) => { e.stopPropagation(); handleCloneGroup(group) }}
-                      className="flex items-center justify-center px-2 py-1 text-sm text-blue-700 hover:bg-blue-100 rounded transition-colors"
+                      className={`flex items-center justify-center px-2 py-1 h-8 min-h-8 max-h-8 text-sm rounded transition-colors ${
+                        isMono
+                          ? 'bg-black border border-white/20 text-white hover:bg-white/10'
+                          : isModern
+                          ? 'bg-gradient-to-br from-purple-100 to-blue-100 text-purple-800 hover:from-purple-200 hover:to-blue-200'
+                          : isModernDark
+                          ? 'bg-gradient-to-br from-purple-800 to-blue-800 text-purple-100 hover:from-purple-700 hover:to-blue-700'
+                          : 'bg-blue-100 text-blue-700 hover:bg-blue-200'
+                      }`}
                       title="Clone this group"
                     >
                       <Copy className="w-4 h-4" />
@@ -1290,7 +1847,15 @@ export default function GroupsPage() {
                     <button
                       onClick={(e) => { e.stopPropagation(); handleGroupSync(group.id) }}
                       disabled={syncingGroups.has(group.id)}
-                      className="flex items-center justify-center px-2 py-1 text-sm text-green-700 hover:bg-green-100 rounded transition-colors disabled:opacity-50"
+                      className={`flex items-center justify-center px-2 py-1 h-8 min-h-8 max-h-8 text-sm rounded transition-colors disabled:opacity-50 ${
+                        isMono
+                          ? 'bg-black border border-white/20 text-white hover:bg-white/10'
+                          : isModern
+                          ? 'bg-gradient-to-br from-purple-100 to-blue-100 text-purple-800 hover:from-purple-200 hover:to-blue-200'
+                          : isModernDark
+                          ? 'bg-gradient-to-br from-purple-800 to-blue-800 text-purple-100 hover:from-purple-700 hover:to-blue-700'
+                          : 'bg-green-100 text-green-700 hover:bg-green-200'
+                      }`}
                       title="Sync all users in this group"
                     >
                       <RefreshCw className={`w-4 h-4 ${syncingGroups.has(group.id) ? 'animate-spin' : ''}`} />
@@ -1305,7 +1870,15 @@ export default function GroupsPage() {
                         })
                       }}
                       disabled={deleteGroupMutation.isPending}
-                      className="flex items-center justify-center px-2 py-1 text-sm text-red-700 hover:bg-red-100 rounded transition-colors disabled:opacity-50"
+                      className={`flex items-center justify-center px-2 py-1 h-8 min-h-8 max-h-8 text-sm rounded transition-colors disabled:opacity-50 ${
+                        isMono
+                          ? 'bg-black border border-white/20 text-white hover:bg-white/10'
+                          : isModern
+                          ? 'bg-gradient-to-br from-purple-100 to-blue-100 text-purple-800 hover:from-purple-200 hover:to-blue-200'
+                          : isModernDark
+                          ? 'bg-gradient-to-br from-purple-800 to-blue-800 text-purple-100 hover:from-purple-700 hover:to-blue-700'
+                          : 'bg-red-100 text-red-700 hover:bg-red-200'
+                      }`}
                       title="Delete group"
                     >
                       <Trash2 className="w-4 h-4" />
@@ -1318,7 +1891,7 @@ export default function GroupsPage() {
         </div>
       )}
 
-      {filteredGroups.length === 0 && (
+      {!isLoading && !error && filteredGroups.length === 0 && (
         <div className="text-center py-12">
           <Users className="w-12 h-12 text-gray-400 mx-auto mb-4" />
           <h3 className={`text-lg font-medium mb-2 ${isDark ? 'text-white' : 'text-gray-900'}`}>
@@ -1334,7 +1907,15 @@ export default function GroupsPage() {
             <div className="mt-6">
               <button
                 onClick={() => setShowAddModal(true)}
-                className="flex items-center justify-center px-3 py-2 sm:px-4 bg-stremio-purple text-white rounded-lg hover:bg-purple-700 transition-colors text-sm sm:text-base mx-auto"
+                className={`flex items-center justify-center px-3 py-2 sm:px-4 text-white rounded-lg transition-colors text-sm sm:text-base mx-auto ${
+                  isModern
+                    ? 'bg-gradient-to-br from-purple-600 via-purple-700 to-blue-800 hover:from-purple-700 hover:via-purple-800 hover:to-blue-900'
+                    : isModernDark
+                    ? 'bg-gradient-to-br from-purple-800 via-purple-900 to-blue-900 hover:from-purple-900 hover:via-purple-950 hover:to-indigo-900'
+                    : isMono
+                    ? 'bg-black hover:bg-gray-800'
+                    : 'bg-stremio-purple hover:bg-purple-700'
+                }`}
               >
                 <Plus className="w-4 h-4 sm:w-5 sm:h-5 mr-2" />
                 <span className="hidden sm:inline">Add Your First Group</span>
@@ -1352,6 +1933,7 @@ export default function GroupsPage() {
           onClick={(e) => {
             if (e.target === e.currentTarget) {
               setShowAddModal(false)
+              resetAddModal()
             }
           }}
         >
@@ -1359,7 +1941,10 @@ export default function GroupsPage() {
             <div className="flex items-center justify-between mb-4">
               <h2 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>Create New Group</h2>
               <button
-                onClick={() => setShowAddModal(false)}
+                onClick={() => {
+                  setShowAddModal(false)
+                  resetAddModal()
+                }}
                 className={`${isDark ? 'text-gray-400 hover:text-gray-300' : 'text-gray-400 hover:text-gray-600'}`}
               >
                 ×
@@ -1373,7 +1958,12 @@ export default function GroupsPage() {
                   toast.error('Group name is required')
                   return
                 }
-                createGroupMutation.mutate({ name: newGroupName.trim(), description: newGroupDescription.trim() || undefined })
+            const currentColorIndex = newGroupColorIndexRef.current
+            createGroupMutation.mutate({ 
+              name: newGroupName.trim(), 
+              description: newGroupDescription.trim() || undefined,
+              colorIndex: currentColorIndex
+            })
               }}
             >
               <div>
@@ -1407,23 +1997,22 @@ export default function GroupsPage() {
               <div>
                 <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>Color</label>
                 <div className="flex items-center gap-2">
-                  {[
-                    { name: 'purple', className: 'bg-stremio-purple' },
-                    { name: 'blue', className: 'bg-blue-500' },
-                    { name: 'green', className: 'bg-green-500' },
-                    { name: 'orange', className: 'bg-orange-500' },
-                    { name: 'red', className: 'bg-red-500' },
-                    { name: 'gray', className: 'bg-gray-500' },
-                  ].map(opt => (
+                  {getColorOptions(isMono ? 'mono' : isModern ? 'modern' : isModernDark ? 'modern-dark' : isDark ? 'dark' : 'light').map((colorOption, index) => (
                     <button
-                      key={opt.name}
+                      key={index + 1}
                       type="button"
-                      onClick={() => setNewGroupColor(opt.name)}
-                      aria-pressed={newGroupColor === opt.name}
-                      className={`relative w-8 h-8 rounded-full border-2 transition ${opt.className} ${newGroupColor === opt.name ? 'border-white ring-2 ring-offset-2 ring-stremio-purple' : 'border-gray-300'}`}
-                      title={opt.name}
+                  onClick={() => {
+                    const selectedIndex = index + 1
+                    setNewGroupColorIndex(selectedIndex)
+                    newGroupColorIndexRef.current = selectedIndex
+                  }}
+                      aria-pressed={newGroupColorIndex === index + 1}
+                      className={`relative w-8 h-8 rounded-full border-2 transition ${newGroupColorIndex === index + 1 ? 'border-white ring-2 ring-offset-2 ring-stremio-purple' : 'border-gray-300'}`}
+                      style={{ 
+                        backgroundColor: getColorValue(colorOption.bg)
+                      }}
                     >
-                      {newGroupColor === opt.name && (
+                      {newGroupColorIndex === index + 1 && (
                         <span className="absolute inset-0 flex items-center justify-center">
                           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="white" className="w-4 h-4">
                             <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-7.25 7.25a1 1 0 01-1.414 0l-3-3a1 1 0 111.414-1.414L8.5 11.586l6.543-6.543a1 1 0 011.414 0z" clipRule="evenodd" />
@@ -1437,7 +2026,10 @@ export default function GroupsPage() {
               <div className="flex gap-3 pt-4">
                 <button
                   type="button"
-                  onClick={() => setShowAddModal(false)}
+                  onClick={() => {
+                    setShowAddModal(false)
+                    resetAddModal()
+                  }}
                   className={`flex-1 px-4 py-2 rounded-lg transition-colors ${
                     isDark 
                       ? 'text-gray-300 bg-gray-700 hover:bg-gray-600' 
@@ -1578,9 +2170,37 @@ export default function GroupsPage() {
               <div className="flex items-center justify-between mb-6">
                 <div className="flex flex-col">
                   <div className="flex items-center gap-4">
-                    <h2 className={`text-xl font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                      {selectedGroup.name}
-                    </h2>
+                    {editingDetailGroupName ? (
+                      <input
+                        type="text"
+                        value={tempDetailGroupName}
+                        onChange={(e) => setTempDetailGroupName(e.target.value)}
+                        onBlur={() => handleBlurDetailGroupName(selectedGroup.name)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            handleSaveDetailGroupName(selectedGroup.name)
+                          } else if (e.key === 'Escape') {
+                            setEditingDetailGroupName(false)
+                            setTempDetailGroupName('')
+                          }
+                        }}
+                        placeholder={selectedGroup.name}
+                        className={`px-2 py-1 text-xl font-bold border rounded focus:ring-2 focus:ring-stremio-purple focus:border-transparent ${
+                          isDark 
+                            ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
+                            : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
+                        }`}
+                        autoFocus
+                      />
+                    ) : (
+                      <h2 
+                        className={`text-xl font-bold cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 px-2 py-1 rounded transition-colors ${isDark ? 'text-white' : 'text-gray-900'}`}
+                        onClick={() => handleStartEditDetailGroupName(selectedGroup.name)}
+                        title="Click to edit group name"
+                      >
+                        {selectedGroup.name}
+                      </h2>
+                    )}
                     <div className="flex items-center gap-2">
                       <Users className={`w-4 h-4 ${isDark ? 'text-gray-400' : 'text-gray-500'}`} />
                       <span className={`text-sm font-medium ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
@@ -1659,8 +2279,12 @@ export default function GroupsPage() {
                         </button>
                         <div className="flex items-center">
                           <div
-                            className={`w-12 h-12 rounded-full flex items-center justify-center text-white ${!selectedGroup?.color ? 'bg-stremio-purple' : (typeof selectedGroup.color === 'string' && selectedGroup.color.trim().startsWith('#') ? '' : getGroupColorClass(selectedGroup.color))}`}
-                            style={typeof selectedGroup?.color === 'string' && selectedGroup.color.trim().startsWith('#') ? ({ backgroundColor: selectedGroup.color } as React.CSSProperties) : undefined}
+                            className={`w-12 h-12 rounded-full flex items-center justify-center text-white ${getGroupColorClass(selectedGroup?.colorIndex)} ${
+                              isMono ? 'border border-white/20' : ''
+                            }`}
+                            style={{
+                              backgroundColor: selectedGroup?.colorIndex === 2 && isMono ? '#1f2937' : undefined
+                            }}
                           >
                             <span className="text-white font-semibold text-lg">
                               {member.username ? member.username.charAt(0).toUpperCase() : 
