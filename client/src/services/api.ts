@@ -95,6 +95,7 @@ export interface CreateAddonData {
   url: string
   name?: string
   description?: string
+  groupIds?: string[]
 }
 
 export interface UpdateAddonData {
