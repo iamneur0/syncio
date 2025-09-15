@@ -69,7 +69,7 @@ export interface Addon {
   description: string
   url: string
   version?: string
-  tags: string[]
+  tags: string
   iconUrl?: string
   status: 'active' | 'inactive'
   users: number
@@ -132,8 +132,19 @@ export const usersAPI = {
   },
 
   // Get user sync status (lightweight)
-  getSyncStatus: async (id: string): Promise<any> => {
-    const response: AxiosResponse<any> = await api.get(`/users/${id}/sync-status`)
+  getSyncStatus: async (id: string, groupId?: string): Promise<any> => {
+    const url = groupId ? `/users/${id}/sync-status?groupId=${encodeURIComponent(groupId)}` : `/users/${id}/sync-status`
+    const response: AxiosResponse<any> = await api.get(url)
+    return response.data
+  },
+
+  // Sync one user via the dedicated endpoint
+  sync: async (id: string, excludedManifestUrls: string[] = [], syncMode: 'normal' | 'advanced' = 'normal'): Promise<any> => {
+    const response: AxiosResponse<any> = await api.post(
+      `/users/${id}/sync`,
+      { excludedManifestUrls },
+      { headers: { 'x-sync-mode': syncMode } }
+    )
     return response.data
   },
 

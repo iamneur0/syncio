@@ -2319,14 +2319,8 @@ export default function UsersPage() {
                       <div className="flex items-center gap-1">
                         <button
                           onClick={(e) => { e.stopPropagation(); handleViewUserDetails(user) }}
-                          className={`flex items-center justify-center px-2 py-1 h-8 min-h-8 max-h-8 text-sm rounded transition-colors ${
-                            isMono
-                              ? 'bg-black border border-white/20 text-white hover:bg-white/10'
-                              : isModern
-                              ? 'bg-gradient-to-br from-purple-100 to-blue-100 text-purple-800 hover:from-purple-200 hover:to-blue-200'
-                              : isModernDark
-                              ? 'bg-gradient-to-br from-purple-800 to-blue-800 text-purple-100 hover:from-purple-700 hover:to-blue-700'
-                              : 'bg-blue-100 text-blue-700 hover:bg-blue-200'
+                          className={`flex items-center justify-center h-8 w-8 text-sm rounded transition-colors focus:outline-none ${
+                            isDark ? 'text-gray-300 hover:text-blue-400' : 'text-gray-600 hover:text-blue-600'
                           }`}
                           title="View user details"
                         >
@@ -2335,14 +2329,8 @@ export default function UsersPage() {
                         <button
                           onClick={(e) => { e.stopPropagation(); syncUserMutation.mutate(user.id) }}
                           disabled={syncUserMutation.isPending}
-                          className={`flex items-center justify-center px-2 py-1 h-8 min-h-8 max-h-8 text-sm rounded transition-colors disabled:opacity-50 ${
-                            isMono
-                              ? 'bg-black border border-white/20 text-white hover:bg-white/10'
-                              : isModern
-                              ? 'bg-gradient-to-br from-purple-100 to-blue-100 text-purple-800 hover:from-purple-200 hover:to-blue-200'
-                              : isModernDark
-                              ? 'bg-gradient-to-br from-purple-800 to-blue-800 text-purple-100 hover:from-purple-700 hover:to-blue-700'
-                              : 'bg-green-100 text-green-700 hover:bg-green-200'
+                          className={`flex items-center justify-center h-8 w-8 text-sm rounded transition-colors disabled:opacity-50 focus:outline-none ${
+                            isDark ? 'text-gray-300 hover:text-green-400' : 'text-gray-600 hover:text-green-600'
                           }`}
                           title="Sync user addons"
                         >
@@ -2351,14 +2339,8 @@ export default function UsersPage() {
                         <button 
                           onClick={(e) => { e.stopPropagation(); handleDeleteUser(user.id, user.username) }}
                           disabled={deleteUserMutation.isPending}
-                          className={`flex items-center justify-center px-2 py-1 h-8 min-h-8 max-h-8 text-sm rounded transition-colors disabled:opacity-50 ${
-                            isMono
-                              ? 'bg-black border border-white/20 text-white hover:bg-white/10'
-                              : isModern
-                              ? 'bg-gradient-to-br from-purple-100 to-blue-100 text-purple-800 hover:from-purple-200 hover:to-blue-200'
-                              : isModernDark
-                              ? 'bg-gradient-to-br from-purple-800 to-blue-800 text-purple-100 hover:from-purple-700 hover:to-blue-700'
-                              : 'bg-red-100 text-red-700 hover:bg-red-200'
+                          className={`flex items-center justify-center h-8 w-8 text-sm rounded transition-colors disabled:opacity-50 focus:outline-none ${
+                            isDark ? 'text-gray-300 hover:text-red-400' : 'text-gray-600 hover:text-red-600'
                           }`}
                           title="Delete user"
                         >

@@ -74,6 +74,8 @@ model GroupMember {
   id       String   @id @default(cuid())
   role     String   @default("MEMBER") // Changed from GroupMemberRole enum
   joinedAt DateTime @default(now())
+  // Membership-scoped exclusions
+  excludedAddons String? // JSON array of excluded addon URLs for this group membership
 
   // Relationships
   userId  String
