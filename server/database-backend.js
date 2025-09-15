@@ -969,6 +969,148 @@ app.post('/api/users/:id/sync', async (req, res) => {
   }
 })
 
+// Helper function to get Stremio addons for a user
+async function getStremioAddons(stremioAuthKey) {
+  try {
+    // Decrypt stored auth key
+    const authKeyPlain = decrypt(stremioAuthKey)
+    
+    // Use stateless client with authKey to fetch addon collection directly
+    const apiClient = new StremioAPIClient({ endpoint: 'https://api.strem.io', authKey: authKeyPlain })
+    const collection = await apiClient.request('addonCollectionGet', {})
+    
+    const rawAddons = collection?.addons || collection || {}
+    const addonsNormalized = Array.isArray(rawAddons)
+      ? rawAddons
+      : (typeof rawAddons === 'object' ? Object.values(rawAddons) : [])
+    
+    // Process addons to get normalized format
+    return addonsNormalized.map((a) => {
+      return {
+        id: a?.id || a?.manifest?.id || 'unknown',
+        name: a?.name || a?.manifest?.name || 'Unknown',
+        manifestUrl: a?.manifestUrl || a?.transportUrl || a?.url || null,
+        version: a?.version || a?.manifest?.version || 'unknown',
+        description: a?.description || a?.manifest?.description || '',
+        iconUrl: a?.iconUrl || a?.manifest?.logo || null
+      }
+    })
+  } catch (error) {
+    console.error('Error fetching Stremio addons:', error)
+    return []
+  }
+}
+
+// Reload all addons for a user and apply them to their Stremio account
+app.post('/api/users/:id/reload-addons', async (req, res) => {
+  try {
+    const { id } = req.params
+    console.log('🔄 Reload user addons endpoint called for user:', id)
+
+    const user = await prisma.user.findUnique({
+      where: { id }
+    })
+
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' })
+    }
+
+    if (!user.stremioAuthKey) {
+      return res.status(400).json({ message: 'User is not connected to Stremio' })
+    }
+
+    console.log(`🔄 Fetching current Stremio addons for user: ${user.username || user.email}`)
+
+    // Get current addons from user's Stremio account
+    const stremioAddons = await getStremioAddons(user.stremioAuthKey)
+    
+    if (!stremioAddons || stremioAddons.length === 0) {
+      return res.status(400).json({ message: 'No addons found in user Stremio account' })
+    }
+
+    console.log(`🔄 Found ${stremioAddons.length} addons in user's Stremio account`)
+
+    let reloadedCount = 0
+    const reloadErrors = []
+    const reloadedAddons = []
+
+    // Reload each addon from user's Stremio account
+    for (const stremioAddon of stremioAddons) {
+      try {
+        console.log(`🔄 Reloading addon: ${stremioAddon.name} (${stremioAddon.manifestUrl})`)
+        const response = await fetch(stremioAddon.manifestUrl, {
+          method: 'GET',
+          headers: { 'Accept': 'application/json' },
+          signal: AbortSignal.timeout(10000)
+        })
+
+        if (response.ok) {
+          const manifestData = await response.json()
+          const reloadedAddon = {
+            ...stremioAddon,
+            name: manifestData?.name || stremioAddon.name,
+            description: manifestData?.description || stremioAddon.description,
+            version: manifestData?.version || stremioAddon.version,
+            iconUrl: manifestData?.logo || stremioAddon.iconUrl,
+            id: manifestData?.id || stremioAddon.id,
+            manifestData: manifestData
+          }
+          reloadedAddons.push(reloadedAddon)
+          console.log(`✅ Reloaded addon: ${reloadedAddon.name} ${reloadedAddon.version}`)
+          reloadedCount++
+        } else {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+        }
+      } catch (error) {
+        console.error(`❌ Failed to reload addon ${stremioAddon.name}:`, error.message)
+        reloadErrors.push(`${stremioAddon.name}: ${error.message}`)
+        // Still include the original addon if reload fails
+        reloadedAddons.push(stremioAddon)
+      }
+    }
+
+    console.log('🔄 Applying reloaded addons to user Stremio account...')
+
+    // Apply the reloaded addons to user's Stremio account
+    const authKeyPlain = decrypt(user.stremioAuthKey)
+    const apiClient = new StremioAPIClient({ endpoint: 'https://api.strem.io', authKey: authKeyPlain })
+    
+    // Create the addon collection with reloaded addons in the proper format
+    const addonCollection = reloadedAddons.map(addon => ({
+      transportName: addon.name,
+      transportUrl: addon.manifestUrl,
+      id: addon.id,
+      version: addon.version,
+      manifest: addon.manifestData || {}
+    }))
+
+    // Push the reloaded addon collection to Stremio
+    await apiClient.request('addonCollectionSet', { addons: addonCollection })
+    console.log('✅ Pushed reloaded addon collection to Stremio API')
+
+    const response = {
+      message: `Successfully reloaded ${reloadedCount}/${stremioAddons.length} addons from user's Stremio account`,
+      reloadedCount,
+      totalAddons: stremioAddons.length,
+      reloadedAddons: reloadedAddons.map(addon => ({
+        name: addon.name,
+        version: addon.version,
+        id: addon.id
+      }))
+    }
+
+    if (reloadErrors.length > 0) {
+      response.reloadErrors = reloadErrors
+    }
+
+    res.json(response)
+
+  } catch (error) {
+    console.error('Error reloading user addons:', error)
+    return res.status(500).json({ message: 'Failed to reload user addons', error: error?.message })
+  }
+})
+
 // Add specific addons to user's Stremio account
 app.post('/api/users/:id/stremio-addons/add', async (req, res) => {
   try {
