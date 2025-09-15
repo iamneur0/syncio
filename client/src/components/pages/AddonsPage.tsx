@@ -991,7 +991,7 @@ export default function AddonsPage() {
                         </div>
                         {addon.tags && addon.tags.length > 0 && (
                           <div className="flex flex-wrap gap-1 mt-1">
-                            {addon.tags.map((tag: string, index: number) => (
+                            {addon.tags.split(',').map((tag: string, index: number) => (
                               <span
                                 key={index}
                                 className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium ${
@@ -1000,7 +1000,7 @@ export default function AddonsPage() {
                                     : 'bg-purple-100 text-purple-800'
                                 }`}
                               >
-                                {tag}
+                                {tag.trim()}
                               </span>
                             ))}
                           </div>
@@ -1080,22 +1080,6 @@ export default function AddonsPage() {
                       <Eye className="w-4 h-4 mr-1" />
                       View
                     </button>
-                    <button 
-                      onClick={() => reloadAddonMutation.mutate(addon.id)}
-                      disabled={reloadAddonMutation.isPending}
-                      className={`flex items-center justify-center px-3 py-2 h-8 min-h-8 max-h-8 text-sm rounded transition-colors disabled:opacity-50 ${
-                        isModern
-                          ? 'bg-gradient-to-br from-purple-100 to-blue-100 text-purple-800 hover:from-purple-200 hover:to-blue-200'
-                          : isModernDark
-                          ? 'bg-gradient-to-br from-purple-800 to-blue-800 text-purple-100 hover:from-purple-700 hover:to-blue-700'
-                          : isMono
-                          ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                          : 'bg-green-100 text-green-700 hover:bg-green-200'
-                      }`}
-                      title="Reload addon manifest"
-                    >
-                      <RefreshCw className={`w-4 h-4 ${reloadAddonMutation.isPending ? 'animate-spin' : ''}`} />
-                    </button>
                     {/* Settings: open configure URL in new tab */}
                     <button
                       onClick={() => {
@@ -1118,6 +1102,22 @@ export default function AddonsPage() {
                       title="Open addon settings"
                     >
                       <Settings className="w-4 h-4" />
+                    </button>
+                    <button 
+                      onClick={() => reloadAddonMutation.mutate(addon.id)}
+                      disabled={reloadAddonMutation.isPending}
+                      className={`flex items-center justify-center px-3 py-2 h-8 min-h-8 max-h-8 text-sm rounded transition-colors disabled:opacity-50 ${
+                        isModern
+                          ? 'bg-gradient-to-br from-purple-100 to-blue-100 text-purple-800 hover:from-purple-200 hover:to-blue-200'
+                          : isModernDark
+                          ? 'bg-gradient-to-br from-purple-800 to-blue-800 text-purple-100 hover:from-purple-700 hover:to-blue-700'
+                          : isMono
+                          ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                          : 'bg-green-100 text-green-700 hover:bg-green-200'
+                      }`}
+                      title="Reload addon manifest"
+                    >
+                      <RefreshCw className={`w-4 h-4 ${reloadAddonMutation.isPending ? 'animate-spin' : ''}`} />
                     </button>
                     {/* Keep Remove (hard delete) always present */}
                     <button 
@@ -1261,22 +1261,6 @@ export default function AddonsPage() {
                       
                       {/* Action buttons */}
                       <div className="flex items-center gap-1">
-                        <button 
-                          onClick={(e) => { e.stopPropagation(); reloadAddonMutation.mutate(addon.id) }}
-                          disabled={reloadAddonMutation.isPending}
-                          className={`flex items-center justify-center px-2 py-1 h-8 min-h-8 max-h-8 text-sm rounded transition-colors disabled:opacity-50 ${
-                            isMono
-                              ? 'text-white hover:bg-white/10'
-                              : isModern
-                              ? 'text-purple-800 hover:bg-gradient-to-br hover:from-purple-100 hover:to-blue-100'
-                              : isModernDark
-                              ? 'text-purple-300 hover:bg-gradient-to-br hover:from-purple-800 hover:to-blue-800'
-                              : 'text-green-700 hover:bg-green-100'
-                          }`}
-                          title="Reload addon manifest"
-                        >
-                          <RefreshCw className={`w-4 h-4 ${reloadAddonMutation.isPending ? 'animate-spin' : ''}`} />
-                        </button>
                         <button
                           onClick={(e) => { e.stopPropagation();
                             try {
@@ -1286,30 +1270,28 @@ export default function AddonsPage() {
                               window.open(configureUrl, '_blank', 'noreferrer')
                             } catch {}
                           }}
-                          className={`flex items-center justify-center px-2 py-1 h-8 min-h-8 max-h-8 text-sm rounded transition-colors ${
-                            isMono
-                              ? 'text-white hover:bg-white/10'
-                              : isModern
-                              ? 'text-purple-800 hover:bg-gradient-to-br hover:from-purple-100 hover:to-blue-100'
-                              : isModernDark
-                              ? 'text-purple-300 hover:bg-gradient-to-br hover:from-purple-800 hover:to-blue-800'
-                              : 'text-blue-700 hover:bg-blue-100'
+                          className={`flex items-center justify-center h-8 w-8 text-sm rounded transition-colors focus:outline-none ${
+                            isDark ? 'text-gray-300 hover:text-blue-400' : 'text-gray-600 hover:text-blue-600'
                           }`}
                           title="Open addon settings"
                         >
                           <Settings className="w-4 h-4" />
                         </button>
                         <button 
+                          onClick={(e) => { e.stopPropagation(); reloadAddonMutation.mutate(addon.id) }}
+                          disabled={reloadAddonMutation.isPending}
+                          className={`flex items-center justify-center h-8 w-8 text-sm rounded transition-colors disabled:opacity-50 focus:outline-none ${
+                            isDark ? 'text-gray-300 hover:text-green-400' : 'text-gray-600 hover:text-green-600'
+                          }`}
+                          title="Reload addon manifest"
+                        >
+                          <RefreshCw className={`w-4 h-4 ${isReloadingAll || reloadAddonMutation.isPending ? 'animate-spin' : ''}`} />
+                        </button>
+                        <button 
                           onClick={(e) => { e.stopPropagation(); handleDeleteAddon(addon.id, addon.name) }}
                           disabled={deleteAddonMutation.isPending}
-                          className={`flex items-center justify-center px-2 py-1 h-8 min-h-8 max-h-8 text-sm rounded transition-colors disabled:opacity-50 ${
-                            isMono
-                              ? 'text-white hover:bg-white/10'
-                              : isModern
-                              ? 'text-purple-800 hover:bg-gradient-to-br hover:from-purple-100 hover:to-blue-100'
-                              : isModernDark
-                              ? 'text-purple-300 hover:bg-gradient-to-br hover:from-purple-800 hover:to-blue-800'
-                              : 'text-red-700 hover:bg-red-100'
+                          className={`flex items-center justify-center h-8 w-8 text-sm rounded transition-colors disabled:opacity-50 focus:outline-none ${
+                            isDark ? 'text-gray-300 hover:text-red-400' : 'text-gray-600 hover:text-red-600'
                           }`}
                           title="Delete addon"
                         >

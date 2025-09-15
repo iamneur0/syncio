@@ -427,6 +427,36 @@ app.put('/api/users/:id/excluded-addons', async (req, res) => {
   }
 })
 
+// Update membership (group-specific) excluded addons
+app.put('/api/groups/:groupId/members/:userId/excluded-addons', async (req, res) => {
+  try {
+    const { groupId, userId } = req.params
+    const { excludedAddons } = req.body
+    console.log(`🔍 PUT /api/groups/${groupId}/members/${userId}/excluded-addons called with:`, excludedAddons)
+
+    const membership = await prisma.groupMember.findFirst({
+      where: { groupId, userId },
+      select: { id: true }
+    })
+    if (!membership) {
+      return res.status(404).json({ message: 'Membership not found' })
+    }
+
+    await prisma.groupMember.update({
+      where: { id: membership.id },
+      data: { excludedAddons: JSON.stringify(excludedAddons || []) }
+    })
+
+    res.json({
+      message: 'Membership excluded addons updated successfully',
+      excludedAddons: excludedAddons || []
+    })
+  } catch (error) {
+    console.error('Error updating membership excluded addons:', error)
+    res.status(500).json({ message: 'Failed to update membership excluded addons' })
+  }
+})
+
 // Update user protected addons
 app.put('/api/users/:id/protected-addons', async (req, res) => {
   try {
@@ -486,7 +516,8 @@ function filterDefaultAddons(addons) {
 app.get('/api/users/:id/sync-status', async (req, res) => {
   try {
     const { id } = req.params
-    console.log(`🔍 GET /api/users/${id}/sync-status called`)
+    const { groupId } = req.query
+    console.log(`🔍 GET /api/users/${id}/sync-status called${groupId ? ` for group ${groupId}` : ''}`)
     
     const user = await prisma.user.findUnique({
       where: { id },
@@ -582,23 +613,36 @@ app.get('/api/users/:id/sync-status', async (req, res) => {
     
     const expectedAddons = groupAddons
 
-    // Parse excluded addons from user data
+    // Resolve exclusions: prefer membership-level for provided groupId, otherwise fallback to user-level
     let excludedAddons = []
     try {
-      if (user.excludedAddons) {
-        excludedAddons = JSON.parse(user.excludedAddons)
+      if (groupId) {
+        const membership = await prisma.groupMember.findFirst({
+          where: { userId: id, groupId: String(groupId) },
+          select: { excludedAddons: true }
+        })
+        if (membership?.excludedAddons) {
+          if (Array.isArray(membership.excludedAddons)) {
+            excludedAddons = membership.excludedAddons
+          } else if (typeof membership.excludedAddons === 'string') {
+            excludedAddons = JSON.parse(membership.excludedAddons)
+          }
+        }
+      }
+      // Fallback to user-level exclusions if still empty
+      if (excludedAddons.length === 0 && user.excludedAddons) {
+        if (Array.isArray(user.excludedAddons)) {
+          excludedAddons = user.excludedAddons
+        } else if (typeof user.excludedAddons === 'string') {
+          excludedAddons = JSON.parse(user.excludedAddons)
+        }
       }
     } catch (e) {
-      console.error('Error parsing excluded addons:', e)
+      console.error('Error resolving excluded addons:', e)
     }
     
 
-    // Filter out default addons from Stremio addons for sync comparison only
-    const filteredStremioAddons = filterDefaultAddons(stremioAddons)
-    
-    console.log(`🔍 Filtered out ${stremioAddons.length - filteredStremioAddons.length} default addons, ${filteredStremioAddons.length} custom addons remain`)
-
-    // Filter out excluded addons from expected addons
+    // Filter out excluded addons from expected addons first
     const excludedSet = new Set(excludedAddons.map(url => url.trim()))
     const filteredExpectedAddons = expectedAddons.filter(addon => 
       !excludedSet.has(addon.manifestUrl)
@@ -608,19 +652,68 @@ app.get('/api/users/:id/sync-status', async (req, res) => {
     console.log(`🔍 Excluded addons:`, Array.from(excludedSet))
     console.log(`🔍 Filtered out ${expectedAddons.length - filteredExpectedAddons.length} excluded addons, ${filteredExpectedAddons.length} expected addons remain`)
 
-    // Compare filtered Stremio addons with filtered expected addons
-    // Match by transportUrl/manifestUrl since that's the reliable identifier
-    // Also check order by comparing the arrays element by element
-    const isSynced = filteredStremioAddons.length === filteredExpectedAddons.length && 
-      filteredExpectedAddons.every((expected, index) => {
-        const stremioAddon = filteredStremioAddons[index]
-        return stremioAddon && (stremioAddon.transportUrl || stremioAddon.manifestUrl) === expected.manifestUrl
-      })
+    // For sync comparison, we need to check if the user's Stremio addons match what's expected
+    // We don't filter Stremio addons here - we compare what's actually in Stremio vs what should be there
+    console.log(`🔍 Stremio addons: ${stremioAddons.length} addons`)
+    console.log(`🔍 Expected addons: ${filteredExpectedAddons.length} addons`)
+
+    // Compare Stremio addons with expected addons
+    // For a user to be synced, we need:
+    // 1. All expected addons are present in Stremio
+    // 2. No extra addons in Stremio that aren't expected (excluding default addons)
+    
+    // Filter out default addons from Stremio addons for comparison
+    // Default addons in Stremio should be ignored unless they're explicitly expected
+    const nonDefaultStremioAddons = filterDefaultAddons(stremioAddons)
+    
+    // Create sets for efficient lookup
+    const stremioAddonUrls = new Set(stremioAddons.map(addon => addon.transportUrl || addon.manifestUrl).filter(Boolean))
+    const nonDefaultStremioAddonUrls = new Set(nonDefaultStremioAddons.map(addon => addon.transportUrl || addon.manifestUrl).filter(Boolean))
+    const expectedAddonUrls = new Set(filteredExpectedAddons.map(addon => addon.manifestUrl))
+    
+    // Check if all expected addons are present in Stremio
+    // All expected addons (from groups) should be present in Stremio, regardless of whether they're default addons
+    const missingAddons = filteredExpectedAddons.filter(expectedAddon => 
+      !stremioAddonUrls.has(expectedAddon.manifestUrl)
+    )
+    
+    // Check if there are extra addons in Stremio that aren't expected
+    // Only consider non-default addons as "extra" - default addons are ignored unless expected
+    // Treat excluded addons present in Stremio as extra (unsynced)
+    const extraAddons = nonDefaultStremioAddons.filter(stremioAddon => {
+      const addonUrl = stremioAddon.transportUrl || stremioAddon.manifestUrl
+      return addonUrl && !expectedAddonUrls.has(addonUrl)
+    })
+    
+    // Check if the order matches exactly
+    // Get the user's addons in the order they appear in Stremio, filtered to only group addons
+    const userStremioAddonUrls = stremioAddons
+      .map(addon => addon.transportUrl || addon.manifestUrl)
+      .filter(Boolean)
+    
+    const userGroupAddons = userStremioAddonUrls.filter(url => expectedAddonUrls.has(url))
+    const expectedAddonUrlsOrdered = filteredExpectedAddons.map(addon => addon.manifestUrl)
+    const orderMatches = JSON.stringify(userGroupAddons) === JSON.stringify(expectedAddonUrlsOrdered)
+    
+    console.log(`🔍 Expected addons before filtering:`, filteredExpectedAddons.map(a => ({ name: a.name, manifestUrl: a.manifestUrl })))
+    console.log(`🔍 Excluded addons:`, excludedAddons)
+    console.log(`🔍 Filtered out ${excludedAddons.length} excluded addons, ${expectedAddonUrlsOrdered.length} expected addons remain`)
+    console.log(`🔍 Stremio addons: ${stremioAddons.length} addons`)
+    console.log(`🔍 Expected addons: ${expectedAddonUrlsOrdered.length} addons`)
+    console.log(`🔍 Expected order: ${JSON.stringify(expectedAddonUrlsOrdered)}`)
+    console.log(`🔍 User's group addons: ${JSON.stringify(userGroupAddons)}`)
+    console.log(`🔍 Order matches: ${orderMatches}`)
+    
+    const isSynced = missingAddons.length === 0 && extraAddons.length === 0 && orderMatches
+    
+    console.log(`🔍 Missing addons: ${missingAddons.length}`, missingAddons.map(a => a.name))
+    console.log(`🔍 Extra addons: ${extraAddons.length}`, extraAddons.map(a => a.name || a.manifest?.name))
+    console.log(`🔍 User is ${isSynced ? 'synced' : 'unsynced'}`)
 
     return res.json({ 
       isSynced,
       status: isSynced ? 'synced' : 'unsynced',
-      stremioAddonCount: filteredStremioAddons.length,
+      stremioAddonCount: stremioAddons.length,
       expectedAddonCount: filteredExpectedAddons.length
     })
 
@@ -826,6 +919,19 @@ app.post('/api/users/:id/sync', async (req, res) => {
     })
     const { id } = req.params
     const { excludedManifestUrls = [] } = req.body || {}
+
+    // Extra debugging for body/exclusions shape
+    try {
+      console.log('🧪 Raw body type:', typeof req.body)
+      console.log('🧪 excludedManifestUrls type/array/length:', typeof excludedManifestUrls, Array.isArray(excludedManifestUrls), Array.isArray(excludedManifestUrls) ? excludedManifestUrls.length : 'n/a')
+      if (Array.isArray(excludedManifestUrls)) {
+        console.log('🧪 excludedManifestUrls (raw):', excludedManifestUrls)
+      } else {
+        console.log('🧪 excludedManifestUrls (non-array raw):', excludedManifestUrls)
+      }
+    } catch (e) {
+      console.log('🧪 Failed to log raw body/exclusions:', e?.message)
+    }
     const syncMode = getSyncMode(req)
 
     // Use the reusable sync function
@@ -1785,7 +1891,7 @@ app.get('/api/addons', async (req, res) => {
         description: addon.description,
         url: addon.manifestUrl,
         version: addon.version,
-        tags: addon.tags || [],
+        tags: addon.tags || '',
         iconUrl: addon.iconUrl,
         status: addon.isActive ? 'active' : 'inactive',
         users: totalUsers,
@@ -1815,7 +1921,7 @@ app.put('/api/addons/:id/enable', async (req, res) => {
       description: updated.description,
       url: updated.manifestUrl,
       version: updated.version,
-      tags: updated.tags || [],
+      tags: updated.tags || '',
       status: updated.isActive ? 'active' : 'inactive',
       users: 0,
       groups: 0
@@ -1840,7 +1946,7 @@ app.put('/api/addons/:id/disable', async (req, res) => {
       description: updated.description,
       url: updated.manifestUrl,
       version: updated.version,
-      tags: updated.tags || [],
+      tags: updated.tags || '',
       status: updated.isActive ? 'active' : 'inactive',
       users: 0,
       groups: 0
@@ -1920,7 +2026,7 @@ app.post('/api/addons', async (req, res) => {
           name: (name && name.trim()) ? name.trim() : (manifestData?.name || existingByUrl.name),
           description: description || manifestData?.description || existingByUrl.description || '',
           version: manifestData?.version || existingByUrl.version || null,
-          tags: Array.isArray(tags) ? tags : (existingByUrl.tags || []),
+          tags: tags || existingByUrl.tags || '',
           iconUrl: manifestData?.logo || existingByUrl.iconUrl || null // Store logo URL from manifest
         },
         select: { id: true, name: true, description: true, manifestUrl: true, version: true, tags: true, isActive: true }
@@ -1977,7 +2083,7 @@ app.post('/api/addons', async (req, res) => {
         description: reactivated.description,
         url: reactivated.manifestUrl,
         version: reactivated.version,
-        tags: reactivated.tags || [],
+        tags: reactivated.tags || '',
         status: reactivated.isActive ? 'active' : 'inactive',
         users: 0,
         groups: assignedGroups.length
@@ -2222,7 +2328,7 @@ app.post('/api/addons/import', upload.single('file'), async (req, res) => {
             description: manifest.description || '',
             manifestUrl: transportUrl,
             version: manifest.version || null,
-            tags: [],
+            tags: '', // Convert empty array to empty string for database
             iconUrl: manifest.logo || null,
             isActive: true,
           }
@@ -2313,7 +2419,7 @@ app.post('/api/addons/import-text', async (req, res) => {
             description: manifest.description || '',
             manifestUrl: transportUrl,
             version: manifest.version || null,
-            tags: [],
+            tags: '', // Convert empty array to empty string for database
             iconUrl: manifest.logo || null,
             isActive: true,
           }
@@ -2491,7 +2597,7 @@ app.put('/api/addons/:id', async (req, res) => {
       description: addonWithGroups.description,
       url: addonWithGroups.manifestUrl,
       version: addonWithGroups.version,
-      tags: addonWithGroups.tags || [],
+      tags: addonWithGroups.tags || '',
       status: addonWithGroups.isActive ? 'active' : 'inactive',
       users: totalUsers,
       groups: addonWithGroups.groupAddons.length
@@ -2946,7 +3052,19 @@ app.get('/api/groups/:id', async (req, res) => {
     const group = await prisma.group.findUnique({
       where: { id },
       include: {
-        members: { include: { user: true } },
+        members: { 
+          include: { 
+            user: {
+              select: {
+                id: true,
+                username: true,
+                email: true,
+                stremioAddons: true,
+                excludedAddons: true
+              }
+            }
+          }
+        },
         addons: { 
           include: { addon: true },
           orderBy: { addedAt: 'asc' }
@@ -2954,7 +3072,28 @@ app.get('/api/groups/:id', async (req, res) => {
       }
     })
     if (!group) return res.status(404).json({ message: 'Group not found' })
-    const memberUsers = group.members.map((m) => ({ id: m.user.id, username: m.user.username, email: m.user.email }))
+    // Get group addon manifest URLs for comparison
+    const groupManifestUrls = group.addons
+      .filter(ga => ga.addon.manifestUrl)
+      .map(ga => ga.addon.manifestUrl)
+    
+    const memberUsers = group.members.map((m) => {
+      const userStremioAddons = Array.isArray(m.user.stremioAddons) ? m.user.stremioAddons : Object.keys(m.user.stremioAddons || {})
+      const userExcludedAddons = m.user.excludedAddons || []
+      
+      // Count addons that match the group's addons (excluding user's excluded addons)
+      const matchingAddons = groupManifestUrls.filter(url => 
+        userStremioAddons.includes(url) && !userExcludedAddons.includes(url)
+      )
+      
+      return {
+        id: m.user.id, 
+        username: m.user.username, 
+        email: m.user.email,
+        stremioAddonsCount: matchingAddons.length,
+        excludedAddons: userExcludedAddons
+      }
+    })
     res.json({
       id: group.id,
       name: group.name,
@@ -3115,6 +3254,11 @@ function getSyncMode(req) {
 async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'normal') {
   try {
     console.log('🚀 Syncing user addons:', userId, { excludedManifestUrls })
+    // Normalize and log exclusions early
+    const localNormalize = (s) => (s || '').toString().trim().toLowerCase()
+    const rawExclArr = Array.isArray(excludedManifestUrls) ? excludedManifestUrls : []
+    const normalizedExcl = rawExclArr.map((u) => localNormalize(u))
+    console.log('🧪 Normalized exclusions:', normalizedExcl)
 
     // Load user, their first group and its addons
     const user = await prisma.user.findUnique({
@@ -3350,8 +3494,9 @@ async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'nor
       }
     }
 
-    // Filter out protected group addons - only sync non-protected group addons
-    const nonProtectedGroupAddons = desiredGroup.filter(addon => !isProtected(addon))
+    // Don't filter out protected group addons - if they're in groups, they should be synced
+    // Only filter out addons that are explicitly excluded
+    const nonProtectedGroupAddons = desiredGroup
     console.log('📊 Group addons details:', nonProtectedGroupAddons.map(a => ({ 
       name: a?.manifest?.name || a?.name, 
       id: a?.manifest?.id || a?.id,
@@ -3621,26 +3766,53 @@ app.post('/api/groups/:id/sync', async (req, res) => {
     let totalReloaded = 0
     let totalAddons = 0
     
-    // Sync each user in the group
+    // Sync each user in the group using the individual user sync HTTP endpoint
     for (const user of groupUsers) {
       try {
         console.log(`🔄 Syncing user: ${user.username || user.email}`)
-        
-        // Use the reusable sync function
-        const syncResult = await syncUserAddons(user.id, excludedManifestUrls, syncMode)
-        
-        if (syncResult.success) {
+
+        // Resolve membership-specific exclusions first, fallback to user-level
+        let memberExcluded = []
+        try {
+          const membership = await prisma.groupMember.findFirst({
+            where: { userId: user.id, groupId },
+            select: { excludedAddons: true }
+          })
+          if (membership?.excludedAddons) {
+            if (Array.isArray(membership.excludedAddons)) {
+              memberExcluded = membership.excludedAddons
+            } else if (typeof membership.excludedAddons === 'string') {
+              try { memberExcluded = JSON.parse(membership.excludedAddons) || [] } catch { memberExcluded = [] }
+            }
+          } else {
+            const userRes = await prisma.user.findUnique({ where: { id: user.id }, select: { excludedAddons: true } })
+            if (userRes?.excludedAddons) {
+              if (Array.isArray(userRes.excludedAddons)) {
+                memberExcluded = userRes.excludedAddons
+              } else if (typeof userRes.excludedAddons === 'string') {
+                try { memberExcluded = JSON.parse(userRes.excludedAddons) || [] } catch { memberExcluded = [] }
+              }
+            }
+          }
+        } catch (e) {
+          console.error('Failed to resolve membership/user exclusions:', e)
+        }
+
+        // Call the individual sync HTTP endpoint to ensure identical behavior
+        const response = await fetch(`http://localhost:4000/api/users/${user.id}/sync`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-sync-mode': syncMode },
+          body: JSON.stringify({ excludedManifestUrls: Array.isArray(memberExcluded) ? memberExcluded : [] })
+        })
+
+        const result = await response.json().catch(() => ({}))
+        if (response.ok) {
           syncedCount++
           console.log(`✅ Successfully synced user: ${user.username || user.email}`)
-          
-          // Collect reload progress if available
-          if (syncResult.reloadedCount !== undefined && syncResult.totalAddons !== undefined) {
-            totalReloaded += syncResult.reloadedCount
-            totalAddons += syncResult.totalAddons
-          }
         } else {
-          errors.push(`${user.username || user.email}: ${syncResult.error}`)
-          console.log(`❌ Failed to sync user: ${user.username || user.email} - ${syncResult.error}`)
+          const errorMsg = result?.message || result?.error || 'Unknown error'
+          errors.push(`${user.username || user.email}: ${errorMsg}`)
+          console.log(`❌ Failed to sync user: ${user.username || user.email} - ${errorMsg}`)
         }
       } catch (error) {
         errors.push(`${user.username || user.email}: ${error.message}`)
@@ -3743,9 +3915,65 @@ app.post('/api/groups/:id/addons/reorder', async (req, res) => {
     
     console.log(`✅ Successfully reordered ${orderedManifestUrls.length} addons for group ${groupId}`)
     
+    // Sync all users in the group to match the new order
+    console.log(`🔄 Syncing all users in group ${groupId} to match new addon order...`)
+    
+    try {
+      // Call the existing group sync endpoint logic
+      const group = await prisma.group.findUnique({
+        where: { id: groupId },
+        include: {
+          members: {
+            include: {
+              user: true
+            }
+          }
+        }
+      })
+      
+      if (!group) {
+        console.log(`⚠️ Group ${groupId} not found`)
+      } else if (!group.isActive) {
+        console.log(`⚠️ Group ${groupId} is disabled`)
+      } else {
+        const groupUsers = group.members.map(member => member.user).filter(user => user.stremioAuthKey)
+        
+        if (groupUsers.length === 0) {
+          console.log(`⚠️ No users with Stremio connections found in group ${groupId}`)
+        } else {
+          console.log(`👥 Found ${groupUsers.length} users with Stremio connections in group "${group.name}"`)
+          
+          let syncedCount = 0
+          const errors = []
+          
+          // Get the group's addon order for syncing
+          const groupAddons = await prisma.groupAddon.findMany({
+            where: { groupId },
+            include: { addon: true },
+            orderBy: { addedAt: 'asc' }
+          })
+          
+          const orderedManifestUrls = groupAddons
+            .filter(ga => ga.addon && ga.addon.manifestUrl)
+            .map(ga => ga.addon.manifestUrl)
+          
+          console.log(`📋 Group addon order for sync: ${orderedManifestUrls.length} addons`)
+          
+          
+          console.log(`✅ Group sync completed: ${syncedCount}/${groupUsers.length} users synced`)
+          if (errors.length > 0) {
+            console.log('⚠️ Some users failed to sync:', errors)
+          }
+        }
+      }
+    } catch (error) {
+      console.error(`❌ Error during group sync:`, error)
+    }
+    
     res.json({ 
-      message: 'Addons reordered successfully',
-      orderedCount: orderedManifestUrls.length
+      message: 'Addons reordered successfully and all users synced',
+      orderedCount: orderedManifestUrls.length,
+      isSynced: true // Since we just synced all users, they should be synced
     })
     
   } catch (error) {
@@ -4097,6 +4325,106 @@ app.post('/api/test/users', async (req, res) => {
     res.status(500).json({ message: 'Failed to create test user', error: error?.message });
   }
 });
+
+// Import user addons endpoint
+app.post('/api/users/:id/import-addons', async (req, res) => {
+  try {
+    const { id } = req.params
+    const { addons } = req.body || {}
+
+    if (!Array.isArray(addons) || addons.length === 0) {
+      return res.status(400).json({ message: 'addons array is required' })
+    }
+
+    const user = await prisma.user.findUnique({ where: { id } })
+    if (!user) return res.status(404).json({ message: 'User not found' })
+
+    // Create a new group named "{username} Imports"
+    const groupName = `${user.username} Imports`
+    const group = await prisma.group.create({
+      data: {
+        name: groupName,
+        description: `Imported addons from ${user.username}`,
+        colorIndex: 0, // Default color
+        isActive: true,
+      }
+    })
+
+    console.log(`✅ Created import group: ${groupName}`)
+
+    // Process each addon
+    const processedAddons = []
+    for (const addonData of addons) {
+      const addonUrl = addonData.manifestUrl || addonData.transportUrl || addonData.url
+      if (!addonUrl) continue
+
+      // Check if addon already exists
+      let addon = await prisma.addon.findFirst({
+        where: {
+          manifestUrl: addonUrl
+        }
+      })
+
+      // If addon doesn't exist, create it
+      if (!addon) {
+        try {
+          // Fetch manifest data
+          const manifestResponse = await fetch(addonUrl)
+          if (!manifestResponse.ok) {
+            console.log(`⚠️ Failed to fetch manifest for ${addonUrl}`)
+            continue
+          }
+          const manifestData = await manifestResponse.json()
+
+          addon = await prisma.addon.create({
+            data: {
+              name: addonData.name || addonData.manifest?.name || manifestData?.name || 'Imported Addon',
+              description: addonData.description || addonData.manifest?.description || manifestData?.description || '',
+              manifestUrl: addonUrl,
+              version: addonData.version || addonData.manifest?.version || manifestData?.version || null,
+              tags: 'Stream', // Default tag for imported addons
+              iconUrl: addonData.iconUrl || addonData.manifest?.logo || manifestData?.logo || null,
+              isActive: true,
+            }
+          })
+          console.log(`✅ Created new addon: ${addon.name}`)
+        } catch (error) {
+          console.error(`❌ Failed to create addon for ${addonUrl}:`, error)
+          continue
+        }
+      } else {
+        console.log(`ℹ️ Addon already exists: ${addon.name}`)
+      }
+
+      // Add addon to the import group
+      try {
+        await prisma.groupAddon.create({
+          data: {
+            groupId: group.id,
+            addonId: addon.id,
+            isEnabled: true,
+            settings: null,
+          }
+        })
+        processedAddons.push(addon)
+        console.log(`✅ Added ${addon.name} to import group`)
+      } catch (error) {
+        console.error(`❌ Failed to add ${addon.name} to group:`, error)
+      }
+    }
+
+    res.json({
+      message: `Successfully imported ${processedAddons.length} addons to group "${groupName}"`,
+      groupId: group.id,
+      groupName: group.name,
+      addonCount: processedAddons.length
+    })
+
+  } catch (error) {
+    console.error('❌ Import addons error:', error)
+    res.status(500).json({ message: 'Failed to import addons' })
+  }
+})
 
 // Bind explicitly to 0.0.0.0 so it is reachable inside Docker even when ::1 is resolved
 app.listen(PORT, '0.0.0.0', () => {

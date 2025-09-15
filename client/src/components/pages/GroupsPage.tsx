@@ -18,7 +18,8 @@ import {
   Copy,
   Grid3X3,
   List,
-  AlertTriangle
+  AlertTriangle,
+  EyeOff
 } from 'lucide-react'
 import { useTheme } from '@/contexts/ThemeContext'
 import { getColorBgClass, getColorTextClass, getColorOptions } from '@/utils/colorMapping'
@@ -29,6 +30,104 @@ import ConfirmDialog from '../common/ConfirmDialog'
 import SyncBadge from '../common/SyncBadge'
 import { useDebounce } from '../../hooks/useDebounce'
 
+
+// Simple sync badge for individual users in group view
+function GroupUserSyncBadge({ userId, userExcludedSet, userProtectedSet, isListMode = false }: { 
+  userId: string, 
+  userExcludedSet?: Set<string>, 
+  userProtectedSet?: Set<string>, 
+  isListMode?: boolean 
+}) {
+  const { isDark, isMono } = useTheme()
+  const queryClient = useQueryClient()
+  const { data: selectedGroup } = useQuery({ queryKey: ['selectedGroup'], queryFn: async () => null, enabled: false })
+  const groupId = (selectedGroup as any)?.id || (typeof window !== 'undefined' ? (window as any).__sfmCurrentGroupId : undefined)
+
+  const { data: syncStatus } = useQuery({
+    queryKey: ['user', userId, 'sync-status', groupId || 'nogroup'],
+    queryFn: async () => usersAPI.getSyncStatus(userId, groupId),
+    staleTime: 5_000,
+  })
+
+  const [status, setStatus] = React.useState<'synced' | 'unsynced' | 'stale' | 'connect' | 'syncing' | 'checking'>('checking')
+
+  React.useEffect(() => {
+    if (!syncStatus) return
+    setStatus(syncStatus.status || 'checking')
+  }, [syncStatus])
+
+  // Expose the sync status data for parent components
+  React.useEffect(() => {
+    if (syncStatus) {
+      // Store the sync status data in a way that parent components can access it
+      window.dispatchEvent(new CustomEvent('sfm:user-sync-data' as any, { 
+        detail: { userId, syncStatus } 
+      }))
+    }
+  }, [syncStatus, userId])
+
+  const getStatusConfig = () => {
+    const prefersDark = isDark || isMono
+    switch (status) {
+      case 'synced':
+        return {
+          dotColor: 'bg-green-500',
+          bgColor: isMono ? 'bg-black text-white border border-white/20' : (prefersDark ? 'bg-green-900 text-green-300' : 'bg-green-100 text-green-800')
+        }
+      case 'unsynced':
+        return {
+          dotColor: 'bg-red-500',
+          bgColor: isMono ? 'bg-black text-white border border-white/20' : (prefersDark ? 'bg-red-900 text-red-300' : 'bg-red-100 text-red-800')
+        }
+      case 'stale':
+        return {
+          dotColor: 'bg-gray-400',
+          bgColor: isMono ? 'bg-black text-white' : (prefersDark ? 'bg-gray-700 text-gray-100' : 'bg-gray-600 text-gray-100')
+        }
+      case 'connect':
+        return {
+          dotColor: 'bg-stremio-purple',
+          bgColor: 'bg-stremio-purple text-white'
+        }
+      case 'syncing':
+        return {
+          dotColor: 'bg-red-500',
+          bgColor: isMono ? 'bg-black text-white border border-white/20' : (prefersDark ? 'bg-red-800 text-red-200' : 'bg-red-100 text-red-800')
+        }
+      case 'checking':
+        return {
+          dotColor: 'bg-gray-400',
+          bgColor: isMono ? 'bg-black text-white border border-white/20' : (prefersDark ? 'bg-gray-700 text-gray-300' : 'bg-gray-200 text-gray-600')
+        }
+      default:
+        return {
+          dotColor: 'bg-gray-400',
+          bgColor: isDark ? 'bg-gray-700 text-gray-100' : 'bg-gray-600 text-gray-100'
+        }
+    }
+  }
+
+  const config = getStatusConfig()
+  const isSpinning = status === 'syncing' || status === 'checking'
+
+  if (isListMode) {
+  return (
+      <div 
+        className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-medium ${config.bgColor}`}
+      >
+        <div className={`w-2 h-2 rounded-full ${config.dotColor} ${isSpinning ? 'animate-spin' : ''}`} />
+      </div>
+    )
+  }
+
+  return (
+    <div 
+      className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-medium ${config.bgColor}`}
+    >
+      <div className={`w-2 h-2 rounded-full ${config.dotColor} ${isSpinning ? 'animate-spin' : ''}`} />
+    </div>
+  )
+}
 
 // Group sync status badge component
 function GroupSyncBadge({ groupId, onSync, isSyncing, isListMode = false }: { groupId: string; onSync: (groupId: string) => void; isSyncing: boolean; isListMode?: boolean }) {
@@ -55,6 +154,19 @@ function GroupSyncBadge({ groupId, onSync, isSyncing, isListMode = false }: { gr
     window.addEventListener('sfm:group:reordered' as any, onGroupReordered as any)
     return () => window.removeEventListener('sfm:group:reordered' as any, onGroupReordered as any)
   }, [groupId])
+
+  // Listen for user status updates to update group sync status
+  React.useEffect(() => {
+    const onUserStatusUpdate = (e: CustomEvent) => {
+      const { userId, status } = (e as any).detail || {}
+      if (groupUsers.some((user: any) => user.id === userId)) {
+        // A user in this group had their status updated, re-check group status
+        setStatus('checking')
+      }
+    }
+    window.addEventListener('sfm:user-status' as any, onUserStatusUpdate as any)
+    return () => window.removeEventListener('sfm:user-status' as any, onUserStatusUpdate as any)
+  }, [groupUsers])
 
   // After a sync completes, briefly go to checking so we don't flash unsynced
   React.useEffect(() => {
@@ -294,13 +406,17 @@ export default function GroupsPage() {
     justReorderedRef.current = true
     if (selectedGroup?.id) {
       groupsAPI.reorderAddons(selectedGroup.id, next)
-        .then(() => {
+        .then((response) => {
           queryClient.invalidateQueries({ queryKey: ['group', selectedGroup.id, 'details'] })
           queryClient.invalidateQueries({ queryKey: ['groups'] })
           queryClient.invalidateQueries({ queryKey: ['users'] })
           queryClient.invalidateQueries({ queryKey: ['user'] })
-          // Notify GroupSyncBadge to reflect unsynced immediately
-          try { window.dispatchEvent(new CustomEvent('sfm:group:reordered' as any, { detail: { id: selectedGroup.id } })) } catch {}
+          
+          // Notify GroupSyncBadge about sync status
+          if (response.isSynced === false) {
+            try { window.dispatchEvent(new CustomEvent('sfm:group:reordered' as any, { detail: { id: selectedGroup.id, isSynced: false } })) } catch {}
+          }
+          
           toast.success('Addon order updated')
         })
         .catch((error: any) => {
@@ -930,6 +1046,13 @@ export default function GroupsPage() {
   const [editAddonIds, setEditAddonIds] = useState<string[]>([])
   const [syncingGroups, setSyncingGroups] = useState<Set<string>>(new Set())
   const [isSyncingAll, setIsSyncingAll] = useState(false)
+  
+  // Global states for all users (used by UserSyncBadge components)
+  const [globalUserExcludedSets, setGlobalUserExcludedSets] = useState<Map<string, Set<string>>>(new Map())
+  const [globalUserProtectedSets, setGlobalUserProtectedSets] = useState<Map<string, Set<string>>>(new Map())
+  
+  // State to track user sync data (for addon counts)
+  const [userSyncData, setUserSyncData] = useState<Map<string, any>>(new Map())
 
 
   // Get group details for placeholders
@@ -1017,6 +1140,42 @@ export default function GroupsPage() {
     queryFn: usersAPI.getAll,
     retry: 1,
   })
+  
+  // Load excluded and protected sets for all users
+  useEffect(() => {
+    if (!allUsers || allUsers.length === 0) return
+    
+    const newExcludedSets = new Map<string, Set<string>>()
+    const newProtectedSets = new Map<string, Set<string>>()
+    
+    allUsers.forEach((user: any) => {
+      const uid = user.id
+      if (!uid) return
+      
+      // Load excluded and protected addons from user data
+      const excludedAddons = user.excludedAddons || []
+      const protectedAddons = user.protectedAddons || []
+      
+      newExcludedSets.set(uid, new Set(excludedAddons))
+      newProtectedSets.set(uid, new Set(protectedAddons))
+    })
+    
+    setGlobalUserExcludedSets(newExcludedSets)
+    setGlobalUserProtectedSets(newProtectedSets)
+  }, [allUsers])
+
+  // Listen for user sync data updates
+  useEffect(() => {
+    const onUserSyncData = (e: CustomEvent) => {
+      const { userId, syncStatus } = (e as any).detail || {}
+      if (userId && syncStatus) {
+        setUserSyncData(prev => new Map(prev).set(userId, syncStatus))
+      }
+    }
+    window.addEventListener('sfm:user-sync-data' as any, onUserSyncData as any)
+    return () => window.removeEventListener('sfm:user-sync-data' as any, onUserSyncData as any)
+  }, [])
+  
   const { data: allAddons = [] } = useQuery({
     queryKey: ['addons'],
     queryFn: addonsAPI.getAll,
@@ -1831,14 +1990,8 @@ export default function GroupsPage() {
                   <div className="flex items-center gap-1">
                     <button
                       onClick={(e) => { e.stopPropagation(); handleCloneGroup(group) }}
-                      className={`flex items-center justify-center px-2 py-1 h-8 min-h-8 max-h-8 text-sm rounded transition-colors ${
-                        isMono
-                          ? 'bg-black border border-white/20 text-white hover:bg-white/10'
-                          : isModern
-                          ? 'bg-gradient-to-br from-purple-100 to-blue-100 text-purple-800 hover:from-purple-200 hover:to-blue-200'
-                          : isModernDark
-                          ? 'bg-gradient-to-br from-purple-800 to-blue-800 text-purple-100 hover:from-purple-700 hover:to-blue-700'
-                          : 'bg-blue-100 text-blue-700 hover:bg-blue-200'
+                      className={`flex items-center justify-center h-8 w-8 text-sm rounded transition-colors focus:outline-none ${
+                        isDark ? 'text-gray-300 hover:text-blue-400' : 'text-gray-600 hover:text-blue-600'
                       }`}
                       title="Clone this group"
                     >
@@ -1847,14 +2000,8 @@ export default function GroupsPage() {
                     <button
                       onClick={(e) => { e.stopPropagation(); handleGroupSync(group.id) }}
                       disabled={syncingGroups.has(group.id)}
-                      className={`flex items-center justify-center px-2 py-1 h-8 min-h-8 max-h-8 text-sm rounded transition-colors disabled:opacity-50 ${
-                        isMono
-                          ? 'bg-black border border-white/20 text-white hover:bg-white/10'
-                          : isModern
-                          ? 'bg-gradient-to-br from-purple-100 to-blue-100 text-purple-800 hover:from-purple-200 hover:to-blue-200'
-                          : isModernDark
-                          ? 'bg-gradient-to-br from-purple-800 to-blue-800 text-purple-100 hover:from-purple-700 hover:to-blue-700'
-                          : 'bg-green-100 text-green-700 hover:bg-green-200'
+                      className={`flex items-center justify-center h-8 w-8 text-sm rounded transition-colors disabled:opacity-50 focus:outline-none ${
+                        isDark ? 'text-gray-300 hover:text-green-400' : 'text-gray-600 hover:text-green-600'
                       }`}
                       title="Sync all users in this group"
                     >
@@ -1870,14 +2017,8 @@ export default function GroupsPage() {
                         })
                       }}
                       disabled={deleteGroupMutation.isPending}
-                      className={`flex items-center justify-center px-2 py-1 h-8 min-h-8 max-h-8 text-sm rounded transition-colors disabled:opacity-50 ${
-                        isMono
-                          ? 'bg-black border border-white/20 text-white hover:bg-white/10'
-                          : isModern
-                          ? 'bg-gradient-to-br from-purple-100 to-blue-100 text-purple-800 hover:from-purple-200 hover:to-blue-200'
-                          : isModernDark
-                          ? 'bg-gradient-to-br from-purple-800 to-blue-800 text-purple-100 hover:from-purple-700 hover:to-blue-700'
-                          : 'bg-red-100 text-red-700 hover:bg-red-200'
+                      className={`flex items-center justify-center h-8 w-8 text-sm rounded transition-colors disabled:opacity-50 focus:outline-none ${
+                        isDark ? 'text-gray-300 hover:text-red-400' : 'text-gray-600 hover:text-red-600'
                       }`}
                       title="Delete group"
                     >
@@ -1945,7 +2086,7 @@ export default function GroupsPage() {
                   setShowAddModal(false)
                   resetAddModal()
                 }}
-                className={`${isDark ? 'text-gray-400 hover:text-gray-300' : 'text-gray-400 hover:text-gray-600'}`}
+                className={`w-8 h-8 flex items-center justify-center rounded ${isDark ? 'text-gray-400 hover:text-gray-300 hover:bg-gray-700' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'}`}
               >
                 ×
               </button>
@@ -2064,7 +2205,7 @@ export default function GroupsPage() {
               <h2 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>Edit Group</h2>
               <button
                 onClick={() => { setShowEditModal(false); setEditingGroupId(null) }}
-                className={`${isDark ? 'text-gray-400 hover:text-gray-300' : 'text-gray-400 hover:text-gray-600'}`}
+                className={`w-8 h-8 flex items-center justify-center rounded ${isDark ? 'text-gray-400 hover:text-gray-300 hover:bg-gray-700' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'}`}
               >
                 ×
               </button>
@@ -2246,16 +2387,107 @@ export default function GroupsPage() {
                     <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-stremio-purple"></div>
                   </div>
                 ) : selectedGroupDetails?.users && selectedGroupDetails.users.length > 0 ? (
-                  <div className="flex flex-wrap justify-center gap-3">
+                  <div className="space-y-3">
                     {selectedGroupDetails.users.map((member: any, index: number) => (
                       <div
                         key={member.id || index}
-                        className={`relative p-3 rounded-lg border transition-all duration-200 hover:shadow-md ${
+                        className={`relative rounded-lg border p-4 hover:shadow-md transition-shadow ${
                           isDark 
-                            ? 'bg-gray-600 border-gray-500 hover:bg-gray-500' 
-                            : 'bg-white border-gray-200 hover:bg-gray-50'
+                            ? 'bg-gray-800 border-gray-700' 
+                            : 'bg-white border-gray-200'
                         }`}
                       >
+                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                          <div className="flex items-center flex-1 min-w-0">
+                            <div className={`w-10 h-10 rounded-full flex items-center justify-center mr-3 flex-shrink-0 ${
+                              isMono ? 'bg-black border border-white/20 text-white' : getGroupColorClass(selectedGroup?.colorIndex)
+                            }`}
+                            style={{
+                              backgroundColor: selectedGroup?.colorIndex === 2 && isMono ? '#1f2937' : undefined
+                            }}>
+                              <span className="text-white font-semibold text-sm">
+                                {member.username ? member.username.charAt(0).toUpperCase() : 
+                                 member.email ? member.email.charAt(0).toUpperCase() : 'U'}
+                              </span>
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-2 mb-1">
+                                <h3 className={`font-semibold truncate ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                                  {member.username || member.email || 'Unnamed User'}
+                                </h3>
+                                <GroupUserSyncBadge 
+                                  userId={member.id} 
+                                  userExcludedSet={globalUserExcludedSets.get(member.id) || new Set()} 
+                                  userProtectedSet={globalUserProtectedSets.get(member.id) || new Set()} 
+                                  isListMode={true}
+                                />
+                              </div>
+                            </div>
+                          </div>
+                          
+                          <div className="flex items-center gap-2 sm:gap-4 sm:ml-4 flex-wrap">
+                            {/* Stats */}
+                            <div className="hidden sm:flex items-center gap-4 text-sm">
+                              <div className="flex items-center gap-1">
+                                <Puzzle className="w-4 h-4 text-gray-400" />
+                                <span className={`font-medium ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                                  {userSyncData.get(member.id)?.stremioAddonCount || member.stremioAddonsCount || 0}
+                                </span>
+                                <span className={`${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+                                  {(userSyncData.get(member.id)?.stremioAddonCount || member.stremioAddonsCount || 0) === 1 ? 'addon' : 'addons'}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-1">
+                                <EyeOff className="w-4 h-4 text-gray-400" />
+                                <span className={`font-medium ${isDark ? 'text-white' : 'text-gray-900'}`}>{globalUserExcludedSets.get(member.id)?.size || 0}</span>
+                                <span className={`${isDark ? 'text-gray-400' : 'text-gray-500'}`}>excluded</span>
+                              </div>
+                            </div>
+                            
+                            {/* Action buttons */}
+                            <div className="flex items-center gap-1">
+                              <button
+                                onClick={() => {
+                                  // Navigate to user details or open user modal
+                                  // This would need to be implemented based on your app's navigation
+                                  console.log('View user details:', member.id);
+                                }}
+                                className={`flex items-center justify-center h-8 w-8 text-sm rounded transition-colors focus:outline-none ${
+                                  isDark ? 'text-gray-300 hover:text-white' : 'text-gray-600 hover:text-gray-900'
+                                }`}
+                                title="View user details"
+                              >
+                                <Eye className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={async () => {
+                                  try {
+                                    const syncMode = typeof window !== 'undefined' ? (localStorage.getItem('sfm_sync_mode') || 'normal') : 'normal'
+                                    // Collect membership-specific exclusions if we have them in state
+                                    const excluded = Array.from(globalUserExcludedSets.get(member.id) || [])
+                                    await usersAPI.sync(member.id, excluded, syncMode as any)
+                                    // mark cached status
+                                    localStorage.setItem(`sfm_user_sync_status:${member.id}`, 'synced')
+                                    const now = Date.now().toString()
+                                    localStorage.setItem(`sfm_user_sync:${member.id}`, now)
+                                    // invalidate queries
+                                    queryClient.invalidateQueries({ queryKey: ['user', member.id, 'sync-status'] })
+                                    if (selectedGroup?.id) {
+                                      queryClient.invalidateQueries({ queryKey: ['user', member.id, 'sync-status', selectedGroup.id] })
+                                      queryClient.invalidateQueries({ queryKey: ['group', selectedGroup.id, 'sync-status'] })
+                                    }
+                                    toast.success('User synced')
+                                  } catch (e: any) {
+                                    toast.error(e?.message || 'Failed to sync user')
+                                  }
+                                }}
+                                className={`flex items-center justify-center h-8 w-8 text-sm rounded transition-colors focus:outline-none ${
+                                  isDark ? 'text-gray-300 hover:text-white' : 'text-gray-600 hover:text-gray-900'
+                                }`}
+                                title="Sync user"
+                              >
+                                <RefreshCw className="w-4 h-4" />
+                              </button>
                         <button
                           onClick={() => {
                             openConfirm({
@@ -2269,31 +2501,15 @@ export default function GroupsPage() {
                               }
                             });
                           }}
-                          className={`absolute -top-2 -right-2 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold transition-colors ${
-                            isDark 
-                              ? 'bg-red-600 hover:bg-red-700 text-white' 
-                              : 'bg-red-500 hover:bg-red-600 text-white'
-                          }`}
-                        >
-                          ×
+                                className={`flex items-center justify-center h-8 w-8 text-sm rounded transition-colors focus:outline-none ${
+                                  isDark ? 'text-gray-300 hover:text-white' : 'text-gray-600 hover:text-gray-900'
+                                }`}
+                                title="Remove from group"
+                              >
+                                <Trash2 className="w-4 h-4" />
                         </button>
-                        <div className="flex items-center">
-                          <div
-                            className={`w-12 h-12 rounded-full flex items-center justify-center text-white ${getGroupColorClass(selectedGroup?.colorIndex)} ${
-                              isMono ? 'border border-white/20' : ''
-                            }`}
-                            style={{
-                              backgroundColor: selectedGroup?.colorIndex === 2 && isMono ? '#1f2937' : undefined
-                            }}
-                          >
-                            <span className="text-white font-semibold text-lg">
-                              {member.username ? member.username.charAt(0).toUpperCase() : 
-                               member.email ? member.email.charAt(0).toUpperCase() : 'U'}
-                            </span>
+                            </div>
                           </div>
-                          <h4 className={`font-medium text-sm ml-3 ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                            {member.username || member.email || 'Unnamed User'}
-                          </h4>
                         </div>
                       </div>
                     ))}
