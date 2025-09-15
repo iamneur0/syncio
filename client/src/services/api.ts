@@ -148,6 +148,12 @@ export const usersAPI = {
     return response.data
   },
 
+  // Reload all addons for a user and apply them
+  reloadUserAddons: async (id: string): Promise<any> => {
+    const response: AxiosResponse<any> = await api.post(`/users/${id}/reload-addons`)
+    return response.data
+  },
+
   // Create new user
   create: async (userData: CreateUserData): Promise<User> => {
     const response: AxiosResponse<User> = await api.post('/users', userData)

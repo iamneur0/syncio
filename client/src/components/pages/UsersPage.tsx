@@ -793,54 +793,37 @@ export default function UsersPage() {
     return () => { cancelled = true }
   }, [userDetailsData, stremioAddonsData, userExcludedSet])
 
-  const syncUserMutation = useMutation({
+
+  // Reload user addons mutation
+  const reloadUserAddonsMutation = useMutation({
     mutationFn: async (userId: string) => {
-      const syncMode = localStorage.getItem('sfm_sync_mode') || 'normal'
-      
-      // Get excluded addons for this user from database
-      let excludedManifestUrls: string[] = []
-      try {
-        const userRes = await fetch(`/api/users/${userId}`)
-        if (userRes.ok) {
-          const userData = await userRes.json()
-          excludedManifestUrls = userData.excludedAddons || []
-        }
-      } catch (error) {
-        console.error('Failed to fetch excluded addons from database:', error)
-      }
-      
-      const res = await fetch(`/api/users/${userId}/sync`, {
+      const res = await fetch(`/api/users/${userId}/reload-addons`, {
         method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'x-sync-mode': syncMode
-        },
-        body: JSON.stringify({ excludedManifestUrls })
+        headers: { 'Content-Type': 'application/json' }
       })
       if (!res.ok) {
         const text = await res.text()
-        throw new Error(text || 'Failed to sync addons')
+        throw new Error(text || 'Failed to reload user addons')
       }
       return res.json()
     },
     onSuccess: (data, userId) => {
-      // Mark user as recently synced in localStorage
-      localStorage.setItem(`sfm_user_sync:${userId}`, Date.now().toString())
-      // refresh live addons and users list to reflect counts
+      // Refresh user data and addons
       queryClient.invalidateQueries({ queryKey: ['user', userId, 'stremio-addons'] })
       queryClient.invalidateQueries({ queryKey: ['user', userId] })
       queryClient.invalidateQueries({ queryKey: ['user', userId, 'sync-status'] })
       queryClient.invalidateQueries({ queryKey: ['users'] })
+      queryClient.invalidateQueries({ queryKey: ['addons'] })
       
-      // Force refetch the data immediately to show updated order
+      // Force refetch the data immediately
       queryClient.refetchQueries({ queryKey: ['user', userId, 'stremio-addons'] })
       queryClient.refetchQueries({ queryKey: ['user', userId] })
       queryClient.refetchQueries({ queryKey: ['user', userId, 'sync-status'] })
       
-      toast.success(data?.message || 'Synced successfully!')
+      toast.success(data?.message || 'User addons reloaded successfully!')
     },
     onError: (error: any) => {
-      toast.error(error?.message || 'Failed to sync addons')
+      toast.error(error?.message || 'Failed to reload user addons')
     }
   })
 
@@ -864,7 +847,7 @@ export default function UsersPage() {
   React.useEffect(() => {
     const handleSyncUser = (event: CustomEvent) => {
       const { userId } = event.detail
-      syncUserMutation.mutate(userId)
+      reloadUserAddonsMutation.mutate(userId)
     }
 
     window.addEventListener('syncUser', handleSyncUser as EventListener)
@@ -872,7 +855,7 @@ export default function UsersPage() {
     return () => {
       window.removeEventListener('syncUser', handleSyncUser as EventListener)
     }
-  }, [syncUserMutation])
+  }, [reloadUserAddonsMutation])
 
   // Fetch groups for the dropdown
   const { data: groupsRaw = [] } = useQuery({
@@ -2123,7 +2106,7 @@ export default function UsersPage() {
                                 userId={user.id} 
                                 userExcludedSet={globalUserExcludedSets.get(user.id) || new Set()} 
                                 userProtectedSet={globalUserProtectedSets.get(user.id) || new Set()} 
-                                isSyncing={syncUserMutation.isPending && syncUserMutation.variables === user.id}
+                                isSyncing={reloadUserAddonsMutation.isPending && reloadUserAddonsMutation.variables === user.id}
                               />
                             </div>
                       </div>
@@ -2143,7 +2126,7 @@ export default function UsersPage() {
                                 userId={user.id} 
                                 userExcludedSet={globalUserExcludedSets.get(user.id) || new Set()} 
                                 userProtectedSet={globalUserProtectedSets.get(user.id) || new Set()} 
-                                isSyncing={syncUserMutation.isPending && syncUserMutation.variables === user.id}
+                                isSyncing={reloadUserAddonsMutation.isPending && reloadUserAddonsMutation.variables === user.id}
                               />
                             </div>
                       </div>
@@ -2212,8 +2195,8 @@ export default function UsersPage() {
                   View
                 </button>
                 <button
-                  onClick={() => syncUserMutation.mutate(user.id)}
-                  disabled={syncUserMutation.isPending}
+                  onClick={() => reloadUserAddonsMutation.mutate(user.id)}
+                  disabled={reloadUserAddonsMutation.isPending}
                   className={`flex items-center justify-center px-3 py-2 h-8 min-h-8 max-h-8 text-sm rounded transition-colors disabled:opacity-50 ${
                     isModern
                       ? 'bg-gradient-to-br from-purple-100 to-blue-100 text-purple-800 hover:from-purple-200 hover:to-blue-200'
@@ -2221,11 +2204,11 @@ export default function UsersPage() {
                       ? 'bg-gradient-to-br from-purple-800 to-blue-800 text-purple-100 hover:from-purple-700 hover:to-blue-700'
                       : isMono
                       ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                      : 'bg-green-100 text-green-700 hover:bg-green-200'
+                      : 'bg-blue-100 text-blue-700 hover:bg-blue-200'
                   }`}
-                  title="Sync user addons"
+                  title="Reload and sync user addons"
                 >
-                      <RefreshCw className={`w-4 h-4 ${syncUserMutation.isPending ? 'animate-spin' : ''}`} />
+                      <RefreshCw className={`w-4 h-4 ${reloadUserAddonsMutation.isPending ? 'animate-spin' : ''}`} />
                 </button>
                 <button 
                   onClick={() => handleDeleteUser(user.id, user.username)}
@@ -2278,7 +2261,7 @@ export default function UsersPage() {
                             userId={user.id} 
                             userExcludedSet={globalUserExcludedSets.get(user.id) || new Set()} 
                             userProtectedSet={globalUserProtectedSets.get(user.id) || new Set()} 
-                            isSyncing={syncUserMutation.isPending && syncUserMutation.variables === user.id}
+                            isSyncing={reloadUserAddonsMutation.isPending && reloadUserAddonsMutation.variables === user.id}
                             isListMode={true}
                           />
                         </div>
@@ -2327,14 +2310,14 @@ export default function UsersPage() {
                           <Eye className="w-4 h-4" />
                         </button>
                         <button
-                          onClick={(e) => { e.stopPropagation(); syncUserMutation.mutate(user.id) }}
-                          disabled={syncUserMutation.isPending}
+                          onClick={(e) => { e.stopPropagation(); reloadUserAddonsMutation.mutate(user.id) }}
+                          disabled={reloadUserAddonsMutation.isPending}
                           className={`flex items-center justify-center h-8 w-8 text-sm rounded transition-colors disabled:opacity-50 focus:outline-none ${
-                            isDark ? 'text-gray-300 hover:text-green-400' : 'text-gray-600 hover:text-green-600'
+                            isDark ? 'text-gray-300 hover:text-blue-400' : 'text-gray-600 hover:text-blue-600'
                           }`}
-                          title="Sync user addons"
+                          title="Reload and sync user addons"
                         >
-                          <RefreshCw className={`w-4 h-4 ${syncUserMutation.isPending ? 'animate-spin' : ''}`} />
+                          <RefreshCw className={`w-4 h-4 ${reloadUserAddonsMutation.isPending ? 'animate-spin' : ''}`} />
                         </button>
                         <button 
                           onClick={(e) => { e.stopPropagation(); handleDeleteUser(user.id, user.username) }}
@@ -2925,7 +2908,7 @@ export default function UsersPage() {
                     userId={selectedUser.id} 
                     userExcludedSet={globalUserExcludedSets.get(selectedUser.id) || new Set()}
                     userProtectedSet={globalUserProtectedSets.get(selectedUser.id) || new Set()}
-                    isSyncing={syncUserMutation.isPending && syncUserMutation.variables === selectedUser.id}
+                    isSyncing={reloadUserAddonsMutation.isPending && reloadUserAddonsMutation.variables === selectedUser.id}
                     location="detailed-view"
                   />
                 <button
