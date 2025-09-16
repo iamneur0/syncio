@@ -2093,9 +2093,9 @@ export default function UsersPage() {
         <>
           {viewMode === 'card' ? (
             /* Card Grid View */
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 items-stretch">
           {displayUsers.map((user: any) => (
-            <div key={user.id} className={`rounded-lg shadow-sm border p-6 hover:shadow-md transition-shadow ${
+            <div key={user.id} className={`rounded-lg shadow-sm border p-6 hover:shadow-md transition-shadow flex flex-col h-full ${
               isModern
                 ? 'bg-gradient-to-br from-purple-50/90 to-blue-50/90 backdrop-blur-sm border-purple-200/60'
                 : isModernDark
@@ -2144,7 +2144,7 @@ export default function UsersPage() {
                           }`}
                           autoFocus
                         />
-                            <div className="mt-1">
+                            <div className="mt-1 mb-0">
                               <UserSyncBadge 
                                 userId={user.id} 
                                 userExcludedSet={globalUserExcludedSets.get(user.id) || new Set()} 
@@ -2164,7 +2164,7 @@ export default function UsersPage() {
                         >
                           {user.username || user.email}
                         </h3>
-                            <div className="mt-1">
+                            <div className="mt-1 mb-0">
                               <UserSyncBadge 
                                 userId={user.id} 
                                 userExcludedSet={globalUserExcludedSets.get(user.id) || new Set()} 
@@ -2195,7 +2195,7 @@ export default function UsersPage() {
                 </div>
               </div>
 
-                  <div className="grid grid-cols-2 gap-4 mb-4">
+                  <div className="grid grid-cols-2 gap-4 mb-4 items-start">
                     <div className="flex items-center">
                       <Puzzle className="w-4 h-4 text-gray-400 mr-2" />
                       <div>
@@ -2668,8 +2668,8 @@ export default function UsersPage() {
                 </h2>
                 <button
                   onClick={handleCloseEditModal}
-                  className={`p-2 rounded-lg hover:bg-gray-200 transition-colors ${
-                    isDark ? 'text-gray-400 hover:bg-gray-700' : 'text-gray-500'
+                  className={`w-8 h-8 flex items-center justify-center rounded transition-colors ${
+                    isDark ? 'text-gray-400 hover:text-gray-300 hover:bg-gray-700' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
                   }`}
                 >
                   ✕
@@ -2956,8 +2956,8 @@ export default function UsersPage() {
                   />
                 <button
                   onClick={() => setIsDetailModalOpen(false)}
-                  className={`p-2 rounded-lg hover:bg-gray-200 transition-colors ${
-                    isDark ? 'text-gray-400 hover:bg-gray-700' : 'text-gray-500'
+                  className={`w-8 h-8 flex items-center justify-center rounded transition-colors ${
+                    isDark ? 'text-gray-400 hover:text-gray-300 hover:bg-gray-700' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
                   }`}
                 >
                   ✕
@@ -2983,36 +2983,74 @@ export default function UsersPage() {
                           .filter((addon: any) => addon.isEnabled !== false)
                           .map((addon: any, index: number) => {
                           const excluded = userExcludedSet.has(addon?.manifestUrl)
+                          // Get icon from Stremio addons data if available
+                          const stremioAddon = Array.isArray(stremioAddonsData?.addons) 
+                            ? stremioAddonsData.addons.find((sa: any) => 
+                                (sa?.manifestUrl || '').toString().trim().toLowerCase() === (addon?.manifestUrl || '').toString().trim().toLowerCase()
+                              ) 
+                            : null
+                          // Debug logging - focused on the issue
+                          if (addon.name === 'AIOStreams') {
+                            console.log('🔍 User AIOStreams Debug:', {
+                              addonName: addon.name,
+                              manifestUrl: addon?.manifestUrl,
+                              iconUrl: addon.iconUrl,
+                              finalIconUrl: addon.iconUrl || addon?.manifest?.logo || stremioAddon?.iconUrl || stremioAddon?.manifest?.logo,
+                              hasStremioData: !!stremioAddon
+                            })
+                          }
+                          
+                          const iconUrl = addon.iconUrl || addon?.manifest?.logo || stremioAddon?.iconUrl || stremioAddon?.manifest?.logo
+                          const addonName = addon.name || addon?.manifest?.name || stremioAddon?.name || stremioAddon?.manifest?.name || addon.id
                           return (
                           <div key={index} className={`p-3 rounded-lg border ${
                             isDark ? 'bg-gray-600 border-gray-500' : 'bg-white border-gray-200'
                           }`}>
-                            <div className="flex items-start justify-between">
-                              <div className="flex-1">
-                                <div className="flex items-center gap-2">
-                                  <h4 className={`font-medium ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                                    {addon.name || addon.id || 'Unnamed Addon'}
-                                  </h4>
-                                  {addon.version && (
-                                    <span className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium ${
-                                      isDark ? 'bg-purple-600 text-white' : 'bg-purple-100 text-purple-800'
-                                    }`}>
-                                      v{addon.version}
-                                    </span>
-                                  )}
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center flex-1 min-w-0">
+                                  <div className="w-10 h-10 rounded-lg flex items-center justify-center mr-3 flex-shrink-0 overflow-hidden">
+                                    {iconUrl ? (
+                                      <img
+                                        src={iconUrl}
+                                        alt={`${addonName} logo`}
+                                        className="w-full h-full object-contain"
+                                        onError={(e: any) => { e.currentTarget.style.display = 'none' }}
+                                      />
+                                    ) : null}
+                                    <div className={`w-full h-full ${iconUrl ? 'hidden' : 'flex'} bg-stremio-purple items-center justify-center`}>
+                                      <Puzzle className="w-5 h-5 text-white" />
+                                    </div>
+                                  </div>
+                                  <div className="min-w-0 flex-1">
+                                    <div className="flex items-center gap-2">
+                                      <h4 className={`font-medium truncate ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                                        {addonName || 'Unnamed Addon'}
+                                      </h4>
+                                      {addon.version && (
+                                        <span className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium flex-shrink-0 ${
+                                          isDark ? 'bg-purple-600 text-white' : 'bg-purple-100 text-purple-800'
+                                        }`}>
+                                          v{addon.version}
+                                        </span>
+                                      )}
+                                    </div>
+                                    {addon.description && (
+                                      <p className={`text-sm mt-1 truncate ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
+                                        {addon.description}
+                                      </p>
+                                    )}
+                                  </div>
                                 </div>
-                                {addon.description && (
-                                  <p className={`text-sm mt-1 ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
-                                    {addon.description.length > 50 
-                                      ? `${addon.description.substring(0, 50)}...` 
-                                      : addon.description}
-                                  </p>
-                                )}
                               </div>
-                              <div className="ml-3 p-2 rounded-lg">
+                              <div className="ml-1 p-2 rounded-lg">
                                 <button
                                   onClick={() => toggleUserExcluded(addon?.manifestUrl)}
-                                  className={`${excluded ? (isDark ? 'text-red-300' : 'text-red-600') : (isDark ? 'text-gray-300' : 'text-gray-500')} ${isDark ? 'hover:bg-gray-700' : 'hover:bg-gray-100'} p-2 rounded-lg`}
+                                  className={`flex items-center justify-center h-8 w-8 text-sm rounded transition-colors focus:outline-none ${
+                                    excluded 
+                                      ? (isDark ? 'text-red-300 hover:text-red-400' : 'text-red-600 hover:text-red-700')
+                                      : (isDark ? 'text-gray-300 hover:text-red-400' : 'text-gray-600 hover:text-red-600')
+                                  }`}
                                   title={excluded ? 'Include for this user' : 'Exclude for this user'}
                                 >
                                   {excluded ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -3189,6 +3227,16 @@ export default function UsersPage() {
                                 const isDragged = isDragging && draggingIdRef.current === murl
                                     const isActive = activeId === murl
                                 
+                                // Debug: Log addon data structure
+                                if (index === 0) {
+                                  console.log('🔍 Stremio addon data structure:', addon)
+                                  console.log('🔍 Available icon fields:', {
+                                    iconUrl: addon?.iconUrl,
+                                    manifestLogo: addon?.manifest?.logo,
+                                    manifestIcon: addon?.manifest?.icon
+                                  })
+                                }
+                                
                                 return (
                                       <SortableAddon key={`${murl}-${index}` || `addon-${index}`} id={murl} index={index}>
                                   <div
@@ -3211,38 +3259,55 @@ export default function UsersPage() {
                                         <span className="w-1 h-1 rounded-full bg-current block" />
                                       </div>
                                     </div>
-                                        <div className="flex items-center justify-between">
-                                          <div className="flex-1 flex items-center gap-3">
-                                        <div className="flex-1">
-                                          <div className="flex items-center gap-2">
-                                            <h4 className={`font-medium ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                                              {fam?.name || addon.name || addon.id || 'Unnamed Addon'}
-                                            </h4>
-                                            {addon.version && (
-                                              <span className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium ${
-                                                    isDark ? 'bg-purple-600 text-white' : 'bg-purple-100 text-purple-800'
+                                        <div className="flex items-center justify-between gap-3">
+                                          <div className="flex-1 min-w-0">
+                                            <div className="flex items-center flex-1 min-w-0">
+                                              <div className={`w-10 h-10 rounded-lg flex items-center justify-center mr-3 flex-shrink-0 overflow-hidden ${
+                                                isMono ? 'border border-white/20' : ''
                                               }`}>
-                                                v{addon.version}
-                                              </span>
-                                            )}
+                                                {(addon.iconUrl || addon?.manifest?.logo) ? (
+                                                  <img
+                                                    src={addon.iconUrl || addon?.manifest?.logo}
+                                                    alt={`${addon.name || addon?.manifest?.name || addon.id || 'Addon'} logo`}
+                                                    className="w-full h-full object-contain"
+                                                    onError={(e: any) => { e.currentTarget.style.display = 'none' }}
+                                                  />
+                                                ) : null}
+                                                <div className={`w-full h-full ${(addon.iconUrl || addon?.manifest?.logo) ? 'hidden' : 'flex'} bg-stremio-purple items-center justify-center`}>
+                                                  <Puzzle className="w-5 h-5 text-white" />
+                                                </div>
+                                              </div>
+                                              <div className="min-w-0 flex-1">
+                                                <div className="flex items-center gap-2">
+                                                  <h4 className={`font-medium truncate ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                                                    {fam?.name || addon.name || addon.id || 'Unnamed Addon'}
+                                                  </h4>
+                                                  {addon.version && (
+                                                    <span className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium flex-shrink-0 ${
+                                                      isDark ? 'bg-purple-600 text-white' : 'bg-purple-100 text-purple-800'
+                                                    }`}>
+                                                      v{addon.version}
+                                                    </span>
+                                                  )}
+                                                </div>
+                                                {addon.description && (
+                                                  <p className={`text-sm mt-1 truncate ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
+                                                    {addon.description}
+                                                  </p>
+                                                )}
+                                              </div>
+                                            </div>
                                           </div>
-                                          {addon.description && (
-                                            <p className={`text-sm mt-1 ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
-                                                  {addon.description.length > 50 ? `${addon.description.substring(0, 50)}...` : addon.description}
-                                            </p>
-                                          )}
-                                        </div>
-                                      </div>
-                                      <div className="flex items-center gap-2 ml-3">
+                                          <div className="flex items-center gap-2 ml-1">
                                           <button
                                             onClick={() => toggleUserProtected(murl)}
                                               disabled={deleteMode === 'safe' && isBuiltIn}
-                                            className={`p-2 rounded-lg transition-colors ${
+                                            className={`flex items-center justify-center h-8 w-8 text-sm rounded transition-colors focus:outline-none ${
                                                 deleteMode === 'safe' && isBuiltIn
                                                   ? (isDark ? 'text-gray-500 cursor-not-allowed opacity-50' : 'text-gray-400 cursor-not-allowed opacity-50')
                                                   : isProt
-                                                  ? (isDark ? 'text-purple-300 hover:bg-purple-900/50' : 'text-purple-700 hover:bg-purple-100/50')
-                                                : (isDark ? 'text-gray-300 hover:bg-gray-700/50' : 'text-gray-500 hover:bg-gray-100/50')
+                                                  ? (isDark ? 'text-yellow-300 hover:text-yellow-400' : 'text-yellow-600 hover:text-yellow-700')
+                                                : (isDark ? 'text-gray-300 hover:text-yellow-400' : 'text-gray-600 hover:text-yellow-600')
                                             }`}
                                               title={
                                                 deleteMode === 'safe' && isBuiltIn
@@ -3255,10 +3320,10 @@ export default function UsersPage() {
                                         <button
                                           onClick={() => handleDeleteStremioAddon(addon.manifestUrl, addon.name)}
                                               disabled={deleteMode === 'safe' && isProt}
-                                              className={`p-2 rounded-lg transition-colors ${
+                                              className={`flex items-center justify-center h-8 w-8 text-sm rounded transition-colors focus:outline-none ${
                                                 deleteMode === 'safe' && isProt
                                                   ? (isDark ? 'text-gray-500 cursor-not-allowed opacity-50' : 'text-gray-400 cursor-not-allowed opacity-50')
-                                                  : (isDark ? 'text-red-400 hover:bg-red-900' : 'text-red-600 hover:bg-red-50')
+                                                  : (isDark ? 'text-gray-300 hover:text-red-400' : 'text-gray-600 hover:text-red-600')
                                               }`}
                                               title={
                                                 deleteMode === 'safe' && isProt
@@ -3282,29 +3347,44 @@ export default function UsersPage() {
                                   const fam = groupByUrl.get((activeId || '').toString().trim().toLowerCase()) as any
                                   return (
                                     <div className={`p-3 pl-8 rounded-lg border ${isDark ? 'bg-gray-600 border-gray-500' : 'bg-white border-gray-200'} shadow-xl`}> 
-                                      <div className="flex items-center justify-between">
-                                        <div className="flex-1 flex items-center gap-3">
-                                          <div className="flex-1">
-                                            <div className="flex items-center gap-2">
-                                              <h4 className={`font-medium ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                                                {fam?.name || activeAddon?.name || activeAddon?.id || 'Addon'}
-                                              </h4>
-                                              {activeAddon?.version && (
-                                                <span className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium ${
-                                                  isDark ? 'bg-purple-600 text-white' : 'bg-purple-100 text-purple-800'
-                                                }`}>
-                                                  v{activeAddon.version}
-                                                </span>
+                                      <div className="flex items-center justify-between gap-3">
+                                        <div className="flex-1 min-w-0">
+                                          <div className="flex items-center flex-1 min-w-0">
+                                            <div className="w-10 h-10 rounded-lg flex items-center justify-center mr-3 flex-shrink-0 overflow-hidden">
+                                              {(activeAddon?.iconUrl || activeAddon?.manifest?.logo) ? (
+                                                <img
+                                                  src={activeAddon?.iconUrl || activeAddon?.manifest?.logo}
+                                                  alt={`${activeAddon?.name || activeAddon?.manifest?.name || activeAddon?.id || 'Addon'} logo`}
+                                                  className="w-full h-full object-contain"
+                                                  onError={(e: any) => { e.currentTarget.style.display = 'none' }}
+                                                />
+                                              ) : null}
+                                              <div className={`w-full h-full ${(activeAddon?.iconUrl || activeAddon?.manifest?.logo) ? 'hidden' : 'flex'} bg-stremio-purple items-center justify-center`}>
+                                                <Puzzle className="w-5 h-5 text-white" />
+                                              </div>
+                                            </div>
+                                            <div className="min-w-0 flex-1">
+                                              <div className="flex items-center gap-2">
+                                                <h4 className={`font-medium truncate ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                                                  {fam?.name || activeAddon?.name || activeAddon?.id || 'Addon'}
+                                                </h4>
+                                                {activeAddon?.version && (
+                                                  <span className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium flex-shrink-0 ${
+                                                    isDark ? 'bg-purple-600 text-white' : 'bg-purple-100 text-purple-800'
+                                                  }`}>
+                                                    v{activeAddon.version}
+                                                  </span>
+                                                )}
+                                              </div>
+                                              {activeAddon?.description && (
+                                                <p className={`text-sm mt-1 truncate ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
+                                                  {activeAddon.description}
+                                                </p>
                                               )}
                                             </div>
-                                            {activeAddon?.description && (
-                                              <p className={`text-sm mt-1 ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
-                                                {activeAddon.description.length > 50 ? `${activeAddon.description.substring(0, 50)}...` : activeAddon.description}
-                                              </p>
-                                            )}
                                           </div>
                                         </div>
-                                        <div className="flex items-center gap-2 ml-3 opacity-70">
+                                        <div className="flex items-center gap-2 ml-1 opacity-70">
                                           <span className={`p-2 rounded-lg ${isDark ? 'text-gray-300' : 'text-gray-500'}`}>
                                             <LockKeyhole className="w-4 h-4" />
                                           </span>

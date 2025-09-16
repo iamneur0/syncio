@@ -85,11 +85,7 @@ export default function HomePage() {
       <div className={`fixed inset-0 z-40 lg:hidden ${sidebarOpen ? '' : 'pointer-events-none'}`}>
         <div className={`fixed inset-0 bg-gray-600 transition-opacity ${sidebarOpen ? 'opacity-75' : 'opacity-0'}`} onClick={() => setSidebarOpen(false)} />
         <div className={`fixed inset-y-0 left-0 flex flex-col w-72 ${
-          isModern
-            ? 'sidebar-gradient'
-            : isModernDark
-            ? 'sidebar-gradient'
-            : isMono
+          isMono
             ? 'bg-black'
             : isDark ? 'bg-gray-800' : 'bg-white'
         } shadow-xl transform transition-transform ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
@@ -98,24 +94,20 @@ export default function HomePage() {
           }`}>
             <div className="flex items-center gap-3">
               <img 
-                src="/favicon-32x32.png" 
+                src={(isDark || isMono) ? "/logo-white.png" : "/logo-black.png"} 
                 alt="Syncio Logo" 
                 className="w-8 h-8"
                 onError={(e) => {
-                  // Fallback to text if image fails to load
-                  e.currentTarget.style.display = 'none'
+                  // Fallback to favicon if theme logo fails to load
+                  e.currentTarget.src = "/favicon-32x32.png"
                 }}
               />
               <h1 className={`text-xl font-bold ${
-                isModern || isModernDark
-                  ? 'text-white'
-                  : 'text-white'
+                isDark ? 'text-white' : 'text-gray-900'
               }`}>Syncio</h1>
             </div>
             <button onClick={() => setSidebarOpen(false)} className={`p-1 ${
-              isModern || isModernDark
-                ? 'text-white hover:text-gray-200'
-                : 'text-white hover:text-gray-200'
+              isDark ? 'text-white hover:text-gray-200' : 'text-gray-900 hover:text-gray-700'
             }`}>
               <X className="w-6 h-6" />
             </button>
@@ -128,11 +120,7 @@ export default function HomePage() {
                 className={`w-full flex items-center px-4 py-4 text-left rounded transition-colors font-medium ${
                   activeTab === item.id
                     ? `bg-stremio-purple text-white ${isMono ? '' : 'shadow-lg'}`
-                    : isModern
-                      ? 'text-purple-700 hover:bg-purple-100/50'
-                      : isModernDark
-                      ? 'text-purple-300 hover:bg-purple-700/50'
-                      : isDark 
+                    : isDark 
                       ? 'text-gray-300 hover:bg-gray-700' 
                       : 'text-gray-700 hover:bg-gray-100'
                 }`}
@@ -147,36 +135,28 @@ export default function HomePage() {
 
       {/* Desktop sidebar */}
       <div className={`hidden lg:flex lg:flex-col transition-all duration-300 ${sidebarCollapsed ? 'lg:w-16' : 'lg:w-64'} ${
-        isModern
-          ? 'sidebar-gradient lg:border-purple-200/50'
-          : isModernDark
-          ? 'sidebar-gradient lg:border-purple-600/50'
-          : isDark ? 'lg:bg-gray-800 lg:border-gray-700' : 'lg:bg-white lg:border-gray-200'
+        isDark ? 'lg:bg-gray-800 lg:border-gray-700' : 'lg:bg-white lg:border-gray-200'
       } ${isMono ? '' : 'lg:border-r'}`}>
         <button
           onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
           className={`w-full flex items-center justify-center h-16 px-4 ${
-            isModern || isModernDark || isMono
-              ? 'hover:bg-white/10'
-              : 'bg-stremio-purple hover:bg-purple-600'
+            isDark ? 'hover:bg-gray-700' : 'hover:bg-gray-100'
           } transition-colors relative`}
           title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
         >
           <div className="flex items-center justify-center w-8 h-8 flex-shrink-0 absolute left-4 top-1/2 transform -translate-y-1/2">
             <img 
-              src="/favicon-32x32.png" 
+              src={(isDark || isMono) ? "/logo-white.png" : "/logo-black.png"} 
               alt="Syncio Logo" 
               className="w-8 h-8"
               onError={(e) => {
-                // Fallback to text if image fails to load
-                e.currentTarget.style.display = 'none'
+                // Fallback to favicon if theme logo fails to load
+                e.currentTarget.src = "/favicon-32x32.png"
               }}
             />
           </div>
           {!sidebarCollapsed && <h1 className={`text-xl font-bold absolute left-20 top-1/2 transform -translate-y-1/2 ${
-            isModern || isModernDark
-              ? 'text-white'
-              : 'text-white'
+            isDark ? 'text-white' : 'text-gray-900'
           }`}>Syncio</h1>}
         </button>
         <nav className="flex-1 px-3 py-4 space-y-2">
@@ -187,11 +167,7 @@ export default function HomePage() {
               className={`w-full flex items-center py-5 pl-4 pr-6 text-left rounded transition-colors relative font-medium ${
                 activeTab === item.id
                   ? `bg-stremio-purple text-white ${isMono ? '' : 'shadow-lg'}`
-                  : isModern
-                    ? 'text-purple-700 hover:bg-purple-100/50'
-                    : isModernDark
-                    ? 'text-purple-300 hover:bg-purple-700/50'
-                    : isDark 
+                  : isDark 
                     ? 'text-gray-300 hover:bg-gray-700' 
                     : 'text-gray-700 hover:bg-gray-100'
               }`}

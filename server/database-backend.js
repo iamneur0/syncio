@@ -316,6 +316,7 @@ app.get('/api/users/:id', async (req, res) => {
             manifestUrl: ga.addon.manifestUrl,
             version: ga.addon.version || null,
             isEnabled: ga.addon.isActive,
+            iconUrl: ga.addon.iconUrl,
           }))
       : []
 
@@ -3248,9 +3249,10 @@ app.get('/api/groups/:id', async (req, res) => {
         id: ga.addon.id, 
         name: ga.addon.name, 
         description: ga.addon.description || '',
-        url: ga.addon.manifestUrl,
+        manifestUrl: ga.addon.manifestUrl,
         version: ga.addon.version || null,
         isEnabled: ga.addon.isActive,
+        iconUrl: ga.addon.iconUrl,
       })),
     })
   } catch (error) {

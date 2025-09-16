@@ -1115,6 +1115,12 @@ export default function GroupsPage() {
   const [globalUserExcludedSets, setGlobalUserExcludedSets] = useState<Map<string, Set<string>>>(new Map())
   const [globalUserProtectedSets, setGlobalUserProtectedSets] = useState<Map<string, Set<string>>>(new Map())
   
+  // Helper function to get user color class
+  const getUserColorClass = (colorIndex: number | null | undefined) => {
+    const theme = isMono ? 'mono' : isModern ? 'modern' : isModernDark ? 'modern-dark' : isDark ? 'dark' : 'light'
+    return getColorBgClass(colorIndex, theme)
+  }
+  
   // State to track user sync data (for addon counts)
   const [userSyncData, setUserSyncData] = useState<Map<string, any>>(new Map())
 
@@ -1131,6 +1137,45 @@ export default function GroupsPage() {
     queryKey: ['group', selectedGroup?.id, 'details'],
     queryFn: () => groupsAPI.getById(selectedGroup!.id),
     enabled: !!selectedGroup?.id && showDetailModal,
+  })
+
+  // Get the first group member with Stremio connection to fetch addon data for icon display
+  const firstGroupMemberWithStremio = selectedGroupDetails?.users?.find(user => user.hasStremioConnection)
+  
+  // Debug logging for group member
+  React.useEffect(() => {
+    if (firstGroupMemberWithStremio) {
+      console.log('🔍 First group member with Stremio:', {
+        id: firstGroupMemberWithStremio.id,
+        name: firstGroupMemberWithStremio.name,
+        hasStremioConnection: firstGroupMemberWithStremio.hasStremioConnection,
+        showDetailModal
+      })
+    } else {
+      console.log('🔍 No group member with Stremio connection found')
+    }
+  }, [firstGroupMemberWithStremio, showDetailModal])
+  
+  // Fetch Stremio addons data for the first group member with Stremio connection
+  const { data: stremioAddonsData, isLoading: isLoadingStremioAddons } = useQuery({
+    queryKey: ['user', firstGroupMemberWithStremio?.id, 'stremio-addons'],
+    queryFn: async () => {
+      if (!firstGroupMemberWithStremio?.id) return null
+      console.log('🔍 Fetching Stremio addons for group member:', firstGroupMemberWithStremio.id)
+      const response = await fetch(`/api/users/${firstGroupMemberWithStremio.id}/stremio-addons`)
+      if (!response.ok) {
+        // If user is not connected to Stremio, return empty addons instead of throwing
+        if (response.status === 400) {
+          console.log('🔍 User not connected to Stremio, returning empty addons')
+          return { addons: [] }
+        }
+        throw new Error('Failed to fetch Stremio addons')
+      }
+      const data = await response.json()
+      console.log('🔍 Fetched Stremio addons for group:', data)
+      return data
+    },
+    enabled: !!firstGroupMemberWithStremio?.id && showDetailModal,
   })
 
   // Initialize/refresh local addon order whenever detail modal opens or group addons change
@@ -1783,7 +1828,7 @@ export default function GroupsPage() {
       {/* Groups Display */}
       {viewMode === 'card' ? (
         /* Card Grid View */
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 items-stretch">
         {filteredGroups.map((group) => (
           <div key={group.id} className={`rounded-lg shadow-sm border p-6 hover:shadow-md transition-shadow flex flex-col h-full ${
               isModern
@@ -1796,19 +1841,20 @@ export default function GroupsPage() {
             } ${!group.isActive ? 'opacity-50' : ''}`}>
             <div className="flex items-start justify-between mb-4">
               <div className="flex items-center">
-                  <div
-                    className={`w-12 h-12 rounded-lg flex items-center justify-center mr-3 text-white ${getGroupColorClass(group?.colorIndex)} ${
-                      isMono ? 'border border-white/20' : ''
-                    }`}
-                    style={{
-                      backgroundColor: group?.colorIndex === 2 && isMono ? '#1f2937' : undefined
-                    }}
-                  >
+                  <div className={`w-12 h-12 rounded-lg flex items-center justify-center ${
+                    isMono
+                      ? 'bg-black border border-white/20 text-white'
+                      : isModern
+                      ? 'bg-gradient-to-br from-purple-600 to-blue-800 text-white'
+                      : isModernDark
+                      ? 'bg-gradient-to-br from-purple-800 to-blue-900 text-white'
+                      : getGroupColorClass(group?.colorIndex)
+                  }`}>
                     <span className="text-white font-semibold text-lg">
                       {group.name ? group.name.charAt(0).toUpperCase() : 'G'}
                     </span>
                 </div>
-                <div>
+                <div className="ml-3">
                     {editingGroupName === group.id ? (
                       <input
                         type="text"
@@ -1824,15 +1870,17 @@ export default function GroupsPage() {
                           }
                         }}
                         placeholder={group.name}
-                        className={`font-semibold bg-transparent border-none outline-none w-full ${
-                          isModern ? 'text-purple-800' : isModernDark ? 'text-purple-200' : (isDark ? 'text-white' : 'text-gray-900')
+                        className={`px-2 py-1 text-sm border rounded focus:ring-2 focus:ring-stremio-purple focus:border-transparent ${
+                          isDark 
+                            ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
+                            : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
                         }`}
                         autoFocus
                       />
                     ) : (
                       <h3 
-                        className={`font-semibold cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 px-1 py-0.5 rounded transition-colors ${
-                          isModern ? 'text-purple-800' : isModernDark ? 'text-purple-200' : (isDark ? 'text-white' : 'text-gray-900')
+                        className={`font-medium cursor-pointer transition-colors ${
+                          isModern ? 'text-purple-800 hover:text-purple-900' : isModernDark ? 'text-purple-200 hover:text-purple-100' : (isDark ? 'text-white hover:text-stremio-purple' : 'text-gray-900 hover:text-stremio-purple')
                         }`}
                         onClick={() => handleStartEditGroupName(group.id, group.name)}
                         title="Click to edit group name"
@@ -1840,7 +1888,7 @@ export default function GroupsPage() {
                         {group.name}
                       </h3>
                     )}
-                    <div className="mt-1">
+                    <div className="mt-1 mb-0">
                       <GroupSyncBadge 
                         groupId={group.id} 
                         onSync={handleGroupSync}
@@ -1867,7 +1915,7 @@ export default function GroupsPage() {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4 mb-4">
+            <div className="grid grid-cols-2 gap-4 mb-4 items-start">
               <div className="flex items-center">
                   <Puzzle className="w-4 h-4 text-gray-400 mr-2" />
                 <div>
@@ -1881,14 +1929,16 @@ export default function GroupsPage() {
               </div>
               <div className="flex items-center">
                   <Users className="w-4 h-4 text-gray-400 mr-2" />
-                <div>
+                  <div>
                     <p className={`text-lg font-semibold ${
                       isModern ? 'text-purple-100' : isModernDark ? 'text-purple-100' : (isDark ? 'text-white' : 'text-gray-900')
-                    }`}>{group.members}</p>
+                    }`}>
+                      {group.members}
+                    </p>
                     <p className={`text-xs ${
                       isModern ? 'text-purple-300' : isModernDark ? 'text-purple-300' : (isDark ? 'text-gray-400' : 'text-gray-500')
                     }`}>{group.members === 1 ? 'Member' : 'Members'}</p>
-                </div>
+                  </div>
               </div>
             </div>
 
@@ -2442,9 +2492,11 @@ export default function GroupsPage() {
                       </span>
                     </div>
                   </div>
-                  <p className={`text-sm mt-1 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
-                    {selectedGroup.description || 'No description'}
-                  </p>
+                  {selectedGroup.description && (
+                    <p className={`text-sm mt-1 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+                      {selectedGroup.description}
+                    </p>
+                  )}
                 </div>
                 <div className="flex items-center gap-2">
                   <GroupSyncBadge 
@@ -2454,8 +2506,8 @@ export default function GroupsPage() {
                   />
                   <button
                     onClick={() => setShowDetailModal(false)}
-                    className={`p-2 rounded-lg hover:bg-gray-200 transition-colors ${
-                      isDark ? 'text-gray-400 hover:bg-gray-700' : 'text-gray-500'
+                    className={`w-8 h-8 flex items-center justify-center rounded transition-colors ${
+                      isDark ? 'text-gray-400 hover:text-gray-300 hover:bg-gray-700' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
                     }`}
                   >
                     ✕
@@ -2481,17 +2533,17 @@ export default function GroupsPage() {
                         onClick={() => handleViewUserDetails(member)}
                         className={`relative rounded-lg border p-4 hover:shadow-md transition-all cursor-pointer ${
                           isDark 
-                            ? 'bg-gray-800 border-gray-700 hover:bg-gray-750' 
+                            ? 'bg-gray-600 border-gray-500 hover:bg-gray-550' 
                             : 'bg-white border-gray-200 hover:bg-gray-50'
                         }`}
                       >
                         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                           <div className="flex items-center flex-1 min-w-0">
                             <div className={`w-10 h-10 rounded-full flex items-center justify-center mr-3 flex-shrink-0 ${
-                              isMono ? 'bg-black border border-white/20 text-white' : getGroupColorClass(selectedGroup?.colorIndex)
+                              isMono ? 'bg-black border border-white/20 text-white' : getUserColorClass(member?.colorIndex)
                             }`}
                             style={{
-                              backgroundColor: selectedGroup?.colorIndex === 2 && isMono ? '#1f2937' : undefined
+                              backgroundColor: member?.colorIndex === 2 && isMono ? '#1f2937' : undefined
                             }}>
                               <span className="text-white font-semibold text-sm">
                                 {member.username ? member.username.charAt(0).toUpperCase() : 
@@ -2558,7 +2610,7 @@ export default function GroupsPage() {
                                   }
                                 }}
                                 className={`flex items-center justify-center h-8 w-8 text-sm rounded transition-colors focus:outline-none ${
-                                  isDark ? 'text-gray-300 hover:text-white' : 'text-gray-600 hover:text-gray-900'
+                                  isDark ? 'text-gray-300 hover:text-blue-400' : 'text-gray-600 hover:text-blue-600'
                                 }`}
                                 title="Sync user"
                               >
@@ -2579,7 +2631,7 @@ export default function GroupsPage() {
                             });
                           }}
                                 className={`flex items-center justify-center h-8 w-8 text-sm rounded transition-colors focus:outline-none ${
-                                  isDark ? 'text-gray-300 hover:text-white' : 'text-gray-600 hover:text-gray-900'
+                                  isDark ? 'text-gray-300 hover:text-red-400' : 'text-gray-600 hover:text-red-600'
                                 }`}
                                 title="Remove from group"
                               >
@@ -2621,6 +2673,27 @@ export default function GroupsPage() {
                       const isDragged = isDragging && draggingIdRef.current === murl
                       const isActive = activeId === murl
                       
+                      // Get icon from Stremio addons data if available
+                      const stremioAddon = Array.isArray(stremioAddonsData?.addons) 
+                        ? stremioAddonsData.addons.find((sa: any) => 
+                            (sa?.manifestUrl || '').toString().trim().toLowerCase() === (addon?.manifestUrl || '').toString().trim().toLowerCase()
+                          ) 
+                        : null
+                      
+                      // Debug logging - focused on the issue
+                      if (addon.name === 'AIOStreams') {
+                        console.log('🔍 AIOStreams Debug:', {
+                          addonName: addon.name,
+                          manifestUrl: addon?.manifestUrl,
+                          iconUrl: addon.iconUrl,
+                          finalIconUrl: addon.iconUrl || addon?.manifest?.logo || stremioAddon?.iconUrl || stremioAddon?.manifest?.logo,
+                          hasStremioData: !!stremioAddon
+                        })
+                      }
+                      
+                      const iconUrl = addon.iconUrl || addon?.manifest?.logo || stremioAddon?.iconUrl || stremioAddon?.manifest?.logo
+                      const addonName = addon.name || addon?.manifest?.name || stremioAddon?.name || stremioAddon?.manifest?.name || addon.id
+                      
                       return (
                         <SortableAddon key={`${murl}-${index}` || `addon-${index}`} id={murl} index={index}>
                         <div
@@ -2644,31 +2717,50 @@ export default function GroupsPage() {
                               <span className="w-1 h-1 rounded-full bg-current block" />
                             </div>
                           </div>
-                          <div className="flex items-start justify-between">
-                            <div className="flex-1">
-                              <div className="flex items-center gap-2">
-                                <h4 className={`font-medium ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                                  {addon.name || addon.id || 'Unnamed Addon'}
-                                </h4>
-                                {addon.version && (
-                                  <span className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium ${
-                                    isDark ? 'bg-purple-600 text-white' : 'bg-purple-100 text-purple-800'
-                                  }`}>
-                                    v{addon.version}
-                                  </span>
-                                )}
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center flex-1 min-w-0">
+                                <div className={`w-10 h-10 rounded-lg flex items-center justify-center mr-3 flex-shrink-0 overflow-hidden ${
+                                  isMono ? 'border border-white/20' : ''
+                                }`}>
+                                  {iconUrl ? (
+                                    <img
+                                      src={iconUrl}
+                                      alt={`${addonName} logo`}
+                                      className="w-full h-full object-contain"
+                                      onError={(e: any) => { e.currentTarget.style.display = 'none' }}
+                                    />
+                                  ) : null}
+                                  <div className={`w-full h-full ${iconUrl ? 'hidden' : 'flex'} bg-stremio-purple items-center justify-center`}>
+                                    <Puzzle className="w-5 h-5 text-white" />
+                                  </div>
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-center gap-2">
+                                    <h4 className={`font-medium truncate ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                                      {addonName || 'Unnamed Addon'}
+                                    </h4>
+                                    {addon.version && (
+                                      <span className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium flex-shrink-0 ${
+                                        isDark ? 'bg-purple-600 text-white' : 'bg-purple-100 text-purple-800'
+                                      }`}>
+                                        v{addon.version}
+                                      </span>
+                                    )}
+                                  </div>
+                                  {addon.description && (
+                                    <p className={`text-sm mt-1 truncate ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
+                                      {addon.description}
+                                    </p>
+                                  )}
+                                </div>
                               </div>
-                              {addon.description && (
-                                <p className={`text-sm mt-1 ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
-                                  {addon.description.length > 50 
-                                    ? `${addon.description.substring(0, 50)}...` 
-                                    : addon.description}
-                                </p>
-                              )}
                             </div>
-                            <div className="ml-3 p-2 rounded-lg">
+                            <div className="ml-1 p-2 rounded-lg">
                               <button
-                                className={`${isDark ? 'text-red-300 hover:bg-gray-700' : 'text-red-600 hover:bg-gray-100'} p-2 rounded-lg`}
+                                className={`flex items-center justify-center h-8 w-8 text-sm rounded transition-colors focus:outline-none ${
+                                  isDark ? 'text-gray-300 hover:text-red-400' : 'text-gray-600 hover:text-red-600'
+                                }`}
                                 title="Remove addon from group"
                                 onClick={() => handleDeleteGroupAddon(addon.id, addon.name)}
                               >
@@ -2690,13 +2782,23 @@ export default function GroupsPage() {
                         return mapIdForAddon(a) === activeId
                       })
                       const addon = (activeAddon && (activeAddon.addon || activeAddon)) || null
+                      
+                      // Get icon from Stremio addons data if available
+                      const stremioAddon = Array.isArray(stremioAddonsData?.addons) 
+                        ? stremioAddonsData.addons.find((sa: any) => 
+                            (sa?.manifestUrl || '').toString().trim().toLowerCase() === (addon?.manifestUrl || '').toString().trim().toLowerCase()
+                          ) 
+                        : null
+                      const iconUrl = addon?.iconUrl || addon?.manifest?.logo || stremioAddon?.iconUrl || stremioAddon?.manifest?.logo
+                      const addonName = addon?.name || addon?.manifest?.name || stremioAddon?.name || stremioAddon?.manifest?.name || addon?.id
+                      
                       return (
                         <div className={`p-3 pl-8 rounded-lg border ${isDark ? 'bg-gray-600 border-gray-500' : 'bg-white border-gray-200'} shadow-xl`}>
                           <div className="flex items-start justify-between">
                             <div className="flex-1">
                               <div className="flex items-center gap-2">
                                 <h4 className={`font-medium ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                                  {addon?.name || addon?.id || 'Addon'}
+                                  {addonName || 'Addon'}
                                 </h4>
                                 {addon?.version && (
                                   <span className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium ${
