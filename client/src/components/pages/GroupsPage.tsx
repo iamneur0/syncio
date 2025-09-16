@@ -155,18 +155,71 @@ function GroupSyncBadge({ groupId, onSync, isSyncing, isListMode = false }: { gr
     return () => window.removeEventListener('sfm:group:reordered' as any, onGroupReordered as any)
   }, [groupId])
 
-  // Listen for user status updates to update group sync status
+  // Helper to recompute group status from cached per-user statuses
+  const recomputeGroupStatus = React.useCallback(async () => {
+    if (!groupId || !groupUsers || groupUsers.length === 0) {
+      setStatus('stale')
+      setIsLoading(false)
+      return
+    }
+
+    try {
+      setIsLoading(true)
+      setStatus(prev => (prev === 'syncing' ? prev : 'checking'))
+
+      // If currently syncing, keep syncing state
+      if (isSyncing) {
+        setStatus('syncing')
+        setIsLoading(false)
+        return
+      }
+
+      // Use cached user statuses first for snappy feedback
+      const userSyncResults = await Promise.all(
+        groupUsers.map(async (user: any) => {
+          try {
+            const cached = localStorage.getItem(`sfm_user_sync_status:${user.id}`)
+            if (cached === 'synced') return true
+            if (cached === 'unsynced') return false
+            // Fallback: conservatively unsynced if unknown
+            return false
+          } catch {
+            return false
+          }
+        })
+      )
+      const allUsersSynced = userSyncResults.every(Boolean)
+      setStatus(allUsersSynced ? 'synced' : 'unsynced')
+    } catch {
+      setStatus('unsynced')
+    } finally {
+      setIsLoading(false)
+    }
+  }, [groupId, groupUsers, isSyncing])
+
+  // Listen for user status updates to update group sync status immediately
   React.useEffect(() => {
     const onUserStatusUpdate = (e: CustomEvent) => {
-      const { userId, status } = (e as any).detail || {}
+      const { userId } = (e as any).detail || {}
       if (groupUsers.some((user: any) => user.id === userId)) {
-        // A user in this group had their status updated, re-check group status
-        setStatus('checking')
+        recomputeGroupStatus()
       }
     }
     window.addEventListener('sfm:user-status' as any, onUserStatusUpdate as any)
     return () => window.removeEventListener('sfm:user-status' as any, onUserStatusUpdate as any)
-  }, [groupUsers])
+  }, [groupUsers, recomputeGroupStatus])
+
+  // Listen for addon deletion to update group sync status
+  React.useEffect(() => {
+    const onAddonDeleted = (e: CustomEvent) => {
+      // When any addon is deleted, re-check group status since it affects all users
+      setStatus('checking')
+      // Immediately recompute from per-user statuses so we don't stay stuck
+      recomputeGroupStatus()
+    }
+    window.addEventListener('sfm:addon:deleted' as any, onAddonDeleted as any)
+    return () => window.removeEventListener('sfm:addon:deleted' as any, onAddonDeleted as any)
+  }, [])
 
   // After a sync completes, briefly go to checking so we don't flash unsynced
   React.useEffect(() => {
@@ -190,15 +243,35 @@ function GroupSyncBadge({ groupId, onSync, isSyncing, isListMode = false }: { gr
     refetchOnMount: 'always',
   })
 
+  // Whenever the re-check query or group members change, recompute
+  React.useEffect(() => {
+    if (groupId) {
+      setStatus(prev => (prev === 'syncing' ? prev : 'checking'))
+      recomputeGroupStatus()
+    }
+  }, [groupId, syncStatusData, groupUsers])
+
   // Re-check when Groups tab is activated
   React.useEffect(() => {
     const onTab = (e: CustomEvent) => {
       if (e.detail?.id === 'groups') {
         setStatus('checking')
+        // Also recompute immediately from cached per-user statuses
+        recomputeGroupStatus()
       }
     }
     window.addEventListener('sfm:tab:activated' as any, onTab as any)
     return () => window.removeEventListener('sfm:tab:activated' as any, onTab as any)
+  }, [])
+
+  // Allow external triggers (e.g., Users tab) to nudge groups to re-check now
+  React.useEffect(() => {
+    const onGroupsRecheck = () => {
+      setStatus(prev => (prev === 'syncing' ? prev : 'checking'))
+      recomputeGroupStatus()
+    }
+    window.addEventListener('sfm:groups:recheck' as any, onGroupsRecheck as any)
+    return () => window.removeEventListener('sfm:groups:recheck' as any, onGroupsRecheck as any)
   }, [])
 
   React.useEffect(() => {
@@ -232,26 +305,8 @@ function GroupSyncBadge({ groupId, onSync, isSyncing, isListMode = false }: { gr
           return
         }
 
-        // Determine per-user status using UserSyncBadge persisted results
-        const userSyncPromises = groupUsers.map(async (user: any) => {
-          try {
-            const cached = localStorage.getItem(`sfm_user_sync_status:${user.id}`)
-            if (cached === 'synced') return true
-            if (cached === 'unsynced') return false
-            // Fallback: query user detail quickly to know if they have connection;
-            // without cached status treat as unsynced to be conservative.
-            const userDetail = await usersAPI.getById(user.id)
-            return !!userDetail?.hasStremioConnection ? false : true
-          } catch (error) {
-            console.error(`Error checking cached status for user ${user.id}:`, error)
-            return false
-          }
-        })
-
-        const userSyncResults = await Promise.all(userSyncPromises)
-        const allUsersSynced = userSyncResults.every(synced => synced)
-        
-        setStatus(allUsersSynced ? 'synced' : 'unsynced')
+        // Reuse the recompute logic (cached-first)
+        await recomputeGroupStatus()
       } catch (error) {
         console.error('Error checking group sync status:', error)
         setStatus('unsynced')
@@ -261,7 +316,7 @@ function GroupSyncBadge({ groupId, onSync, isSyncing, isListMode = false }: { gr
     }
 
     checkGroupSyncStatus()
-  }, [groupId, groupUsers, syncStatusData, isSyncing])
+  }, [groupId, groupUsers, syncStatusData, isSyncing, recomputeGroupStatus])
 
   if (isLoading) {
     return (
@@ -326,6 +381,7 @@ export default function GroupsPage() {
   const [showDetailModal, setShowDetailModal] = useState(false)
   const [selectedGroup, setSelectedGroup] = useState<any>(null)
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null)
+  
   
   // Group name editing state for detail modal
   const [editingDetailGroupName, setEditingDetailGroupName] = useState<boolean>(false)
@@ -424,6 +480,14 @@ export default function GroupsPage() {
           toast.error(error?.message || 'Failed to update addon order')
         })
     }
+  }
+
+  // Handle opening user detail view via UsersPage existing modal
+  const handleViewUserDetails = (user: any) => {
+    try {
+      const event = new CustomEvent('sfm:view-user-details', { detail: { user } })
+      window.dispatchEvent(event)
+    } catch {}
   }
 
   // Force-refetch groups and group-related queries when Groups tab is activated
@@ -1444,12 +1508,35 @@ export default function GroupsPage() {
       return response.json()
     },
     onSuccess: () => {
+      // Clear per-user cached sync flags for users in this group so badges flip immediately
+      try {
+        const members = selectedGroupDetails?.users || []
+        members.forEach((m: any) => {
+          localStorage.setItem(`sfm_user_sync_status:${m.id}`, 'unsynced')
+          const evt = new CustomEvent('sfm:user-status', { detail: { userId: m.id, status: 'unsynced', groupId: selectedGroup?.id } })
+          window.dispatchEvent(evt)
+        })
+      } catch {}
+
+      // Notify group badge to recompute now
+      try {
+        const evt = new CustomEvent('sfm:addon:deleted', { detail: { groupId: selectedGroup?.id } })
+        window.dispatchEvent(evt)
+      } catch {}
+
       // Remove and invalidate all related queries to force fresh data
       queryClient.removeQueries({ queryKey: ['group', selectedGroup?.id, 'details'] })
       queryClient.removeQueries({ queryKey: ['group', selectedGroup?.id] })
       queryClient.invalidateQueries({ queryKey: ['groups'] })
       queryClient.invalidateQueries({ queryKey: ['addons'] })
-      
+      queryClient.invalidateQueries({ queryKey: ['group', selectedGroup?.id, 'sync-status'] })
+      queryClient.invalidateQueries({ queryKey: ['group', selectedGroup?.id, 'sync-check'] })
+
+      const members = selectedGroupDetails?.users || []
+      members.forEach((m: any) => {
+        queryClient.invalidateQueries({ queryKey: ['user', m.id, 'sync-status'] })
+      })
+
       toast.success('Addon removed from group successfully!')
     },
     onError: (error: any) => {
@@ -2391,10 +2478,11 @@ export default function GroupsPage() {
                     {selectedGroupDetails.users.map((member: any, index: number) => (
                       <div
                         key={member.id || index}
-                        className={`relative rounded-lg border p-4 hover:shadow-md transition-shadow ${
+                        onClick={() => handleViewUserDetails(member)}
+                        className={`relative rounded-lg border p-4 hover:shadow-md transition-all cursor-pointer ${
                           isDark 
-                            ? 'bg-gray-800 border-gray-700' 
-                            : 'bg-white border-gray-200'
+                            ? 'bg-gray-800 border-gray-700 hover:bg-gray-750' 
+                            : 'bg-white border-gray-200 hover:bg-gray-50'
                         }`}
                       >
                         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
@@ -2447,20 +2535,8 @@ export default function GroupsPage() {
                             {/* Action buttons */}
                             <div className="flex items-center gap-1">
                               <button
-                                onClick={() => {
-                                  // Navigate to user details or open user modal
-                                  // This would need to be implemented based on your app's navigation
-                                  console.log('View user details:', member.id);
-                                }}
-                                className={`flex items-center justify-center h-8 w-8 text-sm rounded transition-colors focus:outline-none ${
-                                  isDark ? 'text-gray-300 hover:text-white' : 'text-gray-600 hover:text-gray-900'
-                                }`}
-                                title="View user details"
-                              >
-                                <Eye className="w-4 h-4" />
-                              </button>
-                              <button
-                                onClick={async () => {
+                                onClick={async (e) => {
+                                  e.stopPropagation()
                                   try {
                                     const syncMode = typeof window !== 'undefined' ? (localStorage.getItem('sfm_sync_mode') || 'normal') : 'normal'
                                     // Collect membership-specific exclusions if we have them in state
@@ -2489,7 +2565,8 @@ export default function GroupsPage() {
                                 <RefreshCw className="w-4 h-4" />
                               </button>
                         <button
-                          onClick={() => {
+                          onClick={(e) => {
+                            e.stopPropagation()
                             openConfirm({
                               title: 'Remove user from group?',
                               description: `Remove "${member.username || member.email || 'this user'}" from the group? This will set their group to "no group".`,
@@ -2652,6 +2729,7 @@ export default function GroupsPage() {
         </div>
       )}
 
+      
 
       <ConfirmDialog
         open={confirmOpen}

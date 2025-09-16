@@ -479,6 +479,31 @@ export default function AddonsPage() {
         const arr = Array.isArray(prev) ? prev : (prev?.data && Array.isArray(prev.data) ? prev.data : [])
         return arr.filter((a: any) => a.id !== deletedId)
       })
+      
+      // Clear user sync status cache since deleting an addon affects all users
+      // This ensures GroupSyncBadge will re-check sync status
+      const keys = Object.keys(localStorage)
+      keys.forEach(key => {
+        if (key.startsWith('sfm_user_sync_status:')) {
+          localStorage.removeItem(key)
+        }
+      })
+      
+      // Invalidate all user and group sync status queries
+      queryClient.invalidateQueries({ queryKey: ['users'] })
+      queryClient.invalidateQueries({ queryKey: ['groups'] })
+      queryClient.invalidateQueries({ queryKey: ['user'] })
+      queryClient.invalidateQueries({ queryKey: ['group'] })
+      
+      // Notify GroupSyncBadge components to re-check their status
+      try {
+        window.dispatchEvent(new CustomEvent('sfm:addon:deleted', { 
+          detail: { addonId: deletedId } 
+        }))
+      } catch (e) {
+        console.warn('Failed to dispatch addon deleted event:', e)
+      }
+      
       toast.success('Addon deleted successfully!')
       // Also refetch to be safe
       queryClient.invalidateQueries({ queryKey: ['addons'] })
@@ -499,6 +524,7 @@ export default function AddonsPage() {
       return res.json()
     },
     onSuccess: (data) => {
+      // Reload-only: update addons list, do not touch any sync-related caches or events
       queryClient.invalidateQueries({ queryKey: ['addons'] })
       toast.success(`Addon "${data.addon.name}" reloaded successfully!`)
     },
@@ -601,6 +627,7 @@ export default function AddonsPage() {
 
   const handleUpdateAddon = () => {
     if (!editingAddonId) return
+    if (updateAddonMutation.isPending) return
 
     const updateData: any = {}
     
@@ -1105,7 +1132,7 @@ export default function AddonsPage() {
                     </button>
                     <button 
                       onClick={() => reloadAddonMutation.mutate(addon.id)}
-                      disabled={reloadAddonMutation.isPending}
+                      disabled={reloadAddonMutation.isPending && reloadAddonMutation.variables === addon.id}
                       className={`flex items-center justify-center px-3 py-2 h-8 min-h-8 max-h-8 text-sm rounded transition-colors disabled:opacity-50 ${
                         isModern
                           ? 'bg-gradient-to-br from-purple-100 to-blue-100 text-purple-800 hover:from-purple-200 hover:to-blue-200'
@@ -1117,7 +1144,7 @@ export default function AddonsPage() {
                       }`}
                       title="Reload addon manifest"
                     >
-                      <RefreshCw className={`w-4 h-4 ${reloadAddonMutation.isPending ? 'animate-spin' : ''}`} />
+                      <RefreshCw className={`w-4 h-4 ${reloadAddonMutation.isPending && reloadAddonMutation.variables === addon.id ? 'animate-spin' : ''}`} />
                     </button>
                     {/* Keep Remove (hard delete) always present */}
                     <button 
@@ -1279,13 +1306,13 @@ export default function AddonsPage() {
                         </button>
                         <button 
                           onClick={(e) => { e.stopPropagation(); reloadAddonMutation.mutate(addon.id) }}
-                          disabled={reloadAddonMutation.isPending}
+                          disabled={reloadAddonMutation.isPending && reloadAddonMutation.variables === addon.id}
                           className={`flex items-center justify-center h-8 w-8 text-sm rounded transition-colors disabled:opacity-50 focus:outline-none ${
                             isDark ? 'text-gray-300 hover:text-green-400' : 'text-gray-600 hover:text-green-600'
                           }`}
                           title="Reload addon manifest"
                         >
-                          <RefreshCw className={`w-4 h-4 ${isReloadingAll || reloadAddonMutation.isPending ? 'animate-spin' : ''}`} />
+                          <RefreshCw className={`w-4 h-4 ${isReloadingAll || (reloadAddonMutation.isPending && reloadAddonMutation.variables === addon.id) ? 'animate-spin' : ''}`} />
                         </button>
                         <button 
                           onClick={(e) => { e.stopPropagation(); handleDeleteAddon(addon.id, addon.name) }}
@@ -1591,7 +1618,7 @@ export default function AddonsPage() {
                   Cancel
                 </button>
                 <button
-                  onClick={handleUpdateAddon}
+                  type="submit"
                   disabled={updateAddonMutation.isPending}
                   className={`flex-1 px-4 py-2 text-white rounded-lg transition-colors disabled:opacity-50 ${
                     isModern

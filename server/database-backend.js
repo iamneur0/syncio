@@ -2721,7 +2721,8 @@ app.put('/api/addons/:id', async (req, res) => {
       await prisma.groupAddon.deleteMany({ where: { addonId: id } });
       if (Array.isArray(groupIds) && groupIds.length > 0) {
         await prisma.groupAddon.createMany({
-          data: groupIds.map((groupId) => ({ addonId: id, groupId }))
+          data: groupIds.map((groupId) => ({ addonId: id, groupId })),
+          skipDuplicates: true
         });
       }
     }

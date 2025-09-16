@@ -244,6 +244,11 @@ export default function HomePage() {
         <main className="flex-1 overflow-auto">
           {renderContent()}
         </main>
+        {activeTab !== 'users' && (
+          <div className="absolute -left-[99999px] -top-[99999px] w-0 h-0 overflow-hidden">
+            <UsersPage key={`users-${tabKeys.users}-hidden`} />
+          </div>
+        )}
       </div>
     </div>
     </div>
