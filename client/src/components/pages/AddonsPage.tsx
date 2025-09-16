@@ -199,9 +199,10 @@ function DiscoveryCard({ isDark, isModern, isModernDark, isMono, viewMode }: { i
                     src={project.icon} 
                     alt={project.name}
                     className="w-8 h-8 rounded"
-                    onError={(e) => {
+                    onError={(e: React.SyntheticEvent<HTMLImageElement>) => {
                       e.currentTarget.style.display = 'none'
-                      e.currentTarget.nextElementSibling.style.display = 'flex'
+                      const sib = e.currentTarget.nextElementSibling as HTMLElement | null
+                      if (sib) sib.style.display = 'flex'
                     }}
                   />
                   <div className="w-8 h-8 rounded flex items-center justify-center bg-gradient-to-br from-purple-500 to-blue-500 text-white hidden">
@@ -966,9 +967,9 @@ export default function AddonsPage() {
         <>
           {viewMode === 'card' ? (
             /* Card Grid View */
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 items-start">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 items-stretch">
               {displayAddons.map((addon: any) => (
-                <div key={addon.id} className={`rounded-lg shadow-sm border p-6 hover:shadow-md transition-shadow flex flex-col ${
+                <div key={addon.id} className={`rounded-lg shadow-sm border p-6 hover:shadow-md transition-shadow flex flex-col h-full ${
                   isModern
                     ? 'bg-gradient-to-br from-purple-50/90 to-blue-50/90 border-purple-200/50 shadow-lg shadow-purple-100/30'
                     : isModernDark
@@ -979,24 +980,24 @@ export default function AddonsPage() {
                 } ${addon.status === 'inactive' ? 'opacity-50' : ''}`}>
                   <div className="flex items-start justify-between mb-4">
                     <div className="flex items-center flex-1 min-w-0">
-                      <div className="w-12 h-12 rounded-lg flex items-center justify-center mr-3 flex-shrink-0 overflow-hidden">
+                      <div className={`w-12 h-12 rounded-lg flex items-center justify-center mr-3 flex-shrink-0 overflow-hidden ${
+                        isMono ? 'border border-white/20' : ''
+                      }`}>
                         {addon.iconUrl ? (
                           <img 
                             src={addon.iconUrl} 
                             alt={`${addon.name} logo`}
                             className="w-full h-full object-contain"
-                            onError={(e) => {
+                            onError={(e: React.SyntheticEvent<HTMLImageElement>) => {
                               // Fallback to generic icon if image fails to load
                               e.currentTarget.style.display = 'none'
-                              const nextElement = e.currentTarget.nextElementSibling as HTMLElement
-                              if (nextElement) {
-                                nextElement.style.display = 'flex'
-                              }
+                              const sib = e.currentTarget.nextElementSibling as HTMLElement | null
+                              if (sib) sib.style.display = 'flex'
                             }}
                           />
                         ) : null}
                         <div className={`w-full h-full ${addon.iconUrl ? 'hidden' : 'flex'} bg-stremio-purple items-center justify-center`}>
-                          <Puzzle className="w-6 h-6 text-white" />
+                          <Puzzle className="w-5 h-5 text-white" />
                         </div>
                       </div>
                       <div className="min-w-0 flex-1 max-w-[calc(100%-120px)]">
@@ -1064,7 +1065,7 @@ export default function AddonsPage() {
                     </button>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-4 mb-4">
+                  <div className="grid grid-cols-2 gap-4 mb-4 items-start">
                     <div className="flex items-center">
                       <User className="w-4 h-4 text-gray-400 mr-2" />
                       <div>
@@ -1191,7 +1192,9 @@ export default function AddonsPage() {
                 >
                   <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                     <div className="flex items-center flex-1 min-w-0">
-                      <div className="w-10 h-10 rounded-lg flex items-center justify-center mr-3 flex-shrink-0 overflow-hidden">
+                      <div className={`w-10 h-10 rounded-lg flex items-center justify-center mr-3 flex-shrink-0 overflow-hidden ${
+                        isMono ? 'border border-white/20' : ''
+                      }`}>
                         {addon.iconUrl ? (
                           <img 
                             src={addon.iconUrl} 
@@ -1461,7 +1464,7 @@ export default function AddonsPage() {
                               : `bg-gray-100 text-gray-700 border-gray-300 hover:bg-gray-200 hover:border-gray-400 ${isMono ? '' : ''}`
                         }`}
                       >
-                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-white ${getGroupColorClass(group?.colorIndex)}`}
+                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center text-white ${getGroupColorClass(group?.colorIndex)}`}
                         style={{
                           backgroundColor: group?.colorIndex === 2 && isMono ? '#1f2937' : undefined
                         }}>
@@ -1585,7 +1588,7 @@ export default function AddonsPage() {
                               : `bg-gray-100 text-gray-700 border-gray-300 hover:bg-gray-200 hover:border-gray-400 ${isMono ? '' : ''}`
                         }`}
                       >
-                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-white ${getGroupColorClass(group?.colorIndex)}`}
+                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center text-white ${getGroupColorClass(group?.colorIndex)}`}
                         style={{
                           backgroundColor: group?.colorIndex === 2 && isMono ? '#1f2937' : undefined
                         }}>
