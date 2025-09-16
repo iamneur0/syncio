@@ -388,6 +388,27 @@ export default function UsersPage() {
     return () => window.removeEventListener('sfm:settings:changed', handleDeleteModeChange)
   }, [])
   
+  // Listen for user detail view requests from other components (like GroupsPage)
+  useEffect(() => {
+    const handleViewUserDetails = (e: CustomEvent) => {
+      const { user } = e.detail || {}
+      if (user) {
+        setSelectedUser(user)
+        setIsDetailModalOpen(true)
+        // Reset editing states when opening detail view
+        setEditingDetailUsername(null)
+        setTempDetailUsername('')
+        setEditingDetailGroup(false)
+        setTempDetailGroup('')
+      }
+    }
+    
+    window.addEventListener('sfm:view-user-details', handleViewUserDetails as any)
+    return () => {
+      window.removeEventListener('sfm:view-user-details', handleViewUserDetails as any)
+    }
+  }, [])
+  
   // Backend restart detection
   const [lastServerStartTime, setLastServerStartTime] = useState<string | null>(null)
   
@@ -808,22 +829,37 @@ export default function UsersPage() {
       return res.json()
     },
     onSuccess: (data, userId) => {
-      // Refresh user data and addons
+      // Reload-only: refresh user's live stremio addons panel; do not change sync views
       queryClient.invalidateQueries({ queryKey: ['user', userId, 'stremio-addons'] })
       queryClient.invalidateQueries({ queryKey: ['user', userId] })
-      queryClient.invalidateQueries({ queryKey: ['user', userId, 'sync-status'] })
-      queryClient.invalidateQueries({ queryKey: ['users'] })
-      queryClient.invalidateQueries({ queryKey: ['addons'] })
-      
-      // Force refetch the data immediately
+
+      // Force refetch the live addons immediately
       queryClient.refetchQueries({ queryKey: ['user', userId, 'stremio-addons'] })
       queryClient.refetchQueries({ queryKey: ['user', userId] })
-      queryClient.refetchQueries({ queryKey: ['user', userId, 'sync-status'] })
-      
+
       toast.success(data?.message || 'User addons reloaded successfully!')
     },
     onError: (error: any) => {
       toast.error(error?.message || 'Failed to reload user addons')
+    }
+  })
+
+  // Sync user mutation (triggered by the sync badge)
+  const syncUserMutation = useMutation({
+    mutationFn: async ({ userId, excluded }: { userId: string; excluded: string[] }) => {
+      // Use normal mode unless advanced is explicitly needed
+      return usersAPI.sync(userId, excluded, 'normal')
+    },
+    onSuccess: (_data, variables) => {
+      const userId = variables.userId
+      // Refresh only the user's sync status and basic data
+      queryClient.invalidateQueries({ queryKey: ['user', userId, 'sync-status'] })
+      queryClient.invalidateQueries({ queryKey: ['user', userId] })
+      queryClient.refetchQueries({ queryKey: ['user', userId, 'sync-status'] })
+      toast.success('User synced successfully')
+    },
+    onError: (error: any) => {
+      toast.error(error?.message || 'Failed to sync user')
     }
   })
 
@@ -836,7 +872,13 @@ export default function UsersPage() {
         await Promise.all([
           queryClient.refetchQueries({ queryKey: ['users'] as any, type: 'all' }),
           queryClient.refetchQueries({ queryKey: ['user'] as any, type: 'all' }),
+          // Also refresh groups in the background so their badges are fresh when switching back
+          queryClient.refetchQueries({ queryKey: ['groups'] as any, type: 'all' }),
         ])
+        // Nudge group badges to recompute immediately from cached user statuses
+        try {
+          window.dispatchEvent(new CustomEvent('sfm:groups:recheck' as any, { detail: { source: 'users-tab' } }))
+        } catch {}
       } catch {}
     }
     window.addEventListener('sfm:tab:activated' as any, onUsersTab as any)
@@ -847,7 +889,8 @@ export default function UsersPage() {
   React.useEffect(() => {
     const handleSyncUser = (event: CustomEvent) => {
       const { userId } = event.detail
-      reloadUserAddonsMutation.mutate(userId)
+      const excluded = Array.from((globalUserExcludedSets.get(userId) || new Set<string>()).values())
+      syncUserMutation.mutate({ userId, excluded })
     }
 
     window.addEventListener('syncUser', handleSyncUser as EventListener)
@@ -855,7 +898,7 @@ export default function UsersPage() {
     return () => {
       window.removeEventListener('syncUser', handleSyncUser as EventListener)
     }
-  }, [reloadUserAddonsMutation])
+  }, [syncUserMutation, globalUserExcludedSets])
 
   // Fetch groups for the dropdown
   const { data: groupsRaw = [] } = useQuery({
@@ -2106,7 +2149,7 @@ export default function UsersPage() {
                                 userId={user.id} 
                                 userExcludedSet={globalUserExcludedSets.get(user.id) || new Set()} 
                                 userProtectedSet={globalUserProtectedSets.get(user.id) || new Set()} 
-                                isSyncing={reloadUserAddonsMutation.isPending && reloadUserAddonsMutation.variables === user.id}
+                                isSyncing={false}
                               />
                             </div>
                       </div>
@@ -2126,7 +2169,7 @@ export default function UsersPage() {
                                 userId={user.id} 
                                 userExcludedSet={globalUserExcludedSets.get(user.id) || new Set()} 
                                 userProtectedSet={globalUserProtectedSets.get(user.id) || new Set()} 
-                                isSyncing={reloadUserAddonsMutation.isPending && reloadUserAddonsMutation.variables === user.id}
+                                isSyncing={false}
                               />
                             </div>
                       </div>
@@ -2196,7 +2239,7 @@ export default function UsersPage() {
                 </button>
                 <button
                   onClick={() => reloadUserAddonsMutation.mutate(user.id)}
-                  disabled={reloadUserAddonsMutation.isPending}
+                  disabled={reloadUserAddonsMutation.isPending && reloadUserAddonsMutation.variables === user.id}
                   className={`flex items-center justify-center px-3 py-2 h-8 min-h-8 max-h-8 text-sm rounded transition-colors disabled:opacity-50 ${
                     isModern
                       ? 'bg-gradient-to-br from-purple-100 to-blue-100 text-purple-800 hover:from-purple-200 hover:to-blue-200'
@@ -2208,7 +2251,7 @@ export default function UsersPage() {
                   }`}
                   title="Reload and sync user addons"
                 >
-                      <RefreshCw className={`w-4 h-4 ${reloadUserAddonsMutation.isPending ? 'animate-spin' : ''}`} />
+                      <RefreshCw className={`w-4 h-4 ${reloadUserAddonsMutation.isPending && reloadUserAddonsMutation.variables === user.id ? 'animate-spin' : ''}`} />
                 </button>
                 <button 
                   onClick={() => handleDeleteUser(user.id, user.username)}
@@ -2261,7 +2304,7 @@ export default function UsersPage() {
                             userId={user.id} 
                             userExcludedSet={globalUserExcludedSets.get(user.id) || new Set()} 
                             userProtectedSet={globalUserProtectedSets.get(user.id) || new Set()} 
-                            isSyncing={reloadUserAddonsMutation.isPending && reloadUserAddonsMutation.variables === user.id}
+                            isSyncing={false}
                             isListMode={true}
                           />
                         </div>
@@ -2908,7 +2951,7 @@ export default function UsersPage() {
                     userId={selectedUser.id} 
                     userExcludedSet={globalUserExcludedSets.get(selectedUser.id) || new Set()}
                     userProtectedSet={globalUserProtectedSets.get(selectedUser.id) || new Set()}
-                    isSyncing={reloadUserAddonsMutation.isPending && reloadUserAddonsMutation.variables === selectedUser.id}
+                    isSyncing={false}
                     location="detailed-view"
                   />
                 <button
