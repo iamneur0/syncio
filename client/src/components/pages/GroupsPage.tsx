@@ -1140,7 +1140,7 @@ export default function GroupsPage() {
   })
 
   // Get the first group member with Stremio connection to fetch addon data for icon display
-  const firstGroupMemberWithStremio = selectedGroupDetails?.users?.find(user => user.hasStremioConnection)
+  const firstGroupMemberWithStremio = selectedGroupDetails?.users?.find((user: any) => user.hasStremioConnection)
   
   // Debug logging for group member
   React.useEffect(() => {
@@ -1442,8 +1442,8 @@ export default function GroupsPage() {
     mutationFn: async () => {
       setIsSyncingAll(true)
       
-      // Get all groups and sync them sequentially
-      const groupsToSync = groups || []
+      // Get all enabled groups and sync them sequentially
+      const groupsToSync = (groups || []).filter((group: any) => group.isActive !== false)
       
       let successCount = 0
       let errorCount = 0
@@ -1733,10 +1733,14 @@ export default function GroupsPage() {
           {/* View Mode Toggle */}
           {mounted && (
             <div className="flex items-center">
-              <div className={`flex rounded-lg ${isMono ? '' : 'border'} ${isMono ? '' : (isDark ? 'border-gray-600' : 'border-gray-300')}`}>
+              <div className={`flex rounded-lg border ${isMono ? 'border-white/20' : (isDark ? 'border-gray-600' : 'border-gray-300')}`}>
                 <button
                   onClick={() => handleViewModeChange('card')}
-                  className={`flex items-center gap-2 px-3 py-2 sm:py-3 text-sm rounded-l-lg transition-colors h-10 sm:h-12 ${
+                  className={`flex items-center gap-2 px-3 py-2 sm:py-3 text-sm transition-colors h-10 sm:h-12 ${
+                    isMono 
+                      ? 'rounded-l-lg !border-0 !border-r-0 !rounded-r-none' 
+                      : 'rounded-l-lg border-0 border-r-0'
+                  } ${
                     viewMode === 'card'
                       ? isMono
                         ? '!bg-white/10 text-white'
@@ -1756,7 +1760,11 @@ export default function GroupsPage() {
                 </button>
                 <button
                   onClick={() => handleViewModeChange('list')}
-                  className={`flex items-center gap-2 px-3 py-2 sm:py-3 text-sm rounded-r-lg transition-colors h-10 sm:h-12 ${
+                  className={`flex items-center gap-2 px-3 py-2 sm:py-3 text-sm transition-colors h-10 sm:h-12 ${
+                    isMono 
+                      ? 'rounded-r-lg !border-0 !border-l-0 !rounded-l-none' 
+                      : 'rounded-r-lg border-0 border-l-0'
+                  } ${
                     viewMode === 'list'
                       ? isMono
                         ? '!bg-white/10 text-white'
@@ -2034,7 +2042,7 @@ export default function GroupsPage() {
             } ${!group.isActive ? 'opacity-50' : ''}`}
               onClick={() => handleViewGroupDetails(group)}
             >
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center flex-1 min-w-0">
                   <div
                     className={`w-10 h-10 rounded-lg flex items-center justify-center mr-3 flex-shrink-0 text-white ${getGroupColorClass(group?.colorIndex)} ${
@@ -2084,26 +2092,39 @@ export default function GroupsPage() {
                         isListMode={true}
                       />
                     </div>
+                    {/* Mobile stats */}
+                    <div className="flex min-[480px]:hidden items-center gap-3 text-sm mt-1">
+                      <div className="flex items-center gap-1">
+                        <Puzzle className="w-3 h-3 text-gray-400" />
+                        <span className={`font-medium ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                          {group.addons}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <Users className="w-3 h-3 text-gray-400" />
+                        <span className={`font-medium ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                          {group.members}
+                        </span>
+                      </div>
+                    </div>
                     {group.description && (
-                      <p className={`text-sm truncate ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
+                      <p className={`hidden sm:block text-sm truncate ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
                         {group.description}
                       </p>
                     )}
                   </div>
-      </div>
+                </div>
 
-                <div className="flex items-center gap-2 sm:gap-4 sm:ml-4 flex-wrap">
-                  {/* Stats */}
-                  <div className="hidden sm:flex items-center gap-4 text-sm">
+                <div className="flex items-center gap-2">
+                  {/* Desktop stats */}
+                  <div className="hidden min-[480px]:flex items-center gap-4 text-sm mr-3">
                     <div className="flex items-center gap-1">
                       <Puzzle className="w-4 h-4 text-gray-400" />
                       <span className={`font-medium ${isDark ? 'text-white' : 'text-gray-900'}`}>{group.addons}</span>
-                      <span className={`${isDark ? 'text-gray-400' : 'text-gray-500'}`}>{group.addons === 1 ? 'addon' : 'addons'}</span>
                     </div>
                     <div className="flex items-center gap-1">
                       <Users className="w-4 h-4 text-gray-400" />
                       <span className={`font-medium ${isDark ? 'text-white' : 'text-gray-900'}`}>{group.members}</span>
-                      <span className={`${isDark ? 'text-gray-400' : 'text-gray-500'}`}>{group.members === 1 ? 'member' : 'members'}</span>
                     </div>
                   </div>
                   
@@ -2479,17 +2500,19 @@ export default function GroupsPage() {
                         {selectedGroup.name}
                       </h2>
                     )}
-                    <div className="flex items-center gap-2">
-                      <Users className={`w-4 h-4 ${isDark ? 'text-gray-400' : 'text-gray-500'}`} />
-                      <span className={`text-sm font-medium ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
-                        {selectedGroup.members || 0}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Puzzle className={`w-4 h-4 ${isDark ? 'text-gray-400' : 'text-gray-500'}`} />
-                      <span className={`text-sm font-medium ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
-                        {selectedGroupDetails?.group?.addons?.length || selectedGroupDetails?.addons?.length || 0}
-                      </span>
+                    <div className="flex items-center gap-4">
+                      <div className="flex items-center gap-2">
+                        <Users className={`w-4 h-4 ${isDark ? 'text-gray-400' : 'text-gray-500'}`} />
+                        <span className={`text-sm font-medium ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
+                          {selectedGroup.members || 0}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Puzzle className={`w-4 h-4 ${isDark ? 'text-gray-400' : 'text-gray-500'}`} />
+                        <span className={`text-sm font-medium ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
+                          {selectedGroupDetails?.group?.addons?.length || selectedGroupDetails?.addons?.length || 0}
+                        </span>
+                      </div>
                     </div>
                   </div>
                   {selectedGroup.description && (
@@ -2537,7 +2560,7 @@ export default function GroupsPage() {
                             : 'bg-white border-gray-200 hover:bg-gray-50'
                         }`}
                       >
-                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                        <div className="flex items-center justify-between gap-3">
                           <div className="flex items-center flex-1 min-w-0">
                             <div className={`w-10 h-10 rounded-full flex items-center justify-center mr-3 flex-shrink-0 ${
                               isMono ? 'bg-black border border-white/20 text-white' : getUserColorClass(member?.colorIndex)
@@ -2551,7 +2574,7 @@ export default function GroupsPage() {
                               </span>
                             </div>
                             <div className="min-w-0 flex-1">
-                              <div className="flex items-center gap-2 mb-1">
+                              <div className="flex items-center gap-2">
                                 <h3 className={`font-semibold truncate ${isDark ? 'text-white' : 'text-gray-900'}`}>
                                   {member.username || member.email || 'Unnamed User'}
                                 </h3>
@@ -2562,25 +2585,36 @@ export default function GroupsPage() {
                                   isListMode={true}
                                 />
                               </div>
+                              {/* Mobile stats inline with name */}
+                              <div className="flex min-[480px]:hidden items-center gap-3 text-sm mt-1">
+                                <div className="flex items-center gap-1">
+                                  <Puzzle className="w-3 h-3 text-gray-400" />
+                                  <span className={`font-medium ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                                    {userSyncData.get(member.id)?.stremioAddonCount || member.stremioAddonsCount || 0}
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                  <EyeOff className="w-3 h-3 text-gray-400" />
+                                  <span className={`font-medium ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                                    {globalUserExcludedSets.get(member.id)?.size || 0}
+                                  </span>
+                                </div>
+                              </div>
                             </div>
                           </div>
                           
-                          <div className="flex items-center gap-2 sm:gap-4 sm:ml-4 flex-wrap">
-                            {/* Stats */}
-                            <div className="hidden sm:flex items-center gap-4 text-sm">
+                          <div className="flex items-center gap-2">
+                            {/* Desktop stats */}
+                            <div className="hidden min-[480px]:flex items-center gap-4 text-sm mr-3">
                               <div className="flex items-center gap-1">
                                 <Puzzle className="w-4 h-4 text-gray-400" />
                                 <span className={`font-medium ${isDark ? 'text-white' : 'text-gray-900'}`}>
                                   {userSyncData.get(member.id)?.stremioAddonCount || member.stremioAddonsCount || 0}
                                 </span>
-                                <span className={`${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
-                                  {(userSyncData.get(member.id)?.stremioAddonCount || member.stremioAddonsCount || 0) === 1 ? 'addon' : 'addons'}
-                                </span>
                               </div>
                               <div className="flex items-center gap-1">
                                 <EyeOff className="w-4 h-4 text-gray-400" />
                                 <span className={`font-medium ${isDark ? 'text-white' : 'text-gray-900'}`}>{globalUserExcludedSets.get(member.id)?.size || 0}</span>
-                                <span className={`${isDark ? 'text-gray-400' : 'text-gray-500'}`}>excluded</span>
                               </div>
                             </div>
                             
@@ -2717,7 +2751,7 @@ export default function GroupsPage() {
                               <span className="w-1 h-1 rounded-full bg-current block" />
                             </div>
                           </div>
-                          <div className="flex items-start justify-between gap-3">
+                          <div className="flex items-center justify-between gap-3">
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center flex-1 min-w-0">
                                 <div className={`w-10 h-10 rounded-lg flex items-center justify-center mr-3 flex-shrink-0 overflow-hidden ${
@@ -2736,12 +2770,12 @@ export default function GroupsPage() {
                                   </div>
                                 </div>
                                 <div className="min-w-0 flex-1">
-                                  <div className="flex items-center gap-2">
+                                  <div className="flex flex-col min-[480px]:flex-row min-[480px]:items-center min-[480px]:gap-2">
                                     <h4 className={`font-medium truncate ${isDark ? 'text-white' : 'text-gray-900'}`}>
                                       {addonName || 'Unnamed Addon'}
                                     </h4>
                                     {addon.version && (
-                                      <span className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium flex-shrink-0 ${
+                                      <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium w-fit mt-1 min-[480px]:mt-0 ${
                                         isDark ? 'bg-purple-600 text-white' : 'bg-purple-100 text-purple-800'
                                       }`}>
                                         v{addon.version}
@@ -2749,7 +2783,7 @@ export default function GroupsPage() {
                                     )}
                                   </div>
                                   {addon.description && (
-                                    <p className={`text-sm mt-1 truncate ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
+                                    <p className={`hidden sm:block text-sm mt-1 truncate ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
                                       {addon.description}
                                     </p>
                                   )}

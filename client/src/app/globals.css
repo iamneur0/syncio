@@ -307,17 +307,52 @@ body.theme-loaded {
     @apply outline-none ring-0 border-0 shadow-none;
   }
 
-  /* Remove focus outline/rectangle from all buttons in dark mode */
+  /* Remove ALL focus/active states from buttons in dark mode - copy light mode behavior exactly */
   .dark button:focus,
   .dark button:focus-visible,
-  .dark button:active {
-    @apply outline-none ring-0 border-0 shadow-none;
+  .dark button:active,
+  .dark button:focus-visible:active,
+  .dark button:focus-visible:focus,
+  .dark button:focus-visible:active:focus {
+    @apply outline-none ring-0 border-0 shadow-none !important;
+    box-shadow: none !important;
+    border: none !important;
+    outline: none !important;
   }
 
-  /* Remove focus outline from view buttons specifically */
-  .dark button:focus,
-  .dark button:active {
-    @apply outline-none ring-0 border-0 shadow-none;
+  /* Specifically target sidebar navigation buttons in dark mode */
+  .dark nav button:focus,
+  .dark nav button:focus-visible,
+  .dark nav button:active,
+  .dark nav button:focus-visible:active,
+  .dark nav button:focus-visible:focus,
+  .dark nav button:focus-visible:active:focus {
+    @apply outline-none ring-0 border-0 shadow-none !important;
+    box-shadow: none !important;
+    border: none !important;
+    outline: none !important;
+  }
+
+  /* Target all possible button states in dark mode */
+  .dark button:is(:focus, :focus-visible, :active, :focus-visible:active) {
+    @apply outline-none ring-0 border-0 shadow-none !important;
+    box-shadow: none !important;
+    border: none !important;
+    outline: none !important;
+  }
+
+  /* Additional overrides for dark mode button states */
+  .dark button:focus-visible {
+    outline: 2px solid transparent !important;
+    outline-offset: 2px !important;
+  }
+
+  /* Ensure no borders appear on click in dark mode */
+  .dark button:active:focus,
+  .dark button:active:focus-visible {
+    outline: none !important;
+    box-shadow: none !important;
+    border: none !important;
   }
 
   /* Remove background color from selected sidebar tabs in dark mode */
@@ -342,14 +377,6 @@ body.theme-loaded {
     @apply bg-transparent hover:bg-transparent;
   }
 
-  /* Remove all hover effects from sidebar navigation in dark mode */
-  .dark nav button:hover {
-    @apply bg-transparent;
-  }
-
-  .dark .sidebar-gradient nav button:hover {
-    @apply bg-transparent;
-  }
 
   /* Fix toggle borders in dark mode - make them white instead of grey */
   .dark .relative.inline-flex.h-5.w-9.items-center.rounded-full {

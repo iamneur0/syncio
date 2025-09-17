@@ -17,7 +17,7 @@ services:
       syncio_redis:
         condition: service_healthy
     volumes:
-      - ./data:/app/data
+      - ./syncio/data:/app/data
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/"]
       interval: 30s

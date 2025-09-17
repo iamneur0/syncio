@@ -89,10 +89,10 @@ export default function HomePage() {
             ? 'bg-black'
             : isDark ? 'bg-gray-800' : 'bg-white'
         } shadow-xl transform transition-transform ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
-          <div className={`flex items-center justify-between h-16 px-4 ${
+          <div className={`flex items-center h-16 px-3 relative ${
             isMono ? 'bg-black' : ''
           }`}>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center justify-center w-8 h-8 flex-shrink-0 absolute left-6 top-1/2 transform -translate-y-1/2">
               <img 
                 src={(isDark || isMono) ? "/logo-white.png" : "/logo-black.png"} 
                 alt="Syncio Logo" 
@@ -102,11 +102,11 @@ export default function HomePage() {
                   e.currentTarget.src = "/favicon-32x32.png"
                 }}
               />
-              <h1 className={`text-xl font-bold ${
-                isDark ? 'text-white' : 'text-gray-900'
-              }`}>Syncio</h1>
             </div>
-            <button onClick={() => setSidebarOpen(false)} className={`p-1 ${
+            <h1 className={`text-xl font-bold absolute left-1/2 transform -translate-x-1/2 ${
+              isDark ? 'text-white' : 'text-gray-900'
+            }`}>Syncio</h1>
+            <button onClick={() => setSidebarOpen(false)} className={`p-1 absolute right-4 ${
               isDark ? 'text-white hover:text-gray-200' : 'text-gray-900 hover:text-gray-700'
             }`}>
               <X className="w-6 h-6" />
@@ -117,16 +117,22 @@ export default function HomePage() {
               <button
                 key={item.id}
                 onClick={() => activateTab(item.id, true)}
-                className={`w-full flex items-center px-4 py-4 text-left rounded transition-colors font-medium ${
+                className={`w-full flex items-center px-4 py-4 text-left rounded transition-all duration-200 focus:outline-none focus:ring-0 focus:border-0 active:outline-none active:ring-0 active:border-0 ${
                   activeTab === item.id
-                    ? `bg-stremio-purple text-white ${isMono ? '' : 'shadow-lg'}`
+                    ? (isDark || isMono)
+                      ? 'text-white font-bold'
+                      : 'text-gray-900 font-bold'
                     : isDark 
-                      ? 'text-gray-300 hover:bg-gray-700' 
-                      : 'text-gray-700 hover:bg-gray-100'
+                      ? 'text-gray-300 hover:bg-gray-600 hover:text-white font-medium' 
+                      : 'text-gray-700 hover:bg-gray-100 hover:text-gray-900 font-medium'
                 }`}
               >
-                <item.icon className="w-5 h-5 mr-3 flex-shrink-0" />
-                <span className="text-sm font-medium">{item.name}</span>
+                <item.icon className={`w-5 h-5 mr-3 flex-shrink-0 transition-all duration-200 ${
+                  activeTab === item.id ? 'fill-current' : ''
+                }`} />
+                <span className={`text-sm transition-all duration-200 ${
+                  activeTab === item.id ? 'font-bold' : 'font-medium'
+                }`}>{item.name}</span>
               </button>
             ))}
           </nav>
@@ -164,19 +170,25 @@ export default function HomePage() {
             <button
               key={item.id}
               onClick={() => activateTab(item.id)}
-              className={`w-full flex items-center py-5 pl-4 pr-6 text-left rounded transition-colors relative font-medium ${
-                activeTab === item.id
-                  ? `bg-stremio-purple text-white ${isMono ? '' : 'shadow-lg'}`
-                  : isDark 
-                    ? 'text-gray-300 hover:bg-gray-700' 
-                    : 'text-gray-700 hover:bg-gray-100'
-              }`}
+                className={`w-full flex items-center py-5 pl-4 pr-6 text-left rounded transition-all duration-200 relative focus:outline-none focus:ring-0 focus:border-0 active:outline-none active:ring-0 active:border-0 ${
+                  activeTab === item.id
+                    ? (isDark || isMono)
+                      ? 'text-white font-bold'
+                      : 'text-gray-900 font-bold'
+                    : isDark 
+                      ? 'text-gray-300 hover:bg-gray-600 hover:text-white font-medium' 
+                      : 'text-gray-700 hover:bg-gray-100 hover:text-gray-900 font-medium'
+                }`}
               title={sidebarCollapsed ? item.name : ''}
             >
               <div className="flex items-center justify-center w-8 h-8 flex-shrink-0 absolute left-1 top-1/2 transform -translate-y-1/2">
-                <item.icon className="w-5 h-5" />
+                <item.icon className={`w-5 h-5 transition-all duration-200 ${
+                  activeTab === item.id ? 'fill-current' : ''
+                }`} />
               </div>
-              {!sidebarCollapsed && <span className="absolute left-11 top-1/2 transform -translate-y-1/2 text-sm font-medium">{item.name}</span>}
+              {!sidebarCollapsed && <span className={`absolute left-11 top-1/2 transform -translate-y-1/2 text-sm transition-all duration-200 ${
+                activeTab === item.id ? 'font-bold' : 'font-medium'
+              }`}>{item.name}</span>}
             </button>
           ))}
         </nav>

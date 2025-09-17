@@ -309,6 +309,7 @@ app.get('/api/users/:id', async (req, res) => {
     const familyGroup = user.memberships?.[0]?.group
     const addons = Array.isArray(familyGroup?.addons)
       ? familyGroup.addons
+          .filter((ga) => ga.addon.isActive !== false) // Only show enabled addons
           .map((ga) => ({
             id: ga.addon.id,
             name: ga.addon.name,
@@ -603,6 +604,7 @@ app.get('/api/users/:id/sync-status', async (req, res) => {
     // We need to maintain the order from the group addons (sorted by addedAt)
     const groupAddons = user.memberships.flatMap(membership => 
       membership.group.addons
+        .filter(ga => ga.addon.isActive !== false) // Only include enabled addons
         .sort((a, b) => new Date(a.addedAt || 0) - new Date(b.addedAt || 0)) // Sort by addedAt to match sync order
         .map(ga => ({ 
           id: ga.addon.id, 
@@ -1014,6 +1016,10 @@ app.post('/api/users/:id/reload-addons', async (req, res) => {
 
     if (!user) {
       return res.status(404).json({ message: 'User not found' })
+    }
+
+    if (!user.isActive) {
+      return res.status(400).json({ message: 'User is disabled' })
     }
 
     if (!user.stremioAuthKey) {
@@ -2328,6 +2334,10 @@ app.post('/api/addons/:id/reload', async (req, res) => {
       return res.status(404).json({ error: 'Addon not found' });
     }
 
+    if (!addon.isActive) {
+      return res.status(400).json({ error: 'Addon is disabled' });
+    }
+
     if (!addon.manifestUrl) {
       return res.status(400).json({ error: 'Addon has no manifest URL' });
     }
@@ -3216,9 +3226,9 @@ app.get('/api/groups/:id', async (req, res) => {
       }
     })
     if (!group) return res.status(404).json({ message: 'Group not found' })
-    // Get group addon manifest URLs for comparison
+    // Get group addon manifest URLs for comparison (only enabled addons)
     const groupManifestUrls = group.addons
-      .filter(ga => ga.addon.manifestUrl)
+      .filter(ga => ga.addon.manifestUrl && ga.addon.isActive !== false)
       .map(ga => ga.addon.manifestUrl)
     
     const memberUsers = group.members.map((m) => {
@@ -3245,15 +3255,17 @@ app.get('/api/groups/:id', async (req, res) => {
       createdAt: group.createdAt,
       colorIndex: group.colorIndex || 1,
       users: memberUsers,
-      addons: group.addons.map((ga) => ({ 
-        id: ga.addon.id, 
-        name: ga.addon.name, 
-        description: ga.addon.description || '',
-        manifestUrl: ga.addon.manifestUrl,
-        version: ga.addon.version || null,
-        isEnabled: ga.addon.isActive,
-        iconUrl: ga.addon.iconUrl,
-      })),
+      addons: group.addons
+        .filter((ga) => ga.addon.isActive !== false) // Only show enabled addons
+        .map((ga) => ({ 
+          id: ga.addon.id, 
+          name: ga.addon.name, 
+          description: ga.addon.description || '',
+          manifestUrl: ga.addon.manifestUrl,
+          version: ga.addon.version || null,
+          isEnabled: ga.addon.isActive,
+          iconUrl: ga.addon.iconUrl,
+        })),
     })
   } catch (error) {
     console.error('Error fetching group detail:', error)
@@ -3895,7 +3907,7 @@ app.post('/api/groups/:id/sync', async (req, res) => {
       return res.status(400).json({ message: 'Group is disabled' })
     }
     
-    const groupUsers = group.members.map(member => member.user).filter(user => user.stremioAuthKey)
+    const groupUsers = group.members.map(member => member.user).filter(user => user.stremioAuthKey && user.isActive)
     
     if (groupUsers.length === 0) {
       return res.json({ 
