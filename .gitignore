@@ -117,3 +117,4 @@ prisma/migrations/dev.db*
 
 # Local development
 local-addon/
+README-CI-CD.md
