@@ -104,7 +104,7 @@ function DiscoveryCard({ isDark, isModern, isModernDark, isMono, viewMode }: { i
       onClick={() => setShowDiscovery(!showDiscovery)}
     >
       {viewMode === 'list' ? (
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div className="flex items-center justify-between gap-3">
           <div className="flex items-center flex-1 min-w-0">
             <div className={`w-10 h-10 rounded-lg flex items-center justify-center mr-3 flex-shrink-0 ${isMono ? 'bg-black border border-white/20 text-white' : 'bg-gradient-to-br from-purple-500 to-blue-500 text-white'}`}>
               <Star className="w-5 h-5" />
@@ -123,7 +123,7 @@ function DiscoveryCard({ isDark, isModern, isModernDark, isMono, viewMode }: { i
                   Discover Addons
                 </h3>
               </div>
-              <p className={`text-sm truncate ${
+              <p className={`hidden sm:block text-sm truncate ${
                 isMono
                   ? 'text-white/70'
                   : isModern 
@@ -846,9 +846,9 @@ export default function AddonsPage() {
           {/* View Mode Toggle */}
           {mounted && (
             <div className="flex items-center">
-              <div className={`flex rounded-lg ${isMono ? '' : 'border'} ${
+              <div className={`flex rounded-lg border ${
                 isMono
-                  ? ''
+                  ? 'border-white/20'
                   : isModern 
                   ? 'border-purple-300/50' 
                   : isModernDark
@@ -857,7 +857,11 @@ export default function AddonsPage() {
               }`}>
                 <button
                   onClick={() => handleViewModeChange('card')}
-                  className={`flex items-center gap-2 px-3 py-2 sm:py-3 text-sm rounded-l-lg transition-colors h-10 sm:h-12 ${
+                  className={`flex items-center gap-2 px-3 py-2 sm:py-3 text-sm transition-colors h-10 sm:h-12 ${
+                    isMono 
+                      ? 'rounded-l-lg !border-0 !border-r-0 !rounded-r-none' 
+                      : 'rounded-l-lg border-0 border-r-0'
+                  } ${
                     viewMode === 'card'
                       ? isMono
                         ? '!bg-white/10 text-white'
@@ -885,7 +889,11 @@ export default function AddonsPage() {
                 </button>
                 <button
                   onClick={() => handleViewModeChange('list')}
-                  className={`flex items-center gap-2 px-3 py-2 sm:py-3 text-sm rounded-r-lg transition-colors h-10 sm:h-12 ${
+                  className={`flex items-center gap-2 px-3 py-2 sm:py-3 text-sm transition-colors h-10 sm:h-12 ${
+                    isMono 
+                      ? 'rounded-r-lg !border-0 !border-l-0 !rounded-l-none' 
+                      : 'rounded-r-lg border-0 border-l-0'
+                  } ${
                     viewMode === 'list'
                       ? isMono
                         ? '!bg-white/10 text-white'
@@ -1190,7 +1198,7 @@ export default function AddonsPage() {
                 } ${addon.status === 'inactive' ? 'opacity-50' : ''}`}
                   onClick={() => handleEditAddon(addon)}
                 >
-                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                  <div className="flex items-center justify-between gap-3">
                     <div className="flex items-center flex-1 min-w-0">
                       <div className={`w-10 h-10 rounded-lg flex items-center justify-center mr-3 flex-shrink-0 overflow-hidden ${
                         isMono ? 'border border-white/20' : ''
@@ -1214,7 +1222,7 @@ export default function AddonsPage() {
                         </div>
                       </div>
                       <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2 mb-1">
+                        <div className="flex flex-col min-[480px]:flex-row min-[480px]:items-center min-[480px]:gap-2">
                           <h3 className={`font-semibold truncate ${
                             isModern 
                               ? 'text-purple-800' 
@@ -1223,15 +1231,30 @@ export default function AddonsPage() {
                               : isDark ? 'text-white' : 'text-gray-900'
                           }`}>{addon.name}</h3>
                           {addon.version && (
-                            <span className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium flex-shrink-0 ${
+                            <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium w-fit mt-1 min-[480px]:mt-0 ${
                               isDark ? 'bg-purple-600 text-white' : 'bg-purple-100 text-purple-800'
                             }`}>
                               v{addon.version}
                             </span>
                           )}
                         </div>
+                        {/* Mobile stats */}
+                        <div className="flex min-[480px]:hidden items-center gap-3 text-sm mt-1">
+                          <div className="flex items-center gap-1">
+                            <User className="w-3 h-3 text-gray-400" />
+                            <span className={`font-medium ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                              {addon.users}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <Users className="w-3 h-3 text-gray-400" />
+                            <span className={`font-medium ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                              {addon.groups}
+                            </span>
+                          </div>
+                        </div>
                         {addon.description && (
-                          <p className={`text-sm truncate ${
+                          <p className={`hidden sm:block text-sm truncate ${
                             isModern 
                               ? 'text-purple-600' 
                               : isModernDark
@@ -1244,18 +1267,16 @@ export default function AddonsPage() {
                       </div>
                     </div>
                     
-                    <div className="flex items-center gap-2 sm:gap-4 sm:ml-4 flex-wrap">
-                      {/* Stats */}
-                      <div className="hidden sm:flex items-center gap-4 text-sm">
+                    <div className="flex items-center gap-2">
+                      {/* Desktop stats */}
+                      <div className="hidden min-[480px]:flex items-center gap-4 text-sm mr-3">
                         <div className="flex items-center gap-1">
                           <User className="w-4 h-4 text-gray-400" />
                           <span className={`font-medium ${isDark ? 'text-white' : 'text-gray-900'}`}>{addon.users}</span>
-                          <span className={`${isDark ? 'text-gray-400' : 'text-gray-500'}`}>{addon.users === 1 ? 'user' : 'users'}</span>
                         </div>
                         <div className="flex items-center gap-1">
                           <Users className="w-4 h-4 text-gray-400" />
                           <span className={`font-medium ${isDark ? 'text-white' : 'text-gray-900'}`}>{addon.groups}</span>
-                          <span className={`${isDark ? 'text-gray-400' : 'text-gray-500'}`}>{addon.groups === 1 ? 'group' : 'groups'}</span>
                         </div>
                       </div>
                       

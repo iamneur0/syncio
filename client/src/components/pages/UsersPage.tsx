@@ -1163,8 +1163,13 @@ export default function UsersPage() {
       
       return await response.json()
     },
-    onSuccess: () => {
+    onSuccess: (data, variables) => {
       queryClient.invalidateQueries({ queryKey: ['users'] })
+      // If user was enabled, refresh their sync status
+      if (variables.isActive) {
+        queryClient.invalidateQueries({ queryKey: ['user', variables.id, 'sync-status'] })
+        queryClient.refetchQueries({ queryKey: ['user', variables.id, 'sync-status'] })
+      }
       toast.success('User status updated successfully!')
     },
     onError: (error: any) => {
@@ -1994,10 +1999,14 @@ export default function UsersPage() {
           {/* View Mode Toggle */}
           {mounted && (
             <div className="flex items-center">
-              <div className={`flex rounded-lg ${isMono ? '' : 'border'} ${isMono ? '' : (isDark ? 'border-gray-600' : 'border-gray-300')}`}>
+              <div className={`flex rounded-lg border ${isMono ? 'border-white/20' : (isDark ? 'border-gray-600' : 'border-gray-300')}`}>
                 <button
                   onClick={() => handleViewModeChange('card')}
-                  className={`flex items-center gap-2 px-3 py-2 sm:py-3 text-sm rounded-l-lg transition-colors h-10 sm:h-12 ${
+                  className={`flex items-center gap-2 px-3 py-2 sm:py-3 text-sm transition-colors h-10 sm:h-12 ${
+                    isMono 
+                      ? 'rounded-l-lg !border-0 !border-r-0 !rounded-r-none' 
+                      : 'rounded-l-lg border-0 border-r-0'
+                  } ${
                     viewMode === 'card'
                       ? isMono
                         ? '!bg-white/10 text-white'
@@ -2017,7 +2026,11 @@ export default function UsersPage() {
                 </button>
                 <button
                   onClick={() => handleViewModeChange('list')}
-                  className={`flex items-center gap-2 px-3 py-2 sm:py-3 text-sm rounded-r-lg transition-colors h-10 sm:h-12 ${
+                  className={`flex items-center gap-2 px-3 py-2 sm:py-3 text-sm transition-colors h-10 sm:h-12 ${
+                    isMono 
+                      ? 'rounded-r-lg !border-0 !border-l-0 !rounded-l-none' 
+                      : 'rounded-r-lg border-0 border-l-0'
+                  } ${
                     viewMode === 'list'
                       ? isMono
                         ? '!bg-white/10 text-white'
@@ -2249,7 +2262,7 @@ export default function UsersPage() {
                       ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                       : 'bg-blue-100 text-blue-700 hover:bg-blue-200'
                   }`}
-                  title="Reload and sync user addons"
+                  title="Reload user addons"
                 >
                       <RefreshCw className={`w-4 h-4 ${reloadUserAddonsMutation.isPending && reloadUserAddonsMutation.variables === user.id ? 'animate-spin' : ''}`} />
                 </button>
@@ -2285,7 +2298,7 @@ export default function UsersPage() {
                 } ${!user.isActive ? 'opacity-50' : ''}`}
                   onClick={() => handleViewUserDetails(user)}
                 >
-                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                  <div className="flex items-center justify-between gap-3">
                     <div className="flex items-center flex-1 min-w-0">
                       <div className={`w-10 h-10 rounded-full flex items-center justify-center mr-3 flex-shrink-0 ${
                         isMono ? 'bg-black border border-white/20 text-white' : getUserColorClass(user?.colorIndex)
@@ -2308,16 +2321,30 @@ export default function UsersPage() {
                             isListMode={true}
                           />
                         </div>
+                        {/* Mobile stats */}
+                        <div className="flex min-[480px]:hidden items-center gap-3 text-sm mt-1">
+                          <div className="flex items-center gap-1">
+                            <Puzzle className="w-3 h-3 text-gray-400" />
+                            <span className={`font-medium ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                              {user.stremioAddonsCount || 0}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <Users className="w-3 h-3 text-gray-400" />
+                            <span className={`font-medium ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                              {user.groupName || 'No group'}
+                            </span>
+                          </div>
+                        </div>
                       </div>
                     </div>
                     
-                    <div className="flex items-center gap-2 sm:gap-4 sm:ml-4 flex-wrap">
-                      {/* Stats */}
-                      <div className="hidden sm:flex items-center gap-4 text-sm">
+                    <div className="flex items-center gap-2">
+                      {/* Desktop stats */}
+                      <div className="hidden min-[480px]:flex items-center gap-4 text-sm mr-3">
                         <div className="flex items-center gap-1">
                           <Puzzle className="w-4 h-4 text-gray-400" />
                           <span className={`font-medium ${isDark ? 'text-white' : 'text-gray-900'}`}>{user.stremioAddonsCount || 0}</span>
-                          <span className={`${isDark ? 'text-gray-400' : 'text-gray-500'}`}>{user.stremioAddonsCount === 1 ? 'addon' : 'addons'}</span>
                         </div>
                         <div className="flex items-center gap-1">
                           <Users className="w-4 h-4 text-gray-400" />
@@ -2358,7 +2385,7 @@ export default function UsersPage() {
                           className={`flex items-center justify-center h-8 w-8 text-sm rounded transition-colors disabled:opacity-50 focus:outline-none ${
                             isDark ? 'text-gray-300 hover:text-blue-400' : 'text-gray-600 hover:text-blue-600'
                           }`}
-                          title="Reload and sync user addons"
+                          title="Reload user addons"
                         >
                           <RefreshCw className={`w-4 h-4 ${reloadUserAddonsMutation.isPending ? 'animate-spin' : ''}`} />
                         </button>
@@ -3023,12 +3050,12 @@ export default function UsersPage() {
                                     </div>
                                   </div>
                                   <div className="min-w-0 flex-1">
-                                    <div className="flex items-center gap-2">
+                                    <div className="flex flex-col min-[480px]:flex-row min-[480px]:items-center min-[480px]:gap-2">
                                       <h4 className={`font-medium truncate ${isDark ? 'text-white' : 'text-gray-900'}`}>
                                         {addonName || 'Unnamed Addon'}
                                       </h4>
                                       {addon.version && (
-                                        <span className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium flex-shrink-0 ${
+                                        <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium w-fit mt-1 min-[480px]:mt-0 ${
                                           isDark ? 'bg-purple-600 text-white' : 'bg-purple-100 text-purple-800'
                                         }`}>
                                           v{addon.version}
@@ -3036,7 +3063,7 @@ export default function UsersPage() {
                                       )}
                                     </div>
                                     {addon.description && (
-                                      <p className={`text-sm mt-1 truncate ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
+                                      <p className={`hidden sm:block text-sm mt-1 truncate ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
                                         {addon.description}
                                       </p>
                                     )}
@@ -3278,12 +3305,12 @@ export default function UsersPage() {
                                                 </div>
                                               </div>
                                               <div className="min-w-0 flex-1">
-                                                <div className="flex items-center gap-2">
+                                                <div className="flex flex-col min-[480px]:flex-row min-[480px]:items-center min-[480px]:gap-2">
                                                   <h4 className={`font-medium truncate ${isDark ? 'text-white' : 'text-gray-900'}`}>
                                                     {fam?.name || addon.name || addon.id || 'Unnamed Addon'}
                                                   </h4>
                                                   {addon.version && (
-                                                    <span className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium flex-shrink-0 ${
+                                                    <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium w-fit mt-1 min-[480px]:mt-0 ${
                                                       isDark ? 'bg-purple-600 text-white' : 'bg-purple-100 text-purple-800'
                                                     }`}>
                                                       v{addon.version}
@@ -3291,7 +3318,7 @@ export default function UsersPage() {
                                                   )}
                                                 </div>
                                                 {addon.description && (
-                                                  <p className={`text-sm mt-1 truncate ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
+                                                  <p className={`hidden sm:block text-sm mt-1 truncate ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
                                                     {addon.description}
                                                   </p>
                                                 )}
