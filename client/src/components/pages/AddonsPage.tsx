@@ -146,17 +146,19 @@ function DiscoveryCard({ isDark, isModern, isModernDark, isMono, viewMode }: { i
               <Star className="w-6 h-6" />
             </div>
             <div>
-              <h3 className={`text-lg font-semibold ${
-                isMono
-                  ? 'text-white'
-                  : isModern 
-                  ? 'text-purple-800' 
-                  : isModernDark
-                  ? 'text-purple-100'
-                  : isDark ? 'text-white' : 'text-gray-900'
-              }`}>
-                Discover Addons
-              </h3>
+              <div className="flex items-center gap-2 mb-1">
+                <h3 className={`text-lg font-semibold ${
+                  isMono
+                    ? 'text-white'
+                    : isModern 
+                    ? 'text-purple-800' 
+                    : isModernDark
+                    ? 'text-purple-100'
+                    : isDark ? 'text-white' : 'text-gray-900'
+                }`}>
+                  Discover Addons
+                </h3>
+              </div>
               <p className={`text-sm ${
                 isMono
                   ? 'text-white/70'
@@ -194,7 +196,7 @@ function DiscoveryCard({ isDark, isModern, isModernDark, isMono, viewMode }: { i
                          }`}
                        >
               <div className="flex items-start space-x-3 mb-3">
-                <div className="w-8 h-8 rounded flex-shrink-0 flex items-center justify-center bg-gradient-to-br from-purple-500 to-blue-500 text-white">
+                <div className="w-8 h-8 rounded flex-shrink-0 flex items-center justify-center bg-black text-white">
                   <img 
                     src={project.icon} 
                     alt={project.name}
@@ -205,7 +207,7 @@ function DiscoveryCard({ isDark, isModern, isModernDark, isMono, viewMode }: { i
                       if (sib) sib.style.display = 'flex'
                     }}
                   />
-                  <div className="w-8 h-8 rounded flex items-center justify-center bg-gradient-to-br from-purple-500 to-blue-500 text-white hidden">
+                  <div className="w-8 h-8 rounded flex items-center justify-center bg-black text-white hidden">
                     <span className="text-xs font-bold">
                       {project.name.charAt(0).toUpperCase()}
                     </span>
