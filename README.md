@@ -97,7 +97,8 @@ Debug logging includes:
 
 ### 🔐 User Permissions (Docker)
 
-To avoid permission issues with SQLite database files, set your user ID and group ID:
+**Option 1: Automatic (Recommended)**
+Set your user ID and group ID in the `.env` file:
 
 ```bash
 # Get your UID and GID
@@ -106,6 +107,18 @@ id
 # Set them in .env file
 echo "UID=1000" >> .env
 echo "GID=1000" >> .env
+```
+
+**Option 2: Manual Fix**
+If you prefer to handle permissions manually:
+
+```bash
+# Fix ownership of the data directory
+sudo chown -R $(id -u):$(id -g) /path/to/your/syncio/data
+
+# Then set UID/GID to match your user
+echo "UID=$(id -u)" >> .env
+echo "GID=$(id -g)" >> .env
 ```
 
 This ensures the container runs with the same permissions as your host user, preventing SQLite permission errors.
@@ -119,6 +132,9 @@ id
 
 # Update .env with correct values
 nano .env
+
+# Fix ownership of data directory
+sudo chown -R $(id -u):$(id -g) ./syncio/data
 
 # Recreate containers
 docker-compose down
