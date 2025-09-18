@@ -21,4 +21,3 @@ jobs:
           token: ${{ secrets.MY_RELEASE_PLEASE_TOKEN }}
           manifest-file: .release-please-manifest.json
           config-file: release-please-config.json
-
