@@ -4496,18 +4496,47 @@ app.post('/api/users/:id/import-addons', async (req, res) => {
     const user = await prisma.user.findUnique({ where: { id } })
     if (!user) return res.status(404).json({ message: 'User not found' })
 
-    // Create a new group named "{username} Imports"
+    // Check if import group already exists (regardless of membership)
     const groupName = `${user.username} Imports`
-    const group = await prisma.group.create({
-      data: {
-        name: groupName,
-        description: `Imported addons from ${user.username}`,
-        colorIndex: 0, // Default color
-        isActive: true,
+    let group = await prisma.group.findFirst({
+      where: {
+        name: groupName
       }
     })
 
-    console.log(`✅ Created import group: ${groupName}`)
+    if (!group) {
+      // Create a new group named "{username} Imports"
+      group = await prisma.group.create({
+        data: {
+          name: groupName,
+          description: `Imported addons from ${user.username}`,
+          colorIndex: 0, // Default color
+          isActive: true,
+        }
+      })
+      console.log(`✅ Created import group: ${groupName}`)
+    } else {
+      console.log(`ℹ️ Using existing import group: ${groupName}`)
+    }
+
+    // Ensure user is a member of the group
+    const existingMembership = await prisma.groupMember.findFirst({
+      where: {
+        groupId: group.id,
+        userId: id
+      }
+    })
+
+    if (!existingMembership) {
+      await prisma.groupMember.create({
+        data: {
+          groupId: group.id,
+          userId: id,
+          role: 'admin'
+        }
+      })
+      console.log(`✅ Added user to import group`)
+    }
 
     // Process each addon
     const processedAddons = []
@@ -4553,20 +4582,32 @@ app.post('/api/users/:id/import-addons', async (req, res) => {
         console.log(`ℹ️ Addon already exists: ${addon.name}`)
       }
 
-      // Add addon to the import group
-      try {
-        await prisma.groupAddon.create({
-          data: {
-            groupId: group.id,
-            addonId: addon.id,
-            isEnabled: true,
-            settings: null,
-          }
-        })
-        processedAddons.push(addon)
-        console.log(`✅ Added ${addon.name} to import group`)
-      } catch (error) {
-        console.error(`❌ Failed to add ${addon.name} to group:`, error)
+      // Check if addon is already in the group
+      const existingGroupAddon = await prisma.groupAddon.findFirst({
+        where: {
+          groupId: group.id,
+          addonId: addon.id
+        }
+      })
+
+      if (!existingGroupAddon) {
+        // Add addon to the import group
+        try {
+          await prisma.groupAddon.create({
+            data: {
+              groupId: group.id,
+              addonId: addon.id,
+              isEnabled: true,
+              settings: null,
+            }
+          })
+          processedAddons.push(addon)
+          console.log(`✅ Added ${addon.name} to import group`)
+        } catch (error) {
+          console.error(`❌ Failed to add ${addon.name} to group:`, error)
+        }
+      } else {
+        console.log(`ℹ️ Addon ${addon.name} already in import group`)
       }
     }
 
