@@ -89,6 +89,8 @@ export interface CreateGroupData {
   description: string
   restrictions: 'none' | 'low' | 'medium' | 'high'
   colorIndex: number
+  userIds?: string[]
+  addonIds?: string[]
 }
 
 export interface CreateAddonData {

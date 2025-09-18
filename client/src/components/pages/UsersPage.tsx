@@ -1954,18 +1954,44 @@ export default function UsersPage() {
     }
   }
 
-  // Close modals on Escape
+  // Close only the top-most modal on Escape
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        if (showConnectModal) setShowConnectModal(false)
-        if (isEditModalOpen) setIsEditModalOpen(false)
-        if (isDetailModalOpen) setIsDetailModalOpen(false)
+        const w = window as any
+        const stack: string[] = Array.isArray(w.__sfmModalStack) ? w.__sfmModalStack : []
+        const top = stack.length > 0 ? stack[stack.length - 1] : null
+        // Only close if this component owns the top modal
+        if (top === 'users-connect' && showConnectModal) { setShowConnectModal(false); return }
+        if (top === 'users-detail' && isDetailModalOpen) { setIsDetailModalOpen(false); return }
+        if (top === 'users-edit' && isEditModalOpen) { setIsEditModalOpen(false); return }
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [showConnectModal, isEditModalOpen, isDetailModalOpen])
+
+  // Maintain a global modal stack to coordinate Escape behavior across pages
+  React.useEffect(() => {
+    const w = window as any
+    if (!Array.isArray(w.__sfmModalStack)) w.__sfmModalStack = []
+    const stack: string[] = w.__sfmModalStack
+    // Connect/Add User modal
+    if (showConnectModal && !stack.includes('users-connect')) stack.push('users-connect')
+    if (!showConnectModal && stack.includes('users-connect')) {
+      w.__sfmModalStack = stack.filter((id: string) => id !== 'users-connect')
+    }
+    // Detail modal
+    if (isDetailModalOpen && !stack.includes('users-detail')) stack.push('users-detail')
+    if (!isDetailModalOpen && stack.includes('users-detail')) {
+      w.__sfmModalStack = stack.filter((id: string) => id !== 'users-detail')
+    }
+    // Edit modal
+    if (isEditModalOpen && !stack.includes('users-edit')) stack.push('users-edit')
+    if (!isEditModalOpen && stack.includes('users-edit')) {
+      w.__sfmModalStack = stack.filter((id: string) => id !== 'users-edit')
+    }
+  }, [showConnectModal, isDetailModalOpen, isEditModalOpen])
 
   // Local state to manage drag-and-drop addon order
   const [addonOrder, setAddonOrder] = useState<string[]>([])
@@ -2634,7 +2660,7 @@ export default function UsersPage() {
       {/* Add User Modal */}
       {showConnectModal && (
         <div 
-          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50"
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[100]"
           onClick={(e) => {
             if (e.target === e.currentTarget) {
               setShowConnectModal(false)
@@ -2658,8 +2684,8 @@ export default function UsersPage() {
                   setNewGroupName('')
                   setEditingUser(null)
                 }}
-                className={`w-8 h-8 flex items-center justify-center rounded transition-colors border-0 ${
-                  isDark ? 'text-gray-400 hover:text-gray-300 hover:bg-gray-700' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
+                className={`w-8 h-8 flex items-center justify-center rounded transition-colors border-0 focus:outline-none ring-0 focus:ring-0 ${
+                  isMono ? 'text-white hover:text-white/80 hover:bg-white/10' : (isDark ? 'text-gray-400 hover:text-gray-300 hover:bg-gray-700' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100')
                 }`}
               >
                 ✕
@@ -3070,7 +3096,7 @@ export default function UsersPage() {
       {/* User Detail Modal */}
       {isDetailModalOpen && selectedUser && (
         <div 
-          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[95] p-4"
           onClick={(e) => {
             if (e.target === e.currentTarget) {
               setIsDetailModalOpen(false)
