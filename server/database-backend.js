@@ -1625,7 +1625,10 @@ app.post('/api/stremio/validate', async (req, res) => {
     const { email, password } = req.body;
     
     if (!email || !password) {
-      return res.status(400).json({ valid: false, error: 'Email and password are required' });
+      return res.status(400).json({ valid: false, error: !email ? 'Invalid email' : 'Password is required' });
+    }
+    if (typeof password !== 'string' || password.length < 4) {
+      return res.status(400).json({ valid: false, error: 'Password must be at least 4 characters' });
     }
 
     // Create temporary storage for validation
@@ -1642,7 +1645,14 @@ app.post('/api/stremio/validate', async (req, res) => {
     });
 
     // Try to authenticate with Stremio
-    const authResult = await apiStore.login(email, password);
+    let authResult
+    let lastErr
+    for (const attempt of [
+      () => apiStore.login({ email, password }),
+      () => apiStore.login(email, password),
+    ]) {
+      try { authResult = await attempt(); lastErr = null; break } catch (e) { lastErr = e }
+    }
     
     if (authResult && (apiStore.authKey || tempStorage.auth)) {
       res.json({ valid: true });
@@ -1653,8 +1663,11 @@ app.post('/api/stremio/validate', async (req, res) => {
     console.error('Stremio validation error:', error);
     
     // Check for specific error types
-    if (error.code === 3 || error.message === 'Wrong passphrase') {
-      res.json({ valid: false, error: 'Wrong email or password' });
+    const msg = String(error?.message || '').toLowerCase()
+    if (msg.includes('passphrase') || msg.includes('wrong password')) {
+      res.json({ valid: false, error: 'Invalid password' });
+    } else if (msg.includes('no such user') || msg.includes('user not found') || msg.includes('invalid email')) {
+      res.json({ valid: false, error: 'Invalid email' });
     } else if (error.message && error.message.includes('network')) {
       res.json({ valid: false, error: 'Network error - please try again' });
     } else {
@@ -1663,6 +1676,63 @@ app.post('/api/stremio/validate', async (req, res) => {
   }
 });
 
+// Register a new Stremio account
+app.post('/api/stremio/register', async (req, res) => {
+  try {
+    const { email, password } = req.body
+    if (!email || !password) {
+      return res.status(400).json({ message: !email ? 'Invalid email' : 'Password is required' })
+    }
+    if (typeof password !== 'string' || password.length < 4) {
+      return res.status(400).json({ message: 'Password must be at least 4 characters' })
+    }
+
+    // Temporary storage for StremioAPIStore
+    const tempStorage = {}
+    const apiStore = new StremioAPIStore({
+      endpoint: 'https://api.strem.io',
+      storage: {
+        getJSON: (key) => tempStorage[key] || null,
+        setJSON: (key, value) => { tempStorage[key] = value }
+      }
+    })
+
+    // Perform registration
+    // Support both possible signatures just in case
+    let lastErr
+    for (const attempt of [
+      () => apiStore.register({ email, password }),
+      () => apiStore.register(email, password),
+    ]) {
+      try {
+        await attempt()
+        lastErr = null
+        break
+      } catch (e) {
+        lastErr = e
+      }
+    }
+    if (lastErr) throw lastErr
+
+    // Optional: immediately login to retrieve authKey (useful for client flows)
+    try {
+      for (const attempt of [
+        () => apiStore.login({ email, password }),
+        () => apiStore.login(email, password),
+      ]) {
+        try { await attempt(); break } catch {}
+      }
+    } catch {}
+
+    const authKey = apiStore.authKey || tempStorage.auth || tempStorage.authKey || null
+    return res.json({ message: 'Stremio account registered successfully', authKey })
+  } catch (e) {
+    console.error('stremio/register failed:', e)
+    const msg = typeof e?.message === 'string' ? e.message : 'Failed to register Stremio account'
+    return res.status(500).json({ message: msg })
+  }
+})
+
 app.post('/api/stremio/connect', async (req, res) => {
   try {
     const { displayName, email, password, username, groupName } = req.body;
@@ -1670,7 +1740,10 @@ app.post('/api/stremio/connect', async (req, res) => {
     console.log(`🔍 Full request body:`, req.body)
     
     if (!email || !password) {
-      return res.status(400).json({ message: 'Email and password are required' });
+      return res.status(400).json({ message: !email ? 'Invalid email' : 'Password is required' });
+    }
+    if (typeof password !== 'string' || password.length < 4) {
+      return res.status(400).json({ message: 'Password must be at least 4 characters' })
     }
 
     // Use provided username, or fallback to email prefix (Stremio username will be set later)
