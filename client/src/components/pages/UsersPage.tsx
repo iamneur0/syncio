@@ -1059,20 +1059,48 @@ export default function UsersPage() {
   // Import addons from user mutation
   const importUserAddonsMutation = useMutation({
     mutationFn: async (userId: string) => {
-      // First, fetch the user's Stremio addons
-      const userRes = await fetch(`/api/users/${userId}`)
-      if (!userRes.ok) {
-        throw new Error('Failed to fetch user data')
+      // Prefer live Stremio addons first
+      let addonsSource: any[] = []
+      try {
+        const liveRes = await fetch(`/api/users/${userId}/stremio-addons`)
+        if (liveRes.ok) {
+          const liveData = await liveRes.json()
+          const liveAddons = Array.isArray(liveData?.addons) ? liveData.addons : []
+          if (liveAddons.length > 0) {
+            addonsSource = liveAddons
+          }
+        }
+      } catch {}
+
+      // If live is empty, try forcing a reload then re-fetch live once
+      if (addonsSource.length === 0) {
+        try {
+          await fetch(`/api/users/${userId}/reload-addons`, { method: 'POST' })
+          const liveRetry = await fetch(`/api/users/${userId}/stremio-addons`)
+          if (liveRetry.ok) {
+            const liveData = await liveRetry.json()
+            const liveAddons = Array.isArray(liveData?.addons) ? liveData.addons : []
+            if (liveAddons.length > 0) {
+              addonsSource = liveAddons
+            }
+          }
+        } catch {}
       }
-      
-      const userData = await userRes.json()
-      const stremioAddons = userData.stremioAddons || []
-      
-      if (!Array.isArray(stremioAddons) || stremioAddons.length === 0) {
+
+      // Fallback to persisted user endpoint if still empty
+      if (addonsSource.length === 0) {
+        const userRes = await fetch(`/api/users/${userId}`)
+        if (!userRes.ok) throw new Error('Failed to fetch user data')
+        const userData = await userRes.json()
+        const persisted = Array.isArray(userData?.stremioAddons) ? userData.stremioAddons : []
+        addonsSource = persisted
+      }
+
+      if (!Array.isArray(addonsSource) || addonsSource.length === 0) {
         throw new Error('No Stremio addons available to import')
       }
-      
-      const addons = stremioAddons.map((addon: any) => ({
+
+      const addons = addonsSource.map((addon: any) => ({
         manifestUrl: addon.manifestUrl || addon.transportUrl || addon.url,
         name: addon.name || addon.manifest?.name,
         description: addon.description || addon.manifest?.description,
@@ -1085,12 +1113,12 @@ export default function UsersPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ addons })
       })
-      
+
       if (!res.ok) {
         const text = await res.text()
         throw new Error(text || 'Failed to import addons')
       }
-      
+
       return res.json()
     },
     onSuccess: (data) => {
