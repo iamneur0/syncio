@@ -1110,6 +1110,15 @@ export default function GroupsPage() {
   const [editAddonIds, setEditAddonIds] = useState<string[]>([])
   const [syncingGroups, setSyncingGroups] = useState<Set<string>>(new Set())
   const [isSyncingAll, setIsSyncingAll] = useState(false)
+  const [selectionFocus, setSelectionFocus] = useState<'users' | 'addons' | null>(null)
+  const membersSectionRef = React.useRef<HTMLDivElement | null>(null)
+  const addonsSectionRef = React.useRef<HTMLDivElement | null>(null)
+  const [showUserPicker, setShowUserPicker] = useState(false)
+  const [showAddonPicker, setShowAddonPicker] = useState(false)
+  const [selectedUserIdsInline, setSelectedUserIdsInline] = useState<string[]>([])
+  const [selectedAddonIdsInline, setSelectedAddonIdsInline] = useState<string[]>([])
+  const [savingUsers, setSavingUsers] = useState(false)
+  const [savingAddons, setSavingAddons] = useState(false)
   
   // Global states for all users (used by UserSyncBadge components)
   const [globalUserExcludedSets, setGlobalUserExcludedSets] = useState<Map<string, Set<string>>>(new Map())
@@ -1226,6 +1235,18 @@ export default function GroupsPage() {
     setShowEditModal(true)
   }
 
+  // When edit modal opens, scroll to focused section if requested
+  React.useEffect(() => {
+    if (showEditModal && selectionFocus) {
+      const target = selectionFocus === 'users' ? membersSectionRef.current : addonsSectionRef.current
+      if (target) {
+        try { target.scrollIntoView({ behavior: 'smooth', block: 'start' }) } catch {}
+      }
+      // Reset after focusing once
+      setTimeout(() => setSelectionFocus(null), 300)
+    }
+  }, [showEditModal, selectionFocus])
+
   const updateGroupMutation = useMutation({
     mutationFn: (payload: { id: string; data: any }) => groupsAPI.update(payload.id, payload.data),
     onSuccess: (data, variables) => {
@@ -1241,6 +1262,63 @@ export default function GroupsPage() {
     onError: (error: any) => {
       toast.error(error?.response?.data?.message || 'Failed to update group')
     },
+  })
+
+  // Inline update mutations for users/addons
+  const updateGroupUsersMutation = useMutation({
+    mutationFn: async (payload: { id: string; userIds: string[] }) => {
+      const currentAddonIds = (selectedGroupDetails?.group?.addons || selectedGroupDetails?.addons || []).map((a: any) => (a.addon?.id || a.id)).filter(Boolean)
+      return groupsAPI.update(payload.id, { userIds: payload.userIds, addonIds: currentAddonIds })
+    },
+    onSuccess: () => {
+      setShowUserPicker(false)
+      // Refresh group details and lists
+      queryClient.invalidateQueries({ queryKey: ['group', selectedGroup?.id, 'details'] })
+      queryClient.invalidateQueries({ queryKey: ['groups'] })
+      // Re-check group sync
+      if (selectedGroup?.id) {
+        queryClient.invalidateQueries({ queryKey: ['group', selectedGroup.id, 'sync-status'] })
+        queryClient.invalidateQueries({ queryKey: ['group', selectedGroup.id, 'sync-check'] })
+      }
+      // Re-check each affected user sync
+      try {
+        const ids = Array.isArray(selectedUserIdsInline) ? selectedUserIdsInline : []
+        ids.forEach((uid) => {
+          queryClient.invalidateQueries({ queryKey: ['user', uid, 'sync-status'] })
+        })
+      } catch {}
+      toast.success('Members updated')
+    },
+    onError: (err: any) => toast.error(err?.message || 'Failed to update members'),
+    onSettled: () => setSavingUsers(false)
+  })
+
+  const updateGroupAddonsMutation = useMutation({
+    mutationFn: async (payload: { id: string; addonIds: string[] }) => {
+      const currentUserIds = (selectedGroupDetails?.users || []).map((u: any) => u.id).filter(Boolean)
+      return groupsAPI.update(payload.id, { userIds: currentUserIds, addonIds: payload.addonIds })
+    },
+    onSuccess: () => {
+      setShowAddonPicker(false)
+      // Refresh group details and lists
+      queryClient.invalidateQueries({ queryKey: ['group', selectedGroup?.id, 'details'] })
+      queryClient.invalidateQueries({ queryKey: ['groups'] })
+      // Re-check group sync
+      if (selectedGroup?.id) {
+        queryClient.invalidateQueries({ queryKey: ['group', selectedGroup.id, 'sync-status'] })
+        queryClient.invalidateQueries({ queryKey: ['group', selectedGroup.id, 'sync-check'] })
+      }
+      // Re-check each current member's sync (addons changed)
+      try {
+        const members = (selectedGroupDetails?.users || []) as any[]
+        members.forEach((m: any) => {
+          if (m?.id) queryClient.invalidateQueries({ queryKey: ['user', m.id, 'sync-status'] })
+        })
+      } catch {}
+      toast.success('Addons updated')
+    },
+    onError: (err: any) => toast.error(err?.message || 'Failed to update addons'),
+    onSettled: () => setSavingAddons(false)
   })
 
   // Fetch all users and addons for selection lists
@@ -1362,18 +1440,34 @@ export default function GroupsPage() {
     toggleGroupStatusMutation.mutate({ id: groupId, isActive: !currentStatus })
   }
 
-  // Close modals on Escape
+  // Close only the top-most modal on Escape
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        if (showAddModal) setShowAddModal(false)
-        if (showEditModal) { setShowEditModal(false); setEditingGroupId(null) }
-        if (selectedGroup) setSelectedGroup(null)
+        const w = window as any
+        const stack: string[] = Array.isArray(w.__sfmModalStack) ? w.__sfmModalStack : []
+        const top = stack.length > 0 ? stack[stack.length - 1] : null
+        if (top === 'group-edit' && showEditModal) { setShowEditModal(false); setEditingGroupId(null); return }
+        if (top === 'group-detail' && selectedGroup) { setSelectedGroup(null); return }
+        if (top === 'group-add' && showAddModal) { setShowAddModal(false); return }
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [showAddModal, showEditModal, selectedGroup])
+
+  // Maintain global modal stack entries for GroupsPage
+  useEffect(() => {
+    const w = window as any
+    if (!Array.isArray(w.__sfmModalStack)) w.__sfmModalStack = []
+    const stack: string[] = w.__sfmModalStack
+    if (showEditModal && !stack.includes('group-edit')) stack.push('group-edit')
+    if (!showEditModal && stack.includes('group-edit')) w.__sfmModalStack = stack.filter((id: string) => id !== 'group-edit')
+    if (selectedGroup && !stack.includes('group-detail')) stack.push('group-detail')
+    if (!selectedGroup && stack.includes('group-detail')) w.__sfmModalStack = stack.filter((id: string) => id !== 'group-detail')
+    if (showAddModal && !stack.includes('group-add')) stack.push('group-add')
+    if (!showAddModal && stack.includes('group-add')) w.__sfmModalStack = stack.filter((id: string) => id !== 'group-add')
+  }, [showEditModal, selectedGroup, showAddModal])
 
   // Group sync mutation
   const groupSyncMutation = useMutation({
@@ -2353,7 +2447,7 @@ export default function GroupsPage() {
       {/* Edit Group Modal */}
       {showEditModal && editingGroupId && (
         <div 
-          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50"
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[100]"
           onClick={(e) => {
             if (e.target === e.currentTarget) {
               setShowEditModal(false)
@@ -2397,7 +2491,7 @@ export default function GroupsPage() {
                   }`}
                 />
               </div>
-              <div>
+              <div ref={membersSectionRef as any}>
                 <label className={`block text-sm font-medium mb-2 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>Users</label>
                 <div className="flex flex-wrap gap-2 max-h-32 overflow-auto">
                   {safeUsers.map((u: any) => {
@@ -2415,7 +2509,7 @@ export default function GroupsPage() {
                   })}
                 </div>
               </div>
-              <div>
+              <div ref={addonsSectionRef as any}>
                 <label className={`block text-sm font-medium mb-2 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>Addons</label>
                 <div className="flex flex-wrap gap-2 max-h-32 overflow-auto">
                   {safeAddons.map((a: any) => {
@@ -2459,7 +2553,7 @@ export default function GroupsPage() {
       {/* Group Detail Modal */}
       {showDetailModal && selectedGroup && (
         <div 
-          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[90] p-4"
           onClick={(e) => {
             if (e.target === e.currentTarget) {
               setShowDetailModal(false)
@@ -2533,8 +2627,8 @@ export default function GroupsPage() {
                   />
                   <button
                     onClick={() => setShowDetailModal(false)}
-                    className={`w-8 h-8 flex items-center justify-center rounded transition-colors ${
-                      isDark ? 'text-gray-400 hover:text-gray-300 hover:bg-gray-700' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
+                    className={`w-8 h-8 flex items-center justify-center rounded transition-colors border-0 focus:outline-none ring-0 focus:ring-0 ${
+                      isMono ? 'text-white hover:text-white/80 hover:bg-white/10' : (isDark ? 'text-gray-400 hover:text-gray-300 hover:bg-gray-700' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100')
                     }`}
                   >
                     ✕
@@ -2545,9 +2639,67 @@ export default function GroupsPage() {
 
               {/* Group Members */}
               <div className={`p-4 rounded-lg mb-6 ${isDark ? 'bg-gray-700' : 'bg-gray-50'}`}>
-                <h3 className={`text-lg font-semibold mb-3 ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                  Members ({selectedGroupDetails?.users?.length || 0})
-                </h3>
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                    Members ({selectedGroupDetails?.users?.length || 0})
+                  </h3>
+                  <button
+                    onClick={() => {
+                      if (!selectedGroupDetails || !selectedGroup?.id) return
+                      setSelectedUserIdsInline((selectedGroupDetails.users || []).map((u: any) => u.id))
+                      setShowUserPicker(true)
+                    }}
+                    className={`p-2 rounded-lg border-0 focus:outline-none ring-0 focus:ring-0 transition-colors ${
+                      isDark ? 'text-white hover:text-blue-300 hover:bg-gray-600' : 'text-gray-900 hover:text-blue-700 hover:bg-gray-100'
+                    }`}
+                    title="Add user to group"
+                  >
+                    <Plus className="w-5 h-5" />
+                  </button>
+                </div>
+                {showUserPicker && (
+                  <div className={`mb-3 p-3 rounded-lg border ${isDark ? 'bg-gray-600 border-gray-500' : 'bg-white border-gray-200'}`}>
+                    <div className="flex items-center justify-between mb-2">
+                      <h4 className={`font-medium ${isDark ? 'text-white' : 'text-gray-900'}`}>Select Members</h4>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => setShowUserPicker(false)}
+                          className={`w-[84px] h-8 min-h-8 max-h-8 text-sm rounded-lg border transition-colors ${
+                            isDark ? 'bg-gray-600 border-gray-500 text-white hover:bg-gray-500' : 'bg-white border-gray-200 text-gray-900 hover:bg-gray-50'
+                          }`}
+                        >Cancel</button>
+                        <button
+                          onClick={() => { setSavingUsers(true); updateGroupUsersMutation.mutate({ id: selectedGroup!.id, userIds: selectedUserIdsInline }) }}
+                          disabled={savingUsers}
+                          className={`w-[84px] h-8 min-h-8 max-h-8 text-sm rounded-lg border transition-colors disabled:opacity-50 ${
+                            isDark ? 'bg-gray-600 border-gray-500 text-white hover:bg-gray-500' : 'bg-white border-gray-200 text-gray-900 hover:bg-gray-50'
+                          }`}
+                        >{savingUsers ? 'Saving...' : 'Save'}</button>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-2 max-h-48 overflow-auto">
+                      {safeUsers.map((u: any) => {
+                        const active = selectedUserIdsInline.includes(u.id)
+                        return (
+                          <button
+                            key={u.id}
+                            type="button"
+                            onClick={() => setSelectedUserIdsInline(prev => active ? prev.filter(id => id !== u.id) : [...prev, u.id])}
+                            className={`px-3 py-2 rounded-lg text-sm transition-colors !border-0 ${
+                              isMono
+                                ? (active ? '!bg-white/15 text-white' : '!bg-black text-white')
+                                : (isDark
+                                  ? (active ? 'bg-gray-500 text-white' : 'bg-gray-600 text-white')
+                                  : (active ? 'bg-gray-200 text-gray-900' : 'bg-white text-gray-700'))
+                            }`}
+                          >
+                            {u.username || u.email}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
                 {isLoadingGroupDetails ? (
                   <div className="flex items-center justify-center py-8">
                     <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-stremio-purple"></div>
@@ -2693,9 +2845,67 @@ export default function GroupsPage() {
 
               {/* Group Addons Management */}
               <div className={`p-4 rounded-lg ${isDark ? 'bg-gray-700' : 'bg-gray-50'}`}>
-                <h3 className={`text-lg font-semibold mb-3 ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                  Addons
-                </h3>
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>Addons</h3>
+                  <button
+                    onClick={() => {
+                      if (!selectedGroupDetails || !selectedGroup?.id) return
+                      const currentAddons = (selectedGroupDetails?.group?.addons || selectedGroupDetails?.addons || [])
+                      setSelectedAddonIdsInline(currentAddons.map((a: any) => a.addon?.id || a.id).filter(Boolean))
+                      setShowAddonPicker(true)
+                    }}
+                    className={`p-2 rounded-lg border-0 focus:outline-none ring-0 focus:ring-0 transition-colors ${
+                      isDark ? 'text-white hover:text-blue-300 hover:bg-gray-600' : 'text-gray-900 hover:text-blue-700 hover:bg-gray-100'
+                    }`}
+                    title="Add addon to group"
+                  >
+                    <Plus className="w-5 h-5" />
+                  </button>
+                </div>
+                {showAddonPicker && (
+                  <div className={`mb-3 p-3 rounded-lg border ${isDark ? 'bg-gray-600 border-gray-500' : 'bg-white border-gray-200'}`}>
+                    <div className="flex items-center justify-between mb-2">
+                      <h4 className={`font-medium ${isDark ? 'text-white' : 'text-gray-900'}`}>Select Addons</h4>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => setShowAddonPicker(false)}
+                          className={`w-[84px] h-8 min-h-8 max-h-8 text-sm rounded-lg border transition-colors ${
+                            isDark ? 'bg-gray-600 border-gray-500 text-white hover:bg-gray-500' : 'bg-white border-gray-200 text-gray-900 hover:bg-gray-50'
+                          }`}
+                        >Cancel</button>
+                        <button
+                          onClick={() => { setSavingAddons(true); updateGroupAddonsMutation.mutate({ id: selectedGroup!.id, addonIds: selectedAddonIdsInline }) }}
+                          disabled={savingAddons}
+                          className={`w-[84px] h-8 min-h-8 max-h-8 text-sm rounded-lg border transition-colors disabled:opacity-50 ${
+                            isDark ? 'bg-gray-600 border-gray-500 text-white hover:bg-gray-500' : 'bg-white border-gray-200 text-gray-900 hover:bg-gray-50'
+                          }`}
+                        >{savingAddons ? 'Saving...' : 'Save'}</button>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-2 max-h-48 overflow-auto">
+                      {safeAddons.map((a: any) => {
+                        const id = a.id
+                        const active = selectedAddonIdsInline.includes(id)
+                        return (
+                          <button
+                            key={id}
+                            type="button"
+                            onClick={() => setSelectedAddonIdsInline(prev => active ? prev.filter(x => x !== id) : [...prev, id])}
+                            className={`px-3 py-2 rounded-lg text-sm transition-colors !border-0 ${
+                              isMono
+                                ? (active ? '!bg-white/15 text-white' : '!bg-black text-white')
+                                : (isDark
+                                  ? (active ? 'bg-gray-500 text-white' : 'bg-gray-600 text-white')
+                                  : (active ? 'bg-gray-200 text-gray-900' : 'bg-white text-gray-700'))
+                            }`}
+                          >
+                            {a.name}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
                 {isLoadingGroupDetails ? (
                   <div className="flex items-center justify-center py-8">
                     <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-stremio-purple"></div>
