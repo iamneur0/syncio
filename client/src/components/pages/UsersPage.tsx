@@ -1131,6 +1131,55 @@ export default function UsersPage() {
     }
   })
 
+  // Wipe user addons mutation
+  const wipeUserAddonsMutation = useMutation({
+    mutationFn: async (userId: string) => {
+      const response = await fetch(`/api/users/${userId}/stremio-addons/clear`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      })
+      if (!response.ok) {
+        const text = await response.text()
+        throw new Error(text || 'Failed to wipe addons')
+      }
+      return response.json()
+    },
+    // Optimistic UI update to immediately clear addons and set unsynced status
+    onMutate: async (userId) => {
+      await queryClient.cancelQueries({ queryKey: ['user', userId, 'stremio-addons'] })
+      const prev = queryClient.getQueryData<any>(['user', userId, 'stremio-addons'])
+      if (prev && Array.isArray(prev.addons)) {
+        const next = { ...prev, addons: [] }
+        queryClient.setQueryData(['user', userId, 'stremio-addons'], next)
+      }
+      // Immediately set to unsynced - any change means unsynced
+      try {
+        localStorage.setItem(`sfm_user_sync_status:${userId}`, 'unsynced')
+        console.log('Dispatching sfm:user-status event for userId:', userId, 'status: unsynced')
+        window.dispatchEvent(new CustomEvent('sfm:user-status' as any, { detail: { userId, status: 'unsynced' } }))
+      } catch {}
+      return { prev }
+    },
+    onSuccess: () => {
+      toast.success('All addons wiped successfully')
+    },
+    onError: (error: any, vars, context) => {
+      // Rollback on error
+      if (context?.prev) {
+        queryClient.setQueryData(['user', selectedUser?.id, 'stremio-addons'], context.prev)
+        toast.error(error?.message || 'Failed to wipe addons')
+      }
+    },
+    onSettled: (data, error, variables) => {
+      // After any change, invalidate queries to trigger re-evaluation
+      console.log('Wipe operation settled, invalidating queries for userId:', variables)
+      queryClient.invalidateQueries({ queryKey: ['user', variables, 'stremio-addons'] })
+      queryClient.invalidateQueries({ queryKey: ['user', variables] })
+      queryClient.invalidateQueries({ queryKey: ['users'] })
+      // Don't dispatch checking status - let the normal sync evaluation handle it
+    }
+  })
+
   // Update username mutation
   const updateUsernameMutation = useMutation({
     mutationFn: async ({ userId, username }: { userId: string; username: string }) => {
@@ -2314,7 +2363,7 @@ export default function UsersPage() {
               <div className="flex gap-2">
                 <button
                   onClick={() => handleViewUserDetails(user)}
-                  className={`flex-1 flex items-center justify-center px-3 py-2 h-8 min-h-8 max-h-8 text-sm rounded transition-colors ${
+                  className={`flex-1 flex items-center justify-center px-3 py-2 h-8 min-h-8 max-h-8 text-sm rounded transition-colors hover:font-semibold ${
                     isModern
                       ? 'bg-gradient-to-r from-purple-100 to-blue-100 text-purple-800 hover:from-purple-200 hover:to-blue-200'
                       : isModernDark
@@ -2576,9 +2625,11 @@ export default function UsersPage() {
                   setNewGroupName('')
                   setEditingUser(null)
                 }}
-                className={`text-2xl ${isDark ? 'text-gray-400 hover:text-gray-300' : 'text-gray-400 hover:text-gray-600'}`}
+                className={`w-8 h-8 flex items-center justify-center rounded transition-colors border-0 ${
+                  isDark ? 'text-gray-400 hover:text-gray-300 hover:bg-gray-700' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
+                }`}
               >
-                ×
+                ✕
               </button>
             </div>
             <form onSubmit={handleConnectStremio} className="p-6 space-y-4">
@@ -2799,7 +2850,7 @@ export default function UsersPage() {
                 </h2>
                 <button
                   onClick={handleCloseEditModal}
-                  className={`w-8 h-8 flex items-center justify-center rounded transition-colors ${
+                  className={`w-8 h-8 flex items-center justify-center rounded transition-colors border-0 ${
                     isDark ? 'text-gray-400 hover:text-gray-300 hover:bg-gray-700' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
                   }`}
                 >
@@ -3087,7 +3138,7 @@ export default function UsersPage() {
                   />
                 <button
                   onClick={() => setIsDetailModalOpen(false)}
-                  className={`w-8 h-8 flex items-center justify-center rounded transition-colors ${
+                  className={`w-8 h-8 flex items-center justify-center rounded transition-colors border-0 ${
                     isDark ? 'text-gray-400 hover:text-gray-300 hover:bg-gray-700' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
                   }`}
                 >
@@ -3340,9 +3391,29 @@ export default function UsersPage() {
                       <>
                         {/* Stremio Account Addons (non-protected) */}
                         <div className={`p-4 rounded-lg ${isDark ? 'bg-gray-700' : 'bg-gray-50'}`}>
-                          <h3 className={`text-lg font-semibold mb-3 ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                            Stremio Account Addons ({combinedLive.length})
-                          </h3>
+                          <div className="flex items-center justify-between mb-3">
+                            <h3 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                              Stremio Account Addons ({combinedLive.length})
+                            </h3>
+                            <button
+                              onClick={() => wipeUserAddonsMutation.mutate(selectedUser.id)}
+                              disabled={wipeUserAddonsMutation.isPending}
+                              className={`flex items-center justify-center w-[84px] h-8 min-h-8 max-h-8 text-sm rounded-lg transition-colors border disabled:opacity-50 ${
+                                isMono
+                                  ? 'bg-black border-white/20 text-white hover:bg-white/10'
+                                  : (isDark
+                                      ? 'bg-gray-600 border-gray-500 text-white hover:bg-gray-500'
+                                      : 'bg-white border-gray-200 text-gray-900 hover:bg-gray-50')
+                              }`}
+                              title="Clear all addons from user's Stremio account"
+                            >
+                              {wipeUserAddonsMutation.isPending ? (
+                                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-current"></div>
+                              ) : (
+                                'Clear'
+                              )}
+                            </button>
+                          </div>
                           {combinedLive.length > 0 ? (
                             <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStartDnd} onDragEnd={handleDragEndDnd} modifiers={[restrictToVerticalAxis]}>
                               <SortableContext items={addonOrder} strategy={verticalListSortingStrategy}>

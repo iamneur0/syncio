@@ -1937,7 +1937,7 @@ export default function GroupsPage() {
               </div>
               <div className="flex items-center">
                   <Users className="w-4 h-4 text-gray-400 mr-2" />
-                  <div>
+                <div>
                     <p className={`text-lg font-semibold ${
                       isModern ? 'text-purple-100' : isModernDark ? 'text-purple-100' : (isDark ? 'text-white' : 'text-gray-900')
                     }`}>
@@ -1946,14 +1946,14 @@ export default function GroupsPage() {
                     <p className={`text-xs ${
                       isModern ? 'text-purple-300' : isModernDark ? 'text-purple-300' : (isDark ? 'text-gray-400' : 'text-gray-500')
                     }`}>{group.members === 1 ? 'Member' : 'Members'}</p>
-                  </div>
+                </div>
               </div>
             </div>
 
             <div className="flex items-center gap-2 mt-auto">
               <button 
                   onClick={() => handleViewGroupDetails(group)}
-                  className={`flex-1 flex items-center justify-center px-3 py-2 h-8 min-h-8 max-h-8 text-sm rounded transition-colors ${
+                  className={`flex-1 flex items-center justify-center px-3 py-2 h-8 min-h-8 max-h-8 text-sm rounded transition-colors hover:font-semibold ${
                     isModern
                       ? 'bg-gradient-to-r from-purple-100 to-blue-100 text-purple-800 hover:from-purple-200 hover:to-blue-200'
                       : isModernDark
@@ -2113,7 +2113,7 @@ export default function GroupsPage() {
                       </p>
                     )}
                   </div>
-                </div>
+      </div>
 
                 <div className="flex items-center gap-2">
                   {/* Desktop stats */}
@@ -2244,9 +2244,11 @@ export default function GroupsPage() {
                   setShowAddModal(false)
                   resetAddModal()
                 }}
-                className={`w-8 h-8 flex items-center justify-center rounded ${isDark ? 'text-gray-400 hover:text-gray-300 hover:bg-gray-700' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'}`}
+                className={`w-8 h-8 flex items-center justify-center rounded transition-colors border-0 ${
+                  isDark ? 'text-gray-400 hover:text-gray-300 hover:bg-gray-700' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
+                }`}
               >
-                ×
+                ✕
               </button>
             </div>
             <form
@@ -2363,9 +2365,11 @@ export default function GroupsPage() {
               <h2 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>Edit Group</h2>
               <button
                 onClick={() => { setShowEditModal(false); setEditingGroupId(null) }}
-                className={`w-8 h-8 flex items-center justify-center rounded ${isDark ? 'text-gray-400 hover:text-gray-300 hover:bg-gray-700' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'}`}
+                className={`w-8 h-8 flex items-center justify-center rounded transition-colors border-0 ${
+                  isDark ? 'text-gray-400 hover:text-gray-300 hover:bg-gray-700' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
+                }`}
               >
-                ×
+                ✕
               </button>
             </div>
             <div className="space-y-4">

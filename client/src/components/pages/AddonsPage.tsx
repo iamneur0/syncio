@@ -1103,7 +1103,7 @@ export default function AddonsPage() {
                   <div className="flex items-center gap-2 mt-auto">
                     <button 
                       onClick={() => handleEditAddon(addon)}
-                      className={`flex-1 flex items-center justify-center px-3 py-2 h-8 min-h-8 max-h-8 text-sm rounded transition-colors ${
+                      className={`flex-1 flex items-center justify-center px-3 py-2 h-8 min-h-8 max-h-8 text-sm rounded transition-colors hover:font-semibold ${
                         isModern
                           ? 'bg-gradient-to-r from-purple-100 to-blue-100 text-purple-800 hover:from-purple-200 hover:to-blue-200'
                           : isModernDark
@@ -1414,9 +1414,11 @@ export default function AddonsPage() {
               <h2 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>Add New Addon</h2>
               <button
                 onClick={() => setShowAddModal(false)}
-                className={`${isDark ? 'text-gray-400 hover:text-gray-300' : 'text-gray-400 hover:text-gray-600'}`}
+                className={`w-8 h-8 flex items-center justify-center rounded transition-colors border-0 ${
+                  isDark ? 'text-gray-400 hover:text-gray-300 hover:bg-gray-700' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
+                }`}
               >
-                ×
+                ✕
               </button>
             </div>
             <form onSubmit={handleAddAddon} className="space-y-4">
@@ -1501,7 +1503,7 @@ export default function AddonsPage() {
                   })}
                 </div>
               </div>
-              <div className="flex flex-col sm:flex-row sm:justify-end gap-2 sm:gap-3 pt-4">
+              <div className="flex gap-3 pt-4">
                 <button
                   type="button"
                   onClick={() => {
@@ -1511,14 +1513,18 @@ export default function AddonsPage() {
                     setSelectedGroupIds([])
                   }}
                   disabled={createAddonMutation.isPending}
-                  className="px-3 py-2 text-sm rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-400 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600 dark:focus:ring-gray-500 disabled:opacity-50"
+                  className={`flex-1 px-4 py-2 rounded-lg transition-colors ${
+                    isDark 
+                      ? 'text-gray-300 bg-gray-700 hover:bg-gray-600' 
+                      : 'text-gray-700 bg-gray-100 hover:bg-gray-200'
+                  }`}
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={createAddonMutation.isPending || !!urlError}
-                  className="px-3 py-2 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
+                  className="flex-1 px-4 py-2 bg-stremio-purple text-white rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50"
                 >
                   {createAddonMutation.isPending ? 'Adding...' : 'Add Addon'}
                 </button>
@@ -1545,13 +1551,11 @@ export default function AddonsPage() {
               <h2 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>Edit Addon</h2>
               <button
                 onClick={() => setShowEditModal(false)}
-                className={`p-1 rounded-lg transition-colors ${
-                  isDark ? 'text-gray-400 hover:bg-gray-700' : 'text-gray-500 hover:bg-gray-100'
+                className={`w-8 h-8 flex items-center justify-center rounded transition-colors border-0 ${
+                  isDark ? 'text-gray-400 hover:text-gray-300 hover:bg-gray-700' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
                 }`}
               >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
+                ✕
               </button>
             </div>
             <form onSubmit={(e) => { e.preventDefault(); handleUpdateAddon(); }} className="space-y-4">
