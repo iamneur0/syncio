@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.1.0](https://github.com/iamneur0/syncio/compare/v0.0.11...v0.1.0) (2025-09-18)
+
+
+### Features
+
+* add users and addons directly from group view ([80751f0](https://github.com/iamneur0/syncio/commit/80751f0f1679c330cec7f91b9ec2c6126455af62))
+* added user addon clear ([62da7d8](https://github.com/iamneur0/syncio/commit/62da7d858326f802c9478e8391aa913982a690f7))
+* register users directly from syncio ([a711d31](https://github.com/iamneur0/syncio/commit/a711d317b170c3ca9d85f3a8c660c9152b977014))
+* Syncio tab name ([e4a1829](https://github.com/iamneur0/syncio/commit/e4a18299d59f7d35ec1cac58c9af7b6797666d04))
+* user registration completed ([da1e77b](https://github.com/iamneur0/syncio/commit/da1e77b1178b17f1117362f047339af652b7a73e))
+
 ## [0.0.11](https://github.com/iamneur0/syncio/compare/v0.0.11...v0.0.11) (2025-09-18)
 
 
