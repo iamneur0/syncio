@@ -339,6 +339,7 @@ export default function UsersPage() {
   const [stremioPassword, setStremioPassword] = useState('')
   const [stremioUsername, setStremioUsername] = useState('')
   const [stremioAuthKey, setStremioAuthKey] = useState('')
+  const [stremioRegisterNew, setStremioRegisterNew] = useState(false)
   const [selectedGroup, setSelectedGroup] = useState('')
   const [newGroupName, setNewGroupName] = useState('')
   
@@ -1036,6 +1037,28 @@ export default function UsersPage() {
     onError: (err: any) => toast.error(err?.message || 'Failed to connect with auth key')
   })
 
+  // Register new Stremio account (email/password)
+  const registerStremioMutation = useMutation({
+    mutationFn: async (payload: { email: string; password: string }) => {
+      const resp = await fetch('/api/stremio/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      })
+      if (!resp.ok) {
+        const error = await resp.json().catch(() => ({}))
+        throw new Error(error.message || 'Failed to register Stremio account')
+      }
+      return resp.json()
+    },
+    onSuccess: () => {
+      toast.success('Stremio account registered')
+    },
+    onError: (err: any) => {
+      toast.error(err?.message || 'Failed to register Stremio account')
+    }
+  })
+
   // Delete user mutation (inline fetch with better error details)
   const deleteUserMutation = useMutation({
     mutationFn: async (id: string) => {
@@ -1358,7 +1381,7 @@ export default function UsersPage() {
   const [stremioValidationError, setStremioValidationError] = useState<string | null>(null)
   const [isStremioValid, setIsStremioValid] = useState(true)
 
-  const handleConnectStremio = (e: React.FormEvent) => {
+  const handleConnectStremio = async (e: React.FormEvent) => {
     e.preventDefault()
     if (authMode === 'authkey') {
       if (!stremioAuthKey || (!editingUser && !stremioUsername)) {
@@ -1373,17 +1396,27 @@ export default function UsersPage() {
       toast.error('Please fill in all required fields')
       return
       }
+    if (stremioPassword.length < 4) {
+      toast.error('Password must be at least 4 characters')
+      return
+    }
     }
     // Handle group assignment
     const groupToAssign = selectedGroup === 'new' ? newGroupName : selectedGroup
+    try {
+      // If requested, register a new Stremio account first
+      if (stremioRegisterNew && authMode === 'email') {
+        await registerStremioMutation.mutateAsync({ email: stremioEmail.trim(), password: stremioPassword })
+      }
 
-    connectStremioMutation.mutate({
-      email: stremioEmail,
-      password: stremioPassword,
-      username: stremioUsername,
-      groupName: groupToAssign || undefined,
-      userId: editingUser?.id || undefined, // Include user ID if connecting existing user
-    })
+      connectStremioMutation.mutate({
+        email: stremioEmail,
+        password: stremioPassword,
+        username: stremioUsername,
+        groupName: groupToAssign || undefined,
+        userId: editingUser?.id || undefined, // Include user ID if connecting existing user
+      })
+    } catch {}
   }
 
   const [confirmOpen, setConfirmOpen] = useState(false)
@@ -2101,9 +2134,9 @@ export default function UsersPage() {
                   : 'bg-stremio-purple hover:bg-purple-700'
               }`}
             >
-              <Link className="w-4 h-4 sm:w-5 sm:h-5 mr-2" />
-              <span className="hidden sm:inline">Connect Stremio User</span>
-              <span className="sm:hidden">Connect User</span>
+              <Plus className="w-4 h-4 sm:w-5 sm:h-5 mr-2" />
+              <span className="hidden sm:inline">Add User</span>
+              <span className="sm:hidden">Add User</span>
           </button>
         </div>
         </div>
@@ -2590,15 +2623,15 @@ export default function UsersPage() {
                 }`}
             >
                 <Plus className="w-4 h-4 sm:w-5 sm:h-5 mr-2" />
-                <span className="hidden sm:inline">Connect Your First User</span>
-                <span className="sm:hidden">Connect User</span>
+                <span className="hidden sm:inline">Add Your First Stremio User</span>
+                <span className="sm:hidden">Add User</span>
             </button>
             </div>
           )}
         </div>
       )}
 
-      {/* Connect Stremio User Modal */}
+      {/* Add User Modal */}
       {showConnectModal && (
         <div 
           className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50"
@@ -2613,7 +2646,7 @@ export default function UsersPage() {
           }`}>
             <div className="flex items-center justify-between p-6 border-b border-gray-200">
               <h3 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                {editingUser ? `Connect ${editingUser.username} to Stremio` : 'Connect Stremio User'}
+                {editingUser ? `Connect ${editingUser.username} to Stremio` : 'Add New User'}
               </h3>
               <button
                 onClick={() => {
@@ -2742,6 +2775,20 @@ export default function UsersPage() {
                     </button>
                     .
                   </div>
+                </div>
+              )}
+              {authMode === 'email' && (
+                <div className="flex items-center gap-2">
+                  <input
+                    id="stremio-register-new"
+                    type="checkbox"
+                    checked={stremioRegisterNew}
+                    onChange={(e) => setStremioRegisterNew(e.target.checked)}
+                    className={`h-4 w-4 rounded border ${isDark ? 'border-gray-600 bg-gray-700' : 'border-gray-300'} text-stremio-purple focus:ring-stremio-purple`}
+                  />
+                  <label htmlFor="stremio-register-new" className={`${isDark ? 'text-gray-300' : 'text-gray-700'} text-sm`}>
+                    Register new Stremio account with these credentials
+                  </label>
                 </div>
               )}
               {!editingUser && (
