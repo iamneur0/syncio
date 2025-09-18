@@ -2734,7 +2734,6 @@ app.put('/api/addons/:id', async (req, res) => {
       if (Array.isArray(groupIds) && groupIds.length > 0) {
         await prisma.groupAddon.createMany({
           data: groupIds.map((groupId) => ({ addonId: id, groupId })),
-          skipDuplicates: true
         });
       }
     }
@@ -3699,26 +3698,56 @@ async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'nor
       result[position] = addon
     }
     
+    // Track URLs already present (from protected/current) to avoid duplicates
+    const presentUrls = new Set(
+      currentAddons
+        .filter(a => isProtected(a))
+        .map(a => normalize(a?.transportUrl || a?.manifestUrl || a?.url))
+    )
+
     // Now place group addons in the correct order, skipping protected positions
     let groupAddonIndex = 0
     for (let i = 0; i < result.length && groupAddonIndex < nonProtectedGroupAddons.length; i++) {
       if (result[i] === null) {
         // This position is available for a group addon
-        result[i] = nonProtectedGroupAddons[groupAddonIndex]
-        console.log(`✅ Placed group addon at position ${i}: ${nonProtectedGroupAddons[groupAddonIndex]?.manifest?.name || nonProtectedGroupAddons[groupAddonIndex]?.name}`)
+        const candidate = nonProtectedGroupAddons[groupAddonIndex]
+        const cUrl = normalize(candidate?.transportUrl || candidate?.manifestUrl || candidate?.url)
+        if (!presentUrls.has(cUrl)) {
+          result[i] = candidate
+          presentUrls.add(cUrl)
+          console.log(`✅ Placed group addon at position ${i}: ${candidate?.manifest?.name || candidate?.name}`)
+        } else {
+          console.log(`⏭️ Skipping duplicate group addon (already present): ${candidate?.manifest?.name || candidate?.name}`)
+        }
         groupAddonIndex++
       }
     }
     
-    // Add any remaining group addons at the end
+    // Add any remaining group addons at the end (skip duplicates)
     while (groupAddonIndex < nonProtectedGroupAddons.length) {
-      result.push(nonProtectedGroupAddons[groupAddonIndex])
-      console.log(`➕ Added remaining group addon: ${nonProtectedGroupAddons[groupAddonIndex]?.manifest?.name || nonProtectedGroupAddons[groupAddonIndex]?.name}`)
+      const candidate = nonProtectedGroupAddons[groupAddonIndex]
+      const cUrl = normalize(candidate?.transportUrl || candidate?.manifestUrl || candidate?.url)
+      if (!presentUrls.has(cUrl)) {
+        result.push(candidate)
+        presentUrls.add(cUrl)
+        console.log(`➕ Added remaining group addon: ${candidate?.manifest?.name || candidate?.name}`)
+      } else {
+        console.log(`⏭️ Skipped remaining duplicate addon: ${candidate?.manifest?.name || candidate?.name}`)
+      }
       groupAddonIndex++
     }
     
     // Filter out null values to get the final desired collection
-    const desiredCollection = result.filter(addon => addon !== null)
+    // Dedupe by URL once more as a safety net
+    const seenUrls = new Set()
+    const desiredCollection = result.filter(addon => {
+      if (!addon) return false
+      const u = normalize(addon?.transportUrl || addon?.manifestUrl || addon?.url)
+      if (!u) return true
+      if (seenUrls.has(u)) return false
+      seenUrls.add(u)
+      return true
+    })
 
     // Remove any current addons that are excluded (not in the desired collection)
     // This ensures excluded addons are removed from the user's account
@@ -4520,23 +4549,29 @@ app.post('/api/users/:id/import-addons', async (req, res) => {
       debug.log(`ℹ️ Using existing import group: ${groupName}`)
     }
 
-    // Ensure user is a member of the group
-    const existingMembership = await prisma.groupMember.findFirst({
-      where: {
-        groupId: group.id,
-        userId: id
-      }
-    })
-
-    if (!existingMembership) {
-      await prisma.groupMember.create({
-        data: {
+    // Ensure user is a member of the group ONLY if they have no group assigned yet
+    // If the user already belongs to any group, do not auto-attach to the import group
+    const anyMembership = await prisma.groupMember.findFirst({ where: { userId: id } })
+    if (!anyMembership) {
+      const existingMembership = await prisma.groupMember.findFirst({
+        where: {
           groupId: group.id,
-          userId: id,
-          role: 'admin'
+          userId: id
         }
       })
-      debug.log(`✅ Added user to import group`)
+
+      if (!existingMembership) {
+        await prisma.groupMember.create({
+          data: {
+            groupId: group.id,
+            userId: id,
+            role: 'admin'
+          }
+        })
+        debug.log(`✅ Added user to import group (user had no previous groups)`)
+      }
+    } else {
+      debug.log(`ℹ️ Skipped adding user to import group (user already has a group)`)
     }
 
     // Process each addon
