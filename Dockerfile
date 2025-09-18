@@ -43,6 +43,9 @@ WORKDIR /app
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 appuser
 
+# Create data directory (permissions will be set by docker-compose user setting)
+RUN mkdir -p /app/data
+
 # Install runtime dependencies
 RUN apk add --no-cache curl openssl3
 
@@ -74,8 +77,7 @@ RUN echo '#!/bin/sh' > /app/start.sh && \
     echo '  DB_FILE=${DB_URL#file:}' >> /app/start.sh && \
     echo '  DB_DIR=$(dirname "$DB_FILE")' >> /app/start.sh && \
     echo '  mkdir -p "$DB_DIR" || true' >> /app/start.sh && \
-    echo '  chown -R appuser:nodejs "$DB_DIR" || true' >> /app/start.sh && \
-    echo '  chmod -R 775 "$DB_DIR" || true' >> /app/start.sh && \
+    echo '  chmod 755 "$DB_DIR" || true' >> /app/start.sh && \
     echo 'fi' >> /app/start.sh && \
     echo '' >> /app/start.sh && \
     echo '# Apply Prisma schema (migrations or push fallback)' >> /app/start.sh && \
