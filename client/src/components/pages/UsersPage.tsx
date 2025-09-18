@@ -36,6 +36,7 @@ import toast from 'react-hot-toast'
 import ConfirmDialog from '../common/ConfirmDialog'
 import SyncBadge from '../common/SyncBadge'
 import { useDebounce } from '../../hooks/useDebounce'
+import { debug } from '../../utils/debug'
 
 import { fetchManifestCached } from '../../utils/manifestCache'
 
@@ -132,18 +133,18 @@ function UserSyncBadge({ userId, userExcludedSet, userProtectedSet, isSyncing, l
   // Listen for user status changes (e.g., when addon is deleted)
   React.useEffect(() => {
     const onUserStatus = (e: CustomEvent) => {
-      console.log(`UserSyncBadge [${location}] received sfm:user-status event:`, e.detail, 'for userId:', userId)
+      debug.log(`UserSyncBadge [${location}] received sfm:user-status event:`, e.detail, 'for userId:', userId)
       if (e.detail?.userId === userId) {
-        console.log(`UserSyncBadge [${location}] setting status to:`, e.detail.status)
+        debug.log(`UserSyncBadge [${location}] setting status to:`, e.detail.status)
         setStatus(e.detail.status)
         
         // Only set manual flag for unsynced status, and clear it after a short delay
         if (e.detail.status === 'unsynced') {
-          console.log(`UserSyncBadge [${location}] setting unsynced with temporary manual flag`)
+          debug.log(`UserSyncBadge [${location}] setting unsynced with temporary manual flag`)
           setManuallySet(true)
           // Clear the manual flag after 1 second to allow normal sync checking
           setTimeout(() => {
-            console.log(`UserSyncBadge [${location}] clearing manual flag`)
+            debug.log(`UserSyncBadge [${location}] clearing manual flag`)
             setManuallySet(false)
           }, 1000)
         }
@@ -190,24 +191,24 @@ function UserSyncBadge({ userId, userExcludedSet, userProtectedSet, isSyncing, l
 
   React.useEffect(() => {
     const checkSync = () => {
-      console.log(`UserSyncBadge [${location}] checkSync running for userId:`, userId)
-      console.log(`UserSyncBadge [${location}] isSyncing:`, isSyncing, 'manuallySet:', manuallySet)
+      debug.log(`UserSyncBadge [${location}] checkSync running for userId:`, userId)
+      debug.log(`UserSyncBadge [${location}] isSyncing:`, isSyncing, 'manuallySet:', manuallySet)
       
       // Skip if this is not the current user (avoid stale data)
       if (currentUserIdRef.current !== userId) {
-        console.log(`UserSyncBadge [${location}] skipping checkSync - userId mismatch`)
+        debug.log(`UserSyncBadge [${location}] skipping checkSync - userId mismatch`)
         return
       }
       
       // Skip checkSync if status was manually set recently
       if (manuallySet) {
-        console.log(`UserSyncBadge [${location}] skipping checkSync - status was manually set`)
+        debug.log(`UserSyncBadge [${location}] skipping checkSync - status was manually set`)
         return
       }
       
       // If currently syncing, show syncing state
       if (isSyncing) {
-        console.log('Setting status to syncing (currently syncing)')
+        debug.log('Setting status to syncing (currently syncing)')
         setStatus('syncing')
         return
       }

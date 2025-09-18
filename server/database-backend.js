@@ -7,6 +7,7 @@ const { PrismaClient } = require('@prisma/client');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const { StremioAPIStore, StremioAPIClient } = require('stremio-api-client');
+const debug = require('./utils/debug');
 require('dotenv').config();
 
 const app = express();
@@ -161,7 +162,7 @@ app.get('/health', async (req, res) => {
 
 // Users API
 app.get('/api/users', async (req, res) => {
-  console.log('🔍 GET /api/users called');
+  debug.log('🔍 GET /api/users called');
   try {
     const users = await prisma.user.findMany({
       include: {
@@ -281,7 +282,7 @@ app.get('/api/users/:id', async (req, res) => {
   try {
     const { id } = req.params
     const { basic } = req.query
-    console.log(`🔍 GET /api/users/${id} called${basic ? ' (basic mode)' : ''}`)
+    debug.log(`🔍 GET /api/users/${id} called${basic ? ' (basic mode)' : ''}`)
     
     const user = await prisma.user.findUnique({
       where: { id },
@@ -519,7 +520,7 @@ app.get('/api/users/:id/sync-status', async (req, res) => {
   try {
     const { id } = req.params
     const { groupId } = req.query
-    console.log(`🔍 GET /api/users/${id}/sync-status called${groupId ? ` for group ${groupId}` : ''}`)
+    debug.log(`🔍 GET /api/users/${id}/sync-status called${groupId ? ` for group ${groupId}` : ''}`)
     
     const user = await prisma.user.findUnique({
       where: { id },
@@ -581,7 +582,7 @@ app.get('/api/users/:id/sync-status', async (req, res) => {
         ? rawAddons
         : (typeof rawAddons === 'object' ? Object.values(rawAddons) : [])
         
-      console.log(`🔍 Fetched ${stremioAddons.length} live Stremio addons for sync check`)
+      debug.log(`🔍 Fetched ${stremioAddons.length} live Stremio addons for sync check`)
     } catch (error) {
       console.error(`❌ Error fetching live Stremio addons for sync check:`, error.message)
       // Fallback to cached data if live fetch fails
@@ -651,14 +652,14 @@ app.get('/api/users/:id/sync-status', async (req, res) => {
       !excludedSet.has(addon.manifestUrl)
     )
     
-    console.log(`🔍 Expected addons before filtering:`, expectedAddons.map(a => ({ name: a.name, manifestUrl: a.manifestUrl })))
-    console.log(`🔍 Excluded addons:`, Array.from(excludedSet))
-    console.log(`🔍 Filtered out ${expectedAddons.length - filteredExpectedAddons.length} excluded addons, ${filteredExpectedAddons.length} expected addons remain`)
-
+    debug.log(`🔍 Expected addons before filtering:`, expectedAddons.map(a => ({ name: a.name, manifestUrl: a.manifestUrl })))
+    debug.log(`🔍 Excluded addons:`, Array.from(excludedSet))
+    debug.log(`🔍 Filtered out ${expectedAddons.length - filteredExpectedAddons.length} excluded addons, ${filteredExpectedAddons.length} expected addons remain`)
+    
     // For sync comparison, we need to check if the user's Stremio addons match what's expected
     // We don't filter Stremio addons here - we compare what's actually in Stremio vs what should be there
-    console.log(`🔍 Stremio addons: ${stremioAddons.length} addons`)
-    console.log(`🔍 Expected addons: ${filteredExpectedAddons.length} addons`)
+    debug.log(`🔍 Stremio addons: ${stremioAddons.length} addons`)
+    debug.log(`🔍 Expected addons: ${filteredExpectedAddons.length} addons`)
 
     // Compare Stremio addons with expected addons
     // For a user to be synced, we need:
@@ -698,20 +699,20 @@ app.get('/api/users/:id/sync-status', async (req, res) => {
     const expectedAddonUrlsOrdered = filteredExpectedAddons.map(addon => addon.manifestUrl)
     const orderMatches = JSON.stringify(userGroupAddons) === JSON.stringify(expectedAddonUrlsOrdered)
     
-    console.log(`🔍 Expected addons before filtering:`, filteredExpectedAddons.map(a => ({ name: a.name, manifestUrl: a.manifestUrl })))
-    console.log(`🔍 Excluded addons:`, excludedAddons)
-    console.log(`🔍 Filtered out ${excludedAddons.length} excluded addons, ${expectedAddonUrlsOrdered.length} expected addons remain`)
-    console.log(`🔍 Stremio addons: ${stremioAddons.length} addons`)
-    console.log(`🔍 Expected addons: ${expectedAddonUrlsOrdered.length} addons`)
-    console.log(`🔍 Expected order: ${JSON.stringify(expectedAddonUrlsOrdered)}`)
-    console.log(`🔍 User's group addons: ${JSON.stringify(userGroupAddons)}`)
-    console.log(`🔍 Order matches: ${orderMatches}`)
+    debug.log(`🔍 Expected addons before filtering:`, filteredExpectedAddons.map(a => ({ name: a.name, manifestUrl: a.manifestUrl })))
+    debug.log(`🔍 Excluded addons:`, excludedAddons)
+    debug.log(`🔍 Filtered out ${excludedAddons.length} excluded addons, ${expectedAddonUrlsOrdered.length} expected addons remain`)
+    debug.log(`🔍 Stremio addons: ${stremioAddons.length} addons`)
+    debug.log(`🔍 Expected addons: ${expectedAddonUrlsOrdered.length} addons`)
+    debug.log(`🔍 Expected order: ${JSON.stringify(expectedAddonUrlsOrdered)}`)
+    debug.log(`🔍 User's group addons: ${JSON.stringify(userGroupAddons)}`)
+    debug.log(`🔍 Order matches: ${orderMatches}`)
     
     const isSynced = missingAddons.length === 0 && extraAddons.length === 0 && orderMatches
     
-    console.log(`🔍 Missing addons: ${missingAddons.length}`, missingAddons.map(a => a.name))
-    console.log(`🔍 Extra addons: ${extraAddons.length}`, extraAddons.map(a => a.name || a.manifest?.name))
-    console.log(`🔍 User is ${isSynced ? 'synced' : 'unsynced'}`)
+    debug.log(`🔍 Missing addons: ${missingAddons.length}`, missingAddons.map(a => a.name))
+    debug.log(`🔍 Extra addons: ${extraAddons.length}`, extraAddons.map(a => a.name || a.manifest?.name))
+    debug.log(`🔍 User is ${isSynced ? 'synced' : 'unsynced'}`)
 
     return res.json({ 
       isSynced,
@@ -823,7 +824,7 @@ app.get('/api/users/:id/stremio-addons', async (req, res) => {
 // Sync all enabled users' Stremio addons with their group addons
 app.post('/api/users/sync-all', async (req, res) => {
   try {
-    console.log('🚀 Sync all users endpoint called')
+    debug.log('🚀 Sync all users endpoint called')
     
     // Get all enabled users
     const users = await prisma.user.findMany({
@@ -856,19 +857,19 @@ app.post('/api/users/sync-all', async (req, res) => {
     let totalAddons = 0
     const errors = []
     
-    console.log(`🔄 Starting sync for ${users.length} enabled users`)
+    debug.log(`🔄 Starting sync for ${users.length} enabled users`)
     
     // Sync each user
     for (const user of users) {
       try {
-        console.log(`🔄 Syncing user: ${user.username || user.email}`)
+        debug.log(`🔄 Syncing user: ${user.username || user.email}`)
         
         // Use the reusable sync function
         const syncResult = await syncUserAddons(user.id, [], 'normal')
         
         if (syncResult.success) {
           syncedCount++
-          console.log(`✅ Successfully synced user: ${user.username || user.email}`)
+          debug.log(`✅ Successfully synced user: ${user.username || user.email}`)
           
           // Collect reload progress if available
           if (syncResult.reloadedCount !== undefined && syncResult.totalAddons !== undefined) {
@@ -914,8 +915,8 @@ app.post('/api/users/sync-all', async (req, res) => {
 // Sync a user's Stremio addons with their group addons
 app.post('/api/users/:id/sync', async (req, res) => {
   try {
-    console.log('🚀 Sync endpoint called with:', req.params.id, req.body)
-    console.log('🔍 Request headers:', {
+    debug.log('🚀 Sync endpoint called with:', req.params.id, req.body)
+    debug.log('🔍 Request headers:', {
       'user-agent': req.headers['user-agent'],
       'origin': req.headers['origin'],
       'x-sync-mode': req.headers['x-sync-mode']
@@ -925,15 +926,15 @@ app.post('/api/users/:id/sync', async (req, res) => {
 
     // Extra debugging for body/exclusions shape
     try {
-      console.log('🧪 Raw body type:', typeof req.body)
-      console.log('🧪 excludedManifestUrls type/array/length:', typeof excludedManifestUrls, Array.isArray(excludedManifestUrls), Array.isArray(excludedManifestUrls) ? excludedManifestUrls.length : 'n/a')
+      debug.log('🧪 Raw body type:', typeof req.body)
+      debug.log('🧪 excludedManifestUrls type/array/length:', typeof excludedManifestUrls, Array.isArray(excludedManifestUrls), Array.isArray(excludedManifestUrls) ? excludedManifestUrls.length : 'n/a')
       if (Array.isArray(excludedManifestUrls)) {
-        console.log('🧪 excludedManifestUrls (raw):', excludedManifestUrls)
+        debug.log('🧪 excludedManifestUrls (raw):', excludedManifestUrls)
       } else {
-        console.log('🧪 excludedManifestUrls (non-array raw):', excludedManifestUrls)
+        debug.log('🧪 excludedManifestUrls (non-array raw):', excludedManifestUrls)
       }
     } catch (e) {
-      console.log('🧪 Failed to log raw body/exclusions:', e?.message)
+      debug.log('🧪 Failed to log raw body/exclusions:', e?.message)
     }
     const syncMode = getSyncMode(req)
 
@@ -3926,7 +3927,7 @@ app.post('/api/groups/:id/sync', async (req, res) => {
     // Sync each user in the group using the individual user sync HTTP endpoint
     for (const user of groupUsers) {
       try {
-        console.log(`🔄 Syncing user: ${user.username || user.email}`)
+        debug.log(`🔄 Syncing user: ${user.username || user.email}`)
 
         // Resolve membership-specific exclusions first, fallback to user-level
         let memberExcluded = []
@@ -3965,7 +3966,7 @@ app.post('/api/groups/:id/sync', async (req, res) => {
         const result = await response.json().catch(() => ({}))
         if (response.ok) {
           syncedCount++
-          console.log(`✅ Successfully synced user: ${user.username || user.email}`)
+          debug.log(`✅ Successfully synced user: ${user.username || user.email}`)
         } else {
           const errorMsg = result?.message || result?.error || 'Unknown error'
           errors.push(`${user.username || user.email}: ${errorMsg}`)
@@ -4514,9 +4515,9 @@ app.post('/api/users/:id/import-addons', async (req, res) => {
           isActive: true,
         }
       })
-      console.log(`✅ Created import group: ${groupName}`)
+      debug.log(`✅ Created import group: ${groupName}`)
     } else {
-      console.log(`ℹ️ Using existing import group: ${groupName}`)
+      debug.log(`ℹ️ Using existing import group: ${groupName}`)
     }
 
     // Ensure user is a member of the group
@@ -4535,7 +4536,7 @@ app.post('/api/users/:id/import-addons', async (req, res) => {
           role: 'admin'
         }
       })
-      console.log(`✅ Added user to import group`)
+      debug.log(`✅ Added user to import group`)
     }
 
     // Process each addon
@@ -4573,13 +4574,13 @@ app.post('/api/users/:id/import-addons', async (req, res) => {
               isActive: true,
             }
           })
-          console.log(`✅ Created new addon: ${addon.name}`)
+          debug.log(`✅ Created new addon: ${addon.name}`)
         } catch (error) {
           console.error(`❌ Failed to create addon for ${addonUrl}:`, error)
           continue
         }
       } else {
-        console.log(`ℹ️ Addon already exists: ${addon.name}`)
+        debug.log(`ℹ️ Addon already exists: ${addon.name}`)
       }
 
       // Check if addon is already in the group
@@ -4602,12 +4603,12 @@ app.post('/api/users/:id/import-addons', async (req, res) => {
             }
           })
           processedAddons.push(addon)
-          console.log(`✅ Added ${addon.name} to import group`)
+          debug.log(`✅ Added ${addon.name} to import group`)
         } catch (error) {
           console.error(`❌ Failed to add ${addon.name} to group:`, error)
         }
       } else {
-        console.log(`ℹ️ Addon ${addon.name} already in import group`)
+        debug.log(`ℹ️ Addon ${addon.name} already in import group`)
       }
     }
 
