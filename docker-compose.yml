@@ -5,6 +5,7 @@ services:
     image: ghcr.io/iamneur0/syncio:latest
     container_name: syncio
     restart: unless-stopped
+    user: "${UID:-1000}:${GID:-1000}"
     environment:
       JWT_SECRET: ${JWT_SECRET:-jwt-secret-key}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:-encryption-key}
@@ -38,3 +39,9 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+volumes:
+  syncio_data:
+    driver: local
+  syncio_redis_data:
+    driver: local
