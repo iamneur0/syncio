@@ -23,7 +23,10 @@ import {
   Unlock,
   LockKeyhole,
   Grid3X3,
-  List
+  List,
+  Import,
+  Copy,
+  Download
 } from 'lucide-react'
 import { useTheme } from '@/contexts/ThemeContext'
 import { getColorBgClass, getColorTextClass, getColorOptions } from '@/utils/colorMapping'
@@ -1050,6 +1053,53 @@ export default function UsersPage() {
       const msg = typeof error?.message === 'string' ? error.message : (error?.response?.data?.message || 'Failed to delete user')
       toast.error(msg)
     },
+  })
+
+  // Import addons from user mutation
+  const importUserAddonsMutation = useMutation({
+    mutationFn: async (userId: string) => {
+      // First, fetch the user's Stremio addons
+      const userRes = await fetch(`/api/users/${userId}`)
+      if (!userRes.ok) {
+        throw new Error('Failed to fetch user data')
+      }
+      
+      const userData = await userRes.json()
+      const stremioAddons = userData.stremioAddons || []
+      
+      if (!Array.isArray(stremioAddons) || stremioAddons.length === 0) {
+        throw new Error('No Stremio addons available to import')
+      }
+      
+      const addons = stremioAddons.map((addon: any) => ({
+        manifestUrl: addon.manifestUrl || addon.transportUrl || addon.url,
+        name: addon.name || addon.manifest?.name,
+        description: addon.description || addon.manifest?.description,
+        version: addon.version || addon.manifest?.version,
+        iconUrl: addon.iconUrl || addon.manifest?.logo
+      }))
+
+      const res = await fetch(`/api/users/${userId}/import-addons`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ addons })
+      })
+      
+      if (!res.ok) {
+        const text = await res.text()
+        throw new Error(text || 'Failed to import addons')
+      }
+      
+      return res.json()
+    },
+    onSuccess: (data) => {
+      toast.success(`Successfully imported ${data.addonCount} addons to group "${data.groupName}"`)
+      queryClient.invalidateQueries({ queryKey: ['groups'] })
+      queryClient.invalidateQueries({ queryKey: ['users'] })
+    },
+    onError: (error: any) => {
+      toast.error(error?.message || 'Failed to import addons')
+    }
   })
 
   // Update username mutation
@@ -2251,8 +2301,8 @@ export default function UsersPage() {
                   View
                 </button>
                 <button
-                  onClick={() => reloadUserAddonsMutation.mutate(user.id)}
-                  disabled={reloadUserAddonsMutation.isPending && reloadUserAddonsMutation.variables === user.id}
+                  onClick={() => importUserAddonsMutation.mutate(user.id)}
+                  disabled={importUserAddonsMutation.isPending}
                   className={`flex items-center justify-center px-3 py-2 h-8 min-h-8 max-h-8 text-sm rounded transition-colors disabled:opacity-50 ${
                     isModern
                       ? 'bg-gradient-to-br from-purple-100 to-blue-100 text-purple-800 hover:from-purple-200 hover:to-blue-200'
@@ -2261,6 +2311,26 @@ export default function UsersPage() {
                       : isMono
                       ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                       : 'bg-blue-100 text-blue-700 hover:bg-blue-200'
+                  }`}
+                  title="Import user's addons to a new group"
+                >
+                  {importUserAddonsMutation.isPending ? (
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-current"></div>
+                  ) : (
+                    <Download className="w-4 h-4" />
+                  )}
+                </button>
+                <button
+                  onClick={() => reloadUserAddonsMutation.mutate(user.id)}
+                  disabled={reloadUserAddonsMutation.isPending && reloadUserAddonsMutation.variables === user.id}
+                  className={`flex items-center justify-center px-3 py-2 h-8 min-h-8 max-h-8 text-sm rounded transition-colors disabled:opacity-50 ${
+                    isModern
+                      ? 'bg-gradient-to-br from-green-100 to-green-200 text-green-800 hover:from-green-200 hover:to-green-300'
+                      : isModernDark
+                      ? 'bg-gradient-to-br from-green-800 to-green-900 text-green-100 hover:from-green-700 hover:to-green-800'
+                      : isMono
+                      ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      : 'bg-green-100 text-green-700 hover:bg-green-200'
                   }`}
                   title="Reload user addons"
                 >
@@ -2371,19 +2441,24 @@ export default function UsersPage() {
                       {/* Action buttons */}
                       <div className="flex items-center gap-1">
                         <button
-                          onClick={(e) => { e.stopPropagation(); handleViewUserDetails(user) }}
-                          className={`flex items-center justify-center h-8 w-8 text-sm rounded transition-colors focus:outline-none ${
+                          onClick={(e) => { e.stopPropagation(); importUserAddonsMutation.mutate(user.id) }}
+                          disabled={importUserAddonsMutation.isPending}
+                          className={`flex items-center justify-center h-8 w-8 text-sm rounded transition-colors disabled:opacity-50 focus:outline-none ${
                             isDark ? 'text-gray-300 hover:text-blue-400' : 'text-gray-600 hover:text-blue-600'
                           }`}
-                          title="View user details"
+                          title="Import user's addons to a new group"
                         >
-                          <Eye className="w-4 h-4" />
+                          {importUserAddonsMutation.isPending ? (
+                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-current"></div>
+                          ) : (
+                            <Download className="w-4 h-4" />
+                          )}
                         </button>
                         <button
                           onClick={(e) => { e.stopPropagation(); reloadUserAddonsMutation.mutate(user.id) }}
                           disabled={reloadUserAddonsMutation.isPending}
                           className={`flex items-center justify-center h-8 w-8 text-sm rounded transition-colors disabled:opacity-50 focus:outline-none ${
-                            isDark ? 'text-gray-300 hover:text-blue-400' : 'text-gray-600 hover:text-blue-600'
+                            isDark ? 'text-gray-300 hover:text-green-400' : 'text-gray-600 hover:text-green-600'
                           }`}
                           title="Reload user addons"
                         >
