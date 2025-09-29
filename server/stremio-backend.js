@@ -363,32 +363,7 @@ app.get('/api/addons/search', (req, res) => {
   res.json(filtered);
 });
 
-app.post('/api/addons', async (req, res) => {
-  const { url, category } = req.body;
-  
-  if (!url || !category) {
-    return res.status(400).json({ message: 'URL and category are required' });
-  }
-  
-  // Extract addon name from URL (simplified)
-  const name = url.split('/').pop().replace('.json', '').replace('manifest', 'Custom Addon');
-  
-  const newAddon = {
-    id: String(addons.length + 1),
-    name: name || 'New Addon',
-    description: `Custom addon from ${url}`,
-    url,
-    category,
-    status: 'active',
-    users: 0,
-    groups: 0,
-    createdAt: new Date().toISOString()
-  };
-  
-  addons.push(newAddon);
-  await saveAddons();
-  res.status(201).json(newAddon);
-});
+// Removed duplicate /api/addons endpoint - using the one in database-backend.js instead
 
 app.delete('/api/addons/:id', async (req, res) => {
   const { id } = req.params;

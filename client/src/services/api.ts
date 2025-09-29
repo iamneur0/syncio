@@ -9,17 +9,29 @@ const API_BASE_URL = typeof window !== 'undefined'
 const api = axios.create({
   baseURL: API_BASE_URL,
   timeout: 10000,
+  withCredentials: true,
   headers: {
     'Content-Type': 'application/json',
   },
 })
 
-// Request interceptor to add auth token
+// Authorization comes from httpOnly cookie; no header injection needed
 api.interceptors.request.use((config) => {
-  const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`
-  }
+  try {
+    if (typeof window !== 'undefined' && config.method && config.method.toUpperCase() !== 'GET') {
+      // Read CSRF token cookie and send via header
+      const cookies = document.cookie?.split(';') || []
+      const find = (name: string) => {
+        const key = `${name}=`
+        const entry = cookies.find(c => c.trim().startsWith(key))
+        return entry ? decodeURIComponent(entry.split('=')[1]) : ''
+      }
+      const csrf = find('__Host-sfm_csrf') || find('sfm_csrf')
+      if (csrf) {
+        (config.headers as any)['X-CSRF-Token'] = csrf
+      }
+    }
+  } catch {}
   return config
 })
 
@@ -27,11 +39,12 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
-      // Clear token and redirect to login if needed
+    // Only log out on actual authentication errors, not on Stremio connection errors
+    if (error.response?.status === 401 && !error.config?.url?.includes('/stremio/')) {
       if (typeof window !== 'undefined') {
-        localStorage.removeItem('token')
-        // Could redirect to login here if we had auth
+        try {
+          window.dispatchEvent(new CustomEvent('sfm:auth:changed', { detail: { authed: false } }))
+        } catch {}
       }
     }
     return Promise.reject(error)
@@ -98,6 +111,7 @@ export interface CreateAddonData {
   name?: string
   description?: string
   groupIds?: string[]
+  manifestData?: any
 }
 
 export interface UpdateAddonData {
@@ -111,7 +125,7 @@ export interface UpdateAddonData {
 
 // Health Check
 export const healthCheck = async (): Promise<{ status: string; message: string; timestamp: string }> => {
-  const response = await axios.get(`${API_BASE_URL.replace('/api', '')}/health`)
+  const response = await api.get(`/health`)
   return response.data
 }
 
@@ -321,6 +335,25 @@ export const stremioAPI = {
     const response: AxiosResponse<{ valid: boolean; error?: string }> = await api.post('/stremio/validate', credentials)
     return response.data
   },
+}
+
+// Public Auth API (for AUTH_ENABLED=true)
+export const publicAuthAPI = {
+  register: async (payload: { uuid: string; password: string }): Promise<{ message: string; account: any }> => {
+    const res: AxiosResponse<{ message: string; account: any }> = await api.post('/public-auth/register', payload)
+    return res.data
+  },
+  login: async (payload: { uuid: string; password: string }): Promise<{ message: string; account: any }> => {
+    const res: AxiosResponse<{ message: string; account: any }> = await api.post('/public-auth/login', payload)
+    return res.data
+  },
+  me: async (): Promise<any> => {
+    const res: AxiosResponse<any> = await api.get('/public-auth/me')
+    return res.data
+  },
+  logout: async (): Promise<void> => {
+    await api.post('/public-auth/logout')
+  }
 }
 
 // Export the axios instance for direct use if needed

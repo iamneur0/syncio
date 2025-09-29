@@ -31,7 +31,7 @@ interface ThemeProviderProps {
 
 export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
   const [theme, setTheme] = useState<Theme>('light')
-  const [isLoading, setIsLoading] = useState(true)
+  const [isLoading, setIsLoading] = useState(false) // Start with false to prevent blocking
 
   useEffect(() => {
     // Only run on client side
@@ -58,6 +58,9 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
       
       // Set theme state and mark as loaded
       setTheme(initialTheme)
+      setIsLoading(false)
+    } else {
+      // On server side, don't block rendering
       setIsLoading(false)
     }
   }, [])

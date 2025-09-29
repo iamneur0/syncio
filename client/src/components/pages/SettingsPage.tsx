@@ -4,16 +4,24 @@ import React from 'react'
 import { useTheme } from '@/contexts/ThemeContext'
 import { useMutation } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
-import { Upload, RotateCcw, Sun, Moon, Sparkles, User, Users } from 'lucide-react'
+import { Upload, RotateCcw, Sun, Moon, Sparkles, User, Users, Download, Trash2, RefreshCcw } from 'lucide-react'
+import UserMenuButton from '@/components/auth/UserMenuButton'
+import api from '@/services/api'
 
 export default function SettingsPage() {
   const { isDark, isModern, isModernDark, theme, setTheme } = useTheme()
+  const appVersion = (process.env.NEXT_PUBLIC_APP_VERSION as string) || 'dev'
   const [hideSensitive, setHideSensitive] = React.useState<boolean>(false)
   const [syncMode, setSyncMode] = React.useState<'normal' | 'advanced'>('normal')
   const [deleteMode, setDeleteMode] = React.useState<'safe' | 'unsafe'>('safe')
   const [importFile, setImportFile] = React.useState<File | null>(null)
   const [importText, setImportText] = React.useState<string>('')
-  const [importMode, setImportMode] = React.useState<'file' | 'text'>('file')
+  const [showAddonImport, setShowAddonImport] = React.useState<boolean>(false)
+  const [configImporting, setConfigImporting] = React.useState<boolean>(false)
+  const [showConfigImport, setShowConfigImport] = React.useState<boolean>(false)
+  const [configText, setConfigText] = React.useState<string>('')
+  
+  const AUTH_ENABLED = process.env.NEXT_PUBLIC_AUTH_ENABLED === 'true'
 
   React.useEffect(() => {
     const saved = localStorage.getItem('sfm_hide_sensitive')
@@ -47,37 +55,17 @@ export default function SettingsPage() {
     window.dispatchEvent(new CustomEvent('sfm:settings:changed'))
   }
 
-  // Import addons mutation
+  // Import addons mutation (uses axios client to include CSRF header)
   const importAddonsMutation = useMutation({
     mutationFn: async (data: { file?: File; text?: string; mode: 'file' | 'text' }) => {
       if (data.mode === 'file' && data.file) {
         const formData = new FormData()
         formData.append('file', data.file)
-        
-        const response = await fetch('/api/addons/import', {
-          method: 'POST',
-          body: formData
-        })
-        
-        if (!response.ok) {
-          const text = await response.text()
-          throw new Error(text || 'Failed to import addons')
-        }
-        
-        return response.json()
+        const response = await api.post('/addons/import', formData, { headers: { 'Content-Type': 'multipart/form-data' } })
+        return response.data
       } else if (data.mode === 'text' && data.text) {
-        const response = await fetch('/api/addons/import-text', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ jsonData: data.text })
-        })
-        
-        if (!response.ok) {
-          const text = await response.text()
-          throw new Error(text || 'Failed to import addons')
-        }
-        
-        return response.json()
+        const response = await api.post('/addons/import-text', { jsonData: data.text })
+        return response.data
       } else {
         throw new Error('Invalid import data')
       }
@@ -94,7 +82,6 @@ export default function SettingsPage() {
     const file = event.target.files?.[0]
     if (file) {
       setImportFile(file)
-      // Auto-import when file is selected
       importAddonsMutation.mutate({ file, mode: 'file' })
       setImportFile(null)
       // Reset file input
@@ -108,15 +95,186 @@ export default function SettingsPage() {
   }
 
   const handleImport = () => {
-    if (importMode === 'text' && importText.trim()) {
+    if (importText.trim()) {
       importAddonsMutation.mutate({ text: importText.trim(), mode: 'text' })
       setImportText('')
     }
   }
 
+  const onDropImport = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const file = e.dataTransfer.files?.[0]
+    if (file) {
+      importAddonsMutation.mutate({ file, mode: 'file' })
+    } else {
+      const text = e.dataTransfer.getData('text')
+      if (text && text.trim()) {
+        setImportText(text)
+      }
+    }
+  }
+  const onDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault()
+  }
+
+  const exportAddons = async () => {
+    try {
+      const res = await api.get('/exports/addons')
+      const blob = new Blob([JSON.stringify(res.data, null, 2)], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a'); a.href = url; a.download = 'syncio-addon-export.json'; a.click(); URL.revokeObjectURL(url)
+      toast.success('Addons exported')
+    } catch (e: any) {
+      const msg = e?.response?.data?.error || e?.message || 'Export failed'
+      toast.error(msg)
+    }
+  }
+
+  const exportConfig = async () => {
+    try {
+      const res = await api.get('/public-auth/export')
+      const blob = new Blob([JSON.stringify(res.data, null, 2)], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a'); a.href = url; a.download = 'syncio-config-export.json'; a.click(); URL.revokeObjectURL(url)
+      toast.success('Configuration exported')
+    } catch (e: any) {
+      const msg = e?.response?.data?.error || e?.message || 'Export failed'
+      toast.error(msg)
+    }
+  }
+
+  // Reset account then import full configuration (file or pasted text)
+  const importConfiguration = async () => {
+    try {
+      setConfigImporting(true)
+      const input = document.getElementById('import-config-file') as HTMLInputElement
+      const file = input?.files?.[0]
+      if (file) {
+        const formData = new FormData()
+        formData.append('file', file)
+        const resp = await api.post('/public-auth/import-config', formData, { headers: { 'Content-Type': 'multipart/form-data' } })
+        const { addons, users, groups } = resp.data
+        toast.success(`Configuration imported:\n${addons.successful} addons\n${users.created} users\n${groups.created} groups`)
+      } else if (configText.trim()) {
+        const resp = await api.post('/public-auth/import-config', { jsonData: configText.trim() })
+        const { addons, users, groups } = resp.data
+        toast.success(`Configuration imported:\n${addons.successful} addons\n${users.created} users\n${groups.created} groups`)
+      } else {
+        toast.error('Select a file or paste JSON first')
+      }
+    } catch (e: any) {
+      const msg = e?.response?.data?.message || e?.message || 'Import configuration failed'
+      toast.error(msg)
+    } finally {
+      setConfigImporting(false)
+    }
+  }
+
+  const handleConfigFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (file) {
+      const formData = new FormData()
+      formData.append('file', file)
+      setConfigImporting(true)
+      api.post('/public-auth/import-config', formData, { headers: { 'Content-Type': 'multipart/form-data' } })
+        .then((resp) => {
+          const { addons, users, groups } = resp.data
+          toast.success(`Configuration imported:\n${addons.successful} addons\n${users.created} users\n${groups.created} groups`)
+        })
+        .catch((e) => {
+          const msg = e?.response?.data?.message || e?.message || 'Import configuration failed'
+          toast.error(msg)
+        })
+        .finally(() => setConfigImporting(false))
+      // reset input
+      event.currentTarget.value = ''
+    }
+  }
+
+  const onDropConfig = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const file = e.dataTransfer.files?.[0]
+    if (file) {
+      const formData = new FormData()
+      formData.append('file', file)
+      setConfigImporting(true)
+      api.post('/public-auth/import-config', formData, { headers: { 'Content-Type': 'multipart/form-data' } })
+        .then((resp) => {
+          const { addons, users, groups } = resp.data
+          toast.success(`Configuration imported:\n${addons.successful} addons\n${users.created} users\n${groups.created} groups`)
+        })
+        .catch((e) => {
+          const msg = e?.response?.data?.message || e?.message || 'Import configuration failed'
+          toast.error(msg)
+        })
+        .finally(() => setConfigImporting(false))
+    } else {
+      const text = e.dataTransfer.getData('text')
+      if (text && text.trim()) setConfigText(text)
+    }
+  }
+
+  const resetConfig = async () => {
+    if (!confirm('Reset configuration (users, groups, addons)? This cannot be undone.')) return
+    try {
+      const res = await api.post('/public-auth/reset')
+      if (res.status !== 200) throw new Error('Reset failed')
+      toast.success('Configuration reset')
+    } catch (e: any) {
+      const msg = e?.response?.data?.error || e?.message || 'Reset failed'
+      toast.error(msg)
+    }
+  }
+
+  const deleteAccount = async () => {
+    if (!confirm('Delete your Syncio account and all data? This cannot be undone.')) return
+    try {
+      const res = await api.delete('/public-auth/account')
+      if (res.status !== 200) throw new Error('Delete failed')
+      toast.success('Account deleted')
+    } catch (e: any) {
+      const msg = e?.response?.data?.error || e?.message || 'Delete failed'
+      toast.error(msg)
+    } finally {
+      // token is cookie-based now; just notify UI to reset
+      try { window.dispatchEvent(new CustomEvent('sfm:auth:changed', { detail: { authed: false } })) } catch {}
+      window.dispatchEvent(new CustomEvent('sfm:auth:changed', { detail: { authed: false } }))
+    }
+  }
+
   return (
-    <div className="p-6 max-w-3xl">
-      <h1 className={`text-2xl font-bold mb-6 ${isDark ? 'text-white' : 'text-gray-900'}`}>Settings</h1>
+    <div className="p-4 sm:p-6">
+      {/* Header */}
+      <div className="mb-6 sm:mb-8">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4 gap-4">
+          <div>
+            <h1 className={`hidden sm:block text-xl sm:text-2xl font-bold ${
+              isModern 
+                ? 'text-purple-800' 
+                : isModernDark
+                ? 'text-purple-100'
+                : isDark ? 'text-white' : 'text-gray-900'
+            }`}>Settings</h1>
+            <p className={`text-sm sm:text-base ${
+              isModern 
+                ? 'text-purple-600' 
+                : isModernDark
+                ? 'text-purple-300'
+                : isDark ? 'text-gray-400' : 'text-gray-600'
+            }`}>Configure your Syncio preferences</p>
+          </div>
+          <div className="flex items-center gap-2">
+            {/* Desktop account button */}
+            <div className="hidden lg:block ml-1">
+              <UserMenuButton />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="max-w-3xl">
 
       <div className={`p-4 rounded-lg border ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
         <h2 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>Privacy</h2>
@@ -337,40 +495,69 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      {/* Import Addons */}
+      {/* Addon Import/Export */}
       <div className={`p-4 rounded-lg border mt-6 ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
-        <h2 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>Import Addons</h2>
+        <h2 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>Addon Import/Export</h2>
         <p className={`text-sm mt-1 ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
-          Import addons from a JSON file or paste JSON content directly. Duplicate addons will be skipped.
+          Import addons from a JSON file or paste JSON content directly. Duplicate addons will be skipped. You can also export current addons.
         </p>
-        
-        {/* Import Mode Toggle */}
-        <div className="mt-4 flex gap-4">
+        <div className="mt-4 flex gap-4 flex-wrap">
           <button
-            onClick={handleUploadClick}
-            disabled={importAddonsMutation.isPending}
-            className="flex items-center px-4 py-2 bg-stremio-purple text-white rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            onClick={() => setShowAddonImport(v => !v)}
+            className={`${isDark ? 'bg-gray-700 hover:bg-gray-600 text-white' : 'bg-gray-100 hover:bg-gray-200 text-gray-900'} flex items-center px-4 py-2 rounded-lg transition-colors`}
           >
-            {importAddonsMutation.isPending ? (
-              <RotateCcw className="w-5 h-5 mr-2 animate-spin" />
-            ) : (
-              <Upload className="w-5 h-5 mr-2" />
-            )}
-            {importAddonsMutation.isPending ? 'Uploading...' : 'Upload Backup'}
+            <Upload className="w-5 h-5 mr-2" /> Import Addons
           </button>
           <button
-            onClick={() => setImportMode('text')}
-            className={`px-4 py-2 rounded-lg transition-colors ${
-              importMode === 'text'
-                ? 'bg-stremio-purple text-white'
-                : isDark
-                ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-            }`}
+            onClick={exportAddons}
+            className={`${isDark ? 'bg-gray-700 hover:bg-gray-600 text-white' : 'bg-gray-100 hover:bg-gray-200 text-gray-900'} flex items-center px-4 py-2 rounded-lg transition-colors`}
           >
-            Paste JSON
+            <Download className="w-5 h-5 mr-2" /> Export Addons
           </button>
         </div>
+
+        {showAddonImport && (
+          <div
+            onDrop={onDropImport}
+            onDragOver={onDragOver}
+            className={`mt-4 p-4 border-2 border-dashed rounded-lg ${isDark ? 'border-gray-600 bg-gray-800/60' : 'border-gray-300 bg-gray-50'}`}
+          >
+            <div className={`${isDark ? 'text-gray-200' : 'text-gray-800'} mb-2 font-medium`}>
+              Drop a .json file here, or paste JSON below, then click Import
+            </div>
+            {/* Hidden file input for manual selection if desired */}
+            <div className="mb-3">
+              <button onClick={handleUploadClick} className={`${isDark ? 'bg-gray-700 hover:bg-gray-600 text-white' : 'bg-gray-100 hover:bg-gray-200 text-gray-900'} px-3 py-1 rounded`}>
+                Choose File
+              </button>
+            </div>
+            <textarea
+              value={importText}
+              onChange={(e) => setImportText(e.target.value)}
+              placeholder="Paste your JSON content here..."
+              rows={8}
+              className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-stremio-purple focus:border-transparent ${
+                isDark 
+                  ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
+                  : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
+              }`}
+            />
+            <div className="mt-3">
+              <button
+                onClick={handleImport}
+                disabled={!importText.trim() || importAddonsMutation.isPending}
+                className={`${isDark ? 'bg-gray-700 hover:bg-gray-600 text-white' : 'bg-gray-100 hover:bg-gray-200 text-gray-900'} flex items-center px-4 py-2 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed`}
+              >
+                {importAddonsMutation.isPending ? (
+                  <RotateCcw className="w-5 h-5 mr-2 animate-spin" />
+                ) : (
+                  <Upload className="w-5 h-5 mr-2" />
+                )}
+                {importAddonsMutation.isPending ? 'Importing...' : 'Import'}
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Hidden file input */}
         <input
@@ -381,38 +568,93 @@ export default function SettingsPage() {
           className="hidden"
         />
 
-        <div className="mt-4">
-          {importMode === 'text' && (
-            <div className="space-y-4">
-              <textarea
-                value={importText}
-                onChange={(e) => setImportText(e.target.value)}
-                placeholder="Paste your JSON content here..."
-                rows={8}
-                className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-stremio-purple focus:border-transparent ${
-                  isDark 
-                    ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
-                    : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
-                }`}
-              />
+        {/* (Replaced by single Import UI above) */}
+      </div>
+
+      {/* Configuration Import/Export */}
+      <div className={`p-4 rounded-lg border mt-6 ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
+        <h2 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>Configuration Import/Export</h2>
+        <p className={`text-sm mt-1 ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>Export full configuration or reset-and-import a configuration file/JSON.</p>
+        <div className="mt-4 flex gap-4 flex-wrap">
+          <button
+            onClick={() => setShowConfigImport(v => !v)}
+            className={`${isDark ? 'bg-gray-700 hover:bg-gray-600 text-white' : 'bg-gray-100 hover:bg-gray-200 text-gray-900'} flex items-center px-4 py-2 rounded-lg transition-colors`}
+          >
+            <Upload className="w-5 h-5 mr-2" /> Import Configuration
+          </button>
+          <button onClick={exportConfig} className={`flex items-center px-4 py-2 rounded-lg transition-colors ${isDark ? 'bg-gray-700 hover:bg-gray-600 text-white' : 'bg-gray-100 hover:bg-gray-200 text-gray-900'}`}>
+            <Download className="w-5 h-5 mr-2" /> Export Configuration
+          </button>
+        </div>
+
+        {showConfigImport && (
+          <div
+            onDrop={onDropConfig}
+            onDragOver={(e) => e.preventDefault()}
+            className={`mt-4 p-4 border-2 border-dashed rounded-lg ${isDark ? 'border-gray-600 bg-gray-800/60' : 'border-gray-300 bg-gray-50'}`}
+          >
+            <div className={`${isDark ? 'text-gray-200' : 'text-gray-800'} mb-2 font-medium`}>
+              Drop a .json file here, or paste JSON below, then click Import
+            </div>
+            <div className="mb-3">
+              <button onClick={() => (document.getElementById('import-config-file') as HTMLInputElement)?.click()} className={`${isDark ? 'bg-gray-700 hover:bg-gray-600 text-white' : 'bg-gray-100 hover:bg-gray-200 text-gray-900'} px-3 py-1 rounded`}>
+                Choose File
+              </button>
+              <input id="import-config-file" type="file" accept=".json" onChange={handleConfigFileChange} className="hidden" />
+            </div>
+            <textarea
+              value={configText}
+              onChange={(e) => setConfigText(e.target.value)}
+              placeholder="Paste your configuration JSON here..."
+              rows={8}
+              className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-stremio-purple focus:border-transparent ${
+                isDark 
+                  ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
+                  : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
+              }`}
+            />
+            <div className="mt-3">
               <button
-                onClick={handleImport}
-                disabled={!importText.trim() || importAddonsMutation.isPending}
-                className="flex items-center px-4 py-2 bg-stremio-purple text-white rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                onClick={importConfiguration}
+                disabled={!configText.trim() && !(document.getElementById('import-config-file') as HTMLInputElement)?.files?.length || configImporting}
+                className={`${isDark ? 'bg-gray-700 hover:bg-gray-600 text-white' : 'bg-gray-100 hover:bg-gray-200 text-gray-900'} flex items-center px-4 py-2 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed`}
               >
-                {importAddonsMutation.isPending ? (
-                  <RotateCcw className="w-5 h-5 mr-2 animate-spin" />
-                ) : (
-                  <Upload className="w-5 h-5 mr-2" />
-                )}
-                {importAddonsMutation.isPending ? 'Importing...' : 'Import'}
+                {configImporting ? <RotateCcw className="w-5 h-5 mr-2 animate-spin" /> : <Upload className="w-5 h-5 mr-2" />}
+                {configImporting ? 'Importing...' : 'Import'}
               </button>
             </div>
+          </div>
+        )}
+      </div>
+
+      {/* Account Management */}
+      <div className={`p-4 rounded-lg border mt-6 ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
+        <h2 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>Account Management</h2>
+        <p className={`text-sm mt-1 ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>Reset configuration or delete your account.</p>
+        <div className={`mt-4 flex gap-4 flex-wrap`}>
+          <button onClick={resetConfig} className={`flex items-center px-4 py-2 rounded-lg transition-colors ${isDark ? 'bg-gray-700 hover:bg-gray-600 text-white' : 'bg-gray-100 hover:bg-gray-200 text-gray-900'}`}>
+            <RefreshCcw className="w-5 h-5 mr-2" /> Reset Configuration
+          </button>
+          {AUTH_ENABLED && (
+            <button onClick={deleteAccount} className={`flex items-center px-4 py-2 rounded-lg transition-colors ${isDark ? 'bg-red-700 hover:bg-red-600 text-white' : 'bg-red-100 hover:bg-red-200 text-red-800'}`}>
+              <Trash2 className="w-5 h-5 mr-2" /> Delete Account
+            </button>
           )}
         </div>
       </div>
-
+      </div>
+      {/* Version badge */}
+      <div className="fixed bottom-3 right-3 text-xs px-2 py-1 rounded-md opacity-80 select-none pointer-events-none"
+        style={{
+          backgroundColor: isDark ? 'rgba(31,41,55,0.8)' : 'rgba(243,244,246,0.9)',
+          color: isDark ? '#d1d5db' : '#111827',
+          border: isDark ? '1px solid #374151' : '1px solid #e5e7eb'
+        }}
+      >
+        Syncio v{appVersion}
+      </div>
     </div>
   )
 }
+
 

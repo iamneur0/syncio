@@ -83,7 +83,7 @@ db-reset:
 # Build commands
 build:
 	@echo "Building Docker image..."
-	docker build -t stremio-family-manager .
+	docker build -t syncio .
 
 # Maintenance commands
 clean:
