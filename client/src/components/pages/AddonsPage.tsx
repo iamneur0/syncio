@@ -19,6 +19,7 @@ import {
   Star
 } from 'lucide-react'
 import { useTheme } from '@/contexts/ThemeContext'
+import UserMenuButton from '@/components/auth/UserMenuButton'
 import { getColorBgClass } from '@/utils/colorMapping'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { addonsAPI, groupsAPI, type Addon, type CreateAddonData } from '@/services/api'
@@ -99,9 +100,12 @@ function DiscoveryCard({ isDark, isModern, isModernDark, isMono, viewMode }: { i
                 : isDark 
                 ? 'bg-gradient-to-br from-purple-900/20 to-blue-900/20 border-purple-700/50 hover:shadow-md' 
                 : 'bg-gradient-to-br from-purple-50 to-blue-50 border-purple-200 hover:shadow-md'
-            } ${!showDiscovery ? 'h-full' : ''}`
+            } ${showDiscovery ? '' : 'h-full'}`
       }`}
-      onClick={() => setShowDiscovery(!showDiscovery)}
+      onClick={(e) => {
+        e.stopPropagation();
+        setShowDiscovery(!showDiscovery);
+      }}
     >
       {viewMode === 'list' ? (
         <div className="flex items-center justify-between gap-3">
@@ -179,7 +183,7 @@ function DiscoveryCard({ isDark, isModern, isModernDark, isMono, viewMode }: { i
 
 
       {showDiscovery && (
-        <div className="space-y-4 mt-4">
+        <div className="space-y-3 mt-4 max-h-96 overflow-y-auto">
           {addonProjects.map((project, index) => (
                        <div
                          key={index}
@@ -254,10 +258,11 @@ function DiscoveryCard({ isDark, isModern, isModernDark, isMono, viewMode }: { i
                   href={project.projectUrl}
                   target="_blank"
                   rel="noopener noreferrer"
+                  onClick={(e) => e.stopPropagation()}
                   className={`p-1 rounded ${
                     isMono
                       ? 'hover:bg-white/10 text-white/70 hover:text-white'
-                      : isDark 
+                      : isDark
                       ? 'hover:bg-gray-600 text-gray-400 hover:text-white' 
                       : 'hover:bg-gray-200 text-gray-500 hover:text-gray-700'
                   }`}
@@ -267,7 +272,7 @@ function DiscoveryCard({ isDark, isModern, isModernDark, isMono, viewMode }: { i
                 </a>
               </div>
               
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-2 gap-1.5">
                 {project.providers.map((provider, providerIndex) => (
                   <a
                     key={providerIndex}
@@ -275,7 +280,7 @@ function DiscoveryCard({ isDark, isModern, isModernDark, isMono, viewMode }: { i
                     target="_blank"
                     rel="noopener noreferrer"
                     onClick={(e) => e.stopPropagation()}
-                               className={`p-2 rounded-lg text-sm font-medium text-center ${
+                               className={`p-1.5 rounded text-xs font-medium text-center ${
                                  isMono
                                    ? 'bg-black border border-white/20 text-white hover:bg-white/10'
                                    : isModern
@@ -325,6 +330,80 @@ function DiscoveryCard({ isDark, isModern, isModernDark, isMono, viewMode }: { i
 }
 
 export default function AddonsPage() {
+  const AUTH_ENABLED = process.env.NEXT_PUBLIC_AUTH_ENABLED === 'true'
+  const [authed, setAuthed] = useState<boolean>(() => !AUTH_ENABLED ? true : false)
+  const queryClient = useQueryClient()
+  
+  useEffect(() => {
+    const handler = (e: any) => {
+      const next = !!(e?.detail?.authed)
+      setAuthed(next)
+      if (!next) {
+        // Clear all cached data when not authenticated
+        queryClient.setQueryData(['addons'], [] as any)
+        queryClient.setQueryData(['groups'], [] as any)
+        queryClient.setQueryData(['users'], [] as any)
+        queryClient.clear() // Clear all cached data on logout
+      }
+    }
+    window.addEventListener('sfm:auth:changed', handler as any)
+    // ensure initial state
+    if (AUTH_ENABLED) setAuthed(false)
+    return () => window.removeEventListener('sfm:auth:changed', handler as any)
+  }, [queryClient])
+
+  // Check authentication on mount and when tab becomes visible
+  useEffect(() => {
+    if (AUTH_ENABLED) {
+      const checkAuth = async () => {
+        try {
+          const response = await addonsAPI.getAll()
+          console.log('🔄 Auth check successful, user is authenticated')
+          setAuthed(true)
+        } catch (error: any) {
+          // Only set authed to false if it's actually an authentication error
+          if (error?.response?.status === 401 || error?.response?.status === 403) {
+            console.log('🔄 Auth check failed - authentication required:', error)
+            setAuthed(false)
+            // Clear all cached data when not authenticated
+            queryClient.setQueryData(['addons'], [] as any)
+            queryClient.setQueryData(['groups'], [] as any)
+            queryClient.setQueryData(['users'], [] as any)
+          } else {
+            // For other errors (like network issues), keep current auth state
+            console.log('🔄 Auth check failed but not an auth error, keeping current state:', error)
+          }
+        }
+      }
+      
+      // Check auth on mount
+      checkAuth()
+      
+      // Check auth when tab becomes visible again
+      const handleVisibilityChange = () => {
+        if (!document.hidden) {
+          console.log('🔄 Tab became visible, checking authentication...')
+          checkAuth()
+        }
+      }
+      
+      document.addEventListener('visibilitychange', handleVisibilityChange)
+      
+      return () => {
+        document.removeEventListener('visibilitychange', handleVisibilityChange)
+      }
+    }
+  }, [AUTH_ENABLED])
+
+  // Clear addons data when not authenticated
+  useEffect(() => {
+    if (AUTH_ENABLED && !authed) {
+      queryClient.setQueryData(['addons'], [] as any)
+      queryClient.setQueryData(['groups'], [] as any)
+      queryClient.setQueryData(['users'], [] as any)
+    }
+  }, [AUTH_ENABLED, authed, queryClient])
+
   const [searchTerm, setSearchTerm] = useState('')
   const debouncedSearchTerm = useDebounce(searchTerm, 300)
   const [showAddModal, setShowAddModal] = useState(false)
@@ -333,6 +412,8 @@ export default function AddonsPage() {
   const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>([])
   const [newAddonVersion, setNewAddonVersion] = useState<string>('')
   const [urlError, setUrlError] = useState<string>('')
+  const [isLoadingManifest, setIsLoadingManifest] = useState(false)
+  const [manifestData, setManifestData] = useState<any>(null)
   const [isReloadingAll, setIsReloadingAll] = useState(false)
   
   // Edit modal state
@@ -369,24 +450,79 @@ export default function AddonsPage() {
     const theme = isMono ? 'mono' : isModern ? 'modern' : isModernDark ? 'modern-dark' : isDark ? 'dark' : 'light'
     return getColorBgClass(colorIndex, theme)
   }
-  const queryClient = useQueryClient()
   const [mounted, setMounted] = useState(false)
+  const [hasLoadedData, setHasLoadedData] = useState(false)
   useEffect(() => { setMounted(true) }, [])
+  
+  // Derive an auth-scoping key so cache is isolated per signed-in account/session
+  const authScopeKey = React.useMemo(() => {
+    if (!AUTH_ENABLED) return 'public'
+    try {
+      const token = typeof window !== 'undefined' ? (localStorage.getItem('sfm_token') || '') : ''
+      const uuid  = typeof window !== 'undefined' ? (localStorage.getItem('sfm_account_uuid') || '') : ''
+      // Prefer explicit account UUID; fall back to token to vary cache on account switch
+      return uuid || token || 'authed'
+    } catch {
+      return 'authed'
+    }
+  }, [AUTH_ENABLED, authed])
 
-
-  // Fetch addons from API
-  const { data: addons = [], isLoading, error } = useQuery({
-    queryKey: ['addons'],
+  // Fetch addons from API (cache scoped to current account)
+  const { data: addons = [], isLoading, error, isSuccess, isFetching } = useQuery({
+    queryKey: ['addons', authScopeKey],
     queryFn: addonsAPI.getAll,
     retry: 1,
+    enabled: !AUTH_ENABLED || authed,
   })
+  
+  // Track when we've successfully loaded data to prevent empty state flash
+  useEffect(() => {
+    if (isSuccess && Array.isArray(addons) && addons.length > 0) {
+      setHasLoadedData(true)
+    }
+  }, [isSuccess, addons])
+  // Clear cached addons on any auth change (logout/login/account switch)
+  useEffect(() => {
+    const handler = (e: any) => {
+      // Always nuke addons cache on auth changes to avoid cross-account leakage
+      queryClient.removeQueries({ queryKey: ['addons'], exact: false })
+      queryClient.invalidateQueries({ queryKey: ['addons'], exact: false })
+    }
+    window.addEventListener('sfm:auth:changed', handler as any)
+    // ensure initial state
+    if (AUTH_ENABLED) setAuthed(false)
+    return () => window.removeEventListener('sfm:auth:changed', handler as any)
+  }, [queryClient])
+
+  // Clear addons data when not authenticated
+  useEffect(() => {
+    if (AUTH_ENABLED && !authed) {
+      queryClient.setQueryData(['addons'], [] as any)
+      queryClient.setQueryData(['groups'], [] as any)
+      queryClient.setQueryData(['users'], [] as any)
+    }
+  }, [AUTH_ENABLED, authed, queryClient])
 
   // Fetch groups for carousel selection
   const { data: allGroups = [] } = useQuery({
     queryKey: ['groups'],
     queryFn: groupsAPI.getAll,
     retry: 1,
+    enabled: !AUTH_ENABLED || authed,
   })
+  // Clear cached groups on logout
+  useEffect(() => {
+    const handler = (e: any) => {
+      const isAuthed = !!e?.detail?.authed
+      if (!isAuthed) {
+        queryClient.setQueryData(['groups'], [] as any)
+      } else {
+        queryClient.invalidateQueries({ queryKey: ['groups'] })
+      }
+    }
+    window.addEventListener('sfm:auth:changed', handler as any)
+    return () => window.removeEventListener('sfm:auth:changed', handler as any)
+  }, [queryClient])
 
   const safeGroups = useMemo(() => {
     if (Array.isArray(allGroups)) return allGroups
@@ -403,7 +539,11 @@ export default function AddonsPage() {
 
   // When addon detail is loaded, populate editGroupIds so assigned groups show as selected
   useEffect(() => {
-    if (!addonDetail) return
+    if (!addonDetail) {
+      // Clear group selections when addonDetail is not available
+      setEditGroupIds([])
+      return
+    }
     const groupIds = Array.isArray((addonDetail as any)?.groups)
       ? (addonDetail as any).groups.map((g: any) => g.id)
       : []
@@ -434,6 +574,8 @@ export default function AddonsPage() {
       setNewAddonName('')
       setNewAddonVersion('')
       setUrlError('')
+      setIsLoadingManifest(false)
+      setManifestData(null)
       toast.success('Addon added successfully!')
     },
     onError: (error: any) => {
@@ -468,12 +610,7 @@ export default function AddonsPage() {
   // Delete addon mutation
   const deleteAddonMutation = useMutation({
     mutationFn: async (id: string) => {
-      // Use direct fetch to match working curl behavior
-      const res = await fetch(`/api/addons/${id}`, { method: 'DELETE' })
-      if (!res.ok) {
-        const text = await res.text()
-        throw new Error(text || `Failed with status ${res.status}`)
-      }
+      await addonsAPI.delete(id)
       return id
     },
     onSuccess: (deletedId: string) => {
@@ -519,17 +656,13 @@ export default function AddonsPage() {
   // Reload addon mutation
   const reloadAddonMutation = useMutation({
     mutationFn: async (id: string) => {
-      const res = await fetch(`/api/addons/${id}/reload`, { method: 'POST' })
-      if (!res.ok) {
-        const text = await res.text()
-        throw new Error(text || `Failed with status ${res.status}`)
-      }
-      return res.json()
+      const addon = await addonsAPI.reload(id)
+      return addon
     },
-    onSuccess: (data) => {
+    onSuccess: (addon) => {
       // Reload-only: update addons list, do not touch any sync-related caches or events
       queryClient.invalidateQueries({ queryKey: ['addons'] })
-      toast.success(`Addon "${data.addon.name}" reloaded successfully!`)
+      toast.success(`Addon "${addon.name}" reloaded successfully!`)
     },
     onError: (error: any) => {
       toast.error(error.message || 'Failed to reload addon')
@@ -540,12 +673,12 @@ export default function AddonsPage() {
   const handleEditAddon = (addon: any) => {
     setEditingAddonId(addon.id)
     setEditingAddon(addon) // Store addon data for placeholders
-    // Clear form data so placeholders show
-    setEditName('')
-    setEditDescription('')
-    setEditUrl('')
-    // Populate group selections from addon object
-    setEditGroupIds(Array.isArray(addon?.groups) ? addon.groups.map((g: any) => g.id) : [])
+    // Initialize form data with actual addon data
+    setEditName(addon.name || '')
+    setEditDescription(addon.description || '')
+    setEditUrl(addon.url || '')
+    // Don't clear group selections here - let the useEffect handle it when addonDetail loads
+    // This prevents the visual bug where groups appear unselected briefly
     setShowEditModal(true)
   }
 
@@ -578,11 +711,7 @@ export default function AddonsPage() {
       // Create array of reload promises
       const reloadPromises = addonsToReload.map(async (addon: Addon) => {
         try {
-          const response = await fetch(`/api/addons/${addon.id}/reload`, { method: 'POST' })
-          if (!response.ok) {
-            const text = await response.text()
-            throw new Error(text || `Failed with status ${response.status}`)
-          }
+          await addonsAPI.reload(addon.id)
           return { addon, success: true }
         } catch (error: any) {
           console.error(`Failed to reload ${addon.name}:`, error)
@@ -617,7 +746,8 @@ export default function AddonsPage() {
       } else {
         toast.success(`Reloaded ${data.successCount} addons successfully (${data.errorCount} failed)`)
       }
-      // Invalidate queries to refresh the UI
+      // Clear cache and invalidate queries to refresh the UI
+      queryClient.clear() // Clear all cached data
       queryClient.invalidateQueries({ queryKey: ['addons'] })
     },
     onError: (error: any) => {
@@ -660,6 +790,8 @@ export default function AddonsPage() {
     let cancelled = false
     setUrlError('')
     setNewAddonVersion('')
+    setManifestData(null)
+    setIsLoadingManifest(false)
 
     const url = newAddonUrl.trim()
     if (!url) return
@@ -673,6 +805,7 @@ export default function AddonsPage() {
     // Only fetch if looks like http(s)
     if (!/^https?:\/\//i.test(url)) return
 
+    setIsLoadingManifest(true)
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), 8000)
 
@@ -685,6 +818,8 @@ export default function AddonsPage() {
         }
         const json = await res.json()
         if (cancelled) return
+        // Store the full manifest data for sending to backend
+        setManifestData(json)
         // Autofill name if user has not typed or matches previous auto name
         if (!newAddonName || newAddonName === 'Torrentio' || newAddonName === '') {
           setNewAddonName(json?.name || newAddonName)
@@ -694,6 +829,7 @@ export default function AddonsPage() {
         if (e?.name === 'AbortError') return
         if (!cancelled) setUrlError('Failed to fetch addon manifest')
       } finally {
+        if (!cancelled) setIsLoadingManifest(false)
         clearTimeout(timer)
       }
     })()
@@ -711,11 +847,16 @@ export default function AddonsPage() {
       toast.error('Please fill in all required fields')
       return
     }
-    createAddonMutation.mutate({
-      name: newAddonName,
-      url: newAddonUrl,
-      groupIds: selectedGroupIds.length > 0 ? selectedGroupIds : undefined,
-    })
+    if (!manifestData) {
+      toast.error('Please wait for manifest to load')
+      return
+    }
+        createAddonMutation.mutate({
+          name: newAddonName,
+          url: newAddonUrl,
+          manifestData: manifestData,
+          groupIds: selectedGroupIds.length > 0 ? selectedGroupIds : undefined,
+        })
   }
 
   const [confirmOpen, setConfirmOpen] = useState(false)
@@ -781,7 +922,7 @@ export default function AddonsPage() {
                 : isDark ? 'text-gray-400' : 'text-gray-600'
             }`}>Manage Stremio addons for your groups</p>
           </div>
-          <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
+          <div className="flex flex-row flex-wrap sm:flex-row gap-2 sm:gap-3 items-center">
             <button
               onClick={() => reloadAllMutation.mutate()}
               disabled={reloadAllMutation.isPending || isReloadingAll || reloadAddonMutation.isPending || addons.length === 0}
@@ -815,6 +956,10 @@ export default function AddonsPage() {
               <span className="hidden sm:inline">Add Addon</span>
               <span className="sm:hidden">Add</span>
             </button>
+            {/* Desktop account button (mobile version is in the topbar) */}
+            <div className="hidden lg:block ml-1">
+              <UserMenuButton />
+            </div>
           </div>
         </div>
 
@@ -956,7 +1101,10 @@ export default function AddonsPage() {
             Make sure the backend server is running on port 4000
           </p>
           <button 
-            onClick={() => queryClient.invalidateQueries({ queryKey: ['addons'] })}
+            onClick={() => {
+              queryClient.clear() // Clear all cached data
+              queryClient.invalidateQueries({ queryKey: ['addons'] })
+            }}
             className={`mt-4 px-4 py-2 text-white rounded-lg transition-colors ${
               isMono
                 ? 'bg-black hover:bg-gray-800 border border-white/20'
@@ -977,9 +1125,9 @@ export default function AddonsPage() {
         <>
           {viewMode === 'card' ? (
             /* Card Grid View */
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 items-stretch">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 items-start">
               {displayAddons.map((addon: any) => (
-                <div key={addon.id} className={`rounded-lg shadow-sm border p-6 hover:shadow-md transition-shadow flex flex-col h-full ${
+                <div key={addon.id} className={`rounded-lg shadow-sm border p-6 hover:shadow-md transition-shadow flex flex-col self-start ${
                   isModern
                     ? 'bg-gradient-to-br from-purple-50/90 to-blue-50/90 border-purple-200/50 shadow-lg shadow-purple-100/30'
                     : isModernDark
@@ -1011,38 +1159,24 @@ export default function AddonsPage() {
                         </div>
                       </div>
                       <div className="min-w-0 flex-1 max-w-[calc(100%-120px)]">
-                        <div className="flex items-center gap-2">
-                          <h3 className={`font-semibold truncate ${
-                            isModern 
-                              ? 'text-purple-800' 
-                              : isModernDark
-                              ? 'text-purple-100'
-                              : isDark ? 'text-white' : 'text-gray-900'
-                          }`}>{addon.name}</h3>
+                        <div className="flex flex-col gap-1">
+                          <div className="flex items-center gap-2">
+                            <h3 className={`font-semibold truncate ${
+                              isModern 
+                                ? 'text-purple-800' 
+                                : isModernDark
+                                ? 'text-purple-100'
+                                : isDark ? 'text-white' : 'text-gray-900'
+                            }`}>{addon.name}</h3>
+                          </div>
                           {addon.version && (
-                            <span className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium flex-shrink-0 ${
+                            <span className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium w-fit ${
                               isDark ? 'bg-purple-600 text-white' : 'bg-purple-100 text-purple-800'
                             }`}>
                               v{addon.version}
                             </span>
                           )}
                         </div>
-                        {addon.tags && addon.tags.length > 0 && (
-                          <div className="flex flex-wrap gap-1 mt-1">
-                            {addon.tags.split(',').map((tag: string, index: number) => (
-                              <span
-                                key={index}
-                                className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium ${
-                                  isDark 
-                                    ? 'bg-purple-500 text-purple-200' 
-                                    : 'bg-purple-100 text-purple-800'
-                                }`}
-                              >
-                                {tag.trim()}
-                              </span>
-                            ))}
-                          </div>
-                        )}
                       </div>
                     </div>
                     {/* Enable/Disable toggle */}
@@ -1363,39 +1497,48 @@ export default function AddonsPage() {
         </>
       )}
 
-      {/* Empty State */}
-      {!isLoading && !error && displayAddons.length === 0 && (
+
+      {/* Empty State - Only show when we have data but no filtered results */}
+      {isSuccess && !error && !isFetching && !isLoading && Array.isArray(addons) && addons.length > 0 && displayAddons.length === 0 && (
         <div className="text-center py-12">
           <Puzzle className="w-12 h-12 text-gray-400 mx-auto mb-4" />
           <h3 className={`text-lg font-medium mb-2 ${isDark ? 'text-white' : 'text-gray-900'}`}>
-            {debouncedSearchTerm ? 'No addons found' : 'No addons yet'}
+            No addons found
           </h3>
           <p className={`${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
-            {debouncedSearchTerm 
-              ? 'Try adjusting your search criteria' 
-              : 'Start by adding your first Stremio addon'
-            }
+            Try adjusting your search criteria
           </p>
-          {!debouncedSearchTerm && (
-            <div className="mt-6">
-              <button
-                onClick={() => setShowAddModal(true)}
-                className={`flex items-center justify-center px-3 py-2 sm:px-4 text-white rounded-lg transition-colors text-sm sm:text-base mx-auto ${
-                  isModern
-                    ? 'bg-gradient-to-br from-purple-600 via-purple-700 to-blue-800 hover:from-purple-700 hover:via-purple-800 hover:to-blue-900'
-                    : isModernDark
-                    ? 'bg-gradient-to-br from-purple-800 via-purple-900 to-blue-900 hover:from-purple-900 hover:via-purple-950 hover:to-indigo-900'
-                    : isMono
-                    ? 'bg-black hover:bg-gray-800'
-                    : 'bg-stremio-purple hover:bg-purple-700'
-                }`}
-              >
-                <Plus className="w-4 h-4 sm:w-5 sm:h-5 mr-2" />
-                <span className="hidden sm:inline">Add Your First Addon</span>
-                <span className="sm:hidden">Add Addon</span>
-              </button>
-            </div>
-          )}
+        </div>
+      )}
+
+      {/* True Empty State - when there are actually no addons */}
+      {isSuccess && !error && !isFetching && !isLoading && Array.isArray(addons) && addons.length === 0 && !debouncedSearchTerm && !hasLoadedData && (
+        <div className="text-center py-12">
+          <Puzzle className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+          <h3 className={`text-lg font-medium mb-2 ${isDark ? 'text-white' : 'text-gray-900'}`}>
+            No addons yet
+          </h3>
+          <p className={`${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
+            Start by adding your first Stremio addon
+          </p>
+          <div className="mt-6">
+            <button
+              onClick={() => setShowAddModal(true)}
+              className={`flex items-center justify-center px-3 py-2 sm:px-4 text-white rounded-lg transition-colors text-sm sm:text-base mx-auto ${
+                isModern
+                  ? 'bg-gradient-to-br from-purple-600 via-purple-700 to-blue-800 hover:from-purple-700 hover:via-purple-800 hover:to-blue-900'
+                  : isModernDark
+                  ? 'bg-gradient-to-br from-purple-800 via-purple-900 to-blue-900 hover:from-purple-900 hover:via-purple-950 hover:to-indigo-900'
+                  : isMono
+                  ? 'bg-black hover:bg-gray-800'
+                  : 'bg-stremio-purple hover:bg-purple-700'
+              }`}
+            >
+              <Plus className="w-4 h-4 sm:w-5 sm:h-5 mr-2" />
+              <span className="hidden sm:inline">Add Your First Addon</span>
+              <span className="sm:hidden">Add Addon</span>
+            </button>
+          </div>
         </div>
       )}
 
@@ -1406,6 +1549,8 @@ export default function AddonsPage() {
           onClick={(e) => {
             if (e.target === e.currentTarget) {
               setShowAddModal(false)
+              setIsLoadingManifest(false)
+              setManifestData(null)
             }
           }}
         >
@@ -1413,7 +1558,11 @@ export default function AddonsPage() {
             <div className="flex items-center justify-between mb-4">
               <h2 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>Add New Addon</h2>
               <button
-                onClick={() => setShowAddModal(false)}
+                onClick={() => {
+                  setShowAddModal(false)
+                  setIsLoadingManifest(false)
+                  setManifestData(null)
+                }}
                 className={`w-8 h-8 flex items-center justify-center rounded transition-colors border-0 ${
                   isDark ? 'text-gray-400 hover:text-gray-300 hover:bg-gray-700' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
                 }`}
@@ -1511,6 +1660,8 @@ export default function AddonsPage() {
                     setNewAddonName('')
                     setNewAddonUrl('')
                     setSelectedGroupIds([])
+                    setIsLoadingManifest(false)
+                    setManifestData(null)
                   }}
                   disabled={createAddonMutation.isPending}
                   className={`flex-1 px-4 py-2 rounded-lg transition-colors ${
@@ -1523,10 +1674,10 @@ export default function AddonsPage() {
                 </button>
                 <button
                   type="submit"
-                  disabled={createAddonMutation.isPending || !!urlError}
+                  disabled={createAddonMutation.isPending || !!urlError || isLoadingManifest || !manifestData}
                   className="flex-1 px-4 py-2 bg-stremio-purple text-white rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50"
                 >
-                  {createAddonMutation.isPending ? 'Adding...' : 'Add Addon'}
+                  {createAddonMutation.isPending ? 'Adding...' : isLoadingManifest ? 'Loading manifest...' : 'Add Addon'}
                 </button>
               </div>
             </form>

@@ -22,6 +22,7 @@ import {
   EyeOff
 } from 'lucide-react'
 import { useTheme } from '@/contexts/ThemeContext'
+import UserMenuButton from '@/components/auth/UserMenuButton'
 import { getColorBgClass, getColorTextClass, getColorOptions } from '@/utils/colorMapping'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { groupsAPI, usersAPI, addonsAPI } from '@/services/api'
@@ -1023,12 +1024,71 @@ export default function GroupsPage() {
   }, [isDragging, previewOrder, addonOrder])
 
 
+  // Authentication state
+  const [authed, setAuthed] = useState(false)
+  const AUTH_ENABLED = process.env.NEXT_PUBLIC_AUTH_ENABLED === 'true'
+
   // Fetch groups from API
   const { data: groupsRaw = [], isLoading, error } = useQuery({
     queryKey: ['groups'],
     queryFn: groupsAPI.getAll,
     retry: 1,
+    enabled: !AUTH_ENABLED || authed,
   })
+
+  // Clear cached groups on logout
+  useEffect(() => {
+    const handler = (e: any) => {
+      const next = !!(e?.detail?.authed)
+      setAuthed(next)
+      if (!next) {
+        queryClient.setQueryData(['groups'], [] as any)
+      }
+    }
+    window.addEventListener('sfm:auth:changed', handler as any)
+    // ensure initial state
+    if (AUTH_ENABLED) setAuthed(false)
+    return () => window.removeEventListener('sfm:auth:changed', handler as any)
+  }, [queryClient, AUTH_ENABLED])
+
+  // Check authentication on mount and when tab becomes visible
+  useEffect(() => {
+    if (AUTH_ENABLED) {
+      const checkAuth = async () => {
+        try {
+          const response = await groupsAPI.getAll()
+          console.log('🔄 Auth check successful, user is authenticated')
+          setAuthed(true)
+        } catch (error: any) {
+          // Only set authed to false if it's actually an authentication error
+          if (error?.response?.status === 401 || error?.response?.status === 403) {
+            console.log('🔄 Auth check failed - authentication required:', error)
+            setAuthed(false)
+          } else {
+            // For other errors (like Stremio connection issues), keep current auth state
+            console.log('🔄 Auth check failed but not an auth error, keeping current state:', error)
+          }
+        }
+      }
+      
+      // Check auth on mount
+      checkAuth()
+      
+      // Check auth when tab becomes visible again
+      const handleVisibilityChange = () => {
+        if (!document.hidden) {
+          console.log('🔄 Tab became visible, checking authentication...')
+          checkAuth()
+        }
+      }
+      
+      document.addEventListener('visibilitychange', handleVisibilityChange)
+      
+      return () => {
+        document.removeEventListener('visibilitychange', handleVisibilityChange)
+      }
+    }
+  }, [AUTH_ENABLED])
 
   // Normalize groups response (handles plain arrays and axios-like objects)
   const groups = useMemo(() => {
@@ -1083,9 +1143,11 @@ export default function GroupsPage() {
 
   const cloneGroupMutation = useMutation({
     mutationFn: async (originalGroupId: string) => {
+      const csrf = (document.cookie.split(';').find(c => c.trim().startsWith('__Host-sfm_csrf='))?.split('=')[1]) || (document.cookie.split(';').find(c => c.trim().startsWith('sfm_csrf='))?.split('=')[1]) || ''
       const response = await fetch('/api/groups/clone', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+        credentials: 'include',
         body: JSON.stringify({ originalGroupId })
       })
       if (!response.ok) {
@@ -1382,7 +1444,8 @@ export default function GroupsPage() {
 
   const deleteGroupMutation = useMutation({
     mutationFn: async (id: string) => {
-      const res = await fetch(`/api/groups/${id}`, { method: 'DELETE' })
+      const csrf = (document.cookie.split(';').find(c => c.trim().startsWith('__Host-sfm_csrf='))?.split('=')[1]) || (document.cookie.split(';').find(c => c.trim().startsWith('sfm_csrf='))?.split('=')[1]) || ''
+      const res = await fetch(`/api/groups/${id}`, { method: 'DELETE', headers: { 'X-CSRF-Token': csrf }, credentials: 'include' })
       if (!res.ok) {
         const text = await res.text()
         throw new Error(text || `Failed with status ${res.status}`)
@@ -1473,12 +1536,15 @@ export default function GroupsPage() {
   const groupSyncMutation = useMutation({
     mutationFn: async (groupId: string) => {
       const syncMode = localStorage.getItem('sfm_sync_mode') || 'normal'
+      const csrf = (document.cookie.split(';').find(c => c.trim().startsWith('__Host-sfm_csrf='))?.split('=')[1]) || (document.cookie.split(';').find(c => c.trim().startsWith('sfm_csrf='))?.split('=')[1]) || ''
       const res = await fetch(`/api/groups/${groupId}/sync`, { 
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
-          'x-sync-mode': syncMode
+          'x-sync-mode': syncMode,
+          'X-CSRF-Token': csrf
         },
+        credentials: 'include',
         body: JSON.stringify({ 
           excludedManifestUrls: []
         })
@@ -1550,12 +1616,15 @@ export default function GroupsPage() {
       const syncMode = localStorage.getItem('sfm_sync_mode') || 'normal'
       for (const group of groupsToSync) {
         try {
+          const csrf = (document.cookie.split(';').find(c => c.trim().startsWith('__Host-sfm_csrf='))?.split('=')[1]) || (document.cookie.split(';').find(c => c.trim().startsWith('sfm_csrf='))?.split('=')[1]) || ''
           const response = await fetch(`/api/groups/${group.id}/sync`, { 
             method: 'POST',
             headers: { 
               'Content-Type': 'application/json',
-              'x-sync-mode': syncMode
+              'x-sync-mode': syncMode,
+              'X-CSRF-Token': csrf
             },
+            credentials: 'include',
             body: JSON.stringify({ 
               excludedManifestUrls: []
             })
@@ -1619,32 +1688,12 @@ export default function GroupsPage() {
 
   const deleteGroupAddonMutation = useMutation({
     mutationFn: async ({ groupId, addonId }: { groupId: string; addonId: string }) => {
-      // Get current addon details to find its current group assignments
-      const addonResponse = await fetch(`/api/addons/${addonId}`)
-      if (!addonResponse.ok) {
-        throw new Error('Failed to fetch addon details')
-      }
-      const addonData = await addonResponse.json()
-      
-      // Get current group IDs and remove the target group
-      const currentGroupIds = (addonData.groups || []).map((group: any) => group.id)
+      // Get current addon details via axios client
+      const addonData = await addonsAPI.getById(addonId)
+      const currentGroupIds = (addonData as any)?.groups?.map((g: any) => g.id) || []
       const updatedGroupIds = currentGroupIds.filter((id: string) => id !== groupId)
-      
-      // Update the addon with the new group assignments
-      const response = await fetch(`/api/addons/${addonId}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ groupIds: updatedGroupIds })
-      })
-      
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.message || 'Failed to remove addon from group')
-      }
-      
-      return response.json()
+      // Update addon with new group assignments via axios client
+      return await addonsAPI.update(addonId, { groupIds: updatedGroupIds })
     },
     onSuccess: () => {
       // Clear per-user cached sync flags for users in this group so badges flip immediately
@@ -1686,13 +1735,13 @@ export default function GroupsPage() {
   // Remove user from group mutation - uses the same endpoint as detailed user view
   const removeUserFromGroupMutation = useMutation({
     mutationFn: async ({ userId }: { userId: string }) => {
-      // Use the same endpoint as the detailed user view when setting group to "no group"
+      const csrf = (document.cookie.split(';').find(c => c.trim().startsWith('__Host-sfm_csrf='))?.split('=')[1]) || (document.cookie.split(';').find(c => c.trim().startsWith('sfm_csrf='))?.split('=')[1]) || ''
       const response = await fetch(`/api/users/${userId}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ groupName: '' }) // Empty string removes user from group
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+        credentials: 'include',
+        body: JSON.stringify({ groupName: '' })
       })
-      
       if (!response.ok) {
         throw new Error('Failed to remove user from group')
       }
@@ -1770,7 +1819,7 @@ export default function GroupsPage() {
             <h1 className={`hidden sm:block text-xl sm:text-2xl font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>Groups</h1>
             <p className={`text-sm sm:text-base ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>Organize users and manage content access</p>
           </div>
-          <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
+          <div className="flex flex-row flex-wrap sm:flex-row gap-2 sm:gap-3 items-center">
             <button
               onClick={() => syncAllGroupsMutation.mutate()}
               disabled={syncAllGroupsMutation.isPending || isSyncingAll || groups.length === 0}
@@ -1804,6 +1853,10 @@ export default function GroupsPage() {
               <span className="hidden sm:inline">Create Group</span>
               <span className="sm:hidden">Create</span>
             </button>
+            {/* Desktop account button (mobile version is in the topbar) */}
+            <div className="hidden lg:block ml-1">
+              <UserMenuButton />
+            </div>
           </div>
         </div>
 

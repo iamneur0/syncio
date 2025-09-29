@@ -7,6 +7,7 @@ import { ThemeProvider } from '@/contexts/ThemeContext'
 import Head from 'next/head'
 
 import './globals.css'
+import AuthGate from '@/components/auth/AuthGate'
 
 const inter = Inter({ subsets: ['latin'] })
 
@@ -42,7 +43,9 @@ export default function RootLayout({
       <body className={inter.className}>
         <QueryClientProvider client={queryClient}>
           <ThemeProvider>
-            {children}
+            <AuthGate>
+              {children}
+            </AuthGate>
             <Toaster 
               position="top-right"
               toastOptions={{
