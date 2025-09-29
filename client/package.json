@@ -1,10 +1,11 @@
 {
-  "name": "stremio-family-manager-client",
+  "name": "syncio-client",
   "version": "1.0.0",
-  "description": "Frontend for Syncio",
+  "description": "Syncio frontend",
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:public": "cross-env NEXT_PUBLIC_AUTH_ENABLED=true next dev",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",

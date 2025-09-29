@@ -184,7 +184,7 @@ volumes:
 ```bash
 # Clone and deploy
 git clone <repo-url>
-cd stremio-family-manager
+cd syncio
 cp env.example .env
 # Edit .env for your environment
 make prod
@@ -193,7 +193,7 @@ make prod
 ### Manual Steps
 ```bash
 # 1. Build the image
-docker build -t stremio-family-manager .
+docker build -t syncio .
 
 # 2. Run with docker-compose
 docker-compose up -d
