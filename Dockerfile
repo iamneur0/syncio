@@ -65,57 +65,8 @@ COPY --from=builder --chown=appuser:nodejs /app/client/node_modules ./client/nod
 COPY --from=builder --chown=appuser:nodejs /app/client/public ./client/public
 COPY --from=builder --chown=appuser:nodejs /app/client/next.config.js ./client/
 
-# Create startup script
-RUN echo '#!/bin/sh' > /app/start.sh && \
-    echo 'set -e' >> /app/start.sh && \
-    echo '' >> /app/start.sh && \
-    echo 'echo "🚀 Starting Syncio..."' >> /app/start.sh && \
-    echo '' >> /app/start.sh && \
-    echo '# Ensure SQLite directory exists and is writable' >> /app/start.sh && \
-    echo 'DB_URL="${DATABASE_URL:-file:/app/data/sqlite.db}"' >> /app/start.sh && \
-    echo 'if echo "$DB_URL" | grep -q "^file:"; then' >> /app/start.sh && \
-    echo '  DB_FILE=${DB_URL#file:}' >> /app/start.sh && \
-    echo '  DB_DIR=$(dirname "$DB_FILE")' >> /app/start.sh && \
-    echo '  mkdir -p "$DB_DIR" || true' >> /app/start.sh && \
-    echo '  chmod 755 "$DB_DIR" || true' >> /app/start.sh && \
-    echo 'fi' >> /app/start.sh && \
-    echo '' >> /app/start.sh && \
-    echo '# Apply Prisma schema (migrations or push fallback)' >> /app/start.sh && \
-    echo 'echo "📊 Applying Prisma schema..."' >> /app/start.sh && \
-    echo 'npx prisma migrate deploy || true' >> /app/start.sh && \
-    echo 'echo "ℹ️ Ensuring schema is applied (db push)..."' >> /app/start.sh && \
-    echo 'npx prisma db push --accept-data-loss' >> /app/start.sh && \
-    echo '' >> /app/start.sh && \
-    echo '# Prefer IPv4 for localhost resolution (avoid ::1 issues)' >> /app/start.sh && \
-    echo 'export NODE_OPTIONS="--dns-result-order=ipv4first"' >> /app/start.sh && \
-    echo '' >> /app/start.sh && \
-    echo '# Start both services using a process manager approach' >> /app/start.sh && \
-    echo 'echo "🌐 Starting frontend server on port ${FRONTEND_PORT:-3000}..."' >> /app/start.sh && \
-    echo 'cd /app/client && PORT=${FRONTEND_PORT:-3000} npm start &' >> /app/start.sh && \
-    echo 'FRONTEND_PID=$!' >> /app/start.sh && \
-    echo '' >> /app/start.sh && \
-    echo '# Wait a moment for frontend to start' >> /app/start.sh && \
-    echo 'sleep 5' >> /app/start.sh && \
-    echo '' >> /app/start.sh && \
-    echo 'echo "🔧 Starting backend server on port ${BACKEND_PORT:-4000}..."' >> /app/start.sh && \
-    echo 'cd /app && PORT=${BACKEND_PORT:-4000} node server/database-backend.js &' >> /app/start.sh && \
-    echo 'BACKEND_PID=$!' >> /app/start.sh && \
-    echo '' >> /app/start.sh && \
-    echo '# Function to handle shutdown' >> /app/start.sh && \
-    echo 'cleanup() {' >> /app/start.sh && \
-    echo '    echo "🛑 Shutting down services..."' >> /app/start.sh && \
-    echo '    kill $BACKEND_PID 2>/dev/null || true' >> /app/start.sh && \
-    echo '    kill $FRONTEND_PID 2>/dev/null || true' >> /app/start.sh && \
-    echo '    wait' >> /app/start.sh && \
-    echo '    exit 0' >> /app/start.sh && \
-    echo '}' >> /app/start.sh && \
-    echo '' >> /app/start.sh && \
-    echo '# Set up signal handlers' >> /app/start.sh && \
-    echo 'trap cleanup SIGTERM SIGINT' >> /app/start.sh && \
-    echo '' >> /app/start.sh && \
-    echo '# Wait for both processes' >> /app/start.sh && \
-    echo 'wait $BACKEND_PID $FRONTEND_PID' >> /app/start.sh
-
+# Use maintained startup script that selects Prisma schema based on DATABASE_URL
+COPY --from=builder --chown=appuser:nodejs /app/scripts/start.sh /app/start.sh
 RUN chmod +x /app/start.sh
 
 # Switch to non-root user

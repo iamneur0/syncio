@@ -4,7 +4,7 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "sqlite"
   url      = env("DATABASE_URL")
 }
 
@@ -35,10 +35,6 @@ model User {
   addonSettings    AddonSetting[]
   activityLogs     ActivityLog[]
 
-  // Ownership
-  accountId        String?
-  account          AppAccount? @relation(fields: [accountId], references: [id])
-
   @@map("users")
 }
 
@@ -56,10 +52,6 @@ model Group {
   invites      GroupInvite[]
   addons       GroupAddon[]
   activityLogs ActivityLog[]
-
-  // Ownership
-  accountId   String?
-  account     AppAccount? @relation(fields: [accountId], references: [id])
 
   @@map("groups")
 }
@@ -112,10 +104,6 @@ model Addon {
   groupAddons   GroupAddon[]
   addonSettings AddonSetting[]
 
-  // Ownership
-  accountId   String?
-  account     AppAccount? @relation(fields: [accountId], references: [id])
-
   @@map("addons")
 }
 
@@ -160,10 +148,6 @@ model ActivityLog {
   groupId String?
   group   Group? @relation(fields: [groupId], references: [id], onDelete: SetNull)
 
-  // Ownership
-  accountId String?
-  account   AppAccount? @relation(fields: [accountId], references: [id])
-
   @@map("activity_logs")
 }
 
@@ -177,12 +161,6 @@ model AppAccount {
   lastLoginAt  DateTime?
 
   @@map("app_accounts")
-
-  // Back-relations
-  users   User[]
-  groups  Group[]
-  addons  Addon[]
-  logs    ActivityLog[]
 }
 
 

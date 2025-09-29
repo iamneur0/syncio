@@ -31,7 +31,9 @@ import {
 import { useTheme } from '@/contexts/ThemeContext'
 import { getColorBgClass, getColorTextClass, getColorOptions } from '@/utils/colorMapping'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { usersAPI, groupsAPI, type User } from '@/services/api'
+import { usersAPI, groupsAPI, addonsAPI, type User } from '@/services/api'
+import api from '@/services/api'
+import UserMenuButton from '@/components/auth/UserMenuButton'
 import toast from 'react-hot-toast'
 import ConfirmDialog from '../common/ConfirmDialog'
 import SyncBadge from '../common/SyncBadge'
@@ -109,9 +111,12 @@ function UserSyncBadge({ userId, userExcludedSet, userProtectedSet, isSyncing, l
   const { data: live } = useQuery({
     queryKey: ['user', userId, 'stremio-addons'],
     queryFn: async () => {
-      const res = await fetch(`/api/users/${userId}/stremio-addons`)
-      if (!res.ok) return { addons: [] }
-      return res.json()
+      try {
+        const response = await api.get(`/users/${userId}/stremio-addons`)
+        return response.data
+      } catch (error) {
+        return { addons: [] }
+      }
     },
     staleTime: 60_000, // 1 minute
     refetchOnMount: 'always',
@@ -466,36 +471,107 @@ export default function UsersPage() {
 
 
   // Fetch users from API
+  const AUTH_ENABLED = process.env.NEXT_PUBLIC_AUTH_ENABLED === 'true'
+  const [authed, setAuthed] = useState<boolean>(() => !AUTH_ENABLED ? true : false)
+  
+  // Check authentication status on mount and when tab becomes visible
+  useEffect(() => {
+    if (AUTH_ENABLED) {
+      // Check if user is already authenticated by making a test API call
+      const checkAuth = async () => {
+        try {
+          const response = await api.get('/users')
+          console.log('🔄 Auth check successful, user is authenticated')
+          setAuthed(true)
+        } catch (error: any) {
+          // Only set authed to false if it's actually an authentication error
+          if (error?.response?.status === 401 || error?.response?.status === 403) {
+            console.log('🔄 Auth check failed - authentication required:', error)
+            setAuthed(false)
+          } else {
+            // For other errors (like Stremio connection issues), keep current auth state
+            console.log('🔄 Auth check failed but not an auth error, keeping current state:', error)
+          }
+        }
+      }
+      
+      // Check auth on mount
+      checkAuth()
+      
+      // Check auth when tab becomes visible again
+      const handleVisibilityChange = () => {
+        if (!document.hidden) {
+          console.log('🔄 Tab became visible, checking authentication...')
+          checkAuth()
+        }
+      }
+      
+      document.addEventListener('visibilitychange', handleVisibilityChange)
+      
+      return () => {
+        document.removeEventListener('visibilitychange', handleVisibilityChange)
+      }
+    }
+  }, [AUTH_ENABLED])
+  
+  useEffect(() => {
+    const handler = (e: any) => setAuthed(!!e?.detail?.authed)
+    window.addEventListener('sfm:auth:changed', handler as any)
+    return () => window.removeEventListener('sfm:auth:changed', handler as any)
+  }, [])
+
   const { data: users = [], isLoading, error } = useQuery({
     queryKey: ['users'],
     queryFn: async () => {
+      console.log('🔄 Fetching users from API...')
       const result = await usersAPI.getAll()
+      console.log('🔄 Users API result:', result)
       
       // Handle case where result might be wrapped in an axios response
       if (result && typeof result === 'object' && 'data' in result && Array.isArray((result as any).data)) {
+        console.log('🔄 Returning wrapped data:', (result as any).data)
         return (result as any).data
       }
       
       // If result is already an array, return it
       if (Array.isArray(result)) {
+        console.log('🔄 Returning direct array result:', result)
         return result
       }
       
+      console.log('🔄 Returning empty array')
       return []
     },
     retry: 1,
-    refetchOnMount: true,
+    refetchOnMount: 'always',
     refetchOnWindowFocus: false,
+    enabled: !AUTH_ENABLED || authed,
   })
+  // Debug users data changes
+  useEffect(() => {
+    console.log('🔄 Users data changed:', { users, count: users.length, isLoading, error, AUTH_ENABLED, authed })
+  }, [users, isLoading, error, AUTH_ENABLED, authed])
+
+  // Clear cached users/groups on logout
+  useEffect(() => {
+    const handler = (e: any) => {
+      if (!e?.detail?.authed) {
+        queryClient.setQueryData(['users'], [] as any)
+        queryClient.setQueryData(['groups'], [] as any)
+      }
+    }
+    window.addEventListener('sfm:auth:changed', handler as any)
+    return () => window.removeEventListener('sfm:auth:changed', handler as any)
+  }, [queryClient])
+
 
   // Fetch user details (without Stremio addons to avoid duplicate API calls)
   const { data: userDetailsData, isLoading: isLoadingDetails } = useQuery({
     queryKey: ['user', selectedUser?.id, 'basic'],
     queryFn: async () => {
       if (!selectedUser?.id) return null
-      const response = await fetch(`/api/users/${selectedUser.id}?basic=true`)
-      if (!response.ok) throw new Error('Failed to fetch user details')
-      return response.json()
+      const response = await api.get(`/users/${selectedUser.id}?basic=true`)
+      return response.data
     },
     enabled: !!selectedUser?.id
   })
@@ -505,15 +581,16 @@ export default function UsersPage() {
     queryKey: ['user', selectedUser?.id, 'stremio-addons'],
     queryFn: async () => {
       if (!selectedUser?.id) return null
-      const response = await fetch(`/api/users/${selectedUser.id}/stremio-addons`)
-      if (!response.ok) {
+      try {
+        const response = await api.get(`/users/${selectedUser.id}/stremio-addons`)
+        return response.data
+      } catch (error: any) {
         // If user is not connected to Stremio, return empty addons instead of throwing
-        if (response.status === 400) {
+        if (error.response?.status === 400) {
           return { addons: [] }
         }
-        throw new Error('Failed to fetch Stremio addons')
+        throw error
       }
-      return response.json()
     },
     enabled: !!selectedUser?.id && !!selectedUser?.hasStremioConnection,
     staleTime: 5 * 60 * 1000, // Cache for 5 minutes
@@ -602,11 +679,7 @@ export default function UsersPage() {
       else next.add(key)
       
       // Update database
-      fetch(`/api/users/${uid}/excluded-addons`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ excludedAddons: Array.from(next) })
-      }).then(() => {
+      api.put(`/users/${uid}/excluded-addons`, { excludedAddons: Array.from(next) }).then(() => {
         // Update global sets for this user
         setGlobalUserExcludedSets(prev => {
           const newMap = new Map(prev)
@@ -823,15 +896,8 @@ export default function UsersPage() {
   // Reload user addons mutation
   const reloadUserAddonsMutation = useMutation({
     mutationFn: async (userId: string) => {
-      const res = await fetch(`/api/users/${userId}/reload-addons`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
-      })
-      if (!res.ok) {
-        const text = await res.text()
-        throw new Error(text || 'Failed to reload user addons')
-      }
-      return res.json()
+      const response = await api.post(`/users/${userId}/reload-addons`)
+      return response.data
     },
     onSuccess: (data, userId) => {
       // Reload-only: refresh user's live stremio addons panel; do not change sync views
@@ -924,6 +990,7 @@ export default function UsersPage() {
       return []
     },
     retry: 1,
+    enabled: !AUTH_ENABLED || authed,
   })
 
   const groups = React.useMemo(() => {
@@ -951,45 +1018,44 @@ export default function UsersPage() {
     mutationFn: async (userData: { email: string; password: string; username: string; groupName?: string; userId?: string }) => {
       // If userId is provided, connect existing user to Stremio
       if (userData.userId) {
-        const response = await fetch(`/api/users/${userData.userId}/connect-stremio`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
+        try {
+          const response = await api.post(`/users/${userData.userId}/connect-stremio`, {
             email: userData.email,
             password: userData.password,
             username: userData.username
           })
-        })
-        
-        if (!response.ok) {
-          const error = await response.json()
-          throw new Error(error.message || 'Failed to connect to Stremio')
+          return response.data
+        } catch (error: any) {
+          // Treat idempotent 200/409 cases gracefully: refetch and continue
+          if (error.response?.status === 409 || error.response?.status === 200) {
+            await queryClient.refetchQueries({ queryKey: ['users'] as any, type: 'active' })
+          }
+          throw new Error(error.response?.data?.message || error.message || 'Failed to connect to Stremio')
         }
-        
-        return response.json()
       } else {
         // Create new user with Stremio credentials
-        const response = await fetch('/api/stremio/connect', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(userData)
-        })
-        
-        if (!response.ok) {
-          const error = await response.json()
-          throw new Error(error.message || 'Failed to connect to Stremio')
+        try {
+          const response = await api.post('/stremio/connect', userData)
+          return response.data
+        } catch (error: any) {
+          throw new Error(error.response?.data?.message || error.message || 'Failed to connect to Stremio')
         }
-        
-        return response.json()
       }
     },
     onSuccess: (data, variables) => {
+      console.log('🎉 ConnectStremioMutation success:', { data, variables })
+      
+      // Simple invalidation like addons/groups pages
+      console.log('🔄 Invalidating users query...')
       queryClient.invalidateQueries({ queryKey: ['users'] })
-      // Also invalidate the specific user detail query to update the sync badge
+      queryClient.invalidateQueries({ queryKey: ['groups'] })
+      console.log('🔄 Query invalidation completed')
       if (variables.userId) {
         queryClient.invalidateQueries({ queryKey: ['user', variables.userId] })
         queryClient.invalidateQueries({ queryKey: ['user', variables.userId, 'stremio-addons'] })
       }
+      
+      // Close modal
       setShowConnectModal(false)
       setStremioEmail('')
       setStremioPassword('')
@@ -997,6 +1063,7 @@ export default function UsersPage() {
       setSelectedGroup('')
       setNewGroupName('')
       setEditingUser(null)
+      
       toast.success(`Connected to Stremio! Found ${data.addonsCount || 0} addons`)
     },
     onError: (error: any) => {
@@ -1008,30 +1075,36 @@ export default function UsersPage() {
   const connectStremioWithAuthKeyMutation = useMutation({
     mutationFn: async (payload: { authKey: string; username?: string; groupName?: string; userId?: string }) => {
       if (payload.userId) {
-        const resp = await fetch(`/api/users/${payload.userId}/connect-stremio-authkey`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ authKey: payload.authKey })
+        const response = await api.post(`/users/${payload.userId}/connect-stremio-authkey`, {
+          authKey: payload.authKey
         })
-        if (!resp.ok) throw new Error((await resp.json()).message || 'Failed to connect with auth key')
-        return resp.json()
+        return response.data
       } else {
-        const resp = await fetch('/api/stremio/connect-authkey', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ authKey: payload.authKey, username: payload.username, displayName: payload.username, groupName: payload.groupName })
+        const response = await api.post('/stremio/connect-authkey', {
+          authKey: payload.authKey,
+          username: payload.username,
+          displayName: payload.username,
+          groupName: payload.groupName
         })
-        if (!resp.ok) throw new Error((await resp.json()).message || 'Failed to connect with auth key')
-        return resp.json()
+        return response.data
       }
     },
     onSuccess: (data, variables) => {
+      console.log('🎉 ConnectStremioWithAuthKeyMutation success:', { data, variables })
+      
+      // Simple invalidation like addons/groups pages
       queryClient.invalidateQueries({ queryKey: ['users'] })
-      if (variables.userId) queryClient.invalidateQueries({ queryKey: ['user', variables.userId] })
+      queryClient.invalidateQueries({ queryKey: ['groups'] })
+      if (variables.userId) {
+        queryClient.invalidateQueries({ queryKey: ['user', variables.userId] })
+      }
+      
+      // Close modal
       setShowConnectModal(false)
       setStremioAuthKey('')
       setStremioEmail(''); setStremioPassword(''); setStremioUsername('')
       setSelectedGroup(''); setNewGroupName(''); setEditingUser(null)
+      
       toast.success('Connected to Stremio via auth key')
     },
     onError: (err: any) => toast.error(err?.message || 'Failed to connect with auth key')
@@ -1040,37 +1113,42 @@ export default function UsersPage() {
   // Register new Stremio account (email/password)
   const registerStremioMutation = useMutation({
     mutationFn: async (payload: { email: string; password: string }) => {
-      const resp = await fetch('/api/stremio/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      })
-      if (!resp.ok) {
-        const error = await resp.json().catch(() => ({}))
-        throw new Error(error.message || 'Failed to register Stremio account')
-      }
-      return resp.json()
+      const response = await api.post('/stremio/register', payload)
+      return response.data
     },
     onSuccess: () => {
+      console.log('🎉 RegisterStremioMutation success')
+      
+      // Simple invalidation like addons/groups pages
+      queryClient.invalidateQueries({ queryKey: ['users'] })
+      
       toast.success('Stremio account registered')
     },
     onError: (err: any) => {
-      toast.error(err?.message || 'Failed to register Stremio account')
+      console.error('❌ RegisterStremioMutation error:', err)
+      toast.error(err?.response?.data?.message || err?.message || 'Failed to register Stremio account')
+      // Don't throw here - let the error propagate to the calling code
     }
   })
 
-  // Delete user mutation (inline fetch with better error details)
+  // Delete user mutation with optimistic updates like addons/groups
   const deleteUserMutation = useMutation({
     mutationFn: async (id: string) => {
-      const res = await fetch(`/api/users/${id}`, { method: 'DELETE' })
-      if (!res.ok) {
-        const text = await res.text()
-        throw new Error(text || `Failed to delete user (status ${res.status})`)
-      }
-      return res.json()
+      const response = await api.delete(`/users/${id}`)
+      return response.data
     },
-    onSuccess: () => {
+    onSuccess: (data, deletedId: string) => {
+      console.log('🎉 DeleteUserMutation success')
+      
+      // Optimistic update like addons/groups pages
+      queryClient.setQueryData(['users'], (prev: any) => {
+        const arr = Array.isArray(prev) ? prev : (prev?.data && Array.isArray(prev.data) ? prev.data : [])
+        return arr.filter((u: any) => u.id !== deletedId)
+      })
+      
+      // Also invalidate to ensure consistency
       queryClient.invalidateQueries({ queryKey: ['users'] })
+      
       toast.success('User deleted successfully!')
     },
     onError: (error: any) => {
@@ -1085,44 +1163,30 @@ export default function UsersPage() {
       // Prefer live Stremio addons first
       let addonsSource: any[] = []
       try {
-        const liveRes = await fetch(`/api/users/${userId}/stremio-addons`)
-        if (liveRes.ok) {
-          const liveData = await liveRes.json()
-          const liveAddons = Array.isArray(liveData?.addons) ? liveData.addons : []
+        const liveRes = await api.get(`/users/${userId}/stremio-addons`)
+        const liveAddons = Array.isArray(liveRes.data?.addons) ? liveRes.data.addons : []
+        if (liveAddons.length > 0) {
+          addonsSource = liveAddons
+        }
+      } catch {}
+      if (addonsSource.length === 0) {
+        try {
+          await api.post(`/users/${userId}/reload-addons`)
+          const liveRetry = await api.get(`/users/${userId}/stremio-addons`)
+          const liveAddons = Array.isArray(liveRetry.data?.addons) ? liveRetry.data.addons : []
           if (liveAddons.length > 0) {
             addonsSource = liveAddons
           }
-        }
-      } catch {}
-
-      // If live is empty, try forcing a reload then re-fetch live once
-      if (addonsSource.length === 0) {
-        try {
-          await fetch(`/api/users/${userId}/reload-addons`, { method: 'POST' })
-          const liveRetry = await fetch(`/api/users/${userId}/stremio-addons`)
-          if (liveRetry.ok) {
-            const liveData = await liveRetry.json()
-            const liveAddons = Array.isArray(liveData?.addons) ? liveData.addons : []
-            if (liveAddons.length > 0) {
-              addonsSource = liveAddons
-            }
-          }
         } catch {}
       }
-
-      // Fallback to persisted user endpoint if still empty
       if (addonsSource.length === 0) {
-        const userRes = await fetch(`/api/users/${userId}`)
-        if (!userRes.ok) throw new Error('Failed to fetch user data')
-        const userData = await userRes.json()
-        const persisted = Array.isArray(userData?.stremioAddons) ? userData.stremioAddons : []
+        const userRes = await api.get(`/users/${userId}`)
+        const persisted = Array.isArray(userRes.data?.stremioAddons) ? userRes.data.stremioAddons : []
         addonsSource = persisted
       }
-
       if (!Array.isArray(addonsSource) || addonsSource.length === 0) {
         throw new Error('No Stremio addons available to import')
       }
-
       const addons = addonsSource.map((addon: any) => ({
         manifestUrl: addon.manifestUrl || addon.transportUrl || addon.url,
         name: addon.name || addon.manifest?.name,
@@ -1130,24 +1194,17 @@ export default function UsersPage() {
         version: addon.version || addon.manifest?.version,
         iconUrl: addon.iconUrl || addon.manifest?.logo
       }))
-
-      const res = await fetch(`/api/users/${userId}/import-addons`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ addons })
-      })
-
-      if (!res.ok) {
-        const text = await res.text()
-        throw new Error(text || 'Failed to import addons')
-      }
-
-      return res.json()
+      const response = await api.post(`/users/${userId}/import-addons`, { addons })
+      return response.data
     },
-    onSuccess: (data) => {
+    onSuccess: async (data) => {
       toast.success(`Successfully imported ${data.addonCount} addons to group "${data.groupName}"`)
       queryClient.invalidateQueries({ queryKey: ['groups'] })
       queryClient.invalidateQueries({ queryKey: ['users'] })
+      // Ensure Addons tab reflects newly created addons immediately (even if not active)
+      try {
+        await queryClient.fetchQuery({ queryKey: ['addons'], queryFn: addonsAPI.getAll })
+      } catch {}
     },
     onError: (error: any) => {
       toast.error(error?.message || 'Failed to import addons')
@@ -1157,15 +1214,8 @@ export default function UsersPage() {
   // Wipe user addons mutation
   const wipeUserAddonsMutation = useMutation({
     mutationFn: async (userId: string) => {
-      const response = await fetch(`/api/users/${userId}/stremio-addons/clear`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
-      })
-      if (!response.ok) {
-        const text = await response.text()
-        throw new Error(text || 'Failed to wipe addons')
-      }
-      return response.json()
+      const response = await api.post(`/users/${userId}/stremio-addons/clear`)
+      return response.data
     },
     // Optimistic UI update to immediately clear addons and set unsynced status
     onMutate: async (userId) => {
@@ -1206,16 +1256,8 @@ export default function UsersPage() {
   // Update username mutation
   const updateUsernameMutation = useMutation({
     mutationFn: async ({ userId, username }: { userId: string; username: string }) => {
-      const response = await fetch(`/api/users/${userId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username })
-      })
-      if (!response.ok) {
-        const text = await response.text()
-        throw new Error(text || 'Failed to update username')
-      }
-      return response.json()
+      const response = await api.patch(`/users/${userId}`, { username })
+      return response.data
     },
     onSuccess: (data, variables) => {
       toast.success('Username updated successfully')
@@ -1238,32 +1280,9 @@ export default function UsersPage() {
     mutationFn: async ({ id, userData }: { id: string; userData: any }) => {
       
       // Use inline API call to bypass import issues
-      const response = await fetch(`/api/users/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(userData)
-      })
+      const response = await api.put(`/users/${id}`, userData)
       
-      if (!response.ok) {
-        const errorText = await response.text()
-        console.error('❌ Update failed:', response.status, errorText)
-        let errorMessage = 'Failed to update user'
-        try {
-          const error = JSON.parse(errorText)
-          errorMessage = error.message || errorMessage
-        } catch {
-          errorMessage = errorText || errorMessage
-        }
-        throw new Error(errorMessage)
-      }
-      
-      const result = await response.json()
-      
-      // Handle axios-style response wrapper if present
-      if (result && typeof result === 'object' && result.data) {
-        return result.data
-      }
-      return result
+      return response.data
     },
     onSuccess: (data, variables) => {
       queryClient.invalidateQueries({ queryKey: ['users'] })
@@ -1294,28 +1313,14 @@ export default function UsersPage() {
   // Toggle user status mutation
   const toggleUserStatusMutation = useMutation({
     mutationFn: async ({ id, isActive }: { id: string; isActive: boolean }) => {
-      const response = await fetch(`/api/users/${id}/toggle-status`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ isActive: !isActive })
-      })
-      
-      if (!response.ok) {
-        const errorText = await response.text()
-        let errorMessage = 'Failed to toggle user status'
-        try {
-          const error = JSON.parse(errorText)
-          errorMessage = error.message || errorMessage
-        } catch {
-          errorMessage = errorText || errorMessage
-        }
-        throw new Error(errorMessage)
-      }
-      
-      return await response.json()
+      const response = await api.patch(`/users/${id}/toggle-status`, { isActive: !isActive })
+      return response.data
     },
     onSuccess: (data, variables) => {
+      console.log('🎉 ToggleUserStatusMutation success:', { variables })
+      // Immediately invalidate and refetch
       queryClient.invalidateQueries({ queryKey: ['users'] })
+      queryClient.refetchQueries({ queryKey: ['users'] as any, type: 'active' })
       // If user was enabled, refresh their sync status
       if (variables.isActive) {
         queryClient.invalidateQueries({ queryKey: ['user', variables.id, 'sync-status'] })
@@ -1332,17 +1337,8 @@ export default function UsersPage() {
   // Sync all users mutation
   const syncAllUsersMutation = useMutation({
     mutationFn: async () => {
-      const response = await fetch('/api/users/sync-all', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
-      })
-      
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.message || 'Failed to sync all users')
-      }
-      
-      return response.json()
+      const response = await api.post('/users/sync-all')
+      return response.data
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['users'] })
@@ -1406,9 +1402,19 @@ export default function UsersPage() {
     try {
       // If requested, register a new Stremio account first
       if (stremioRegisterNew && authMode === 'email') {
-        await registerStremioMutation.mutateAsync({ email: stremioEmail.trim(), password: stremioPassword })
+        console.log('🔄 Starting registration process...')
+        try {
+          await registerStremioMutation.mutateAsync({ email: stremioEmail.trim(), password: stremioPassword })
+          console.log('✅ Registration completed, proceeding with connection...')
+        } catch (regError: any) {
+          console.error('❌ Registration failed:', regError)
+          // Show the specific error message from the backend
+          toast.error(regError?.response?.data?.message || regError?.message || 'Registration failed')
+          return // Stop here, don't proceed with connection
+        }
       }
 
+      console.log('🔄 Starting connection process...')
       connectStremioMutation.mutate({
         email: stremioEmail,
         password: stremioPassword,
@@ -1416,7 +1422,10 @@ export default function UsersPage() {
         groupName: groupToAssign || undefined,
         userId: editingUser?.id || undefined, // Include user ID if connecting existing user
       })
-    } catch {}
+    } catch (error) {
+      console.error('❌ Error in handleConnectStremio:', error)
+      toast.error('Failed to process request')
+    }
   }
 
   const [confirmOpen, setConfirmOpen] = useState(false)
@@ -1719,11 +1728,7 @@ export default function UsersPage() {
       else next.add(key)
       
       // Update database
-      fetch(`/api/users/${uid}/protected-addons`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ protectedAddons: Array.from(next) })
-      }).then(() => {
+      api.put(`/users/${uid}/protected-addons`, { protectedAddons: Array.from(next) }).then(() => {
         // Update global sets for this user
         setGlobalUserProtectedSets(prev => {
           const newMap = new Map(prev)
@@ -1759,13 +1764,8 @@ export default function UsersPage() {
   const deleteStremioAddonMutation = useMutation({
     mutationFn: async ({ userId, addonId }: { userId: string; addonId: string }) => {
       const encodedAddonId = encodeURIComponent(addonId)
-      const res = await fetch(`/api/users/${userId}/stremio-addons/${encodedAddonId}`, { method: 'DELETE' })
-      // Treat 200/204 as success; don't require a JSON body
-      if (res.status === 200 || res.status === 204) return { ok: true }
-      const text = await res.text().catch(() => '')
-      const err: any = new Error(text || `HTTP ${res.status}`)
-      err.status = res.status
-      throw err
+      const response = await api.delete(`/users/${userId}/stremio-addons/${encodedAddonId}`)
+      return response.data
     },
     // Optimistic UI update to avoid stale item lingering if proxy returns 502
     onMutate: async ({ userId, addonId }) => {
@@ -1849,24 +1849,18 @@ export default function UsersPage() {
     setStremioValidationError(null)
 
     try {
-      const response = await fetch('/api/stremio/validate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password })
-      })
+      const response = await api.post('/stremio/validate', { email, password })
       
-      const result = await response.json()
-      
-      if (response.ok && result.valid) {
+      if (response.data.valid) {
         setIsStremioValid(true)
         setStremioValidationError(null)
       } else {
         setIsStremioValid(false)
-        setStremioValidationError(result.error || 'Invalid Stremio credentials')
+        setStremioValidationError(response.data.error || 'Invalid Stremio credentials')
       }
-    } catch (error) {
+    } catch (error: any) {
       setIsStremioValid(false)
-      setStremioValidationError('Failed to validate credentials')
+      setStremioValidationError(error.response?.data?.error || error.message || 'Failed to validate Stremio credentials')
     } finally {
       setIsValidatingStremio(false)
     }
@@ -2054,16 +2048,8 @@ export default function UsersPage() {
   const reorderMutation = useMutation({
     mutationFn: async (orderedManifestUrls: string[]) => {
       if (!selectedUser?.id) throw new Error('No user selected')
-      const res = await fetch(`/api/users/${selectedUser.id}/stremio-addons/reorder`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ orderedManifestUrls })
-      })
-      if (!res.ok) {
-        const text = await res.text()
-        throw new Error(text || 'Failed to reorder addons')
-      }
-      return res.json()
+      const response = await api.post(`/users/${selectedUser.id}/stremio-addons/reorder`, { orderedManifestUrls })
+      return response.data
     },
     onSuccess: () => {
       toast.success('Addon order updated')
@@ -2130,7 +2116,7 @@ export default function UsersPage() {
             <h1 className={`hidden sm:block text-xl sm:text-2xl font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>Users</h1>
             <p className={`text-sm sm:text-base ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>Manage Stremio users for your group</p>
           </div>
-          <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
+          <div className="flex flex-row flex-wrap sm:flex-row gap-2 sm:gap-3 items-center">
             <button
               onClick={() => syncAllUsersMutation.mutate()}
               disabled={syncAllUsersMutation.isPending || users.length === 0}
@@ -2164,6 +2150,10 @@ export default function UsersPage() {
               <span className="hidden sm:inline">Add User</span>
               <span className="sm:hidden">Add User</span>
           </button>
+          {/* Desktop account button (mobile version is in the topbar) */}
+          <div className="hidden lg:block ml-1">
+            <UserMenuButton />
+          </div>
         </div>
         </div>
         {/* Search and View Toggle */}
@@ -2895,7 +2885,7 @@ export default function UsersPage() {
                       : 'bg-stremio-purple hover:bg-purple-700'
                   }`}
                 >
-                  {connectStremioMutation.isPending ? 'Connecting...' : 'Connect to Stremio'}
+                  {connectStremioMutation.isPending ? (stremioRegisterNew ? 'Registering...' : 'Connecting...') : (stremioRegisterNew ? 'Register & Connect' : 'Connect to Stremio')}
                 </button>
               </div>
             </form>

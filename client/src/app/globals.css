@@ -4,8 +4,72 @@
 
 /* Prevent theme flash on page load - set default background */
 html {
-  background-color: #000000;
+  background-color: #000000; /* safe default for dark/mono to avoid white flash */
+  color-scheme: light; /* default */
 }
+
+/* Match browser chrome/overscroll color to theme by default */
+@media (prefers-color-scheme: light) {
+  html { background-color: #f9fafb; }
+}
+@media (prefers-color-scheme: dark) {
+  html { background-color: #111827; color-scheme: dark; }
+}
+
+/* Themed scrollbars (WebKit + Firefox) */
+/* Base (light) */
+html {
+  scrollbar-width: thin; /* Firefox */
+  scrollbar-color: #cbd5e1 transparent; /* thumb + transparent track */
+}
+/* WebKit */
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background-color: #cbd5e1; /* gray-300 */
+  border-radius: 8px;
+  border: 2px solid #f3f4f6; /* creates padding effect */
+}
+*::-webkit-scrollbar-thumb:hover {
+  background-color: #9ca3af; /* gray-400 */
+}
+
+/* Dark */
+.dark html, .modern-dark html, .mono html { scrollbar-color: #0f172a transparent; }
+.dark html, .modern-dark html, .mono html { color-scheme: dark; }
+.dark *::-webkit-scrollbar-track,
+.modern-dark *::-webkit-scrollbar-track,
+.mono *::-webkit-scrollbar-track { background: transparent; }
+.dark *::-webkit-scrollbar-thumb,
+.modern-dark *::-webkit-scrollbar-thumb { background-color: #0f172a; border-color: #111827; }
+.dark *::-webkit-scrollbar-thumb:hover,
+.modern-dark *::-webkit-scrollbar-thumb:hover { background-color: #1f2937; }
+
+/* Mono (pure black theme) */
+.mono *::-webkit-scrollbar-track { background: transparent; }
+.mono *::-webkit-scrollbar-thumb { background-color: #2a2a2a; border-color: #000000; }
+.mono *::-webkit-scrollbar-thumb:hover { background-color: #3a3a3a; }
+.mono html { scrollbar-color: #2a2a2a #000000; }
+
+/* Modern (light gradient) - subtle purple/indigo thumb */
+.modern html { scrollbar-color: rgba(99,102,241,0.6) transparent; }
+.modern *::-webkit-scrollbar-track { background: transparent; }
+.modern *::-webkit-scrollbar-thumb {
+  background-color: rgba(99,102,241,0.6); /* indigo-500 @ 0.6 */
+  border-color: transparent;
+}
+.modern *::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(79,70,229,0.75); /* indigo-600 @ 0.75 */
+}
+
+/* Modern-dark (dark gradient) - lighter lavender thumb */
+.modern-dark html { scrollbar-color: rgba(255,255,255,0.2) transparent; }
+.modern-dark *::-webkit-scrollbar-track { background: transparent; }
+.modern-dark *::-webkit-scrollbar-thumb { background-color: rgba(255,255,255,0.2); border-color: transparent; }
+.modern-dark *::-webkit-scrollbar-thumb:hover { background-color: rgba(255,255,255,0.3); }
 
 /* Ensure proper theme is applied immediately */
 html:not(.light):not(.dark):not(.modern):not(.modern-dark):not(.mono) {
@@ -27,15 +91,23 @@ body.theme-loaded {
   }
   
   body {
-    @apply bg-gray-50 text-gray-900;
+    @apply bg-gray-50 text-gray-900; /* light fallback */
+  }
+
+  /* Ensure overscroll/rubber-band shows correct theme color (html/body) */
+  .light html, .light body {
+    @apply bg-gray-50;
+  }
+  .dark html, .dark body {
+    @apply bg-gray-900;
   }
 
   /* Override body background for modern themes */
-  .modern body {
+  .modern html, .modern body {
     @apply bg-gradient-to-br from-purple-100 via-blue-100 to-indigo-100 text-purple-900;
   }
 
-  .modern-dark body {
+  .modern-dark html, .modern-dark body {
     @apply bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 text-purple-100;
   }
 
@@ -88,7 +160,7 @@ body.theme-loaded {
   }
 
   /* Mono theme: fully black UI with white text and subtle borders */
-  .mono body {
+  .mono html, .mono body {
     @apply bg-black text-white;
   }
 
