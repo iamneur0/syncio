@@ -48,10 +48,8 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
         localStorage.setItem('theme', 'dark')
       }
       
-      // Apply theme to document immediately
-      const root = window.document.documentElement
-      root.classList.remove('light', 'dark', 'modern', 'modern-dark', 'mono')
-      root.classList.add(initialTheme)
+      // Apply theme to document immediately and update theme-color
+      updateDocumentClass(initialTheme)
       
       // Mark theme as loaded on body
       document.body.classList.add('theme-loaded')
@@ -65,11 +63,31 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
     }
   }, [])
 
+  const ensureThemeColorTag = (): HTMLMetaElement => {
+    let tag = document.querySelector('meta[name="theme-color"]') as HTMLMetaElement | null
+    if (!tag) {
+      tag = document.createElement('meta')
+      tag.setAttribute('name', 'theme-color')
+      document.head.appendChild(tag)
+    }
+    return tag
+  }
+
   const updateDocumentClass = (newTheme: Theme) => {
     if (typeof window !== 'undefined') {
       const root = window.document.documentElement
       root.classList.remove('light', 'dark', 'modern', 'modern-dark', 'mono')
       root.classList.add(newTheme)
+      // Update theme-color meta to match background precisely per theme
+      const colors: Record<Theme, string> = {
+        light: '#f9fafb',
+        dark: '#111827',
+        'modern': '#f9fafb',
+        'modern-dark': '#111827',
+        mono: '#000000',
+      }
+      const tag = ensureThemeColorTag()
+      tag.setAttribute('content', colors[newTheme] || '#111827')
     }
   }
 

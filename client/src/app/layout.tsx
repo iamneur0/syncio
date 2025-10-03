@@ -32,6 +32,30 @@ export default function RootLayout({
         <meta name="application-name" content="Syncio" />
         <meta name="apple-mobile-web-app-title" content="Syncio" />
         <meta name="description" content="Syncio - Stremio Group Manager" />
+        {/* Single theme-color; ThemeProvider updates it dynamically */}
+        <meta name="theme-color" content="#111827" />
+        {/* Pre-init theme to avoid flash and fix overscroll background before paint */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              (function(){
+                try {
+                  var d = document.documentElement;
+                  var saved = localStorage.getItem('theme');
+                  var isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+                  var theme = saved || (isDark ? 'dark' : 'light');
+                  if (theme === 'modern' || theme === 'modern-dark') theme = 'dark';
+                  d.classList.remove('light','dark','modern','modern-dark','mono');
+                  d.classList.add(theme);
+                  var tag = document.querySelector('meta[name="theme-color"]');
+                  if (!tag) { tag = document.createElement('meta'); tag.setAttribute('name','theme-color'); document.head.appendChild(tag); }
+                  var colors = { light: '#f9fafb', dark: '#111827', mono: '#000000', 'modern': '#f9fafb', 'modern-dark': '#111827' };
+                  tag.setAttribute('content', colors[theme] || '#111827');
+                } catch(e){}
+              })();
+            `
+          }}
+        />
         <link rel="manifest" href="/site.webmanifest" />
         <link rel="icon" href="/favicon.ico" />
         <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />

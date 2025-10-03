@@ -1201,10 +1201,9 @@ export default function UsersPage() {
       toast.success(`Successfully imported ${data.addonCount} addons to group "${data.groupName}"`)
       queryClient.invalidateQueries({ queryKey: ['groups'] })
       queryClient.invalidateQueries({ queryKey: ['users'] })
-      // Ensure Addons tab reflects newly created addons immediately (even if not active)
-      try {
-        await queryClient.fetchQuery({ queryKey: ['addons'], queryFn: addonsAPI.getAll })
-      } catch {}
+      // Refresh any addons queries (covers ['addons', authScopeKey])
+      queryClient.invalidateQueries({ queryKey: ['addons'], exact: false })
+      queryClient.refetchQueries({ queryKey: ['addons'], exact: false })
     },
     onError: (error: any) => {
       toast.error(error?.message || 'Failed to import addons')
@@ -2896,7 +2895,7 @@ export default function UsersPage() {
       {/* Edit User Modal */}
       {isEditModalOpen && editingUser && (
         <div 
-          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 modal-root"
           onClick={(e) => {
             if (e.target === e.currentTarget) {
               setIsEditModalOpen(false)
@@ -3086,7 +3085,7 @@ export default function UsersPage() {
       {/* User Detail Modal */}
       {isDetailModalOpen && selectedUser && (
         <div 
-          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[95] p-4"
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[95] p-4 modal-root"
           onClick={(e) => {
             if (e.target === e.currentTarget) {
               setIsDetailModalOpen(false)
@@ -3250,7 +3249,7 @@ export default function UsersPage() {
                           return (
                           <div key={index} className={`p-3 rounded-lg border ${
                             isDark ? 'bg-gray-600 border-gray-500' : 'bg-white border-gray-200'
-                          }`}>
+                          } ${excluded ? 'opacity-60' : ''}`}>
                             <div className="flex items-start justify-between gap-3">
                               <div className="flex-1 min-w-0">
                                 <div className="flex items-center flex-1 min-w-0">
@@ -3272,6 +3271,13 @@ export default function UsersPage() {
                                       <h4 className={`font-medium truncate ${isDark ? 'text-white' : 'text-gray-900'}`}>
                                         {addonName || 'Unnamed Addon'}
                                       </h4>
+                                      {excluded && (
+                                        <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium w-fit mt-1 min-[480px]:mt-0 ${
+                                          isDark ? 'bg-gray-700 text-gray-300' : 'bg-gray-200 text-gray-700'
+                                        }`}>
+                                          Excluded
+                                        </span>
+                                      )}
                                       {addon.version && (
                                         <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium w-fit mt-1 min-[480px]:mt-0 ${
                                           isDark ? 'bg-purple-600 text-white' : 'bg-purple-100 text-purple-800'

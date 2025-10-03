@@ -266,8 +266,13 @@ export const groupsAPI = {
 export const addonsAPI = {
   // Get all addons
   getAll: async (): Promise<Addon[]> => {
-    const response: AxiosResponse<Addon[]> = await api.get('/addons')
-    return response.data
+    const response: AxiosResponse<any> = await api.get('/addons')
+    // Be resilient to different response wrappers
+    const data = response.data
+    if (Array.isArray(data)) return data as Addon[]
+    if (data && Array.isArray(data.addons)) return data.addons as Addon[]
+    if (data && data.data && Array.isArray(data.data)) return data.data as Addon[]
+    return []
   },
 
   // Get addon by ID
