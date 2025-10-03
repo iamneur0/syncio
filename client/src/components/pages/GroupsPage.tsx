@@ -1470,7 +1470,12 @@ export default function GroupsPage() {
     mutationFn: async ({ id, isActive }: { id: string; isActive: boolean }) => {
       const response = await fetch(`/api/groups/${id}/toggle-status`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': (document.cookie.split(';').find(c => c.trim().startsWith('__Host-sfm_csrf='))?.split('=')[1]
+            || document.cookie.split(';').find(c => c.trim().startsWith('sfm_csrf='))?.split('=')[1]
+            || '')
+        },
         body: JSON.stringify({ isActive: !isActive })
       })
       
@@ -1740,7 +1745,7 @@ export default function GroupsPage() {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
         credentials: 'include',
-        body: JSON.stringify({ groupName: '' })
+        body: JSON.stringify({ groupId: '' })
       })
       if (!response.ok) {
         throw new Error('Failed to remove user from group')
@@ -2375,7 +2380,7 @@ export default function GroupsPage() {
       {/* Add Group Modal */}
       {showAddModal && (
         <div 
-          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50"
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 modal-root"
           onClick={(e) => {
             if (e.target === e.currentTarget) {
               setShowAddModal(false)
@@ -2500,7 +2505,7 @@ export default function GroupsPage() {
       {/* Edit Group Modal */}
       {showEditModal && editingGroupId && (
         <div 
-          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[100]"
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[100] modal-root"
           onClick={(e) => {
             if (e.target === e.currentTarget) {
               setShowEditModal(false)
@@ -2606,7 +2611,7 @@ export default function GroupsPage() {
       {/* Group Detail Modal */}
       {showDetailModal && selectedGroup && (
         <div 
-          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[90] p-4"
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[90] p-4 modal-root"
           onClick={(e) => {
             if (e.target === e.currentTarget) {
               setShowDetailModal(false)
@@ -2722,7 +2727,37 @@ export default function GroupsPage() {
                           }`}
                         >Cancel</button>
                         <button
-                          onClick={() => { setSavingUsers(true); updateGroupUsersMutation.mutate({ id: selectedGroup!.id, userIds: selectedUserIdsInline }) }}
+                          onClick={() => {
+                            if (!selectedGroup?.id) return
+                            // Determine users that would be moved from other groups
+                            const currentMembers = (selectedGroupDetails?.users || []).map((u: any) => u.id)
+                            const toAdd = selectedUserIdsInline.filter((id: string) => !currentMembers.includes(id))
+                            const toRemove = currentMembers.filter((id: string) => !selectedUserIdsInline.includes(id))
+
+                            // If adding users who already belong to another group, confirm move
+                            const needsConfirm = toAdd.some((uid: string) => {
+                              const u = safeUsers.find((su: any) => su.id === uid)
+                              // Show only if the user is in some group different from the current one
+                              return !!(u?.groupId && u.groupId !== selectedGroup!.id)
+                            })
+                            if (needsConfirm) {
+                              setConfirmConfig({
+                                title: 'Move user to this group?',
+                                description: 'Some selected users may already belong to another group. Move them here and remove them from their current group?',
+                                isDanger: false,
+                                onConfirm: () => {
+                                  setSavingUsers(true)
+                                  updateGroupUsersMutation.mutate({ id: selectedGroup!.id, userIds: selectedUserIdsInline })
+                                  setShowUserPicker(false)
+                                }
+                              })
+                              setConfirmOpen(true)
+                            } else {
+                              setSavingUsers(true)
+                              updateGroupUsersMutation.mutate({ id: selectedGroup!.id, userIds: selectedUserIdsInline })
+                              setShowUserPicker(false)
+                            }
+                          }}
                           disabled={savingUsers}
                           className={`w-[84px] h-8 min-h-8 max-h-8 text-sm rounded-lg border transition-colors disabled:opacity-50 ${
                             isDark ? 'bg-gray-600 border-gray-500 text-white hover:bg-gray-500' : 'bg-white border-gray-200 text-gray-900 hover:bg-gray-50'

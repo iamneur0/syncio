@@ -9,114 +9,73 @@ datasource db {
 }
 
 model User {
-  id               String   @id @default(cuid())
-  displayName      String
-  email            String   @unique
-  username         String   @unique
-  password         String?
-  firstName        String?
-  lastName         String?
-  avatar           String?
-  role             String   @default("USER")
-  isActive         Boolean  @default(true)
-  stremioEmail     String?  @unique
-  stremioUsername  String?
-  stremioAuthKey   String?
-  stremioUserId    String?
-  stremioAddons    String?
-  lastStremioSync  DateTime?
-  excludedAddons   String?
-  protectedAddons  String?
-  colorIndex       Int?
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
-  memberships      GroupMember[]
-  invitations      GroupInvite[]
-  addonSettings    AddonSetting[]
-  activityLogs     ActivityLog[]
+  id              String   @id @default(cuid())
+  username        String   @unique
+  email           String   @unique
+  isActive        Boolean  @default(true)
+  stremioAuthKey  String?  // Encrypted Stremio auth key
+  excludedAddons  String?  // JSON array of addon IDs that user has excluded
+  protectedAddons String?  // JSON array of addon IDs that user has protected
+  colorIndex      Int?     // UI color theme index
+  accountId       String?  // For multi-tenant support
+  
+  // Relationships
+  addonSettings   AddonSetting[]
+  activityLogs    ActivityLog[]
 
   @@map("users")
 }
 
 model Group {
-  id          String    @id @default(cuid())
+  id          String   @id @default(cuid())
   name        String
   description String?
-  avatar      String?
-  colorIndex  Int?
-  isActive    Boolean   @default(true)
-  maxMembers  Int       @default(10)
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  members      GroupMember[]
-  invites      GroupInvite[]
-  addons       GroupAddon[]
+  isActive    Boolean  @default(true)
+  colorIndex  Int?     // UI color theme index
+  accountId   String?  // For multi-tenant support
+  userIds     String?  // JSON array of user IDs
+  addonIds    String?  // JSON array of addon IDs
+  
+  // Relationships
+  addons      GroupAddon[]
   activityLogs ActivityLog[]
 
   @@map("groups")
 }
 
-model GroupMember {
-  id       String   @id @default(cuid())
-  role     String   @default("MEMBER")
-  joinedAt DateTime @default(now())
-  excludedAddons String?
-  userId  String
-  user    User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-  groupId String
-  group   Group  @relation(fields: [groupId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, groupId])
-  @@map("group_members")
-}
-
-model GroupInvite {
-  id        String   @id @default(cuid())
-  email     String
-  role      String   @default("MEMBER")
-  status    String   @default("PENDING")
-  token     String   @unique
-  expiresAt DateTime
-  createdAt DateTime @default(now())
-  groupId   String
-  group     Group  @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  inviterId String
-  inviter   User   @relation(fields: [inviterId], references: [id], onDelete: Cascade)
-
-  @@unique([email, groupId])
-  @@map("group_invites")
-}
+// GroupMember model removed - using JSON arrays in Group model instead
 
 model Addon {
-  id              String   @id @default(cuid())
-  name            String   @unique
-  description     String?
-  manifestUrl     String   @unique
-  stremioAddonId  String?  @unique
-  iconUrl         String?
-  version         String?
-  author          String?
-  tags            String
-  isOfficial      Boolean  @default(false)
-  isActive        Boolean  @default(true)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-  groupAddons   GroupAddon[]
-  addonSettings AddonSetting[]
+  id             String   @id @default(cuid())
+  name           String
+  description    String?
+  manifestUrl    String
+  manifest       String?  // Store the full manifest JSON as string (SQLite doesn't have native JSON)
+  stremioAddonId String?
+  version        String?
+  author         String?
+  isOfficial     Boolean  @default(false)
+  isActive       Boolean  @default(true)
+  accountId      String?  // For multi-tenant support
+  tags           String?
+  iconUrl        String?
+  
+  // Relationships
+  groupAddons    GroupAddon[]
+  addonSettings  AddonSetting[]
 
+  @@unique([name, accountId])
   @@map("addons")
 }
 
 model GroupAddon {
   id        String   @id @default(cuid())
   isEnabled Boolean  @default(true)
-  settings  String?
-  addedAt   DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  groupId String
-  group   Group  @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  addonId String
-  addon   Addon  @relation(fields: [addonId], references: [id], onDelete: Cascade)
+  settings  String?  // JSON string for addon-specific settings
+  groupId   String
+  group     Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  addonId   String
+  addon     Addon    @relation(fields: [addonId], references: [id], onDelete: Cascade)
 
   @@unique([groupId, addonId])
   @@map("group_addons")
@@ -126,12 +85,10 @@ model AddonSetting {
   id        String   @id @default(cuid())
   key       String
   value     String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  userId  String
-  user    User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-  addonId String
-  addon   Addon  @relation(fields: [addonId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  addonId   String
+  addon     Addon    @relation(fields: [addonId], references: [id], onDelete: Cascade)
 
   @@unique([userId, addonId, key])
   @@map("addon_settings")
@@ -141,12 +98,12 @@ model ActivityLog {
   id        String   @id @default(cuid())
   action    String
   details   String?
-  metadata  String?
-  createdAt DateTime @default(now())
-  userId  String
-  user    User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-  groupId String?
-  group   Group? @relation(fields: [groupId], references: [id], onDelete: SetNull)
+  metadata  String?  // JSON string for additional data
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  groupId   String?
+  group     Group?   @relation(fields: [groupId], references: [id], onDelete: SetNull)
+  accountId String?  // For multi-tenant support
 
   @@map("activity_logs")
 }
@@ -155,12 +112,6 @@ model AppAccount {
   id           String   @id @default(cuid())
   uuid         String   @unique
   passwordHash String
-  isActive     Boolean  @default(true)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-  lastLoginAt  DateTime?
 
   @@map("app_accounts")
 }
-
-

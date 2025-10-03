@@ -3,18 +3,15 @@
 @tailwind utilities;
 
 /* Prevent theme flash on page load - set default background */
-html {
-  background-color: #000000; /* safe default for dark/mono to avoid white flash */
+html, body, #__next, :root {
+  background-color: transparent; /* allow theme to control actual color */
   color-scheme: light; /* default */
+  min-height: 100%;
 }
 
 /* Match browser chrome/overscroll color to theme by default */
-@media (prefers-color-scheme: light) {
-  html { background-color: #f9fafb; }
-}
-@media (prefers-color-scheme: dark) {
-  html { background-color: #111827; color-scheme: dark; }
-}
+@media (prefers-color-scheme: light) { html { background-color: #f9fafb; } }
+@media (prefers-color-scheme: dark) { html { background-color: #111827; color-scheme: dark; } }
 
 /* Themed scrollbars (WebKit + Firefox) */
 /* Base (light) */
@@ -39,7 +36,8 @@ html {
 
 /* Dark */
 .dark html, .modern-dark html, .mono html { scrollbar-color: #0f172a transparent; }
-.dark html, .modern-dark html, .mono html { color-scheme: dark; }
+  .dark html, .modern-dark html, .mono html { color-scheme: dark; }
+  .mono html { background-color: #000000; }
 .dark *::-webkit-scrollbar-track,
 .modern-dark *::-webkit-scrollbar-track,
 .mono *::-webkit-scrollbar-track { background: transparent; }
@@ -98,8 +96,20 @@ body.theme-loaded {
   .light html, .light body {
     @apply bg-gray-50;
   }
-  .dark html, .dark body {
-    @apply bg-gray-900;
+  .dark html, .dark body { @apply bg-gray-900; }
+  .light html, .light body { @apply bg-gray-50; }
+  .dark html, .dark body { @apply bg-gray-900; }
+  .mono html, .mono body { @apply bg-black; }
+  .light html, .light body, .dark html, .dark body, .mono html, .mono body { min-height: 100%; }
+
+  /* Force overscroll/out-of-bounds to match active theme */
+  .light html, .light body, .light :root, .light #__next { background-color: #f9fafb !important; }
+  .dark html, .dark body, .dark :root, .dark #__next { background-color: #111827 !important; }
+  .mono html, .mono body, .mono :root, .mono #__next { background-color: #000000 !important; }
+
+  /* Ensure the viewport/out-of-bounds rubber-band area inherits theme color */
+  html, body {
+    background-color: inherit;
   }
 
   /* Override body background for modern themes */
@@ -652,6 +662,15 @@ body.theme-loaded {
 }
 
 @layer components {
+  /* When a modal overlay is present, dim all fixed headers/buttons except the modal */
+  .modal-open .fixed,
+  .modal-open [class*="z-"] {
+    filter: brightness(0.8);
+  }
+  .modal-open .modal-root,
+  .modal-open .modal-root * {
+    filter: none !important;
+  }
   .btn {
     @apply inline-flex items-center justify-center px-4 py-2 text-sm font-medium rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed;
   }

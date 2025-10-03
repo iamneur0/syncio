@@ -123,7 +123,7 @@ export default function UserMenuButton({ className = '' }: Props) {
   }`
 
   return (
-    <div className="relative z-[300]" ref={wrapperRef}>
+    <div className="relative z-[10]" ref={wrapperRef}>
       <button className={btnClasses} onClick={() => setShowMenu((s) => !s)} title="Account">
         <UserIcon size={18} />
       </button>
