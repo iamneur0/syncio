@@ -43,11 +43,11 @@ import { debug } from '../../utils/debug'
 import { fetchManifestCached } from '../../utils/manifestCache'
 
 // Small badge that shows per-user sync status in list view
-function UserSyncBadge({ userId, userExcludedSet, userProtectedSet, isSyncing, location = 'unknown', isListMode = false }: { userId: string, userExcludedSet: Set<string>, userProtectedSet: Set<string>, isSyncing?: boolean, location?: string, isListMode?: boolean }) {
+function UserSyncBadge({ userId, userExcludedSet, userProtectedSet, isSyncing, location = 'unknown', isListMode = false, deleteMode = 'safe' }: { userId: string, userExcludedSet: Set<string>, userProtectedSet: Set<string>, isSyncing?: boolean, location?: string, isListMode?: boolean, deleteMode?: 'safe' | 'unsafe' }) {
   const { isDark, isModern, isModernDark, isMono } = useTheme()
   const { data: syncStatus } = useQuery({
-    queryKey: ['user', userId, 'sync-status'],
-    queryFn: async () => usersAPI.getSyncStatus(userId),
+    queryKey: ['user', userId, 'sync-status', deleteMode],
+    queryFn: async () => usersAPI.getSyncStatus(userId, undefined, deleteMode === 'unsafe'),
     staleTime: 30_000,
     refetchOnMount: 'always',
   })
@@ -962,7 +962,7 @@ export default function UsersPage() {
   const syncUserMutation = useMutation({
     mutationFn: async ({ userId, excluded }: { userId: string; excluded: string[] }) => {
       // Use normal mode unless advanced is explicitly needed
-      return usersAPI.sync(userId, excluded, 'normal')
+      return usersAPI.sync(userId, excluded, 'normal', deleteMode === 'unsafe')
     },
     onSuccess: (_data, variables) => {
       const userId = variables.userId
@@ -1825,7 +1825,8 @@ export default function UsersPage() {
   const deleteStremioAddonMutation = useMutation({
     mutationFn: async ({ userId, addonId }: { userId: string; addonId: string }) => {
       const encodedAddonId = encodeURIComponent(addonId)
-      const response = await api.delete(`/users/${userId}/stremio-addons/${encodedAddonId}`)
+      const unsafeMode = deleteMode === 'unsafe' ? '?unsafe=true' : ''
+      const response = await api.delete(`/users/${userId}/stremio-addons/${encodedAddonId}${unsafeMode}`)
       return response.data
     },
     // Optimistic UI update to avoid stale item lingering if proxy returns 502
@@ -2401,6 +2402,7 @@ export default function UsersPage() {
                                 userExcludedSet={globalUserExcludedSets.get(user.id) || new Set()} 
                                 userProtectedSet={globalUserProtectedSets.get(user.id) || new Set()} 
                                 isSyncing={false}
+                                deleteMode={deleteMode}
                               />
                             </div>
                       </div>
@@ -2421,6 +2423,7 @@ export default function UsersPage() {
                                 userExcludedSet={globalUserExcludedSets.get(user.id) || new Set()} 
                                 userProtectedSet={globalUserProtectedSets.get(user.id) || new Set()} 
                                 isSyncing={false}
+                                deleteMode={deleteMode}
                               />
                             </div>
                       </div>
@@ -2588,6 +2591,7 @@ export default function UsersPage() {
                             userProtectedSet={globalUserProtectedSets.get(user.id) || new Set()} 
                             isSyncing={false}
                             isListMode={true}
+                            deleteMode={deleteMode}
                           />
                         </div>
                         {/* Mobile stats */}
@@ -3281,6 +3285,7 @@ export default function UsersPage() {
                     userProtectedSet={globalUserProtectedSets.get(selectedUser.id) || new Set()}
                     isSyncing={false}
                     location="detailed-view"
+                    deleteMode={deleteMode}
                   />
                 <button
                   onClick={() => setIsDetailModalOpen(false)}
