@@ -4,7 +4,7 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "sqlite"
   url      = env("DATABASE_URL")
 }
 
@@ -13,12 +13,17 @@ model User {
   username        String   @unique
   email           String   @unique
   isActive        Boolean  @default(true)
-  stremioAuthKey  String?
-  excludedAddons  String?
-  protectedAddons String?
-  colorIndex      Int?
-  accountId       String?
-
+  stremioAuthKey  String?  // Encrypted Stremio auth key
+  stremioEmail    String?  // Stremio email
+  stremioUsername String?  // Stremio username
+  stremioUserId   String?  // Stremio user ID
+  stremioAddons   String?  // JSON string of Stremio addons
+  lastStremioSync DateTime? // Last sync timestamp
+  excludedAddons  String?  // JSON array of addon IDs that user has excluded
+  protectedAddons String?  // JSON array of addon IDs that user has protected
+  colorIndex      Int?     // UI color theme index
+  accountId       String?  // For multi-tenant support
+  
   // Relationships
   addonSettings   AddonSetting[]
   activityLogs    ActivityLog[]
@@ -31,35 +36,35 @@ model Group {
   name        String
   description String?
   isActive    Boolean  @default(true)
-  colorIndex  Int?
-  accountId   String?
-  userIds     String?
-  addonIds    String?
-
+  colorIndex  Int?     // UI color theme index
+  accountId   String?  // For multi-tenant support
+  userIds     String?  // JSON array of user IDs
+  addonIds    String?  // JSON array of addon IDs
+  
   // Relationships
-  addons       GroupAddon[]
+  addons      GroupAddon[]
   activityLogs ActivityLog[]
 
   @@map("groups")
 }
 
-// GroupMember and GroupInvite removed – using JSON arrays on Group
+// GroupMember model removed - using JSON arrays in Group model instead
 
 model Addon {
   id             String   @id @default(cuid())
   name           String
   description    String?
   manifestUrl    String
-  manifest       Json?    // Store the full manifest JSON
+  manifest       String?  // Store the full manifest JSON as string (SQLite doesn't have native JSON)
   stremioAddonId String?
   version        String?
   author         String?
   isOfficial     Boolean  @default(false)
   isActive       Boolean  @default(true)
-  accountId      String?
+  accountId      String?  // For multi-tenant support
   tags           String?
   iconUrl        String?
-
+  
   // Relationships
   groupAddons    GroupAddon[]
   addonSettings  AddonSetting[]
@@ -71,7 +76,7 @@ model Addon {
 model GroupAddon {
   id        String   @id @default(cuid())
   isEnabled Boolean  @default(true)
-  settings  String?
+  settings  String?  // JSON string for addon-specific settings
   groupId   String
   group     Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
   addonId   String
@@ -98,12 +103,12 @@ model ActivityLog {
   id        String   @id @default(cuid())
   action    String
   details   String?
-  metadata  String?
+  metadata  String?  // JSON string for additional data
   userId    String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   groupId   String?
   group     Group?   @relation(fields: [groupId], references: [id], onDelete: SetNull)
-  accountId String?
+  accountId String?  // For multi-tenant support
 
   @@map("activity_logs")
 }
@@ -112,9 +117,6 @@ model AppAccount {
   id           String   @id @default(cuid())
   uuid         String   @unique
   passwordHash String
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
 
   @@map("app_accounts")
 }
-

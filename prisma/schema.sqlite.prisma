@@ -14,6 +14,11 @@ model User {
   email           String   @unique
   isActive        Boolean  @default(true)
   stremioAuthKey  String?  // Encrypted Stremio auth key
+  stremioEmail    String?  // Stremio email
+  stremioUsername String?  // Stremio username
+  stremioUserId   String?  // Stremio user ID
+  stremioAddons   String?  // JSON string of Stremio addons
+  lastStremioSync DateTime? // Last sync timestamp
   excludedAddons  String?  // JSON array of addon IDs that user has excluded
   protectedAddons String?  // JSON array of addon IDs that user has protected
   colorIndex      Int?     // UI color theme index

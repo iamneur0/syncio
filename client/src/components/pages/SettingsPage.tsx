@@ -158,12 +158,26 @@ export default function SettingsPage() {
         const resp = await api.post('/public-auth/import-config', formData, { headers: { 'Content-Type': 'multipart/form-data' } })
         const { addons, users, groups } = resp.data
         const totalAddons = (addons.created || 0) + (addons.reused || 0)
-        toast.success(`Configuration imported:\n${totalAddons} addons (${addons.created} created, ${addons.reused} reused)\n${users.created} users\n${groups.created} groups`)
+        
+        // Build message with only non-zero values
+        const messageParts = []
+        if (totalAddons > 0) messageParts.push(`${totalAddons} addons`)
+        if (users.created > 0) messageParts.push(`${users.created} users`)
+        if (groups.created > 0) messageParts.push(`${groups.created} groups`)
+        
+        toast.success(`Configuration imported:\n${messageParts.join('\n')}`)
       } else if (configText.trim()) {
         const resp = await api.post('/public-auth/import-config', { jsonData: configText.trim() })
         const { addons, users, groups } = resp.data
         const totalAddons = (addons.created || 0) + (addons.reused || 0)
-        toast.success(`Configuration imported:\n${totalAddons} addons (${addons.created} created, ${addons.reused} reused)\n${users.created} users\n${groups.created} groups`)
+        
+        // Build message with only non-zero values
+        const messageParts = []
+        if (totalAddons > 0) messageParts.push(`${totalAddons} addons`)
+        if (users.created > 0) messageParts.push(`${users.created} users`)
+        if (groups.created > 0) messageParts.push(`${groups.created} groups`)
+        
+        toast.success(`Configuration imported:\n${messageParts.join('\n')}`)
       } else {
         toast.error('Select a file or paste JSON first')
       }
@@ -185,7 +199,13 @@ export default function SettingsPage() {
         .then((resp) => {
           const { addons, users, groups } = resp.data
           const totalAddons = (addons.created || 0) + (addons.reused || 0)
-          toast.success(`Configuration imported:\n${totalAddons} addons (${addons.created} created, ${addons.reused} reused)\n${users.created} users\n${groups.created} groups`)
+          // Build message with only non-zero values
+          const messageParts = []
+          if (totalAddons > 0) messageParts.push(`${totalAddons} addons`)
+          if (users.created > 0) messageParts.push(`${users.created} users`)
+          if (groups.created > 0) messageParts.push(`${groups.created} groups`)
+          
+          toast.success(`Configuration imported:\n${messageParts.join('\n')}`)
         })
         .catch((e) => {
           const msg = e?.response?.data?.message || e?.message || 'Import configuration failed'
@@ -209,7 +229,13 @@ export default function SettingsPage() {
         .then((resp) => {
           const { addons, users, groups } = resp.data
           const totalAddons = (addons.created || 0) + (addons.reused || 0)
-          toast.success(`Configuration imported:\n${totalAddons} addons (${addons.created} created, ${addons.reused} reused)\n${users.created} users\n${groups.created} groups`)
+          // Build message with only non-zero values
+          const messageParts = []
+          if (totalAddons > 0) messageParts.push(`${totalAddons} addons`)
+          if (users.created > 0) messageParts.push(`${users.created} users`)
+          if (groups.created > 0) messageParts.push(`${groups.created} groups`)
+          
+          toast.success(`Configuration imported:\n${messageParts.join('\n')}`)
         })
         .catch((e) => {
           const msg = e?.response?.data?.message || e?.message || 'Import configuration failed'
