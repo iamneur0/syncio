@@ -369,6 +369,30 @@ export default function GroupsPage() {
     }
     return 'card'
   })
+  
+  // Delete mode state
+  const [deleteMode, setDeleteMode] = useState<'safe' | 'unsafe'>('safe')
+  
+  // Load delete mode from localStorage
+  useEffect(() => {
+    const savedDeleteMode = localStorage.getItem('sfm_delete_mode') as 'safe' | 'unsafe' | null
+    if (savedDeleteMode) {
+      setDeleteMode(savedDeleteMode)
+    }
+  }, [])
+  
+  // Listen for delete mode changes from settings
+  useEffect(() => {
+    const handleDeleteModeChange = () => {
+      const savedDeleteMode = localStorage.getItem('sfm_delete_mode') as 'safe' | 'unsafe' | null
+      if (savedDeleteMode) {
+        setDeleteMode(savedDeleteMode)
+      }
+    }
+    
+    window.addEventListener('sfm:delete-mode:changed', handleDeleteModeChange)
+    return () => window.removeEventListener('sfm:delete-mode:changed', handleDeleteModeChange)
+  }, [])
   // Ensure highlight persists after refresh/hydration
   useLayoutEffect(() => {
     try {
@@ -2195,7 +2219,7 @@ export default function GroupsPage() {
               onClick={() => handleViewGroupDetails(group)}
             >
               <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center flex-1 min-w-0">
+                <div className="flex items-center flex-1 min-w-0 max-w-[calc(100%-200px)]">
                   <div
                     className={`w-10 h-10 rounded-lg flex items-center justify-center mr-3 flex-shrink-0 text-white ${getGroupColorClass(group?.colorIndex)} ${
                       isMono ? 'border border-white/20' : ''
@@ -2260,7 +2284,7 @@ export default function GroupsPage() {
                       </div>
                     </div>
                     {group.description && (
-                      <p className={`hidden sm:block text-sm truncate ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
+                      <p className={`hidden sm:block text-sm truncate max-w-[250px] lg:max-w-[300px] ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
                         {group.description}
                       </p>
                     )}
@@ -2871,7 +2895,7 @@ export default function GroupsPage() {
                                     const syncMode = typeof window !== 'undefined' ? (localStorage.getItem('sfm_sync_mode') || 'normal') : 'normal'
                                     // Collect membership-specific exclusions if we have them in state
                                     const excluded = Array.from(globalUserExcludedSets.get(member.id) || [])
-                                    await usersAPI.sync(member.id, excluded, syncMode as any)
+                                    await usersAPI.sync(member.id, excluded, syncMode as any, deleteMode === 'unsafe')
                                     // mark cached status
                                     localStorage.setItem(`sfm_user_sync_status:${member.id}`, 'synced')
                                     const now = Date.now().toString()

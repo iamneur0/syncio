@@ -1335,7 +1335,7 @@ export default function AddonsPage() {
                   onClick={() => handleEditAddon(addon)}
                 >
                   <div className="flex items-center justify-between gap-3">
-                    <div className="flex items-center flex-1 min-w-0">
+                    <div className="flex items-center flex-1 min-w-0 max-w-[calc(100%-200px)]">
                       <div className={`w-10 h-10 rounded-lg flex items-center justify-center mr-3 flex-shrink-0 overflow-hidden ${
                         isMono ? 'border border-white/20' : ''
                       }`}>
@@ -1390,7 +1390,7 @@ export default function AddonsPage() {
                           </div>
                         </div>
                         {addon.description && (
-                          <p className={`hidden sm:block text-sm truncate ${
+                          <p className={`hidden sm:block text-sm truncate max-w-[250px] lg:max-w-[300px] ${
                             isModern 
                               ? 'text-purple-600' 
                               : isModernDark

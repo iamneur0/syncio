@@ -148,17 +148,20 @@ export const usersAPI = {
   },
 
   // Get user sync status (lightweight)
-  getSyncStatus: async (id: string, groupId?: string): Promise<any> => {
-    const url = groupId ? `/users/${id}/sync-status?groupId=${encodeURIComponent(groupId)}` : `/users/${id}/sync-status`
+  getSyncStatus: async (id: string, groupId?: string, unsafeMode?: boolean): Promise<any> => {
+    const params = new URLSearchParams()
+    if (groupId) params.append('groupId', groupId)
+    if (unsafeMode) params.append('unsafe', 'true')
+    const url = `/users/${id}/sync-status${params.toString() ? '?' + params.toString() : ''}`
     const response: AxiosResponse<any> = await api.get(url)
     return response.data
   },
 
   // Sync one user via the dedicated endpoint
-  sync: async (id: string, excludedManifestUrls: string[] = [], syncMode: 'normal' | 'advanced' = 'normal'): Promise<any> => {
+  sync: async (id: string, excludedManifestUrls: string[] = [], syncMode: 'normal' | 'advanced' = 'normal', unsafeMode?: boolean): Promise<any> => {
     const response: AxiosResponse<any> = await api.post(
       `/users/${id}/sync`,
-      { excludedManifestUrls },
+      { excludedManifestUrls, unsafe: unsafeMode },
       { headers: { 'x-sync-mode': syncMode } }
     )
     return response.data
