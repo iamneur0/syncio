@@ -43,13 +43,38 @@ import { debug } from '../../utils/debug'
 import { fetchManifestCached } from '../../utils/manifestCache'
 
 // Small badge that shows per-user sync status in list view
-function UserSyncBadge({ userId, userExcludedSet, userProtectedSet, isSyncing, location = 'unknown', isListMode = false }: { userId: string, userExcludedSet: Set<string>, userProtectedSet: Set<string>, isSyncing?: boolean, location?: string, isListMode?: boolean }) {
+function UserSyncBadge({ userId, userExcludedSet, userProtectedSet, isSyncing, location = 'unknown', isListMode = false, deleteMode = 'safe' }: { userId: string, userExcludedSet: Set<string>, userProtectedSet: Set<string>, isSyncing?: boolean, location?: string, isListMode?: boolean, deleteMode?: 'safe' | 'unsafe' }) {
   const { isDark, isModern, isModernDark, isMono } = useTheme()
   const { data: syncStatus } = useQuery({
-    queryKey: ['user', userId, 'sync-status'],
-    queryFn: async () => usersAPI.getSyncStatus(userId),
+    queryKey: ['user', userId, 'sync-status', deleteMode],
+    queryFn: async () => usersAPI.getSyncStatus(userId, undefined, deleteMode === 'unsafe'),
     staleTime: 30_000,
     refetchOnMount: 'always',
+  })
+
+  // Fetch stremio-addons data to check for needsReconnect flag
+  const { data: stremioAddonsData } = useQuery({
+    queryKey: ['user', userId, 'stremio-addons'],
+    queryFn: async () => {
+      try {
+        const response = await api.get(`/users/${userId}/stremio-addons`)
+        return response.data
+      } catch (error: any) {
+        // If user is not connected to Stremio, return empty addons instead of throwing
+        if (error.response?.status === 400) {
+          return { addons: [] }
+        }
+        // If decryption fails (bad stremioAuthKey), return empty addons and mark for reconnection
+        if (error.response?.status === 500 && error.response?.data?.message?.includes('decrypt')) {
+          return { addons: [], needsReconnect: true }
+        }
+        throw error
+      }
+    },
+    enabled: !!userId,
+    staleTime: 5 * 60 * 1000, // Cache for 5 minutes
+    refetchOnMount: false, // Don't refetch on mount if we have cached data
+    refetchOnWindowFocus: false
   })
 
   // userExcludedSet and userProtectedSet are now passed as props from parent component
@@ -65,6 +90,13 @@ function UserSyncBadge({ userId, userExcludedSet, userProtectedSet, isSyncing, l
       setStatus(syncStatus.status || 'checking')
     }
   }, [syncStatus, manuallySet])
+
+  // Check for needsReconnect flag from stremio-addons data
+  React.useEffect(() => {
+    if (stremioAddonsData?.needsReconnect && !manuallySet) {
+      setStatus('connect')
+    }
+  }, [stremioAddonsData?.needsReconnect, manuallySet])
 
   // Protected addon IDs and URLs - same as main component
   const protectedAddonIds = ['org.stremio.local', 'com.stremio.opensubtitles']
@@ -342,7 +374,6 @@ export default function UsersPage() {
   const [authMode, setAuthMode] = useState<'email' | 'authkey'>('email')
   const [stremioEmail, setStremioEmail] = useState('')
   const [stremioPassword, setStremioPassword] = useState('')
-  const [stremioUsername, setStremioUsername] = useState('')
   const [stremioAuthKey, setStremioAuthKey] = useState('')
   const [stremioRegisterNew, setStremioRegisterNew] = useState(false)
   const [selectedGroup, setSelectedGroup] = useState('')
@@ -589,6 +620,10 @@ export default function UsersPage() {
         if (error.response?.status === 400) {
           return { addons: [] }
         }
+        // If decryption fails (bad stremioAuthKey), return empty addons and mark for reconnection
+        if (error.response?.status === 500 && error.response?.data?.message?.includes('decrypt')) {
+          return { addons: [], needsReconnect: true }
+        }
         throw error
       }
     },
@@ -722,7 +757,7 @@ export default function UsersPage() {
   React.useEffect(() => {
     const handleConnectStremio = (event: CustomEvent) => {
       const userDetail = event.detail
-      handleConnectExistingUserToStremio(userDetail)
+      handleConnectExistingUserToStremio(userDetail.id || userDetail)
     }
 
     window.addEventListener('connectStremio', handleConnectStremio as EventListener)
@@ -740,6 +775,13 @@ export default function UsersPage() {
       const allGroupAddons = Array.isArray(userDetailsData.addons) ? userDetailsData.addons : []
       const groupAddons = allGroupAddons.filter((ga: any) => !userExcludedSet.has(ga?.manifestUrl) && ga?.isEnabled !== false)
       if (groupAddons.length === 0) { setIsUserSynced(true); return }
+      
+      // Check if user needs to reconnect due to bad stremioAuthKey
+      if (stremioAddonsData?.needsReconnect) {
+        setIsUserSynced(false)
+        return
+      }
+      
       const live = Array.isArray(stremioAddonsData?.addons) ? stremioAddonsData.addons : []
       if (live.length === 0) { setIsUserSynced(false); return }
 
@@ -911,7 +953,7 @@ export default function UsersPage() {
       toast.success(data?.message || 'User addons reloaded successfully!')
     },
     onError: (error: any) => {
-      toast.error(error?.message || 'Failed to reload user addons')
+      toast.error(error?.response?.data?.message || error?.message || 'Failed to reload user addons')
     }
   })
 
@@ -919,7 +961,7 @@ export default function UsersPage() {
   const syncUserMutation = useMutation({
     mutationFn: async ({ userId, excluded }: { userId: string; excluded: string[] }) => {
       // Use normal mode unless advanced is explicitly needed
-      return usersAPI.sync(userId, excluded, 'normal')
+      return usersAPI.sync(userId, excluded, 'normal', deleteMode === 'unsafe')
     },
     onSuccess: (_data, variables) => {
       const userId = variables.userId
@@ -930,7 +972,7 @@ export default function UsersPage() {
       toast.success('User synced successfully')
     },
     onError: (error: any) => {
-      toast.error(error?.message || 'Failed to sync user')
+      toast.error(error?.response?.data?.message || error?.message || 'Failed to sync user')
     }
   })
 
@@ -1059,7 +1101,7 @@ export default function UsersPage() {
       setShowConnectModal(false)
       setStremioEmail('')
       setStremioPassword('')
-      setStremioUsername('')
+      setTempUsername('')
       setSelectedGroup('')
       setNewGroupName('')
       setEditingUser(null)
@@ -1083,7 +1125,6 @@ export default function UsersPage() {
         const response = await api.post('/stremio/connect-authkey', {
           authKey: payload.authKey,
           username: payload.username,
-          displayName: payload.username,
           groupName: payload.groupName
         })
         return response.data
@@ -1102,12 +1143,15 @@ export default function UsersPage() {
       // Close modal
       setShowConnectModal(false)
       setStremioAuthKey('')
-      setStremioEmail(''); setStremioPassword(''); setStremioUsername('')
+      setStremioEmail(''); setStremioPassword(''); setTempUsername('')
       setSelectedGroup(''); setNewGroupName(''); setEditingUser(null)
       
       toast.success('Connected to Stremio via auth key')
     },
-    onError: (err: any) => toast.error(err?.message || 'Failed to connect with auth key')
+    onError: (err: any) => {
+      const errorMessage = err?.response?.data?.message || err?.message || 'Failed to connect with auth key'
+      toast.error(errorMessage)
+    }
   })
 
   // Register new Stremio account (email/password)
@@ -1198,16 +1242,15 @@ export default function UsersPage() {
       return response.data
     },
     onSuccess: async (data) => {
-      toast.success(`Successfully imported ${data.addonCount} addons to group "${data.groupName}"`)
+      toast.success(data.message || `Successfully imported ${data.addonCount} addons to group "${data.groupName}"`)
       queryClient.invalidateQueries({ queryKey: ['groups'] })
       queryClient.invalidateQueries({ queryKey: ['users'] })
-      // Ensure Addons tab reflects newly created addons immediately (even if not active)
-      try {
-        await queryClient.fetchQuery({ queryKey: ['addons'], queryFn: addonsAPI.getAll })
-      } catch {}
+      // Refresh any addons queries (covers ['addons', authScopeKey])
+      queryClient.invalidateQueries({ queryKey: ['addons'], exact: false })
+      queryClient.refetchQueries({ queryKey: ['addons'], exact: false })
     },
     onError: (error: any) => {
-      toast.error(error?.message || 'Failed to import addons')
+      toast.error(error?.response?.data?.message || error?.message || 'Failed to import addons')
     }
   })
 
@@ -1271,7 +1314,7 @@ export default function UsersPage() {
       // Note: Detailed view editing states are now handled locally in the handlers
     },
     onError: (error: any) => {
-      toast.error(error?.message || 'Failed to update username')
+      toast.error(error?.response?.data?.message || error?.message || 'Failed to update username')
     }
   })
 
@@ -1346,9 +1389,14 @@ export default function UsersPage() {
       toast.success(data.message || 'All users synced successfully')
     },
     onError: (error: any) => {
-      toast.error(error?.message || 'Failed to sync all users')
+      toast.error(error?.response?.data?.message || error?.message || 'Failed to sync all users')
     },
   })
+
+  // Check if user has invalid Stremio connection (disabled with stremioAuthKey)
+  const hasInvalidStremioConnection = (user: any) => {
+    return !user.isActive && user.hasStremioConnection && user.stremioAddonsCount === 0
+  }
 
   // Handle toggle user status
   const handleToggleUserStatus = (userId: string, currentStatus: boolean) => {
@@ -1380,15 +1428,15 @@ export default function UsersPage() {
   const handleConnectStremio = async (e: React.FormEvent) => {
     e.preventDefault()
     if (authMode === 'authkey') {
-      if (!stremioAuthKey || (!editingUser && !stremioUsername)) {
+      if (!stremioAuthKey) {
         toast.error('Please provide auth key and username')
         return
       }
       const groupToAssign = selectedGroup === 'new' ? newGroupName : selectedGroup
-      connectStremioWithAuthKeyMutation.mutate({ authKey: stremioAuthKey.trim(), username: stremioUsername, groupName: groupToAssign || undefined, userId: editingUser?.id })
+      connectStremioWithAuthKeyMutation.mutate({ authKey: stremioAuthKey.trim(), username: '', groupName: groupToAssign || undefined, userId: editingUser?.id })
       return
     } else {
-    if (!stremioEmail || !stremioPassword || (!editingUser && !stremioUsername)) {
+    if (!stremioEmail || !stremioPassword) {
       toast.error('Please fill in all required fields')
       return
       }
@@ -1418,7 +1466,7 @@ export default function UsersPage() {
       connectStremioMutation.mutate({
         email: stremioEmail,
         password: stremioPassword,
-        username: stremioUsername,
+        username: tempUsername,
         groupName: groupToAssign || undefined,
         userId: editingUser?.id || undefined, // Include user ID if connecting existing user
       })
@@ -1662,10 +1710,24 @@ export default function UsersPage() {
     setTempDetailGroup('')
   }
 
-  const handleConnectExistingUserToStremio = (user: any) => {
+  const handleConnectExistingUserToStremio = async (userOrId: any) => {
+    let user = userOrId
+    
+    // If only userId is passed, fetch the full user data
+    if (typeof userOrId === 'string' || (userOrId && userOrId.id && !userOrId.username)) {
+      try {
+        const response = await api.get(`/users/${userOrId.id || userOrId}`)
+        user = response.data
+      } catch (error) {
+        console.error('Failed to fetch user data:', error)
+        toast.error('Failed to load user data')
+        return
+      }
+    }
+    
     // Set the user ID and pre-fill email, then open the connect modal
     setEditingUser(user)
-    setStremioEmail(user.stremioEmail || user.email || '')
+    setStremioEmail(user.email || '')
     setShowConnectModal(true)
   }
 
@@ -1764,7 +1826,8 @@ export default function UsersPage() {
   const deleteStremioAddonMutation = useMutation({
     mutationFn: async ({ userId, addonId }: { userId: string; addonId: string }) => {
       const encodedAddonId = encodeURIComponent(addonId)
-      const response = await api.delete(`/users/${userId}/stremio-addons/${encodedAddonId}`)
+      const unsafeMode = deleteMode === 'unsafe' ? '?unsafe=true' : ''
+      const response = await api.delete(`/users/${userId}/stremio-addons/${encodedAddonId}${unsafeMode}`)
       return response.data
     },
     // Optimistic UI update to avoid stale item lingering if proxy returns 502
@@ -1867,7 +1930,7 @@ export default function UsersPage() {
   }
 
   // Check if user is changing credentials from original values
-  const originalEmail = editUserDetails?.stremioEmail || editUserDetails?.email || ''
+  const originalEmail = editUserDetails?.email || ''
   const isEmailChanged = editFormData.email.trim() !== '' && editFormData.email !== originalEmail
   const isPasswordChanged = editFormData.password.trim() !== ''
   const isChangingCredentials = isEmailChanged || isPasswordChanged
@@ -2063,7 +2126,7 @@ export default function UsersPage() {
       }, 500)
     },
     onError: (error: any) => {
-      toast.error(error?.message || 'Failed to update addon order')
+      toast.error(error?.response?.data?.message || error?.message || 'Failed to update addon order')
     }
   })
 
@@ -2340,6 +2403,7 @@ export default function UsersPage() {
                                 userExcludedSet={globalUserExcludedSets.get(user.id) || new Set()} 
                                 userProtectedSet={globalUserProtectedSets.get(user.id) || new Set()} 
                                 isSyncing={false}
+                                deleteMode={deleteMode}
                               />
                             </div>
                       </div>
@@ -2360,6 +2424,7 @@ export default function UsersPage() {
                                 userExcludedSet={globalUserExcludedSets.get(user.id) || new Set()} 
                                 userProtectedSet={globalUserProtectedSets.get(user.id) || new Set()} 
                                 isSyncing={false}
+                                deleteMode={deleteMode}
                               />
                             </div>
                       </div>
@@ -2370,15 +2435,26 @@ export default function UsersPage() {
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() => handleToggleUserStatus(user.id, user.isActive)}
+                    disabled={hasInvalidStremioConnection(user)}
                         className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                          user.isActive ? 'bg-stremio-purple' : (isDark ? 'bg-gray-700' : 'bg-gray-300')
+                          hasInvalidStremioConnection(user) 
+                            ? 'bg-gray-400 cursor-not-allowed' 
+                            : user.isActive 
+                              ? 'bg-stremio-purple' 
+                              : (isDark ? 'bg-gray-700' : 'bg-gray-300')
                     }`}
                         aria-pressed={user.isActive}
-                        title={user.isActive ? 'Click to disable' : 'Click to enable'}
+                        title={hasInvalidStremioConnection(user) 
+                          ? 'Cannot enable - invalid Stremio connection' 
+                          : user.isActive 
+                            ? 'Click to disable' 
+                            : 'Click to enable'}
                   >
                     <span
-                          className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${
-                        user.isActive ? 'translate-x-5' : 'translate-x-1'
+                          className={`inline-block h-5 w-5 transform rounded-full transition-transform ${
+                        user.isActive 
+                          ? 'translate-x-5 bg-purple-200' 
+                          : 'translate-x-1 bg-white'
                       }`}
                     />
                   </button>
@@ -2516,6 +2592,7 @@ export default function UsersPage() {
                             userProtectedSet={globalUserProtectedSets.get(user.id) || new Set()} 
                             isSyncing={false}
                             isListMode={true}
+                            deleteMode={deleteMode}
                           />
                         </div>
                         {/* Mobile stats */}
@@ -2552,15 +2629,26 @@ export default function UsersPage() {
                       {/* Enable/Disable toggle */}
                       <button
                         onClick={(e) => { e.stopPropagation(); handleToggleUserStatus(user.id, user.isActive) }}
+                        disabled={hasInvalidStremioConnection(user)}
                         className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-                          user.isActive ? (isMono ? 'bg-white/30 border border-white/20' : 'bg-stremio-purple') : (isMono ? 'bg-white/15 border border-white/20' : (isDark ? 'bg-gray-700' : 'bg-gray-300'))
+                          hasInvalidStremioConnection(user)
+                            ? 'bg-gray-400 cursor-not-allowed'
+                            : user.isActive 
+                              ? (isMono ? 'bg-white/30 border border-white/20' : 'bg-stremio-purple') 
+                              : (isMono ? 'bg-white/15 border border-white/20' : (isDark ? 'bg-gray-700' : 'bg-gray-300'))
                         }`}
                         aria-pressed={user.isActive}
-                        title={user.isActive ? 'Click to disable' : 'Click to enable'}
+                        title={hasInvalidStremioConnection(user) 
+                          ? 'Cannot enable - invalid Stremio connection' 
+                          : user.isActive 
+                            ? 'Click to disable' 
+                            : 'Click to enable'}
                       >
                         <span
-                          className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                            user.isActive ? 'translate-x-4' : 'translate-x-0.5'
+                          className={`inline-block h-4 w-4 transform rounded-full transition-transform ${
+                            user.isActive 
+                              ? 'translate-x-4 bg-purple-200' 
+                              : 'translate-x-0.5 bg-white'
                           }`}
                         />
                       </button>
@@ -2662,14 +2750,14 @@ export default function UsersPage() {
           }`}>
             <div className="flex items-center justify-between p-6 border-b border-gray-200">
               <h3 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                {editingUser ? `Connect ${editingUser.username} to Stremio` : 'Add New User'}
+                {editingUser ? `Connect ${editingUser.username || editingUser.email || 'User'} to Stremio` : 'Add New User'}
               </h3>
               <button
                 onClick={() => {
                   setShowConnectModal(false)
                   setStremioEmail('')
                   setStremioPassword('')
-                  setStremioUsername('')
+                  setTempUsername('')
                   setSelectedGroup('')
                   setNewGroupName('')
                   setEditingUser(null)
@@ -2708,8 +2796,6 @@ export default function UsersPage() {
                   </label>
                   <input
                     type="text"
-                    value={stremioUsername}
-                    onChange={(e) => setStremioUsername(e.target.value)}
                     placeholder="Enter username"
                     required
                     className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-stremio-purple focus:border-transparent ${
@@ -2793,7 +2879,7 @@ export default function UsersPage() {
                   </div>
                 </div>
               )}
-              {authMode === 'email' && (
+              {authMode === 'email' && !editingUser && (
                 <div className="flex items-center gap-2">
                   <input
                     id="stremio-register-new"
@@ -2861,7 +2947,7 @@ export default function UsersPage() {
                     setShowConnectModal(false)
                     setStremioEmail('')
                     setStremioPassword('')
-                    setStremioUsername('')
+                    setTempUsername('')
                     setSelectedGroup('')
                     setNewGroupName('')
                   }}
@@ -2896,7 +2982,7 @@ export default function UsersPage() {
       {/* Edit User Modal */}
       {isEditModalOpen && editingUser && (
         <div 
-          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 modal-root"
           onClick={(e) => {
             if (e.target === e.currentTarget) {
               setIsEditModalOpen(false)
@@ -2930,7 +3016,7 @@ export default function UsersPage() {
                     type="text"
                     value={editFormData.username}
                     onChange={(e) => setEditFormData(prev => ({ ...prev, username: e.target.value }))}
-                    placeholder={editingUser?.username || editingUser?.stremioUsername || ''}
+                    placeholder={editingUser?.username || ''}
                     className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-stremio-purple focus:border-transparent ${
                       isDark 
                         ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
@@ -2951,7 +3037,7 @@ export default function UsersPage() {
                       setIsStremioValid(true) // Reset validation when typing
                       setStremioValidationError(null)
                     }}
-                    placeholder={editingUser?.email || editingUser?.stremioEmail || ''}
+                    placeholder={editingUser?.email || ''}
                     className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-stremio-purple focus:border-transparent ${
                       !isStremioValid && (editFormData.email || editFormData.password)
                         ? 'border-red-500 focus:ring-red-500'
@@ -3086,7 +3172,7 @@ export default function UsersPage() {
       {/* User Detail Modal */}
       {isDetailModalOpen && selectedUser && (
         <div 
-          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[95] p-4"
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[95] p-4 modal-root"
           onClick={(e) => {
             if (e.target === e.currentTarget) {
               setIsDetailModalOpen(false)
@@ -3198,6 +3284,7 @@ export default function UsersPage() {
                     userProtectedSet={globalUserProtectedSets.get(selectedUser.id) || new Set()}
                     isSyncing={false}
                     location="detailed-view"
+                    deleteMode={deleteMode}
                   />
                 <button
                   onClick={() => setIsDetailModalOpen(false)}
@@ -3250,7 +3337,7 @@ export default function UsersPage() {
                           return (
                           <div key={index} className={`p-3 rounded-lg border ${
                             isDark ? 'bg-gray-600 border-gray-500' : 'bg-white border-gray-200'
-                          }`}>
+                          } ${excluded ? 'opacity-60' : ''}`}>
                             <div className="flex items-start justify-between gap-3">
                               <div className="flex-1 min-w-0">
                                 <div className="flex items-center flex-1 min-w-0">
@@ -3272,6 +3359,13 @@ export default function UsersPage() {
                                       <h4 className={`font-medium truncate ${isDark ? 'text-white' : 'text-gray-900'}`}>
                                         {addonName || 'Unnamed Addon'}
                                       </h4>
+                                      {excluded && (
+                                        <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium w-fit mt-1 min-[480px]:mt-0 ${
+                                          isDark ? 'bg-gray-700 text-gray-300' : 'bg-gray-200 text-gray-700'
+                                        }`}>
+                                          Excluded
+                                        </span>
+                                      )}
                                       {addon.version && (
                                         <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium w-fit mt-1 min-[480px]:mt-0 ${
                                           isDark ? 'bg-purple-600 text-white' : 'bg-purple-100 text-purple-800'
@@ -3477,7 +3571,7 @@ export default function UsersPage() {
                               )}
                             </button>
                           </div>
-                          {combinedLive.length > 0 ? (
+                          {combinedLive.length > 0 || stremioAddonsData?.needsReconnect ? (
                             <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStartDnd} onDragEnd={handleDragEndDnd} modifiers={[restrictToVerticalAxis]}>
                               <SortableContext items={addonOrder} strategy={verticalListSortingStrategy}>
                             <div className="space-y-2">
@@ -3664,9 +3758,25 @@ export default function UsersPage() {
                               </DragOverlay>
                             </DndContext>
                           ) : (
-                            <p className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
-                              No addons found in this user's Stremio account.
-                            </p>
+                            <div className="space-y-2">
+                              {stremioAddonsData?.needsReconnect ? (
+                                <div className={`p-4 rounded-lg border ${isDark ? 'bg-red-900/20 border-red-500/30' : 'bg-red-50 border-red-200'}`}>
+                                  <div className="flex items-center gap-2">
+                                    <div className="w-2 h-2 rounded-full bg-red-500"></div>
+                                    <p className={`text-sm font-medium ${isDark ? 'text-red-300' : 'text-red-700'}`}>
+                                      Unable to fetch Stremio addons
+                                    </p>
+                                  </div>
+                                  <p className={`text-sm mt-1 ${isDark ? 'text-red-400' : 'text-red-600'}`}>
+                                    The user's Stremio connection is invalid. Click "Connect Stremio" to reconnect.
+                                  </p>
+                                </div>
+                              ) : (
+                                <p className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+                                  No addons found in this user's Stremio account.
+                                </p>
+                              )}
+                            </div>
                           )}
                         </div>
 

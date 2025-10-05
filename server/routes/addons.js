@@ -157,7 +157,7 @@ router.get('/groups/:groupId', authenticateToken, requireGroupAccess, async (req
       include: {
         addon: true,
       },
-      orderBy: { addedAt: 'desc' },
+      orderBy: { id: 'desc' },
     });
 
     res.json({ addons: groupAddons });

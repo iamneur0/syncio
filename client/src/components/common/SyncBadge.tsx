@@ -45,7 +45,7 @@ export default function SyncBadge({
       case 'connect':
         return {
           text: 'Connect Stremio',
-          dotColor: 'bg-stremio-purple',
+          dotColor: 'bg-purple-200',
           bgColor: 'bg-stremio-purple text-white'
         }
       case 'syncing':
