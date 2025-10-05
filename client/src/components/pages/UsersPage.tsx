@@ -374,6 +374,7 @@ export default function UsersPage() {
   const [authMode, setAuthMode] = useState<'email' | 'authkey'>('email')
   const [stremioEmail, setStremioEmail] = useState('')
   const [stremioPassword, setStremioPassword] = useState('')
+  const [stremioUsername, setStremioUsername] = useState('')
   const [stremioAuthKey, setStremioAuthKey] = useState('')
   const [stremioRegisterNew, setStremioRegisterNew] = useState(false)
   const [selectedGroup, setSelectedGroup] = useState('')
@@ -457,7 +458,7 @@ export default function UsersPage() {
   useEffect(() => {
     const checkBackendRestart = async () => {
       try {
-        const response = await fetch('http://localhost:4000/health')
+        const response = await fetch('/api/health')
         if (response.ok) {
           const health = await response.json()
           if (lastServerStartTime && health.serverStartTime !== lastServerStartTime) {
@@ -953,7 +954,7 @@ export default function UsersPage() {
       toast.success(data?.message || 'User addons reloaded successfully!')
     },
     onError: (error: any) => {
-      toast.error(error?.response?.data?.message || error?.message || 'Failed to reload user addons')
+      toast.error(error?.message || 'Failed to reload user addons')
     }
   })
 
@@ -972,7 +973,7 @@ export default function UsersPage() {
       toast.success('User synced successfully')
     },
     onError: (error: any) => {
-      toast.error(error?.response?.data?.message || error?.message || 'Failed to sync user')
+      toast.error(error?.message || 'Failed to sync user')
     }
   })
 
@@ -1101,7 +1102,7 @@ export default function UsersPage() {
       setShowConnectModal(false)
       setStremioEmail('')
       setStremioPassword('')
-      setTempUsername('')
+      setStremioUsername('')
       setSelectedGroup('')
       setNewGroupName('')
       setEditingUser(null)
@@ -1125,6 +1126,7 @@ export default function UsersPage() {
         const response = await api.post('/stremio/connect-authkey', {
           authKey: payload.authKey,
           username: payload.username,
+          displayName: payload.username,
           groupName: payload.groupName
         })
         return response.data
@@ -1143,15 +1145,12 @@ export default function UsersPage() {
       // Close modal
       setShowConnectModal(false)
       setStremioAuthKey('')
-      setStremioEmail(''); setStremioPassword(''); setTempUsername('')
+      setStremioEmail(''); setStremioPassword(''); setStremioUsername('')
       setSelectedGroup(''); setNewGroupName(''); setEditingUser(null)
       
       toast.success('Connected to Stremio via auth key')
     },
-    onError: (err: any) => {
-      const errorMessage = err?.response?.data?.message || err?.message || 'Failed to connect with auth key'
-      toast.error(errorMessage)
-    }
+    onError: (err: any) => toast.error(err?.message || 'Failed to connect with auth key')
   })
 
   // Register new Stremio account (email/password)
@@ -1250,7 +1249,7 @@ export default function UsersPage() {
       queryClient.refetchQueries({ queryKey: ['addons'], exact: false })
     },
     onError: (error: any) => {
-      toast.error(error?.response?.data?.message || error?.message || 'Failed to import addons')
+      toast.error(error?.message || 'Failed to import addons')
     }
   })
 
@@ -1314,7 +1313,7 @@ export default function UsersPage() {
       // Note: Detailed view editing states are now handled locally in the handlers
     },
     onError: (error: any) => {
-      toast.error(error?.response?.data?.message || error?.message || 'Failed to update username')
+      toast.error(error?.message || 'Failed to update username')
     }
   })
 
@@ -1389,7 +1388,7 @@ export default function UsersPage() {
       toast.success(data.message || 'All users synced successfully')
     },
     onError: (error: any) => {
-      toast.error(error?.response?.data?.message || error?.message || 'Failed to sync all users')
+      toast.error(error?.message || 'Failed to sync all users')
     },
   })
 
@@ -1428,15 +1427,15 @@ export default function UsersPage() {
   const handleConnectStremio = async (e: React.FormEvent) => {
     e.preventDefault()
     if (authMode === 'authkey') {
-      if (!stremioAuthKey) {
+      if (!stremioAuthKey || (!editingUser && !stremioUsername)) {
         toast.error('Please provide auth key and username')
         return
       }
       const groupToAssign = selectedGroup === 'new' ? newGroupName : selectedGroup
-      connectStremioWithAuthKeyMutation.mutate({ authKey: stremioAuthKey.trim(), username: '', groupName: groupToAssign || undefined, userId: editingUser?.id })
+      connectStremioWithAuthKeyMutation.mutate({ authKey: stremioAuthKey.trim(), username: stremioUsername, groupName: groupToAssign || undefined, userId: editingUser?.id })
       return
     } else {
-    if (!stremioEmail || !stremioPassword) {
+    if (!stremioEmail || !stremioPassword || (!editingUser && !stremioUsername)) {
       toast.error('Please fill in all required fields')
       return
       }
@@ -1466,7 +1465,7 @@ export default function UsersPage() {
       connectStremioMutation.mutate({
         email: stremioEmail,
         password: stremioPassword,
-        username: tempUsername,
+        username: stremioUsername,
         groupName: groupToAssign || undefined,
         userId: editingUser?.id || undefined, // Include user ID if connecting existing user
       })
@@ -1727,7 +1726,7 @@ export default function UsersPage() {
     
     // Set the user ID and pre-fill email, then open the connect modal
     setEditingUser(user)
-    setStremioEmail(user.email || '')
+    setStremioEmail(user.stremioEmail || user.email || '')
     setShowConnectModal(true)
   }
 
@@ -1930,7 +1929,7 @@ export default function UsersPage() {
   }
 
   // Check if user is changing credentials from original values
-  const originalEmail = editUserDetails?.email || ''
+  const originalEmail = editUserDetails?.stremioEmail || editUserDetails?.email || ''
   const isEmailChanged = editFormData.email.trim() !== '' && editFormData.email !== originalEmail
   const isPasswordChanged = editFormData.password.trim() !== ''
   const isChangingCredentials = isEmailChanged || isPasswordChanged
@@ -2126,7 +2125,7 @@ export default function UsersPage() {
       }, 500)
     },
     onError: (error: any) => {
-      toast.error(error?.response?.data?.message || error?.message || 'Failed to update addon order')
+      toast.error(error?.message || 'Failed to update addon order')
     }
   })
 
@@ -2757,7 +2756,7 @@ export default function UsersPage() {
                   setShowConnectModal(false)
                   setStremioEmail('')
                   setStremioPassword('')
-                  setTempUsername('')
+                  setStremioUsername('')
                   setSelectedGroup('')
                   setNewGroupName('')
                   setEditingUser(null)
@@ -2796,6 +2795,8 @@ export default function UsersPage() {
                   </label>
                   <input
                     type="text"
+                    value={stremioUsername}
+                    onChange={(e) => setStremioUsername(e.target.value)}
                     placeholder="Enter username"
                     required
                     className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-stremio-purple focus:border-transparent ${
@@ -2947,7 +2948,7 @@ export default function UsersPage() {
                     setShowConnectModal(false)
                     setStremioEmail('')
                     setStremioPassword('')
-                    setTempUsername('')
+                    setStremioUsername('')
                     setSelectedGroup('')
                     setNewGroupName('')
                   }}
@@ -3016,7 +3017,7 @@ export default function UsersPage() {
                     type="text"
                     value={editFormData.username}
                     onChange={(e) => setEditFormData(prev => ({ ...prev, username: e.target.value }))}
-                    placeholder={editingUser?.username || ''}
+                    placeholder={editingUser?.username || editingUser?.stremioUsername || ''}
                     className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-stremio-purple focus:border-transparent ${
                       isDark 
                         ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
@@ -3037,7 +3038,7 @@ export default function UsersPage() {
                       setIsStremioValid(true) // Reset validation when typing
                       setStremioValidationError(null)
                     }}
-                    placeholder={editingUser?.email || ''}
+                    placeholder={editingUser?.email || editingUser?.stremioEmail || ''}
                     className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-stremio-purple focus:border-transparent ${
                       !isStremioValid && (editFormData.email || editFormData.password)
                         ? 'border-red-500 focus:ring-red-500'
