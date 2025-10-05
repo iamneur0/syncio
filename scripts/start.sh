@@ -28,14 +28,17 @@ export PRISMA_SCHEMA_PATH="$SCHEMA"
 echo "Using Prisma schema: $PRISMA_SCHEMA_PATH"
 echo "AUTH_ENABLED=${AUTH_ENABLED} DATABASE_URL=${DATABASE_URL}"
 
-# Ensure SQLite dir exists if using file: URL
+# Ensure SQLite dir exists and is writable if using file: URL
 if echo "$DATABASE_URL" | grep -q '^file:'; then
   DB_FILE=${DATABASE_URL#file:}
   DB_DIR=$(dirname "$DB_FILE")
   mkdir -p "$DB_DIR" || true
-  # Try to set permissions, but don't fail if not possible
-  chmod 755 "$DB_DIR" 2>/dev/null || true
-  # Ensure the directory is writable by the current user
+  # Take ownership and ensure write perms for current user
+  chown -R "$(id -u):$(id -g)" "$DB_DIR" 2>/dev/null || true
+  chmod 775 "$DB_DIR" 2>/dev/null || true
+  # Ensure DB file exists
+  touch "$DB_FILE" 2>/dev/null || true
+  # Final write test
   touch "$DB_DIR/.test" 2>/dev/null && rm -f "$DB_DIR/.test" || {
     echo "⚠️ Warning: Cannot write to $DB_DIR, database may not work properly"
   }
@@ -52,7 +55,12 @@ npx prisma db push --schema "$PRISMA_SCHEMA_PATH" --accept-data-loss || true
 export NODE_OPTIONS="--dns-result-order=ipv4first"
 
 echo "🌐 Starting frontend server on port ${FRONTEND_PORT:-3000}..."
-cd /app/client && PORT=${FRONTEND_PORT:-3000} npm start &
+# Use Next.js standalone output if available
+if [ -f "/app/client/.next/standalone/server.js" ]; then
+  cd /app/client && node .next/standalone/server.js -p ${FRONTEND_PORT:-3000} &
+else
+  cd /app/client && PORT=${FRONTEND_PORT:-3000} npm start &
+fi
 FRONTEND_PID=$!
 
 sleep 2

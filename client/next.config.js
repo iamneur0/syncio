@@ -1,12 +1,22 @@
 /** @type {import('next').NextConfig} */
-// Read app version from root package.json (Syncio version)
+// Read app version from server/version.js (managed by release-please extra-files)
 let APP_VERSION = 'dev'
 try {
-  // parent of client/
+  // Prefer server/version.js if available
   // eslint-disable-next-line @typescript-eslint/no-var-requires
-  APP_VERSION = require('fs').readFileSync(require('path').join(__dirname, '..', 'package.json'), 'utf8')
-  APP_VERSION = JSON.parse(APP_VERSION).version || 'dev'
+  const serverVersion = require('fs')
+    .readFileSync(require('path').join(__dirname, '..', 'server', 'version.js'), 'utf8')
+    .match(/VERSION\s*=\s*'([^']+)'/)
+  if (serverVersion && serverVersion[1]) APP_VERSION = serverVersion[1]
 } catch {}
+if (APP_VERSION === 'dev') {
+  try {
+    // Fallback to root package.json
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    APP_VERSION = require('fs').readFileSync(require('path').join(__dirname, '..', 'package.json'), 'utf8')
+    APP_VERSION = JSON.parse(APP_VERSION).version || 'dev'
+  } catch {}
+}
 
 const nextConfig = {
   reactStrictMode: true,

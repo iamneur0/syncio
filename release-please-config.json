@@ -8,7 +8,7 @@
       "release-type": "node",
       "include-component-in-tag": false,
       "extra-files": [
-        "src/index.ts"
+        "server/version.js"
       ],
       "exclude-paths": [
         ".env.sample",

@@ -27,13 +27,18 @@ ENV PRISMA_CLI_BINARY_TARGETS="linux-musl-openssl-3.0.x,linux-musl-arm64-openssl
 RUN rm -rf node_modules/.prisma node_modules/@prisma/client/runtime/libquery_engine-*.so.node 2>/dev/null || true
 RUN npx prisma generate
 
-# Set build-time environment variables
-# Use relative API path so the browser hits the same origin and Next.js rewrites proxy to the backend inside the container
+# Set build-time variables
+# Use relative API path so the browser hits same origin; auth UI derived from INSTANCE
 ARG NEXT_PUBLIC_API_URL=/api
+ARG INSTANCE=private
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+ENV INSTANCE=$INSTANCE
 
-# Build Next.js frontend
-RUN cd client && npm run build
+# Build Next.js frontend with derived NEXT_PUBLIC_AUTH_ENABLED
+RUN cd client && \
+    NEXT_PUBLIC_AUTH_ENABLED=$( [ "$INSTANCE" = "public" ] && echo true || echo false ) \
+    NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL \
+    npm run build
 
 # Production stage
 FROM base AS production
