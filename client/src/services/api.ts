@@ -40,7 +40,13 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     // Only log out on actual authentication errors, not on Stremio connection errors
-    if (error.response?.status === 401 && !error.config?.url?.includes('/stremio/')) {
+    const isStremioEndpoint = error.config?.url?.includes('/stremio/') || 
+                             error.config?.url?.includes('/stremio-addons') ||
+                             error.config?.url?.includes('/connect-stremio') ||
+                             error.config?.url?.includes('/clear-stremio-credentials') ||
+                             error.config?.url?.includes('/stremio-credentials')
+    
+    if (error.response?.status === 401 && !isStremioEndpoint) {
       if (typeof window !== 'undefined') {
         try {
           window.dispatchEvent(new CustomEvent('sfm:auth:changed', { detail: { authed: false } }))

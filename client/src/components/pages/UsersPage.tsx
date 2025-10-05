@@ -954,7 +954,7 @@ export default function UsersPage() {
       toast.success(data?.message || 'User addons reloaded successfully!')
     },
     onError: (error: any) => {
-      toast.error(error?.message || 'Failed to reload user addons')
+      toast.error(error?.response?.data?.message || error?.message || 'Failed to reload user addons')
     }
   })
 
@@ -973,7 +973,7 @@ export default function UsersPage() {
       toast.success('User synced successfully')
     },
     onError: (error: any) => {
-      toast.error(error?.message || 'Failed to sync user')
+      toast.error(error?.response?.data?.message || error?.message || 'Failed to sync user')
     }
   })
 
@@ -1150,7 +1150,10 @@ export default function UsersPage() {
       
       toast.success('Connected to Stremio via auth key')
     },
-    onError: (err: any) => toast.error(err?.message || 'Failed to connect with auth key')
+    onError: (err: any) => {
+      const errorMessage = err?.response?.data?.message || err?.message || 'Failed to connect with auth key'
+      toast.error(errorMessage)
+    }
   })
 
   // Register new Stremio account (email/password)
@@ -1249,7 +1252,7 @@ export default function UsersPage() {
       queryClient.refetchQueries({ queryKey: ['addons'], exact: false })
     },
     onError: (error: any) => {
-      toast.error(error?.message || 'Failed to import addons')
+      toast.error(error?.response?.data?.message || error?.message || 'Failed to import addons')
     }
   })
 
@@ -1313,7 +1316,7 @@ export default function UsersPage() {
       // Note: Detailed view editing states are now handled locally in the handlers
     },
     onError: (error: any) => {
-      toast.error(error?.message || 'Failed to update username')
+      toast.error(error?.response?.data?.message || error?.message || 'Failed to update username')
     }
   })
 
@@ -1388,7 +1391,7 @@ export default function UsersPage() {
       toast.success(data.message || 'All users synced successfully')
     },
     onError: (error: any) => {
-      toast.error(error?.message || 'Failed to sync all users')
+      toast.error(error?.response?.data?.message || error?.message || 'Failed to sync all users')
     },
   })
 
@@ -2125,7 +2128,7 @@ export default function UsersPage() {
       }, 500)
     },
     onError: (error: any) => {
-      toast.error(error?.message || 'Failed to update addon order')
+      toast.error(error?.response?.data?.message || error?.message || 'Failed to update addon order')
     }
   })
 
