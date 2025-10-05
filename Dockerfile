@@ -68,6 +68,11 @@ COPY --from=builder --chown=appuser:nodejs /app/client/node_modules ./client/nod
 COPY --from=builder --chown=appuser:nodejs /app/client/public ./client/public
 COPY --from=builder --chown=appuser:nodejs /app/client/next.config.js ./client/
 
+# Ensure standalone server can serve static and public assets correctly
+RUN mkdir -p /app/client/.next/standalone/public/_next/static && \
+    cp -r /app/client/public/* /app/client/.next/standalone/public/ 2>/dev/null || true && \
+    cp -r /app/client/.next/static/* /app/client/.next/standalone/public/_next/static/ 2>/dev/null || true
+
 # Use maintained startup script that selects Prisma schema based on DATABASE_URL
 COPY --from=builder --chown=appuser:nodejs /app/scripts/start.sh /app/start.sh
 RUN chmod +x /app/start.sh
