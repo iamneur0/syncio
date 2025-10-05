@@ -1,10 +1,9 @@
-name: Main Branch Release (Docker public & private)
+name: Release Docker Images (public & private)
 
 on:
   push:
-    branches: [main]
     tags:
-      - 'v*.*.*'  # Trigger on Release Please tags
+      - 'v*.*.*'  # Trigger only on Release Please tags
   workflow_dispatch:
 
 env:
