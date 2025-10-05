@@ -374,7 +374,6 @@ export default function UsersPage() {
   const [authMode, setAuthMode] = useState<'email' | 'authkey'>('email')
   const [stremioEmail, setStremioEmail] = useState('')
   const [stremioPassword, setStremioPassword] = useState('')
-  const [stremioUsername, setStremioUsername] = useState('')
   const [stremioAuthKey, setStremioAuthKey] = useState('')
   const [stremioRegisterNew, setStremioRegisterNew] = useState(false)
   const [selectedGroup, setSelectedGroup] = useState('')
@@ -1102,7 +1101,7 @@ export default function UsersPage() {
       setShowConnectModal(false)
       setStremioEmail('')
       setStremioPassword('')
-      setStremioUsername('')
+      setTempUsername('')
       setSelectedGroup('')
       setNewGroupName('')
       setEditingUser(null)
@@ -1126,7 +1125,6 @@ export default function UsersPage() {
         const response = await api.post('/stremio/connect-authkey', {
           authKey: payload.authKey,
           username: payload.username,
-          displayName: payload.username,
           groupName: payload.groupName
         })
         return response.data
@@ -1145,7 +1143,7 @@ export default function UsersPage() {
       // Close modal
       setShowConnectModal(false)
       setStremioAuthKey('')
-      setStremioEmail(''); setStremioPassword(''); setStremioUsername('')
+      setStremioEmail(''); setStremioPassword(''); setTempUsername('')
       setSelectedGroup(''); setNewGroupName(''); setEditingUser(null)
       
       toast.success('Connected to Stremio via auth key')
@@ -1430,15 +1428,15 @@ export default function UsersPage() {
   const handleConnectStremio = async (e: React.FormEvent) => {
     e.preventDefault()
     if (authMode === 'authkey') {
-      if (!stremioAuthKey || (!editingUser && !stremioUsername)) {
+      if (!stremioAuthKey) {
         toast.error('Please provide auth key and username')
         return
       }
       const groupToAssign = selectedGroup === 'new' ? newGroupName : selectedGroup
-      connectStremioWithAuthKeyMutation.mutate({ authKey: stremioAuthKey.trim(), username: stremioUsername, groupName: groupToAssign || undefined, userId: editingUser?.id })
+      connectStremioWithAuthKeyMutation.mutate({ authKey: stremioAuthKey.trim(), username: '', groupName: groupToAssign || undefined, userId: editingUser?.id })
       return
     } else {
-    if (!stremioEmail || !stremioPassword || (!editingUser && !stremioUsername)) {
+    if (!stremioEmail || !stremioPassword) {
       toast.error('Please fill in all required fields')
       return
       }
@@ -1468,7 +1466,7 @@ export default function UsersPage() {
       connectStremioMutation.mutate({
         email: stremioEmail,
         password: stremioPassword,
-        username: stremioUsername,
+        username: tempUsername,
         groupName: groupToAssign || undefined,
         userId: editingUser?.id || undefined, // Include user ID if connecting existing user
       })
@@ -1729,7 +1727,7 @@ export default function UsersPage() {
     
     // Set the user ID and pre-fill email, then open the connect modal
     setEditingUser(user)
-    setStremioEmail(user.stremioEmail || user.email || '')
+    setStremioEmail(user.email || '')
     setShowConnectModal(true)
   }
 
@@ -1932,7 +1930,7 @@ export default function UsersPage() {
   }
 
   // Check if user is changing credentials from original values
-  const originalEmail = editUserDetails?.stremioEmail || editUserDetails?.email || ''
+  const originalEmail = editUserDetails?.email || ''
   const isEmailChanged = editFormData.email.trim() !== '' && editFormData.email !== originalEmail
   const isPasswordChanged = editFormData.password.trim() !== ''
   const isChangingCredentials = isEmailChanged || isPasswordChanged
@@ -2759,7 +2757,7 @@ export default function UsersPage() {
                   setShowConnectModal(false)
                   setStremioEmail('')
                   setStremioPassword('')
-                  setStremioUsername('')
+                  setTempUsername('')
                   setSelectedGroup('')
                   setNewGroupName('')
                   setEditingUser(null)
@@ -2798,8 +2796,6 @@ export default function UsersPage() {
                   </label>
                   <input
                     type="text"
-                    value={stremioUsername}
-                    onChange={(e) => setStremioUsername(e.target.value)}
                     placeholder="Enter username"
                     required
                     className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-stremio-purple focus:border-transparent ${
@@ -2951,7 +2947,7 @@ export default function UsersPage() {
                     setShowConnectModal(false)
                     setStremioEmail('')
                     setStremioPassword('')
-                    setStremioUsername('')
+                    setTempUsername('')
                     setSelectedGroup('')
                     setNewGroupName('')
                   }}
@@ -3020,7 +3016,7 @@ export default function UsersPage() {
                     type="text"
                     value={editFormData.username}
                     onChange={(e) => setEditFormData(prev => ({ ...prev, username: e.target.value }))}
-                    placeholder={editingUser?.username || editingUser?.stremioUsername || ''}
+                    placeholder={editingUser?.username || ''}
                     className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-stremio-purple focus:border-transparent ${
                       isDark 
                         ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
@@ -3041,7 +3037,7 @@ export default function UsersPage() {
                       setIsStremioValid(true) // Reset validation when typing
                       setStremioValidationError(null)
                     }}
-                    placeholder={editingUser?.email || editingUser?.stremioEmail || ''}
+                    placeholder={editingUser?.email || ''}
                     className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-stremio-purple focus:border-transparent ${
                       !isStremioValid && (editFormData.email || editFormData.password)
                         ? 'border-red-500 focus:ring-red-500'

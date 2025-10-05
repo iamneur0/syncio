@@ -184,8 +184,14 @@ body.theme-loaded {
 
   .mono .card,
   .mono .bg-white,
-  .mono .bg-gray-50,
-  .mono .bg-gray-800 {
+  .mono .bg-gray-50 {
+    @apply bg-black border border-white/20 rounded-lg shadow-[inset_0_1px_0_rgba(255,255,255,0.03),0_8px_30px_rgba(0,0,0,0.6)];
+  }
+
+  /* Override gray-800 only for cards and containers, not for color indicators */
+  .mono .card.bg-gray-800,
+  .mono .bg-white.bg-gray-800,
+  .mono .bg-gray-50.bg-gray-800 {
     @apply bg-black border border-white/20 rounded-lg shadow-[inset_0_1px_0_rgba(255,255,255,0.03),0_8px_30px_rgba(0,0,0,0.6)];
   }
 
@@ -252,18 +258,31 @@ body.theme-loaded {
   .mono .from-*,
   .mono .to-* { /* no-op to avoid gradients */ }
 
-  .mono .bg-blue-600,
-  .mono .bg-red-600,
-  .mono .bg-green-600,
-  .mono .bg-purple-600,
-  .mono .bg-blue-700,
-  .mono .bg-red-700,
-  .mono .bg-green-700,
-  .mono .bg-purple-700,
-  .mono .bg-blue-800,
-  .mono .bg-red-800,
-  .mono .bg-green-800,
-  .mono .bg-purple-800 {
+  /* Override colored backgrounds only for UI elements, not for group color indicators */
+  .mono .card .bg-blue-600,
+  .mono .card .bg-red-600,
+  .mono .card .bg-green-600,
+  .mono .card .bg-purple-600,
+  .mono .card .bg-blue-700,
+  .mono .card .bg-red-700,
+  .mono .card .bg-green-700,
+  .mono .card .bg-purple-700,
+  .mono .card .bg-blue-800,
+  .mono .card .bg-red-800,
+  .mono .card .bg-green-800,
+  .mono .card .bg-purple-800,
+  .mono .bg-white .bg-blue-600,
+  .mono .bg-white .bg-red-600,
+  .mono .bg-white .bg-green-600,
+  .mono .bg-white .bg-purple-600,
+  .mono .bg-white .bg-blue-700,
+  .mono .bg-white .bg-red-700,
+  .mono .bg-white .bg-green-700,
+  .mono .bg-white .bg-purple-700,
+  .mono .bg-white .bg-blue-800,
+  .mono .bg-white .bg-red-800,
+  .mono .bg-white .bg-green-800,
+  .mono .bg-white .bg-purple-800 {
     @apply bg-black;
   }
 
@@ -509,7 +528,8 @@ body.theme-loaded {
     background-color: #1f1f1f !important;
     border: 1px solid rgba(255, 255, 255, 0.2) !important;
   }
-  .mono [class*="inline-flex"][class*="h-5"][class*="w-9"][class*="rounded-full"][class*="bg-"] {
+  /* Override toggle switches only, not group color indicators */
+  .mono [class*="inline-flex"][class*="h-5"][class*="w-9"][class*="rounded-full"][class*="bg-"]:not([class*="w-10"][class*="h-10"]) {
     background-color: #1f1f1f !important;
     border: 1px solid rgba(255, 255, 255, 0.2) !important;
   }
@@ -519,7 +539,8 @@ body.theme-loaded {
     background-color: #1f1f1f !important;
     border: 1px solid rgba(255, 255, 255, 0.2) !important;
   }
-  .mono [class*="inline-flex"][class*="h-6"][class*="w-11"][class*="rounded-full"][class*="bg-"] {
+  /* Override toggle switches only, not group color indicators */
+  .mono [class*="inline-flex"][class*="h-6"][class*="w-11"][class*="rounded-full"][class*="bg-"]:not([class*="w-10"][class*="h-10"]) {
     background-color: #1f1f1f !important;
     border: 1px solid rgba(255, 255, 255, 0.2) !important;
   }

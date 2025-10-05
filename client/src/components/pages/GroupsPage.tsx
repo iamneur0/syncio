@@ -2025,15 +2025,18 @@ export default function GroupsPage() {
             } ${!group.isActive ? 'opacity-50' : ''}`}>
             <div className="flex items-start justify-between mb-4">
               <div className="flex items-center">
-                  <div className={`w-12 h-12 rounded-lg flex items-center justify-center ${
-                    isMono
-                      ? 'bg-black border border-white/20 text-white'
-                      : isModern
-                      ? 'bg-gradient-to-br from-purple-600 to-blue-800 text-white'
-                      : isModernDark
-                      ? 'bg-gradient-to-br from-purple-800 to-blue-900 text-white'
-                      : getGroupColorClass(group?.colorIndex)
-                  }`}>
+                  <div 
+                    className={`w-12 h-12 rounded-lg flex items-center justify-center ${
+                      isMono
+                        ? 'border border-white/20 text-white'
+                        : isModern
+                        ? 'bg-gradient-to-br from-purple-600 to-blue-800 text-white'
+                        : isModernDark
+                        ? 'bg-gradient-to-br from-purple-800 to-blue-900 text-white'
+                        : getGroupColorClass(group?.colorIndex)
+                    }`}
+                    style={isMono ? { backgroundColor: getColorValue(getGroupColorClass(group?.colorIndex)) } : undefined}
+                  >
                     <span className="text-white font-semibold text-lg">
                       {group.name ? group.name.charAt(0).toUpperCase() : 'G'}
                     </span>
@@ -2221,12 +2224,10 @@ export default function GroupsPage() {
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center flex-1 min-w-0 max-w-[calc(100%-200px)]">
                   <div
-                    className={`w-10 h-10 rounded-lg flex items-center justify-center mr-3 flex-shrink-0 text-white ${getGroupColorClass(group?.colorIndex)} ${
+                    className={`w-10 h-10 rounded-lg flex items-center justify-center mr-3 flex-shrink-0 text-white ${!isMono ? getGroupColorClass(group?.colorIndex) : ''} ${
                       isMono ? 'border border-white/20' : ''
                     }`}
-                    style={{
-                      backgroundColor: group?.colorIndex === 2 && isMono ? '#1f2937' : undefined
-                    }}
+                    style={isMono ? { backgroundColor: getColorValue(getGroupColorClass(group?.colorIndex)) } : undefined}
                   >
                     <span className="text-white font-semibold text-sm">
                       {group.name ? group.name.charAt(0).toUpperCase() : 'G'}

@@ -262,7 +262,7 @@ app.post('/api/public-auth/register', async (req, res) => {
     res.cookie(cookieName('sfm_csrf'), csrf, { httpOnly: false, secure: isProdEnv(), sameSite: isProdEnv() ? 'strict' : 'lax', path: '/', maxAge: 7 * 24 * 60 * 60 * 1000 });
     return res.status(201).json({
       message: 'Registered successfully',
-      account: { id: account.id, uuid: account.uuid, createdAt: account.createdAt },
+      account: { id: account.id, uuid: account.uuid },
     });
   } catch (err) {
     return res.status(500).json({ message: 'Failed to register', error: String(err && err.message || err) });
@@ -340,7 +340,7 @@ app.get('/api/public-auth/me', async (req, res) => {
       }
     }
     if (!accountId) return res.status(401).json({ account: null });
-    const account = await prisma.appAccount.findUnique({ where: { id: accountId }, select: { id: true, uuid: true, createdAt: true } });
+    const account = await prisma.appAccount.findUnique({ where: { id: accountId }, select: { id: true, uuid: true } });
     if (!account) return res.status(401).json({ account: null });
     return res.json({ account });
   } catch (err) {
@@ -362,7 +362,7 @@ app.get('/api/public-auth/export', async (req, res) => {
     const whereScope = AUTH_ENABLED ? { accountId: req.appAccountId } : {}
     if (AUTH_ENABLED && !req.appAccountId) return res.status(401).json({ error: 'Unauthorized' })
     const [users, groups, addons] = await Promise.all([
-      prisma.user.findMany({ where: whereScope, include: { addonSettings: true } }),
+      prisma.user.findMany({ where: whereScope }),
       prisma.group.findMany({ where: whereScope, include: { addons: true } }),
       prisma.addon.findMany({ where: whereScope, include: { groupAddons: true } })
     ])
@@ -478,8 +478,7 @@ app.post('/api/public-auth/import-config', upload.single('file'), async (req, re
     console.log('🧹 Resetting configuration before import for accountId:', accountId)
     
     await prisma.$transaction([
-      // Optional logs table (ignore if not present in schema at runtime)
-      prisma.activityLog ? prisma.activityLog.deleteMany({ where: { accountId } }) : prisma.$executeRaw`SELECT 1`,
+      // ActivityLog model removed
       // Existing relations in simplified schema
       prisma.groupAddon.deleteMany({ where: { group: { accountId } } }),
       prisma.user.deleteMany({ where: { accountId } }),
@@ -528,15 +527,12 @@ app.post('/api/public-auth/import-config', upload.single('file'), async (req, re
             description: (entry?.description ?? manifest?.description ?? ''),
             manifestUrl: transportUrl,
             version: (entry?.version ?? manifest?.version ?? null),
-            author: entry?.author ?? null,
-            tags: typeof entry?.tags === 'string' ? entry.tags : '',
             isOfficial: entry?.isOfficial === true,
             iconUrl: (entry?.iconUrl ?? manifest?.logo ?? null),
             stremioAddonId: entry?.stremioAddonId ?? null,
             isActive: true,
             manifest: manifest ? JSON.stringify(manifest) : null,
             accountId: getAccountId(req),
-            ...(entry?.createdAt ? { createdAt: new Date(entry.createdAt) } : {}),
           }
         })
         successful++
@@ -821,8 +817,7 @@ app.post('/api/public-auth/reset', async (req, res) => {
     console.log('🧹 Resetting configuration before import for accountId:', accountId)
     
     await prisma.$transaction([
-      // Optional logs table (ignore if not present in schema at runtime)
-      prisma.activityLog ? prisma.activityLog.deleteMany({ where: { accountId } }) : prisma.$executeRaw`SELECT 1`,
+      // ActivityLog model removed
       // Existing relations in simplified schema
       prisma.groupAddon.deleteMany({ where: { group: { accountId } } }),
       prisma.user.deleteMany({ where: { accountId } }),
@@ -847,10 +842,10 @@ app.delete('/api/public-auth/account', async (req, res) => {
 
     // Cascade delete scoped data
     await prisma.$transaction([
-      prisma.activityLog.deleteMany({ where: { accountId: req.appAccountId } }),
+      // ActivityLog model removed
       // GroupMember and GroupInvite models removed - using JSON arrays instead
       prisma.groupAddon.deleteMany({ where: { group: { accountId: req.appAccountId } } }),
-      prisma.addonSetting.deleteMany({ where: { user: { accountId: req.appAccountId } } }),
+      // AddonSetting model removed
       prisma.user.deleteMany({ where: { accountId: req.appAccountId } }),
       prisma.group.deleteMany({ where: { accountId: req.appAccountId } }),
       prisma.addon.deleteMany({ where: { accountId: req.appAccountId } }),
@@ -957,7 +952,7 @@ app.get('/health', async (req, res) => {
 app.get('/debug/addons', async (req, res) => {
   try {
     const allAddons = await prisma.addon.findMany({
-      select: { id: true, name: true, accountId: true, manifestUrl: true, isActive: true, createdAt: true }
+      select: { id: true, name: true, accountId: true, manifestUrl: true, isActive: true }
     });
     res.json({
       total: allAddons.length,
@@ -1005,10 +1000,7 @@ app.get('/api/users', async (req, res) => {
     const whereScope = getAccountId(req) ? { accountId: getAccountId(req) } : {}
     const users = await prisma.user.findMany({
       where: whereScope,
-      include: {
-        addonSettings: true,
-        activityLogs: true
-      },
+      include: {},
         orderBy: { id: 'asc' }
     });
 
@@ -1096,15 +1088,14 @@ app.get('/api/users', async (req, res) => {
       
       return {
         id: user.id,
-        username: user.username || user.stremioUsername,
-        email: user.stremioEmail || user.email,
+        username: user.username,
+        email: user.email,
         groupName: userGroup?.name || null,
         status: user.isActive ? 'active' : 'inactive',
         addons: addonCount,
         stremioAddonsCount: stremioAddonsCount,
         groups: groups.length,
-        lastActive: user.lastStremioSync || null,
-        avatar: null,
+        lastActive: null,
         hasStremioConnection: !!user.stremioAuthKey,
         isActive: user.isActive,
         excludedAddons: excludedAddons,
@@ -1133,10 +1124,7 @@ app.get('/api/users/:id', async (req, res) => {
         id,
         accountId: getAccountId(req)
       },
-      include: {
-        addonSettings: true,
-        activityLogs: true
-      }
+      include: {}
     })
 
     if (!user) {
@@ -1177,7 +1165,7 @@ app.get('/api/users/:id', async (req, res) => {
       : []
 
     // Get all groups the user belongs to
-    const userGroups = groups.map(g => ({ id: g.id, name: g.name, role: 'member' }))
+    const userGroups = groups.map(g => ({ id: g.id, name: g.name }))
 
     // Calculate Stremio addons count and parse addons data (skip in basic mode)
     let stremioAddonsCount = 0
@@ -1227,22 +1215,15 @@ app.get('/api/users/:id', async (req, res) => {
     // Transform for frontend
     const transformedUser = {
       id: user.id,
-      displayName: user.displayName,
-      email: user.stremioEmail || user.email,
-      username: user.stremioUsername || user.username,
-      stremioEmail: user.stremioEmail,
-      stremioUsername: user.stremioUsername,
+      email: user.email,
+      username: user.username,
       hasStremioConnection: !!user.stremioAuthKey,
-      role: 'member', // Default role for SQLite
       status: user.isActive ? 'active' : 'inactive',
       addons: addons,
       groups: userGroups,
       groupName: groups[0]?.name || null,
       groupId: groups[0]?.id || null,
-      lastActive: user.lastStremioSync || user.updatedAt,
-      avatar: null,
-        createdAt: null,
-        updatedAt: null,
+      lastActive: null,
       stremioAddonsCount: stremioAddonsCount,
       stremioAddons: stremioAddons,
       excludedAddons: excludedAddons,
@@ -1405,10 +1386,7 @@ app.get('/api/users/:id/sync-status', async (req, res) => {
       },
       select: { 
         id: true,
-        stremioEmail: true, 
-        stremioUsername: true, 
         stremioAuthKey: true, 
-        stremioUserId: true,
         isActive: true,
         excludedAddons: true,
         protectedAddons: true
@@ -1680,7 +1658,7 @@ app.get('/api/users/:id/stremio-addons', async (req, res) => {
         id,
         accountId: getAccountId(req)
       },
-      select: { stremioEmail: true, stremioUsername: true, stremioAuthKey: true, stremioUserId: true }
+      select: { stremioAuthKey: true }
     })
 
     if (!user) {
@@ -1741,8 +1719,6 @@ app.get('/api/users/:id/stremio-addons', async (req, res) => {
 
       return res.json({
         userId: id,
-        stremioUsername: user.stremioUsername || null,
-        stremioEmail: user.stremioEmail || null,
         count: addons.length,
         addons
       })
@@ -1764,8 +1740,6 @@ app.get('/api/users/:id/stremio-addons', async (req, res) => {
         console.warn('⚠️ Stremio API unavailable, returning empty addons')
         return res.json({
           userId: id,
-          stremioUsername: user.stremioUsername || null,
-          stremioEmail: user.stremioEmail || null,
           count: 0,
           addons: []
         })
@@ -2317,7 +2291,7 @@ app.put('/api/users/:id', async (req, res) => {
       const emailExists = await prisma.user.findFirst({
         where: { 
           AND: [
-            { OR: [{ email }, { stremioEmail: email }] },
+            { email },
             { id: { not: id } },
             ...(AUTH_ENABLED && req.appAccountId ? [{ accountId: req.appAccountId }] : [])
           ]
@@ -2328,12 +2302,7 @@ app.put('/api/users/:id', async (req, res) => {
         return res.status(400).json({ error: 'Email already exists' })
       }
       
-      // Update both email fields if it's a Stremio user
-      if (existingUser.stremioEmail) {
-        updateData.stremioEmail = email
-      } else {
-        updateData.email = email
-      }
+      updateData.email = email
     }
 
     if (password !== undefined && password.trim() !== '') {
@@ -2415,17 +2384,15 @@ app.put('/api/users/:id', async (req, res) => {
     const userGroup = userGroups[0] // Get first group if any
     const transformedUser = {
       id: userWithGroups.id,
-      username: userWithGroups.username || userWithGroups.stremioUsername,
-      email: userWithGroups.stremioEmail || userWithGroups.email,
-      role: 'user', // Default role since we removed role field
+      username: userWithGroups.username,
+      email: userWithGroups.email,
       status: userWithGroups.isActive ? 'active' : 'inactive',
       addons: userWithGroups.stremioAddons ? 
         (Array.isArray(userWithGroups.stremioAddons) ? userWithGroups.stremioAddons.length : Object.keys(userWithGroups.stremioAddons).length) : 0,
       groups: userGroups.length,
       groupName: userGroup?.name || null,
       groupId: userGroup?.id || null,
-      lastActive: userWithGroups.lastStremioSync || userWithGroups.createdAt,
-      avatar: null
+      lastActive: null
     }
 
     // Log activity (temporarily disabled for debugging)
@@ -2495,7 +2462,7 @@ app.patch('/api/users/:id', async (req, res) => {
       const emailExists = await prisma.user.findFirst({
         where: { 
           AND: [
-            { OR: [{ email }, { stremioEmail: email }] },
+            { email },
             { id: { not: id } },
             ...(AUTH_ENABLED && req.appAccountId ? [{ accountId: req.appAccountId }] : [])
           ]
@@ -2506,12 +2473,7 @@ app.patch('/api/users/:id', async (req, res) => {
         return res.status(400).json({ error: 'Email already exists' })
       }
       
-      // Update both email fields if it's a Stremio user
-      if (existingUser.stremioEmail) {
-        updateData.stremioEmail = email
-      } else {
-        updateData.email = email
-      }
+      updateData.email = email
     }
     
     if (password !== undefined && password.trim() !== '') {
@@ -2551,10 +2513,7 @@ app.patch('/api/users/:id/toggle-status', async (req, res) => {
         accountId: getAccountId(req)
       },
       data: { isActive: !isActive },
-      include: {
-        addonSettings: true,
-        activityLogs: true
-      }
+      include: {}
     })
     
     // Remove sensitive data
@@ -2605,8 +2564,7 @@ app.delete('/api/users/:id', async (req, res) => {
 
     // Delete related records first to avoid FK constraint errors
     await prisma.$transaction([
-      // Optional logs table (ignore if not present in schema at runtime)
-      prisma.activityLog ? prisma.activityLog.deleteMany({ where: { userId: id } }) : prisma.$executeRaw`SELECT 1`,
+      // ActivityLog model removed
       prisma.user.delete({ 
         where: { 
           id,
@@ -2770,8 +2728,8 @@ app.post('/api/stremio/register', async (req, res) => {
 
 app.post('/api/stremio/connect', async (req, res) => {
   try {
-    const { displayName, email, password, username, groupName } = req.body;
-    console.log(`🔍 POST /api/stremio/connect called with:`, { displayName, email, username, groupName })
+    const { email, password, username, groupName } = req.body;
+    console.log(`🔍 POST /api/stremio/connect called with:`, { email, username, groupName })
     // Redact any sensitive fields from logs
     try {
       const { password: _pw, authKey: _ak, ...rest } = (req.body || {})
@@ -2793,7 +2751,6 @@ app.post('/api/stremio/connect', async (req, res) => {
       where: {
         OR: [
           { email: email },
-          { stremioEmail: email },
           { username: finalUsername }
         ],
         // Only check within the current account when auth is enabled
@@ -2820,7 +2777,7 @@ app.post('/api/stremio/connect', async (req, res) => {
         if (AUTH_ENABLED && req.appAccountId && existingUser.accountId === req.appAccountId) {
           return res.status(200).json({
             message: 'User already exists in this account',
-            user: { id: existingUser.id, username: existingUser.username || existingUser.stremioUsername },
+            user: { id: existingUser.id, username: existingUser.username },
             addonsCount: 0,
             group: null
           })
@@ -2833,7 +2790,7 @@ app.post('/api/stremio/connect', async (req, res) => {
             error: 'Please choose a different username'
           });
         }
-        if (existingUser.email === email || existingUser.stremioEmail === email) {
+        if (existingUser.email === email) {
           return res.status(409).json({ 
             message: 'Email already exists',
             error: 'This email is already registered'
@@ -3031,32 +2988,13 @@ app.post('/api/stremio/connect', async (req, res) => {
       console.log(`🔍 No group assignment - groupName is empty or undefined`)
     }
 
-    // Log activity (non-blocking)
-    try {
-      if (prisma.activityLog) {
-        await prisma.activityLog.create({
-          data: {
-            userId: newUser.id,
-            action: 'USER_JOINED',
-            details: `User connected Stremio account: ${email}${assignedGroup ? ` and joined group: ${assignedGroup.name}` : ''}`,
-            metadata: JSON.stringify({
-              stremioUsername: userData?.username,
-              addonCount: Object.keys(addonsData).length,
-              groupName: assignedGroup?.name
-            })
-          }
-        });
-      }
-    } catch (activityErr) {
-      console.error('Activity log error (non-critical):', activityErr)
-    }
+    // ActivityLog model removed
 
     res.status(201).json({
       message: 'Successfully connected to Stremio',
       user: {
         id: newUser.id,
-        username: newUser.username,
-        stremioUsername: newUser.stremioUsername
+        username: newUser.username
       },
       addonsCount: Object.keys(addonsData).length,
       group: assignedGroup ? {
@@ -3127,7 +3065,7 @@ app.post('/api/stremio/connect', async (req, res) => {
 // Connect using existing Stremio authKey (create new Syncio user)
 app.post('/api/stremio/connect-authkey', async (req, res) => {
   try {
-    const { displayName, username, email, authKey, groupName } = req.body
+    const { username, email, authKey, groupName } = req.body
     if (!authKey) return res.status(400).json({ message: 'authKey is required' })
 
     // Validate auth key against Stremio (must be an active session)
@@ -3240,9 +3178,6 @@ app.post('/api/users/:id/connect-stremio-authkey', async (req, res) => {
       data: {
         stremioAuthKey: encryptedAuthKey,
         stremioAddons: JSON.stringify(addonsData || {}),
-        stremioEmail: verifiedUser?.email || undefined,
-        // Do not override Syncio username from Stremio
-        stremioUsername: undefined,
         email: verifiedUser?.email ? verifiedUser.email.toLowerCase() : undefined,
         isActive: true, // Reconnect user since they now have valid Stremio connection
       },
@@ -3324,7 +3259,6 @@ app.get('/api/addons', async (req, res) => {
         manifestUrl: addon.manifestUrl,
         url: addon.manifestUrl, // Keep both for compatibility
         version: addon.version,
-        tags: addon.tags || '',
         iconUrl: addon.iconUrl,
         status: addon.isActive ? 'active' : 'inactive',
         users: totalUsers,
@@ -3366,7 +3300,6 @@ app.put('/api/addons/:id/enable', async (req, res) => {
       description: updated.description,
       url: updated.manifestUrl,
       version: updated.version,
-      tags: updated.tags || '',
       status: updated.isActive ? 'active' : 'inactive',
       users: 0,
       groups: 0
@@ -3402,7 +3335,6 @@ app.put('/api/addons/:id/disable', async (req, res) => {
       description: updated.description,
       url: updated.manifestUrl,
       version: updated.version,
-      tags: updated.tags || '',
       status: updated.isActive ? 'active' : 'inactive',
       users: 0,
       groups: 0
@@ -3437,7 +3369,7 @@ function canonicalizeManifestUrl(raw) {
 
 app.post('/api/addons', async (req, res) => {
   try {
-          const { url, tags, name, description, groupIds, manifestData: providedManifestData } = req.body;
+          const { url, name, description, groupIds, manifestData: providedManifestData } = req.body;
     
     if (!url) {
       return res.status(400).json({ message: 'Addon URL is required' });
@@ -3499,10 +3431,9 @@ app.post('/api/addons', async (req, res) => {
           name: (name && name.trim()) ? name.trim() : (manifestData?.name || existingByUrl.name),
           description: description || manifestData?.description || existingByUrl.description || '',
           version: manifestData?.version || existingByUrl.version || null,
-          tags: tags || existingByUrl.tags || '',
           iconUrl: manifestData?.logo || existingByUrl.iconUrl || null // Store logo URL from manifest
         },
-        select: { id: true, name: true, description: true, manifestUrl: true, version: true, tags: true, isActive: true }
+        select: { id: true, name: true, description: true, manifestUrl: true, version: true, isActive: true }
       })
 
       // Handle group assignments for reactivated addon
@@ -3556,7 +3487,6 @@ app.post('/api/addons', async (req, res) => {
         description: reactivated.description,
         url: reactivated.manifestUrl,
         version: reactivated.version,
-        tags: reactivated.tags || '',
         status: reactivated.isActive ? 'active' : 'inactive',
         users: 0,
         groups: assignedGroups.length
@@ -3583,7 +3513,6 @@ app.post('/api/addons', async (req, res) => {
         description: description || manifestData?.description || '',
         manifestUrl: sanitizedUrl,
         version: manifestData?.version || null,
-        tags: Array.isArray(tags) ? tags.join(',') : (tags || ''),
         iconUrl: manifestData?.logo || null, // Store logo URL from manifest
         isActive: true,
         // Enforce account ownership
@@ -3630,7 +3559,6 @@ app.post('/api/addons', async (req, res) => {
       description: addon.description,
       url: addon.manifestUrl,
       version: addon.version,
-      tags: addon.tags,
       iconUrl: addon.iconUrl,
       status: 'active',
       users: 0,
@@ -3737,7 +3665,7 @@ app.delete('/api/addons/:id', async (req, res) => {
     // Hard delete: remove relations then delete addon (transaction requires Prisma promises only)
     await prisma.$transaction([
       prisma.groupAddon.deleteMany({ where: { addonId: id } }),
-      prisma.addonSetting.deleteMany({ where: { addonId: id } }),
+      // AddonSetting model removed
       prisma.addon.delete({ 
         where: { 
           id,
@@ -3857,7 +3785,6 @@ app.post('/api/addons/import', upload.single('file'), async (req, res) => {
             description: manifest.description || '',
             manifestUrl: transportUrl,
             version: manifest.version || null,
-            tags: '', // Convert empty array to empty string for database
             iconUrl: manifest.logo || null,
             isActive: true,
             accountId: getAccountId(req),
@@ -4131,7 +4058,6 @@ app.put('/api/addons/:id', async (req, res) => {
       description: addonWithGroups.description,
       url: addonWithGroups.manifestUrl,
       version: addonWithGroups.version,
-      tags: addonWithGroups.tags || '',
       status: addonWithGroups.isActive ? 'active' : 'inactive',
       users: totalUsers,
       groups: addonWithGroups.groupAddons.length
@@ -4194,7 +4120,6 @@ app.get('/api/groups', async (req, res) => {
         members: activeMemberCount,
       addons: group._count.addons,
       restrictions: 'none', // TODO: Implement restrictions logic
-        createdAt: null,
       isActive: group.isActive,
       // Expose color index for UI
         colorIndex: group.colorIndex || 1,
@@ -4235,9 +4160,7 @@ app.get('/api/debug/addon/:name', async (req, res) => {
       version: addon.version,
       description: addon.description,
       manifestUrl: addon.manifestUrl,
-      manifest: addon.manifest,
-        createdAt: null,
-        updatedAt: null
+      manifest: addon.manifest
     })
   } catch (error) {
     console.error('Error fetching addon debug info:', error)
@@ -4267,8 +4190,7 @@ app.put('/api/debug/addon/:id', async (req, res) => {
       version: updatedAddon.version,
       description: updatedAddon.description,
       manifestUrl: updatedAddon.manifestUrl,
-      manifest: updatedAddon.manifest,
-      updatedAt: updatedAddon.updatedAt
+      manifest: updatedAddon.manifest
     })
   } catch (error) {
     console.error('Error updating addon:', error)
@@ -4489,7 +4411,6 @@ app.post('/api/groups', async (req, res) => {
       members: 0,
       addons: 0,
       restrictions: 'none',
-      createdAt: null,
       isActive: newGroup.isActive,
       colorIndex: newGroup.colorIndex || 1,
     });
@@ -4666,7 +4587,6 @@ app.get('/api/groups/:id', async (req, res) => {
       id: group.id,
       name: group.name,
       description: group.description,
-      createdAt: null,
       colorIndex: group.colorIndex || 1,
       users: memberUsers,
       addons: group.addons
@@ -4770,7 +4690,7 @@ app.delete('/api/groups/:id', async (req, res) => {
     await prisma.$transaction([
       // GroupMember model removed - using JSON arrays instead
       prisma.groupAddon.deleteMany({ where: { groupId: id } }),
-      prisma.activityLog.deleteMany({ where: { groupId: id } }),
+      // ActivityLog model removed
       prisma.group.delete({ 
         where: { 
           id,
@@ -5568,8 +5488,7 @@ app.post('/api/users/:id/stremio-addons/reorder', async (req, res) => {
         accountId: getAccountId(req)
       },
       data: {
-        stremioAddons: JSON.stringify(updatedStremioAddons),
-        lastStremioSync: new Date()
+        stremioAddons: JSON.stringify(updatedStremioAddons)
       }
     })
     
@@ -5744,11 +5663,7 @@ app.post('/api/users/:id/clear-stremio-credentials', async (req, res) => {
       },
       data: {
         stremioAuthKey: null,
-        stremioUserId: null,
-        stremioUsername: null,
-        stremioEmail: null,
         stremioAddons: null,
-        lastStremioSync: null,
         isActive: false, // Disconnect user since Stremio credentials are cleared
       },
     });
@@ -5957,12 +5872,10 @@ app.post('/api/users/:id/connect-stremio', async (req, res) => {
         accountId: getAccountId(req)
       },
       data: {
-        stremioEmail: email,
-        stremioUsername: username || userData?.username || email.split('@')[0],
+        email: email,
+        username: username || userData?.username || email.split('@')[0],
         stremioAuthKey: encryptedAuthKey,
-        stremioUserId: userData?.id,
         stremioAddons: JSON.stringify(addonsData || {}),
-        lastStremioSync: new Date(),
         isActive: true, // Re-enable the user after successful reconnection
       }
     });
@@ -5973,8 +5886,7 @@ app.post('/api/users/:id/connect-stremio', async (req, res) => {
       user: {
         id: updatedUser.id,
         username: updatedUser.username,
-        stremioEmail: updatedUser.stremioEmail,
-        stremioUsername: updatedUser.stremioUsername
+        email: updatedUser.email
       }
     });
     
@@ -6005,9 +5917,8 @@ app.post('/api/test/set-stremio-credentials/:userId', async (req, res) => {
       where: { id: userId },
       data: {
         stremioAuthKey: encryptedAuthKey,
-        stremioUserId: 'test-user-id',
-        stremioUsername: 'testuser',
-        stremioEmail: 'test@example.com'
+        email: 'test@example.com',
+        username: 'testuser'
       }
     });
     
