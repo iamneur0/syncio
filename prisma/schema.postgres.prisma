@@ -14,19 +14,13 @@ model User {
   email           String   @unique
   isActive        Boolean  @default(true)
   stremioAuthKey  String?  // Encrypted Stremio auth key
-  stremioEmail    String?  // Stremio email
-  stremioUsername String?  // Stremio username
-  stremioUserId   String?  // Stremio user ID
   stremioAddons   String?  // JSON string of Stremio addons
-  lastStremioSync DateTime? // Last sync timestamp
   excludedAddons  String?  // JSON array of addon IDs that user has excluded
   protectedAddons String?  // JSON array of addon IDs that user has protected
   colorIndex      Int?     // UI color theme index
   accountId       String?  // For multi-tenant support
 
   // Relationships
-  addonSettings   AddonSetting[]
-  activityLogs    ActivityLog[]
 
   @@map("users")
 }
@@ -43,7 +37,6 @@ model Group {
 
   // Relationships
   addons       GroupAddon[]
-  activityLogs ActivityLog[]
 
   @@map("groups")
 }
@@ -58,16 +51,13 @@ model Addon {
   manifest       Json?    // Store the full manifest JSON
   stremioAddonId String?
   version        String?
-  author         String?
   isOfficial     Boolean  @default(false)
   isActive       Boolean  @default(true)
   accountId      String?
-  tags           String?
   iconUrl        String?
 
   // Relationships
   groupAddons    GroupAddon[]
-  addonSettings  AddonSetting[]
 
   @@unique([name, accountId])
   @@map("addons")
@@ -86,39 +76,11 @@ model GroupAddon {
   @@map("group_addons")
 }
 
-model AddonSetting {
-  id        String   @id @default(cuid())
-  key       String
-  value     String
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  addonId   String
-  addon     Addon    @relation(fields: [addonId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, addonId, key])
-  @@map("addon_settings")
-}
-
-model ActivityLog {
-  id        String   @id @default(cuid())
-  action    String
-  details   String?
-  metadata  String?
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  groupId   String?
-  group     Group?   @relation(fields: [groupId], references: [id], onDelete: SetNull)
-  accountId String?
-
-  @@map("activity_logs")
-}
 
 model AppAccount {
   id           String   @id @default(cuid())
   uuid         String   @unique
   passwordHash String
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
 
   @@map("app_accounts")
 }

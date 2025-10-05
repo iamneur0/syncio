@@ -62,13 +62,8 @@ export interface User {
   id: string
   email: string
   username: string
-  firstName?: string
-  lastName?: string
-  role: 'admin' | 'parent' | 'child'
   status: 'active' | 'inactive'
   groups: string[]
-  createdAt: string
-  updatedAt: string
 }
 
 export interface Group {
@@ -88,7 +83,6 @@ export interface Addon {
   description: string
   url: string
   version?: string
-  tags: string
   iconUrl?: string
   status: 'active' | 'inactive'
   users: number
@@ -98,9 +92,6 @@ export interface Addon {
 export interface CreateUserData {
   email: string
   username: string
-  firstName?: string
-  lastName?: string
-  role: 'admin' | 'parent' | 'child'
 }
 
 export interface CreateGroupData {
@@ -186,7 +177,7 @@ export const usersAPI = {
   },
 
   // Update user
-  update: async (id: string, userData: { displayName?: string; email?: string; password?: string; groupName?: string }): Promise<User> => {
+  update: async (id: string, userData: { email?: string; password?: string; groupName?: string }): Promise<User> => {
     const response: AxiosResponse<User> = await api.put(`/users/${id}`, userData)
     // Handle axios response wrapper
     if (response.data && typeof response.data === 'object' && (response.data as any).data) {
@@ -201,10 +192,9 @@ export const usersAPI = {
   },
 
   // Search users
-  search: async (query: string, role?: string): Promise<User[]> => {
+  search: async (query: string): Promise<User[]> => {
     const params = new URLSearchParams()
     if (query) params.append('q', query)
-    if (role && role !== 'all') params.append('role', role)
     
     const response: AxiosResponse<User[]> = await api.get(`/users/search?${params}`)
     return response.data
@@ -339,7 +329,7 @@ export const addonsAPI = {
 // Stremio API
 export const stremioAPI = {
   // Connect to Stremio
-  connect: async (userData: { displayName?: string; email: string; password: string; username?: string; groupName?: string }): Promise<any> => {
+  connect: async (userData: { email: string; password: string; username?: string; groupName?: string }): Promise<any> => {
     const response: AxiosResponse<any> = await api.post('/stremio/connect', userData)
     return response.data
   },

@@ -450,6 +450,35 @@ export default function AddonsPage() {
     const theme = isMono ? 'mono' : isModern ? 'modern' : isModernDark ? 'modern-dark' : isDark ? 'dark' : 'light'
     return getColorBgClass(colorIndex, theme)
   }
+
+  // Helper function to convert Tailwind classes to actual color values
+  const getColorValue = (tailwindClass: string): string => {
+    const colorMap: Record<string, string> = {
+      'bg-black': '#000000',
+      'bg-gray-800': '#1f2937',
+      'bg-gray-600': '#4b5563',
+      'bg-gray-400': '#9ca3af',
+      'bg-gray-300': '#d1d5db',
+      'bg-blue-500': '#3b82f6',
+      'bg-green-500': '#10b981',
+      'bg-purple-500': '#8b5cf6',
+      'bg-orange-500': '#f97316',
+      'bg-red-500': '#ef4444',
+      // Add gradient classes for modern themes
+      'bg-gradient-to-br from-blue-500 to-blue-600': '#3b82f6',
+      'bg-gradient-to-br from-green-500 to-green-600': '#10b981',
+      'bg-gradient-to-br from-purple-500 to-purple-600': '#8b5cf6',
+      'bg-gradient-to-br from-orange-500 to-orange-600': '#f97316',
+      'bg-gradient-to-br from-red-500 to-red-600': '#ef4444',
+      'bg-gradient-to-br from-blue-600 to-blue-700': '#2563eb',
+      'bg-gradient-to-br from-green-600 to-green-700': '#059669',
+      'bg-gradient-to-br from-purple-600 to-purple-700': '#7c3aed',
+      'bg-gradient-to-br from-orange-600 to-orange-700': '#ea580c',
+      'bg-gradient-to-br from-red-600 to-red-700': '#dc2626'
+    }
+    return colorMap[tailwindClass] || '#000000'
+  }
+
   const [mounted, setMounted] = useState(false)
   const [hasLoadedData, setHasLoadedData] = useState(false)
   useEffect(() => { setMounted(true) }, [])
@@ -556,10 +585,8 @@ export default function AddonsPage() {
     return base.filter((addon: any) => {
       const name = String(addon.name || '')
       const description = String(addon.description || '')
-      const tags = Array.isArray(addon.tags) ? addon.tags.join(' ') : String(addon.tags || '')
       const matchesSearch = name.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
-                           description.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
-                           tags.toLowerCase().includes(debouncedSearchTerm.toLowerCase())
+                           description.toLowerCase().includes(debouncedSearchTerm.toLowerCase())
       return matchesSearch
     })
   }, [addons, debouncedSearchTerm])
@@ -1638,10 +1665,10 @@ export default function AddonsPage() {
                               : `bg-gray-100 text-gray-700 border-gray-300 hover:bg-gray-200 hover:border-gray-400 ${isMono ? '' : ''}`
                         }`}
                       >
-                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center text-white ${getGroupColorClass(group?.colorIndex)}`}
-                        style={{
-                          backgroundColor: group?.colorIndex === 2 && isMono ? '#1f2937' : undefined
-                        }}>
+                        <div 
+                          className={`w-10 h-10 rounded-lg flex items-center justify-center text-white ${!isMono ? getGroupColorClass(group?.colorIndex) : ''}`}
+                          style={isMono ? { backgroundColor: getColorValue(getGroupColorClass(group?.colorIndex)) } : undefined}
+                        >
                           <span className="text-sm font-semibold">
                             {group.name ? group.name.charAt(0).toUpperCase() : 'G'}
                           </span>
@@ -1766,10 +1793,10 @@ export default function AddonsPage() {
                               : `bg-gray-100 text-gray-700 border-gray-300 hover:bg-gray-200 hover:border-gray-400 ${isMono ? '' : ''}`
                         }`}
                       >
-                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center text-white ${getGroupColorClass(group?.colorIndex)}`}
-                        style={{
-                          backgroundColor: group?.colorIndex === 2 && isMono ? '#1f2937' : undefined
-                        }}>
+                        <div 
+                          className={`w-10 h-10 rounded-lg flex items-center justify-center text-white ${!isMono ? getGroupColorClass(group?.colorIndex) : ''}`}
+                          style={isMono ? { backgroundColor: getColorValue(getGroupColorClass(group?.colorIndex)) } : undefined}
+                        >
                           <span className="text-sm font-semibold">
                             {group.name ? group.name.charAt(0).toUpperCase() : 'G'}
                           </span>
