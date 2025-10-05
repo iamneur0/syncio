@@ -1,4 +1,4 @@
-name: Main Branch Release
+name: Main Branch Release (Docker public & private)
 
 on:
   push:
@@ -17,6 +17,10 @@ jobs:
     permissions:
       contents: read
       packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        instance: [ public, private ]
 
     steps:
     - name: Checkout repository
@@ -32,36 +36,42 @@ jobs:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Extract metadata
-      id: meta
+    - name: Extract metadata (private)
+      id: meta_private
+      if: matrix.instance == 'private'
       uses: docker/metadata-action@v5
       with:
         images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
         tags: |
-          type=ref,event=branch
-          type=ref,event=tag
-          type=sha,prefix=main-
-          type=raw,value=latest,enable={{is_default_branch}}
+          type=raw,value=private
+          type=semver,pattern=private-v{{version}}
+        labels: |
+          org.opencontainers.image.title=syncio-private
 
-    - name: Build and push Docker image
+    - name: Extract metadata (public)
+      id: meta_public
+      if: matrix.instance == 'public'
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        tags: |
+          type=raw,value=public
+          type=semver,pattern=public-v{{version}}
+        labels: |
+          org.opencontainers.image.title=syncio-public
+
+    - name: Build and push Docker image (${{ matrix.instance }})
       uses: docker/build-push-action@v5
       with:
         context: .
         platforms: linux/amd64,linux/arm64
         push: true
-        tags: ${{ steps.meta.outputs.tags }}
-        labels: ${{ steps.meta.outputs.labels }}
+        tags: ${{ steps.meta_private.outputs.tags || steps.meta_public.outputs.tags }}
+        labels: ${{ steps.meta_private.outputs.labels || steps.meta_public.outputs.labels }}
+        build-args: |
+          INSTANCE=${{ matrix.instance }}
         cache-from: type=gha
         cache-to: type=gha,mode=max
-
-    - name: Deploy to production
-      run: |
-        echo "🚀 Deploying main branch to production..."
-        echo "Image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
-        
-        # Add your production deployment commands here
-        # Example: kubectl apply -f k8s/production/
-        # Or: docker-compose -f docker-compose.prod.yml up -d
 
   notify:
     needs: build-and-push
@@ -72,7 +82,7 @@ jobs:
       if: needs.build-and-push.result == 'success'
       run: |
         echo "✅ Main branch build completed successfully!"
-        echo "Image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
+        echo "Images pushed: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }} (public/private variants)"
         
     - name: Notify on failure
       if: needs.build-and-push.result == 'failure'
