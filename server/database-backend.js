@@ -24,6 +24,15 @@ const prisma = new PrismaClient();
 // Auth toggle and config (public vs single-user)
 const AUTH_ENABLED = String(process.env.AUTH_ENABLED || 'false').toLowerCase() === 'true';
 const JWT_SECRET = process.env.JWT_SECRET || 'syncio-dev-secret-change-me';
+const DEFAULT_ACCOUNT_ID = 'default';
+
+// Helper function to get account ID for private mode
+function getAccountId(req) {
+  if (AUTH_ENABLED && req.appAccountId) {
+    return req.appAccountId
+  }
+  return DEFAULT_ACCOUNT_ID
+}
 
 // Parse JSON bodies
 app.use(express.json());
@@ -253,7 +262,7 @@ app.post('/api/public-auth/register', async (req, res) => {
     res.cookie(cookieName('sfm_csrf'), csrf, { httpOnly: false, secure: isProdEnv(), sameSite: isProdEnv() ? 'strict' : 'lax', path: '/', maxAge: 7 * 24 * 60 * 60 * 1000 });
     return res.status(201).json({
       message: 'Registered successfully',
-      account: { id: account.id, uuid: account.uuid, createdAt: account.createdAt },
+      account: { id: account.id, uuid: account.uuid },
     });
   } catch (err) {
     return res.status(500).json({ message: 'Failed to register', error: String(err && err.message || err) });
@@ -267,15 +276,15 @@ app.post('/api/public-auth/login', async (req, res) => {
       return res.status(400).json({ message: 'uuid and password are required' });
     }
     const account = await prisma.appAccount.findUnique({ where: { uuid } });
-    if (!account || !account.isActive) {
+    if (!account) {
       return res.status(401).json({ message: 'Wrong Credentials' });
     }
     const ok = await bcrypt.compare(password, account.passwordHash || '');
     if (!ok) {
       return res.status(401).json({ message: 'Wrong Credentials' });
     }
-    // Update last login
-    await prisma.appAccount.update({ where: { id: account.id }, data: { lastLoginAt: new Date() } });
+    // Update last login (AppAccount doesn't have lastLoginAt field, so we'll skip this)
+    // await prisma.appAccount.update({ where: { id: account.id }, data: { lastLoginAt: new Date() } });
 
     // Set access/refresh and CSRF cookies
     const at = issueAccessToken(account.id);
@@ -331,7 +340,7 @@ app.get('/api/public-auth/me', async (req, res) => {
       }
     }
     if (!accountId) return res.status(401).json({ account: null });
-    const account = await prisma.appAccount.findUnique({ where: { id: accountId }, select: { id: true, uuid: true, createdAt: true, lastLoginAt: true, isActive: true } });
+    const account = await prisma.appAccount.findUnique({ where: { id: accountId }, select: { id: true, uuid: true } });
     if (!account) return res.status(401).json({ account: null });
     return res.json({ account });
   } catch (err) {
@@ -353,11 +362,26 @@ app.get('/api/public-auth/export', async (req, res) => {
     const whereScope = AUTH_ENABLED ? { accountId: req.appAccountId } : {}
     if (AUTH_ENABLED && !req.appAccountId) return res.status(401).json({ error: 'Unauthorized' })
     const [users, groups, addons] = await Promise.all([
-      prisma.user.findMany({ where: whereScope, include: { memberships: true, addonSettings: true } }),
-      prisma.group.findMany({ where: whereScope, include: { members: true, addons: true } }),
+      prisma.user.findMany({ where: whereScope }),
+      prisma.group.findMany({ where: whereScope, include: { addons: true } }),
       prisma.addon.findMany({ where: whereScope, include: { groupAddons: true } })
     ])
-    const payload = { users, groups, addons }
+    
+    // Decrypt stremioAuthKey for each user before exporting
+    const decryptedUsers = users.map(user => {
+      const decryptedUser = { ...user }
+      if (user.stremioAuthKey) {
+        try {
+          decryptedUser.stremioAuthKey = decrypt(user.stremioAuthKey)
+        } catch (e) {
+          console.warn(`Failed to decrypt auth key for user ${user.id}:`, e.message)
+          decryptedUser.stremioAuthKey = null
+        }
+      }
+      return decryptedUser
+    })
+    
+    const payload = { users: decryptedUsers, groups, addons }
     res.setHeader('Content-Disposition', 'attachment; filename="syncio-export.json"')
     return res.json(payload)
   } catch (e) {
@@ -407,8 +431,9 @@ app.get('/api/exports/addons', async (req, res) => {
         }
 
         return {
-          transportUrl: transportUrl,
-          transportName: '',
+          manifestUrl: transportUrl,
+          transportUrl: transportUrl, // Keep both for compatibility
+          transportName: addon.name || '',
           manifest,
           flags: { official: addon.isOfficial, protected: false },
         }
@@ -448,19 +473,22 @@ app.post('/api/public-auth/import-config', upload.single('file'), async (req, re
       return res.status(400).json({ message: 'Invalid JSON' })
     }
 
-    // Always reset before importing configuration
-    if (AUTH_ENABLED && req.appAccountId) {
-      await prisma.$transaction([
-        prisma.activityLog.deleteMany({ where: { accountId: req.appAccountId } }),
-        prisma.groupMember.deleteMany({ where: { group: { accountId: req.appAccountId } } }),
-        prisma.groupInvite.deleteMany({ where: { group: { accountId: req.appAccountId } } }),
-        prisma.groupAddon.deleteMany({ where: { group: { accountId: req.appAccountId } } }),
-        prisma.addonSetting.deleteMany({ where: { user: { accountId: req.appAccountId } } }),
-        prisma.user.deleteMany({ where: { accountId: req.appAccountId } }),
-        prisma.group.deleteMany({ where: { accountId: req.appAccountId } }),
-        prisma.addon.deleteMany({ where: { accountId: req.appAccountId } }),
-      ])
-    }
+    // Always reset before importing configuration (works for both auth and private mode)
+    const accountId = getAccountId(req)
+    console.log('🧹 Resetting configuration before import for accountId:', accountId)
+    
+    await prisma.$transaction([
+      // ActivityLog model removed
+      // Existing relations in simplified schema
+      prisma.groupAddon.deleteMany({ where: { group: { accountId } } }),
+      prisma.user.deleteMany({ where: { accountId } }),
+      prisma.group.deleteMany({ where: { accountId } }),
+      prisma.addon.deleteMany({ where: { accountId } }),
+      // Clean orphans
+      prisma.addon.deleteMany({ where: { accountId: null, groupAddons: { none: {} } } }),
+    ])
+    
+    console.log('✅ Configuration reset completed, starting import...')
 
     // Extract sections
     const addonsArray = Array.isArray(data?.addons) ? data.addons : (Array.isArray(data) ? data : [])
@@ -481,7 +509,7 @@ app.post('/api/public-auth/import-config', upload.single('file'), async (req, re
         let manifest = entry && entry.manifest ? entry.manifest : null
         if (!transportUrl) { failed++; continue }
 
-        const existing = await prisma.addon.findFirst({ where: { accountId: req.appAccountId, manifestUrl: transportUrl } })
+        const existing = await prisma.addon.findFirst({ where: { accountId: getAccountId(req), manifestUrl: transportUrl } })
         if (existing) { redundant++; continue }
 
         // Attempt to fetch manifest if not provided to enrich fields
@@ -499,16 +527,15 @@ app.post('/api/public-auth/import-config', upload.single('file'), async (req, re
             description: (entry?.description ?? manifest?.description ?? ''),
             manifestUrl: transportUrl,
             version: (entry?.version ?? manifest?.version ?? null),
-            author: entry?.author ?? null,
-            tags: typeof entry?.tags === 'string' ? entry.tags : '',
             isOfficial: entry?.isOfficial === true,
             iconUrl: (entry?.iconUrl ?? manifest?.logo ?? null),
             stremioAddonId: entry?.stremioAddonId ?? null,
             isActive: true,
-            accountId: req.appAccountId,
-            ...(entry?.createdAt ? { createdAt: new Date(entry.createdAt) } : {}),
+            manifest: manifest ? JSON.stringify(manifest) : null,
+            accountId: getAccountId(req),
           }
         })
+        successful++
         if (entry?.id) {
           addonIdMap[entry.id] = created.id
         }
@@ -521,10 +548,10 @@ app.post('/api/public-auth/import-config', upload.single('file'), async (req, re
               const groupById = ga?.groupId && groupIdMap[ga.groupId]
               let group = null
               if (groupById) {
-                group = await prisma.group.findFirst({ where: { id: groupIdMap[ga.groupId], accountId: req.appAccountId } })
+                group = await prisma.group.findFirst({ where: { id: groupIdMap[ga.groupId], accountId: getAccountId(req) } })
               }
               if (!group && groupName) {
-                group = await prisma.group.findFirst({ where: { accountId: req.appAccountId, name: groupName } })
+                group = await prisma.group.findFirst({ where: { accountId: getAccountId(req), name: groupName } })
               }
               if (!group) continue
               const exists = await prisma.groupAddon.findFirst({ where: { groupId: group.id, addonId: created.id } })
@@ -534,7 +561,6 @@ app.post('/api/public-auth/import-config', upload.single('file'), async (req, re
             } catch {}
           }
         }
-        successful++
       } catch (e) {
         console.error('Import-config addon failed:', e)
         failed++
@@ -550,7 +576,7 @@ app.post('/api/public-auth/import-config', upload.single('file'), async (req, re
         // avoid duplicates within this account by username/email
         const exists = await prisma.user.findFirst({
           where: {
-            accountId: req.appAccountId,
+            accountId: getAccountId(req),
             OR: [
               ...(email ? [{ email }] : []),
               ...(username ? [{ username }] : []),
@@ -561,25 +587,14 @@ app.post('/api/public-auth/import-config', upload.single('file'), async (req, re
         // Map fields from export; force accountId to current
         const createdUser = await prisma.user.create({
           data: {
-            displayName: u?.displayName || username || email || 'User',
-            email: email || `${Date.now()}@local`,
             username: username || email || `user_${Date.now()}`,
-            firstName: u?.firstName || null,
-            lastName: u?.lastName || null,
-            avatar: u?.avatar || null,
-            role: u?.role || 'USER',
+            email: email || `${Date.now()}@local`,
             isActive: u?.isActive !== false,
-            stremioEmail: u?.stremioEmail || null,
-            stremioUsername: u?.stremioUsername || null,
-            stremioAuthKey: u?.stremioAuthKey || null,
-            stremioUserId: u?.stremioUserId || null,
-            stremioAddons: u?.stremioAddons || null,
-            lastStremioSync: u?.lastStremioSync ? new Date(u.lastStremioSync) : null,
+            stremioAuthKey: u?.stremioAuthKey ? encrypt(u.stremioAuthKey) : null,
             excludedAddons: u?.excludedAddons || null,
             protectedAddons: u?.protectedAddons || null,
             colorIndex: typeof u?.colorIndex === 'number' ? u.colorIndex : null,
-            accountId: req.appAccountId,
-            ...(u?.createdAt ? { createdAt: new Date(u.createdAt) } : {}),
+            accountId: getAccountId(req),
           }
         })
         usersCreated++
@@ -598,17 +613,15 @@ app.post('/api/public-auth/import-config', upload.single('file'), async (req, re
       try {
         const name = (g?.name || '').toString().trim()
         if (!name) { groupsFailed++; continue }
-        let group = await prisma.group.findFirst({ where: { accountId: req.appAccountId, name } })
+        let group = await prisma.group.findFirst({ where: { accountId: getAccountId(req), name } })
         if (!group) {
           group = await prisma.group.create({
             data: {
               name,
               description: g?.description || '',
               colorIndex: typeof g?.colorIndex === 'number' ? g.colorIndex : null,
-              maxMembers: typeof g?.maxMembers === 'number' ? g.maxMembers : 10,
               isActive: g?.isActive !== false,
-              accountId: req.appAccountId,
-              ...(g?.createdAt ? { createdAt: new Date(g.createdAt) } : {}),
+              accountId: getAccountId(req),
             }
           })
           groupsCreated++
@@ -616,6 +629,28 @@ app.post('/api/public-auth/import-config', upload.single('file'), async (req, re
           groupsSkipped++
         }
         // memberships
+        // Handle group memberships using userIds array (SQLite approach)
+        const groupUserIds = []
+        
+        // First, try to parse userIds from the group data
+        if (g?.userIds) {
+          try {
+            const userIdsArray = JSON.parse(g.userIds)
+            if (Array.isArray(userIdsArray)) {
+              for (const userId of userIdsArray) {
+                const mappedUserId = userIdMap[userId]
+                if (mappedUserId) {
+                  groupUserIds.push(mappedUserId)
+                  membershipsCreated++
+                }
+              }
+            }
+          } catch (e) {
+            console.error('Failed to parse userIds:', e)
+          }
+        }
+        
+        // Also handle members array if present
         if (Array.isArray(g?.members)) {
           for (const m of g.members) {
             try {
@@ -624,19 +659,25 @@ app.post('/api/public-auth/import-config', upload.single('file'), async (req, re
               const byExportId = m?.userId && userIdMap[m.userId]
               let user = null
               if (byExportId) {
-                user = await prisma.user.findFirst({ where: { id: userIdMap[m.userId], accountId: req.appAccountId } })
+                user = await prisma.user.findFirst({ where: { id: userIdMap[m.userId], accountId: getAccountId(req) } })
               }
               if (!user) {
-                user = await prisma.user.findFirst({ where: { accountId: req.appAccountId, OR: [ ...(mail ? [{ email: mail }] : []), ...(uname ? [{ username: uname }] : []) ] } })
+                user = await prisma.user.findFirst({ where: { accountId: getAccountId(req), OR: [ ...(mail ? [{ email: mail }] : []), ...(uname ? [{ username: uname }] : []) ] } })
               }
-              if (!user) continue
-              const exists = await prisma.groupMember.findFirst({ where: { groupId: group.id, userId: user.id } })
-              if (!exists) {
-                await prisma.groupMember.create({ data: { groupId: group.id, userId: user.id, role: String(m?.role || 'MEMBER').toUpperCase(), joinedAt: m?.joinedAt ? new Date(m.joinedAt) : undefined, excludedAddons: m?.excludedAddons || null } })
+              if (user && !groupUserIds.includes(user.id)) {
+                groupUserIds.push(user.id)
                 membershipsCreated++
               }
             } catch {}
           }
+        }
+        
+        // Update group with userIds array
+        if (groupUserIds.length > 0) {
+          await prisma.group.update({
+            where: { id: group.id },
+            data: { userIds: JSON.stringify(groupUserIds) }
+          })
         }
         // group -> addons linking by manifestUrl or addon name
         if (Array.isArray(g?.addons)) {
@@ -647,14 +688,14 @@ app.post('/api/public-auth/import-config', upload.single('file'), async (req, re
               if (!addonId) {
                 const manifestUrl = (ga?.addon?.manifestUrl || ga?.manifestUrl || '').toString().trim()
                 if (manifestUrl) {
-                  const a1 = await prisma.addon.findFirst({ where: { accountId: req.appAccountId, manifestUrl } })
+                  const a1 = await prisma.addon.findFirst({ where: { accountId: getAccountId(req), manifestUrl } })
                   if (a1) addonId = a1.id
                 }
               }
               if (!addonId) {
                 const addonName = (ga?.addon?.name || ga?.name || '').toString().trim()
                 if (addonName) {
-                  const a2 = await prisma.addon.findFirst({ where: { accountId: req.appAccountId, name: addonName } })
+                  const a2 = await prisma.addon.findFirst({ where: { accountId: getAccountId(req), name: addonName } })
                   if (a2) addonId = a2.id
                 }
               }
@@ -681,12 +722,13 @@ app.post('/api/public-auth/import-config', upload.single('file'), async (req, re
           const byId = u?.id && userIdMap[u.id]
           let user = null
           if (byId) {
-            user = await prisma.user.findFirst({ where: { id: userIdMap[u.id], accountId: req.appAccountId } })
+            user = await prisma.user.findFirst({ where: { id: userIdMap[u.id], accountId: getAccountId(req) } })
           }
           if (!user) {
-            user = await prisma.user.findFirst({ where: { accountId: req.appAccountId, OR: [ ...(email ? [{ email }] : []), ...(username ? [{ username }] : []) ] } })
+            user = await prisma.user.findFirst({ where: { accountId: getAccountId(req), OR: [ ...(email ? [{ email }] : []), ...(username ? [{ username }] : []) ] } })
           }
           if (!user) continue
+          // Handle user memberships using userIds array (SQLite approach)
           if (Array.isArray(u?.memberships)) {
             for (const m of u.memberships) {
               try {
@@ -694,15 +736,21 @@ app.post('/api/public-auth/import-config', upload.single('file'), async (req, re
                 const groupById = m?.groupId && groupIdMap[m.groupId]
                 let group = null
                 if (groupById) {
-                  group = await prisma.group.findFirst({ where: { id: groupIdMap[m.groupId], accountId: req.appAccountId } })
+                  group = await prisma.group.findFirst({ where: { id: groupIdMap[m.groupId], accountId: getAccountId(req) } })
                 }
                 if (!group && gname) {
-                  group = await prisma.group.findFirst({ where: { accountId: req.appAccountId, name: gname } })
+                  group = await prisma.group.findFirst({ where: { accountId: getAccountId(req), name: gname } })
                 }
                 if (!group) continue
-                const exists = await prisma.groupMember.findFirst({ where: { groupId: group.id, userId: user.id } })
-                if (!exists) {
-                  await prisma.groupMember.create({ data: { groupId: group.id, userId: user.id, role: String(m?.role || 'MEMBER').toUpperCase(), joinedAt: m?.joinedAt ? new Date(m.joinedAt) : undefined, excludedAddons: m?.excludedAddons || null } })
+                
+                // Add user to group's userIds array
+                const currentUserIds = group.userIds ? JSON.parse(group.userIds) : []
+                if (!currentUserIds.includes(user.id)) {
+                  currentUserIds.push(user.id)
+                  await prisma.group.update({
+                    where: { id: group.id },
+                    data: { userIds: JSON.stringify(currentUserIds) }
+                  })
                   membershipsCreated++
                 }
               } catch {}
@@ -721,7 +769,7 @@ app.post('/api/public-auth/import-config', upload.single('file'), async (req, re
           if (!addonId) {
             const manifestUrl = (a?.manifestUrl || a?.url || a?.transportUrl || '').toString().trim()
             if (manifestUrl) {
-              const found = await prisma.addon.findFirst({ where: { accountId: req.appAccountId, manifestUrl } })
+              const found = await prisma.addon.findFirst({ where: { accountId: getAccountId(req), manifestUrl } })
               if (found) addonId = found.id
             }
           }
@@ -733,7 +781,7 @@ app.post('/api/public-auth/import-config', upload.single('file'), async (req, re
                 if (!groupId) {
                   const gname = (ga?.group?.name || ga?.groupName || '').toString().trim()
                   if (gname) {
-                    const group = await prisma.group.findFirst({ where: { accountId: req.appAccountId, name: gname } })
+                    const group = await prisma.group.findFirst({ where: { accountId: getAccountId(req), name: gname } })
                     if (group) groupId = group.id
                   }
                 }
@@ -751,7 +799,7 @@ app.post('/api/public-auth/import-config', upload.single('file'), async (req, re
 
     return res.json({
       message: 'Configuration imported',
-      addons: { successful, failed, redundant, total: addonsArray.length },
+      addons: { created: successful, reused: 0 },
       users: { created: usersCreated, skipped: usersSkipped, failed: usersFailed, total: usersArray.length },
       groups: { created: groupsCreated, skipped: groupsSkipped, failed: groupsFailed, total: groupsArray.length, membershipsCreated },
     })
@@ -764,20 +812,22 @@ app.post('/api/public-auth/import-config', upload.single('file'), async (req, re
 // Reset (wipe) all data for the logged-in account, but keep the account
 app.post('/api/public-auth/reset', async (req, res) => {
   try {
-    if (!AUTH_ENABLED) return res.status(400).json({ error: 'Auth disabled' })
-    if (!req.appAccountId) return res.status(401).json({ error: 'Unauthorized' })
+    // Always reset before importing configuration (works for both auth and private mode)
+    const accountId = getAccountId(req)
+    console.log('🧹 Resetting configuration before import for accountId:', accountId)
+    
     await prisma.$transaction([
-      prisma.activityLog.deleteMany({ where: { accountId: req.appAccountId } }),
-      prisma.groupMember.deleteMany({ where: { group: { accountId: req.appAccountId } } }),
-      prisma.groupInvite.deleteMany({ where: { group: { accountId: req.appAccountId } } }),
-      prisma.groupAddon.deleteMany({ where: { group: { accountId: req.appAccountId } } }),
-      prisma.addonSetting.deleteMany({ where: { user: { accountId: req.appAccountId } } }),
-      prisma.user.deleteMany({ where: { accountId: req.appAccountId } }),
-      prisma.group.deleteMany({ where: { accountId: req.appAccountId } }),
-      prisma.addon.deleteMany({ where: { accountId: req.appAccountId } }),
-      // Also remove any orphan addons that have no account scope and no group links
+      // ActivityLog model removed
+      // Existing relations in simplified schema
+      prisma.groupAddon.deleteMany({ where: { group: { accountId } } }),
+      prisma.user.deleteMany({ where: { accountId } }),
+      prisma.group.deleteMany({ where: { accountId } }),
+      prisma.addon.deleteMany({ where: { accountId } }),
+      // Clean orphans
       prisma.addon.deleteMany({ where: { accountId: null, groupAddons: { none: {} } } }),
     ])
+    
+    console.log('✅ Configuration reset completed, starting import...')
     return res.json({ message: 'Configuration reset' })
   } catch (e) {
     console.error('Reset account failed:', e)
@@ -792,11 +842,10 @@ app.delete('/api/public-auth/account', async (req, res) => {
 
     // Cascade delete scoped data
     await prisma.$transaction([
-      prisma.activityLog.deleteMany({ where: { accountId: req.appAccountId } }),
-      prisma.groupMember.deleteMany({ where: { group: { accountId: req.appAccountId } } }),
-      prisma.groupInvite.deleteMany({ where: { group: { accountId: req.appAccountId } } }),
+      // ActivityLog model removed
+      // GroupMember and GroupInvite models removed - using JSON arrays instead
       prisma.groupAddon.deleteMany({ where: { group: { accountId: req.appAccountId } } }),
-      prisma.addonSetting.deleteMany({ where: { user: { accountId: req.appAccountId } } }),
+      // AddonSetting model removed
       prisma.user.deleteMany({ where: { accountId: req.appAccountId } }),
       prisma.group.deleteMany({ where: { accountId: req.appAccountId } }),
       prisma.addon.deleteMany({ where: { accountId: req.appAccountId } }),
@@ -903,7 +952,7 @@ app.get('/health', async (req, res) => {
 app.get('/debug/addons', async (req, res) => {
   try {
     const allAddons = await prisma.addon.findMany({
-      select: { id: true, name: true, accountId: true, manifestUrl: true, isActive: true, createdAt: true }
+      select: { id: true, name: true, accountId: true, manifestUrl: true, isActive: true }
     });
     res.json({
       total: allAddons.length,
@@ -948,39 +997,33 @@ app.get('/api/health', async (req, res) => {
 app.get('/api/users', async (req, res) => {
   debug.log('🔍 GET /api/users called');
   try {
-    const whereScope = AUTH_ENABLED && req.appAccountId 
-      ? {
-          OR: [
-            { accountId: req.appAccountId },
-            { memberships: { some: { group: { accountId: req.appAccountId } } } }
-          ]
-        }
-      : {}
+    const whereScope = getAccountId(req) ? { accountId: getAccountId(req) } : {}
     const users = await prisma.user.findMany({
       where: whereScope,
-      include: {
-        memberships: { 
-          include: { 
-            group: {
-              include: {
-                addons: {
-                  include: {
-                    addon: true
-                  },
-                  orderBy: { addedAt: 'asc' }
-                }
-              }
-            }
-          } 
-        },
-      },
-      orderBy: { createdAt: 'asc' }
+      include: {},
+        orderBy: { id: 'asc' }
     });
 
     // Transform data for frontend compatibility
     const transformedUsers = await Promise.all(users.map(async (user) => {
-      // Calculate addon count from user's group
-      const userGroup = user.memberships?.[0]?.group
+      // For SQLite, we need to find groups that contain this user
+      const groups = await prisma.group.findMany({
+        where: {
+          accountId: getAccountId(req),
+          userIds: {
+            contains: user.id
+          }
+        },
+              include: {
+                addons: {
+                  include: {
+                    addon: true
+            }
+          }
+        }
+      })
+      
+      const userGroup = groups[0] // Use first group
       const addonCount = userGroup?.addons?.length || 0
       
       // Calculate Stremio addons count by fetching live data
@@ -1045,15 +1088,14 @@ app.get('/api/users', async (req, res) => {
       
       return {
         id: user.id,
-        username: user.username || user.stremioUsername,
-        email: user.stremioEmail || user.email,
+        username: user.username,
+        email: user.email,
         groupName: userGroup?.name || null,
         status: user.isActive ? 'active' : 'inactive',
         addons: addonCount,
         stremioAddonsCount: stremioAddonsCount,
-        groups: user.memberships?.length || 0,
-        lastActive: user.lastStremioSync || user.createdAt,
-        avatar: null,
+        groups: groups.length,
+        lastActive: null,
         hasStremioConnection: !!user.stremioAuthKey,
         isActive: user.isActive,
         excludedAddons: excludedAddons,
@@ -1080,30 +1122,34 @@ app.get('/api/users/:id', async (req, res) => {
     const user = await prisma.user.findUnique({
       where: { 
         id,
-        ...(AUTH_ENABLED && req.appAccountId ? { accountId: req.appAccountId } : {})
+        accountId: getAccountId(req)
       },
-      include: {
-        memberships: {
-          include: {
-            group: {
-              include: {
-                addons: {
-                  include: { addon: true },
-                  orderBy: { addedAt: 'asc' }
-                }
-              }
-            }
-          }
-        }
-      }
+      include: {}
     })
 
     if (!user) {
       return res.status(404).json({ error: 'User not found' })
     }
 
+    // Find groups that contain this user
+    const groups = await prisma.group.findMany({
+      where: {
+        accountId: getAccountId(req),
+        userIds: {
+          contains: user.id
+        }
+      },
+      include: {
+        addons: {
+          include: {
+            addon: true
+          }
+        }
+      }
+    })
+
     // Group addons come from the user's primary group assignment
-    const familyGroup = user.memberships?.[0]?.group
+    const familyGroup = groups[0]
     const addons = Array.isArray(familyGroup?.addons)
       ? familyGroup.addons
           .filter((ga) => ga.addon.isActive !== false) // Only show enabled addons
@@ -1119,9 +1165,7 @@ app.get('/api/users/:id', async (req, res) => {
       : []
 
     // Get all groups the user belongs to
-    const userGroups = [
-      ...user.memberships.map(m => ({ id: m.group.id, name: m.group.name, role: 'member' }))
-    ]
+    const userGroups = groups.map(g => ({ id: g.id, name: g.name }))
 
     // Calculate Stremio addons count and parse addons data (skip in basic mode)
     let stremioAddonsCount = 0
@@ -1171,22 +1215,15 @@ app.get('/api/users/:id', async (req, res) => {
     // Transform for frontend
     const transformedUser = {
       id: user.id,
-      displayName: user.displayName,
-      email: user.stremioEmail || user.email,
-      username: user.stremioUsername || user.username,
-      stremioEmail: user.stremioEmail,
-      stremioUsername: user.stremioUsername,
+      email: user.email,
+      username: user.username,
       hasStremioConnection: !!user.stremioAuthKey,
-      role: user.role.toLowerCase(),
       status: user.isActive ? 'active' : 'inactive',
       addons: addons,
       groups: userGroups,
-      groupName: user.memberships?.[0]?.group?.name || null,
-      groupId: user.memberships?.[0]?.group?.id || null,
-      lastActive: user.lastStremioSync || user.updatedAt,
-      avatar: null,
-      createdAt: user.createdAt,
-      updatedAt: user.updatedAt,
+      groupName: groups[0]?.name || null,
+      groupId: groups[0]?.id || null,
+      lastActive: null,
       stremioAddonsCount: stremioAddonsCount,
       stremioAddons: stremioAddons,
       excludedAddons: excludedAddons,
@@ -1212,7 +1249,7 @@ app.put('/api/users/:id/excluded-addons', async (req, res) => {
     const updatedUser = await prisma.user.update({
       where: { 
         id,
-        ...(AUTH_ENABLED && req.appAccountId ? { accountId: req.appAccountId } : {})
+        accountId: getAccountId(req)
       },
       data: {
         excludedAddons: JSON.stringify(excludedAddons || [])
@@ -1270,7 +1307,7 @@ app.put('/api/users/:id/protected-addons', async (req, res) => {
     const updatedUser = await prisma.user.update({
       where: { 
         id,
-        ...(AUTH_ENABLED && req.appAccountId ? { accountId: req.appAccountId } : {})
+        accountId: getAccountId(req)
       },
       data: {
         protectedAddons: JSON.stringify(protectedAddons || [])
@@ -1319,7 +1356,12 @@ const defaultAddons = {
 }
 
 // Helper function to filter out Stremio default addons
-function filterDefaultAddons(addons) {
+function filterDefaultAddons(addons, unsafeMode = false) {
+  // In unsafe mode, don't filter out any addons - treat all as regular addons
+  if (unsafeMode) {
+    return addons
+  }
+  
   return addons.filter(addon => {
     const name = addon.name || addon.manifest?.name || ''
     const id = addon.id || addon.manifest?.id || ''
@@ -1334,35 +1376,20 @@ function filterDefaultAddons(addons) {
 app.get('/api/users/:id/sync-status', async (req, res) => {
   try {
     const { id } = req.params
-    const { groupId } = req.query
+    const { groupId, unsafe } = req.query
     debug.log(`🔍 GET /api/users/${id}/sync-status called${groupId ? ` for group ${groupId}` : ''}`)
     
     const user = await prisma.user.findUnique({
       where: { 
         id,
-        ...(AUTH_ENABLED && req.appAccountId ? { accountId: req.appAccountId } : {})
+        accountId: getAccountId(req)
       },
       select: { 
         id: true,
-        stremioEmail: true, 
-        stremioUsername: true, 
         stremioAuthKey: true, 
-        stremioUserId: true,
         isActive: true,
         excludedAddons: true,
-        protectedAddons: true,
-        memberships: {
-          include: {
-            group: {
-              include: {
-                addons: {
-                  include: { addon: true },
-                  orderBy: { addedAt: 'asc' }
-                }
-              }
-            }
-          }
-        }
+        protectedAddons: true
       }
     })
 
@@ -1379,6 +1406,14 @@ app.get('/api/users/:id/sync-status', async (req, res) => {
     }
 
     if (!user.isActive) {
+      // If user has stremioAuthKey but is disabled, show connect button
+      if (user.stremioAuthKey) {
+        return res.json({ 
+          isSynced: false, 
+          status: 'connect',
+          message: 'User is disabled - click to reconnect' 
+        })
+      }
       return res.json({ 
         isSynced: false, 
         status: 'inactive',
@@ -1404,13 +1439,51 @@ app.get('/api/users/:id/sync-status', async (req, res) => {
       debug.log(`🔍 Fetched ${stremioAddons.length} live Stremio addons for sync check`)
     } catch (error) {
       console.error(`❌ Error fetching live Stremio addons for sync check:`, error.message)
-      // Fallback to cached data if live fetch fails
+      
+      // If session is invalid, return connect status
+      if (error.message.includes('Session does not exist') || error.message.includes('Session')) {
+        // Also disable the user when we detect invalid Stremio connection
+        try {
+          await prisma.user.update({
+            where: { id: user.id },
+            data: { isActive: false }
+          })
+          console.log(`🔧 Automatically disabled user ${user.id} due to invalid Stremio connection (sync status)`)
+        } catch (disableError) {
+          console.error('Failed to disable user:', disableError.message)
+        }
+        
+        return res.json({ 
+          isSynced: false, 
+          status: 'connect',
+          message: 'User has been disabled due to invalid Stremio connection - click to reconnect' 
+        })
+      }
+      
+      // Fallback to cached data if live fetch fails for other reasons
       stremioAddons = user.stremioAddons ? 
         (Array.isArray(user.stremioAddons) ? user.stremioAddons : Object.values(user.stremioAddons)) : []
     }
 
+    // Find groups that contain this user
+    const groups = await prisma.group.findMany({
+      where: {
+        accountId: getAccountId(req),
+        userIds: {
+          contains: user.id
+        }
+      },
+      include: {
+        addons: {
+          include: {
+            addon: true
+          }
+        }
+      }
+    })
+
     // Check if user has no group memberships - show "Stale" status
-    if (!user.memberships || user.memberships.length === 0) {
+    if (!groups || groups.length === 0) {
       return res.json({ 
         isSynced: false,
         status: 'stale',
@@ -1421,11 +1494,9 @@ app.get('/api/users/:id/sync-status', async (req, res) => {
     }
 
     // Get expected addons from groups - fetch fresh addon data to get current manifest URLs
-    // We need to maintain the order from the group addons (sorted by addedAt)
-    const groupAddons = user.memberships.flatMap(membership => 
-      membership.group.addons
+    const groupAddons = groups.flatMap(group => 
+      group.addons
         .filter(ga => ga.addon.isActive !== false) // Only include enabled addons
-        .sort((a, b) => new Date(a.addedAt || 0) - new Date(b.addedAt || 0)) // Sort by addedAt to match sync order
         .map(ga => ({ 
           id: ga.addon.id, 
           name: ga.addon.name, 
@@ -1487,7 +1558,8 @@ app.get('/api/users/:id/sync-status', async (req, res) => {
     
     // Filter out default addons from Stremio addons for comparison
     // Default addons in Stremio should be ignored unless they're explicitly expected
-    const nonDefaultStremioAddons = filterDefaultAddons(stremioAddons)
+    // In unsafe mode, treat all addons as regular addons for sync purposes
+    const nonDefaultStremioAddons = filterDefaultAddons(stremioAddons, unsafe === 'true')
     
     // Create sets for efficient lookup
     const stremioAddonUrls = new Set(stremioAddons.map(addon => addon.transportUrl || addon.manifestUrl).filter(Boolean))
@@ -1495,11 +1567,13 @@ app.get('/api/users/:id/sync-status', async (req, res) => {
     const expectedAddonUrls = new Set(filteredExpectedAddons.map(addon => addon.manifestUrl))
     
     // Check order: ignore protected/default addons for order comparison
-    // Include both Stremio default addons and user-defined protected addons
-    const protectedAddonIds = new Set(defaultAddons.ids)
-    const protectedManifestUrls = new Set(defaultAddons.manifestUrls)
+    // Protected addons logic:
+    // 1. Default Stremio addons: protected in safe mode, not protected in unsafe mode
+    // 2. User-defined protected addons: ALWAYS protected regardless of mode
+    const protectedAddonIds = unsafe === 'true' ? new Set() : new Set(defaultAddons.ids)
+    const protectedManifestUrls = unsafe === 'true' ? new Set() : new Set(defaultAddons.manifestUrls)
     
-    // Parse user-defined protected addons
+    // Parse user-defined protected addons (ALWAYS protected regardless of mode)
     let userProtectedAddons = []
     try {
       userProtectedAddons = user.protectedAddons ? JSON.parse(user.protectedAddons) : []
@@ -1508,10 +1582,11 @@ app.get('/api/users/:id/sync-status', async (req, res) => {
       userProtectedAddons = []
     }
     
-    // Add user-defined protected addons to the protected URLs set
+    // Add user-defined protected addons to the protected URLs set (ALWAYS)
     userProtectedAddons.forEach(url => {
       if (url && typeof url === 'string') {
         protectedManifestUrls.add(url.trim())
+        console.log(`🔒 Added user protected addon for sync status: ${url}`)
       }
     })
     
@@ -1581,9 +1656,9 @@ app.get('/api/users/:id/stremio-addons', async (req, res) => {
     const user = await prisma.user.findUnique({
       where: { 
         id,
-        ...(AUTH_ENABLED && req.appAccountId ? { accountId: req.appAccountId } : {})
+        accountId: getAccountId(req)
       },
-      select: { stremioEmail: true, stremioUsername: true, stremioAuthKey: true, stremioUserId: true }
+      select: { stremioAuthKey: true }
     })
 
     if (!user) {
@@ -1608,64 +1683,77 @@ app.get('/api/users/:id/stremio-addons', async (req, res) => {
     }
 
     // Use stateless client with authKey to fetch addon collection directly
-    const apiClient = new StremioAPIClient({ endpoint: 'https://api.strem.io', authKey: authKeyPlain })
-    const collection = await apiClient.request('addonCollectionGet', {})
+    try {
+      const apiClient = new StremioAPIClient({ endpoint: 'https://api.strem.io', authKey: authKeyPlain })
+      const collection = await apiClient.request('addonCollectionGet', {})
 
-    const rawAddons = collection?.addons || collection || {}
-    const addonsNormalized = Array.isArray(rawAddons)
-      ? rawAddons
-      : (typeof rawAddons === 'object' ? Object.values(rawAddons) : [])
+      const rawAddons = collection?.addons || collection || {}
+      const addonsNormalized = Array.isArray(rawAddons)
+        ? rawAddons
+        : (typeof rawAddons === 'object' ? Object.values(rawAddons) : [])
 
-    // Keep only safe serializable fields (skip manifest fetching for performance)
-    const allAddons = addonsNormalized.map((a) => {
-      return {
-        id: a?.id || a?.manifest?.id || 'unknown',
-        name: a?.name || a?.manifest?.name || 'Unknown',
-        manifestUrl: a?.manifestUrl || a?.transportUrl || a?.url || null,
-        version: a?.version || a?.manifest?.version || 'unknown',
-        description: a?.description || a?.manifest?.description || '',
-        // Include manifest object for frontend compatibility - ensure it's never null
-        manifest: a?.manifest || {
-          id: a?.manifest?.id || a?.id || 'unknown',
-          name: a?.manifest?.name || a?.name || 'Unknown',
-          version: a?.manifest?.version || a?.version || 'unknown',
-          description: a?.manifest?.description || a?.description || '',
-          // Include other essential manifest fields to prevent null errors
-          types: a?.manifest?.types || ['other'],
-          resources: a?.manifest?.resources || [],
-          catalogs: a?.manifest?.catalogs || []
+      // Keep only safe serializable fields (skip manifest fetching for performance)
+      const allAddons = addonsNormalized.map((a) => {
+        return {
+          id: a?.id || a?.manifest?.id || 'unknown',
+          name: a?.name || a?.manifest?.name || 'Unknown',
+          manifestUrl: a?.manifestUrl || a?.transportUrl || a?.url || null,
+          version: a?.version || a?.manifest?.version || 'unknown',
+          description: a?.description || a?.manifest?.description || '',
+          // Include manifest object for frontend compatibility - ensure it's never null
+          manifest: a?.manifest || {
+            id: a?.manifest?.id || a?.id || 'unknown',
+            name: a?.manifest?.name || a?.name || 'Unknown',
+            version: a?.manifest?.version || a?.version || 'unknown',
+            description: a?.manifest?.description || a?.description || '',
+            // Include other essential manifest fields to prevent null errors
+            types: a?.manifest?.types || ['other'],
+            resources: a?.manifest?.resources || [],
+            catalogs: a?.manifest?.catalogs || []
+          }
         }
-      }
-    })
+      })
 
-    // Keep all addons for display (don't filter default addons in the main endpoint)
-    const addons = allAddons
+      // Keep all addons for display (don't filter default addons in the main endpoint)
+      const addons = allAddons
 
-    return res.json({
-      userId: id,
-      stremioUsername: user.stremioUsername || null,
-      stremioEmail: user.stremioEmail || null,
-      count: addons.length,
-      addons
-    })
-  } catch (error) {
-    console.error('Error fetching live Stremio addons:', error)
-    
-    // If Stremio API is down, return empty addons instead of error
-    if (error?.message?.includes('response has no result') || 
-        error?.message?.toLowerCase().includes('network') ||
-        error?.message?.toLowerCase().includes('timeout')) {
-      console.warn('⚠️ Stremio API unavailable, returning empty addons')
       return res.json({
         userId: id,
-        stremioUsername: user.stremioUsername || null,
-        stremioEmail: user.stremioEmail || null,
-        count: 0,
-        addons: []
+        count: addons.length,
+        addons
+      })
+    } catch (stremioError) {
+      console.error('Error fetching live Stremio addons:', stremioError)
+      
+      // Handle specific Stremio API errors gracefully
+      if (stremioError.code === 1 || stremioError.message?.includes('Session does not exist')) {
+        return res.status(400).json({ 
+          message: 'Stremio session expired or invalid. Please reconnect your Stremio account.',
+          error: 'Session does not exist'
+        })
+      }
+      
+      // If Stremio API is down, return empty addons instead of error
+      if (stremioError?.message?.includes('response has no result') || 
+          stremioError?.message?.toLowerCase().includes('network') ||
+          stremioError?.message?.toLowerCase().includes('timeout')) {
+        console.warn('⚠️ Stremio API unavailable, returning empty addons')
+        return res.json({
+          userId: id,
+          count: 0,
+          addons: []
+        })
+      }
+      
+      // For other Stremio API errors, return a 400 instead of 502
+      return res.status(400).json({ 
+        message: 'Failed to fetch addons from Stremio',
+        error: stremioError.message || 'Unknown Stremio API error'
       })
     }
-    
-    return res.status(502).json({ message: 'Failed to fetch addons from Stremio', error: error?.message })
+  } catch (error) {
+    console.error('Error fetching Stremio addons for user', id, ':', error.message)
+    res.status(500).json({ message: 'Failed to fetch addons from Stremio', error: error.message })
   }
 })
 
@@ -1676,21 +1764,7 @@ app.post('/api/users/sync-all', async (req, res) => {
     
     // Get all enabled users
     const users = await prisma.user.findMany({
-      where: { isActive: true },
-      include: {
-        memberships: {
-          include: {
-            group: {
-              include: {
-                addons: {
-                  include: { addon: true },
-                  orderBy: { addedAt: 'asc' }
-                }
-              }
-            }
-          }
-        }
-      }
+      where: { isActive: true }
     })
     
     if (users.length === 0) {
@@ -1713,7 +1787,7 @@ app.post('/api/users/sync-all', async (req, res) => {
         debug.log(`🔄 Syncing user: ${user.username || user.email}`)
         
         // Use the reusable sync function
-        const syncResult = await syncUserAddons(user.id, [], 'normal')
+        const syncResult = await syncUserAddons(user.id, [], 'normal', false)
         
         if (syncResult.success) {
           syncedCount++
@@ -1770,7 +1844,7 @@ app.post('/api/users/:id/sync', async (req, res) => {
       'x-sync-mode': req.headers['x-sync-mode']
     })
     const { id } = req.params
-    const { excludedManifestUrls = [] } = req.body || {}
+    const { excludedManifestUrls = [], unsafe } = req.body || {}
 
     // Extra debugging for body/exclusions shape
     try {
@@ -1787,7 +1861,7 @@ app.post('/api/users/:id/sync', async (req, res) => {
     const syncMode = getSyncMode(req)
 
     // Use the reusable sync function
-    const syncResult = await syncUserAddons(id, excludedManifestUrls, syncMode)
+    const syncResult = await syncUserAddons(id, excludedManifestUrls, syncMode, unsafe === true)
     
     if (syncResult.success) {
       if (syncResult.alreadySynced) {
@@ -2089,33 +2163,46 @@ app.post('/api/users/:id/stremio-addons/clear', async (req, res) => {
 app.delete('/api/users/:id/stremio-addons/:addonId', async (req, res) => {
   try {
     const { id, addonId } = req.params
+    const { unsafe } = req.query
     
-    // Define protected addon IDs and URLs that should never be deleted
-    // Use the same defaultAddons definition
-    const protectedAddonIds = defaultAddons.ids
-    const protectedManifestUrls = defaultAddons.manifestUrls
-    
-    // Check if the addon being deleted is protected
-    const isProtected = protectedAddonIds.some(protectedId => addonId.includes(protectedId)) ||
-                       protectedManifestUrls.some(protectedUrl => addonId === protectedUrl)
-    
-    if (isProtected) {
-      return res.status(403).json({ message: 'This addon is protected and cannot be deleted' })
-    }
-    
-    // Fetch the user's stored Stremio auth
+    // Get user to check for user-defined protected addons and Stremio auth
     const user = await prisma.user.findUnique({
-      where: { 
-        id,
-        ...(AUTH_ENABLED && req.appAccountId ? { accountId: req.appAccountId } : {})
-      },
-      select: { stremioEmail: true, stremioUsername: true, stremioAuthKey: true, stremioUserId: true }
+      where: { id },
+      select: { protectedAddons: true, stremioAuthKey: true }
     })
-
+    
     if (!user) {
       return res.status(404).json({ message: 'User not found' })
     }
-
+    
+    // Protected addons logic:
+    // 1. Default Stremio addons: protected in safe mode, not protected in unsafe mode
+    // 2. User-defined protected addons: ALWAYS protected regardless of mode
+    const protectedAddonIds = unsafe === 'true' ? [] : defaultAddons.ids
+    const protectedManifestUrls = unsafe === 'true' ? [] : defaultAddons.manifestUrls
+    
+    // Parse user-defined protected addons (ALWAYS protected regardless of mode)
+    let userProtectedAddons = []
+    try {
+      userProtectedAddons = user.protectedAddons ? JSON.parse(user.protectedAddons) : []
+    } catch (e) {
+      console.warn('Failed to parse user protected addons in delete:', e)
+      userProtectedAddons = []
+    }
+    
+    // Add user-defined protected addons to the protected URLs list (ALWAYS)
+    const allProtectedUrls = [...protectedManifestUrls, ...userProtectedAddons]
+    
+    // Check if the addon being deleted is protected
+    const isProtected = protectedAddonIds.some(protectedId => addonId.includes(protectedId)) ||
+                       allProtectedUrls.some(protectedUrl => addonId === protectedUrl)
+    
+    // In unsafe mode, allow deletion of default Stremio addons but not user-defined protected addons
+    if (isProtected && unsafe !== 'true') {
+      return res.status(403).json({ message: 'This addon is protected and cannot be deleted' })
+    }
+    
+    // Check if user has Stremio auth
     if (!user.stremioAuthKey) {
       return res.status(400).json({ message: 'User is not connected to Stremio' })
     }
@@ -2184,9 +2271,8 @@ app.put('/api/users/:id', async (req, res) => {
     const existingUser = await prisma.user.findUnique({
       where: { 
         id,
-        ...(AUTH_ENABLED && req.appAccountId ? { accountId: req.appAccountId } : {})
+        accountId: getAccountId(req)
       },
-      include: { memberships: true }
     })
 
     if (!existingUser) {
@@ -2205,7 +2291,7 @@ app.put('/api/users/:id', async (req, res) => {
       const emailExists = await prisma.user.findFirst({
         where: { 
           AND: [
-            { OR: [{ email }, { stremioEmail: email }] },
+            { email },
             { id: { not: id } },
             ...(AUTH_ENABLED && req.appAccountId ? [{ accountId: req.appAccountId }] : [])
           ]
@@ -2216,12 +2302,7 @@ app.put('/api/users/:id', async (req, res) => {
         return res.status(400).json({ error: 'Email already exists' })
       }
       
-      // Update both email fields if it's a Stremio user
-      if (existingUser.stremioEmail) {
-        updateData.stremioEmail = email
-      } else {
-        updateData.email = email
-      }
+      updateData.email = email
     }
 
     if (password !== undefined && password.trim() !== '') {
@@ -2237,10 +2318,24 @@ app.put('/api/users/:id', async (req, res) => {
     // Handle group assignment
     console.log(`🔍 Group assignment - groupId: "${groupId}", type: ${typeof groupId}`)
     if (groupId !== undefined) {
-      // Always remove user from current member groups first
-      await prisma.groupMember.deleteMany({
-        where: { userId: id }
+      // Remove user from all groups first (update userIds arrays)
+      const currentGroups = await prisma.group.findMany({
+        where: {
+          accountId: getAccountId(req),
+          userIds: {
+            contains: id
+          }
+        }
       })
+      
+      for (const group of currentGroups) {
+        const userIds = group.userIds ? JSON.parse(group.userIds) : []
+        const updatedUserIds = userIds.filter(userId => userId !== id)
+        await prisma.group.update({
+          where: { id: group.id },
+          data: { userIds: JSON.stringify(updatedUserIds) }
+        })
+      }
       console.log(`🔍 Removed user from all groups`)
 
       // If a group ID is provided and not empty, assign to that group
@@ -2250,7 +2345,7 @@ app.put('/api/users/:id', async (req, res) => {
         const group = await prisma.group.findUnique({
           where: { 
             id: groupId.trim(),
-            ...(AUTH_ENABLED && req.appAccountId ? { accountId: req.appAccountId } : {})
+            accountId: getAccountId(req)
           }
         })
         
@@ -2258,45 +2353,46 @@ app.put('/api/users/:id', async (req, res) => {
           return res.status(400).json({ error: 'Group not found' })
         }
         
-        // Create the group membership
-        await prisma.groupMember.create({
-          data: {
-            userId: id,
-            groupId: group.id,
-            role: 'MEMBER'
-          }
-        })
+        // Add user to group's userIds array
+        const currentUserIds = group.userIds ? JSON.parse(group.userIds) : []
+        if (!currentUserIds.includes(id)) {
+          currentUserIds.push(id)
+          await prisma.group.update({
+            where: { id: group.id },
+            data: { userIds: JSON.stringify(currentUserIds) }
+          })
+        }
         console.log(`🔍 User assigned to group: ${group.name}`)
       }
     }
 
     // Fetch updated user for response
     const userWithGroups = await prisma.user.findUnique({
-      where: { id },
-      include: {
-        memberships: {
-          include: {
-            group: true
-          }
+      where: { id }
+    })
+
+    // Find groups that contain this user using userIds JSON array
+    const userGroups = await prisma.group.findMany({
+      where: {
+        userIds: {
+          contains: id
         }
       }
     })
 
     // Transform for frontend response
-    const userGroup = userWithGroups.memberships?.[0]?.group
+    const userGroup = userGroups[0] // Get first group if any
     const transformedUser = {
       id: userWithGroups.id,
-      username: userWithGroups.username || userWithGroups.stremioUsername,
-      email: userWithGroups.stremioEmail || userWithGroups.email,
-      role: userWithGroups.role.toLowerCase(),
+      username: userWithGroups.username,
+      email: userWithGroups.email,
       status: userWithGroups.isActive ? 'active' : 'inactive',
       addons: userWithGroups.stremioAddons ? 
         (Array.isArray(userWithGroups.stremioAddons) ? userWithGroups.stremioAddons.length : Object.keys(userWithGroups.stremioAddons).length) : 0,
-      groups: userWithGroups.memberships?.length || 0,
+      groups: userGroups.length,
       groupName: userGroup?.name || null,
       groupId: userGroup?.id || null,
-      lastActive: userWithGroups.lastStremioSync || userWithGroups.createdAt,
-      avatar: null
+      lastActive: null
     }
 
     // Log activity (temporarily disabled for debugging)
@@ -2333,9 +2429,8 @@ app.patch('/api/users/:id', async (req, res) => {
     const existingUser = await prisma.user.findUnique({
       where: { 
         id,
-        ...(AUTH_ENABLED && req.appAccountId ? { accountId: req.appAccountId } : {})
+        accountId: getAccountId(req)
       },
-      include: { memberships: true }
     })
     
     if (!existingUser) {
@@ -2351,7 +2446,7 @@ app.patch('/api/users/:id', async (req, res) => {
         where: { 
           username,
           id: { not: id },
-          ...(AUTH_ENABLED && req.appAccountId ? { accountId: req.appAccountId } : {})
+          accountId: getAccountId(req)
         }
       })
       
@@ -2367,7 +2462,7 @@ app.patch('/api/users/:id', async (req, res) => {
       const emailExists = await prisma.user.findFirst({
         where: { 
           AND: [
-            { OR: [{ email }, { stremioEmail: email }] },
+            { email },
             { id: { not: id } },
             ...(AUTH_ENABLED && req.appAccountId ? [{ accountId: req.appAccountId }] : [])
           ]
@@ -2378,12 +2473,7 @@ app.patch('/api/users/:id', async (req, res) => {
         return res.status(400).json({ error: 'Email already exists' })
       }
       
-      // Update both email fields if it's a Stremio user
-      if (existingUser.stremioEmail) {
-        updateData.stremioEmail = email
-      } else {
-        updateData.email = email
-      }
+      updateData.email = email
     }
     
     if (password !== undefined && password.trim() !== '') {
@@ -2394,14 +2484,7 @@ app.patch('/api/users/:id', async (req, res) => {
     // Update user
     const updatedUser = await prisma.user.update({
       where: { id },
-      data: updateData,
-      include: {
-        memberships: {
-          include: {
-            group: true
-          }
-        }
-      }
+      data: updateData
     })
     
     // Remove sensitive data
@@ -2427,16 +2510,10 @@ app.patch('/api/users/:id/toggle-status', async (req, res) => {
     const updatedUser = await prisma.user.update({
       where: { 
         id,
-        ...(AUTH_ENABLED && req.appAccountId ? { accountId: req.appAccountId } : {})
+        accountId: getAccountId(req)
       },
       data: { isActive: !isActive },
-      include: {
-        memberships: {
-          include: {
-            group: true
-          }
-        }
-      }
+      include: {}
     })
     
     // Remove sensitive data
@@ -2458,21 +2535,40 @@ app.delete('/api/users/:id', async (req, res) => {
     const existingUser = await prisma.user.findUnique({ 
       where: { 
         id,
-        ...(AUTH_ENABLED && req.appAccountId ? { accountId: req.appAccountId } : {})
+        accountId: getAccountId(req)
       }
     })
     if (!existingUser) {
       return res.status(404).json({ message: 'User not found' })
     }
 
+    // Remove user from all groups first (update userIds arrays)
+    const groups = await prisma.group.findMany({
+      where: {
+        accountId: getAccountId(req),
+        userIds: {
+          contains: id
+        }
+      }
+    })
+    
+    // Update each group to remove the user from userIds array
+    for (const group of groups) {
+      const userIds = group.userIds ? JSON.parse(group.userIds) : []
+      const updatedUserIds = userIds.filter(userId => userId !== id)
+      await prisma.group.update({
+        where: { id: group.id },
+        data: { userIds: JSON.stringify(updatedUserIds) }
+      })
+    }
+
     // Delete related records first to avoid FK constraint errors
     await prisma.$transaction([
-      prisma.groupMember.deleteMany({ where: { userId: id } }),
-      prisma.activityLog.deleteMany({ where: { userId: id } }),
+      // ActivityLog model removed
       prisma.user.delete({ 
         where: { 
           id,
-          ...(AUTH_ENABLED && req.appAccountId ? { accountId: req.appAccountId } : {})
+          accountId: getAccountId(req)
         }
       })
     ])
@@ -2632,8 +2728,8 @@ app.post('/api/stremio/register', async (req, res) => {
 
 app.post('/api/stremio/connect', async (req, res) => {
   try {
-    const { displayName, email, password, username, groupName } = req.body;
-    console.log(`🔍 POST /api/stremio/connect called with:`, { displayName, email, username, groupName })
+    const { email, password, username, groupName } = req.body;
+    console.log(`🔍 POST /api/stremio/connect called with:`, { email, username, groupName })
     // Redact any sensitive fields from logs
     try {
       const { password: _pw, authKey: _ak, ...rest } = (req.body || {})
@@ -2655,40 +2751,58 @@ app.post('/api/stremio/connect', async (req, res) => {
       where: {
         OR: [
           { email: email },
-          { stremioEmail: email },
           { username: finalUsername }
         ],
         // Only check within the current account when auth is enabled
-        ...(AUTH_ENABLED && req.appAccountId ? { accountId: req.appAccountId } : {})
+        accountId: getAccountId(req)
       }
     });
 
+    // Check if user has a valid Stremio connection
+    let hasValidStremioConnection = false
+    if (existingUser && existingUser.stremioAuthKey) {
+      try {
+        const decryptedKey = decrypt(existingUser.stremioAuthKey)
+        const validation = await validateStremioAuthKey(decryptedKey)
+        hasValidStremioConnection = !!(validation && validation.user)
+      } catch (e) {
+        // Invalid auth key - allow reconnection
+        hasValidStremioConnection = false
+      }
+    }
+
     if (existingUser) {
-      // User already exists in this account - return success (idempotent)
-      if (AUTH_ENABLED && req.appAccountId && existingUser.accountId === req.appAccountId) {
-        return res.status(200).json({
-          message: 'User already exists in this account',
-          user: { id: existingUser.id, username: existingUser.username || existingUser.stremioUsername },
-          addonsCount: 0,
-          group: null
-        })
+      // If user exists with valid Stremio connection, return conflict
+      if (hasValidStremioConnection) {
+        if (AUTH_ENABLED && req.appAccountId && existingUser.accountId === req.appAccountId) {
+          return res.status(200).json({
+            message: 'User already exists in this account',
+            user: { id: existingUser.id, username: existingUser.username },
+            addonsCount: 0,
+            group: null
+          })
+        }
+        
+        // Determine which field caused the conflict
+        if (existingUser.username === finalUsername) {
+          return res.status(409).json({ 
+            message: 'Username already exists',
+            error: 'Please choose a different username'
+          });
+        }
+        if (existingUser.email === email) {
+          return res.status(409).json({ 
+            message: 'Email already exists',
+            error: 'This email is already registered'
+          });
+        }
+        
+        return res.status(409).json({ message: 'User already exists' });
       }
       
-      // Determine which field caused the conflict
-      if (existingUser.username === finalUsername) {
-        return res.status(409).json({ 
-          message: 'Username already exists',
-          error: 'Please choose a different username'
-        });
-      }
-      if (existingUser.email === email || existingUser.stremioEmail === email) {
-        return res.status(409).json({ 
-          message: 'Email already exists',
-          error: 'This email is already registered'
-        });
-      }
-      
-      return res.status(409).json({ message: 'User already exists' });
+      // User exists but has invalid/no Stremio connection - allow reconnection
+      // We'll update the existing user instead of creating a new one
+      console.log(`🔄 User exists with invalid Stremio connection, allowing reconnection: ${existingUser.id}`)
     }
 
     // Create a temporary storage object for this authentication session
@@ -2801,23 +2915,34 @@ app.post('/api/stremio/connect', async (req, res) => {
     // Encrypt the auth key for secure storage
     const encryptedAuthKey = encrypt(authKey);
 
-    // Create user in database
-    const newUser = await prisma.user.create({
-      data: {
-        // Scope to current AppAccount when auth is enabled
-        ...(AUTH_ENABLED && req.appAccountId ? { accountId: req.appAccountId } : {}),
-        displayName: finalUsername,
-        username: finalUsername,
-        email,
-        stremioEmail: email,
-        stremioUsername: userData?.username || email.split('@')[0],
-        stremioAuthKey: encryptedAuthKey,
-        stremioUserId: userData?.id,
-        stremioAddons: JSON.stringify(addonsData || {}),
-        lastStremioSync: new Date(),
-        role: 'USER'
-      }
-    });
+    // Create or update user in database
+    let newUser;
+    if (existingUser && !hasValidStremioConnection) {
+      // Update existing user with new Stremio connection
+      newUser = await prisma.user.update({
+        where: { id: existingUser.id },
+        data: {
+          username: finalUsername,
+          email,
+          stremioAuthKey: encryptedAuthKey,
+          isActive: true
+        }
+      });
+      console.log(`✅ Updated existing user with new Stremio connection: ${newUser.id}`)
+    } else {
+      // Create new user
+      newUser = await prisma.user.create({
+        data: {
+          // Scope to current AppAccount when auth is enabled
+          accountId: getAccountId(req),
+          username: finalUsername,
+          email,
+          stremioAuthKey: encryptedAuthKey,
+          isActive: true
+        }
+      });
+      console.log(`✅ Created new user: ${newUser.id}`)
+    }
 
     // Handle group assignment if provided
     let assignedGroup = null;
@@ -2829,7 +2954,7 @@ app.post('/api/stremio/connect', async (req, res) => {
         assignedGroup = await prisma.group.findFirst({
           where: {
             name: groupName.trim(),
-            ...(AUTH_ENABLED && req.appAccountId ? { accountId: req.appAccountId } : {})
+            accountId: getAccountId(req)
           }
         });
         
@@ -2838,21 +2963,22 @@ app.post('/api/stremio/connect', async (req, res) => {
             data: {
               name: groupName.trim(),
               description: `Group created for ${finalUsername}`,
-              ...(AUTH_ENABLED && req.appAccountId ? { accountId: req.appAccountId } : {})
+              accountId: getAccountId(req)
             }
           });
         }
         console.log(`🔍 Group found/created:`, assignedGroup)
 
-        // Add user to group
-        const groupMember = await prisma.groupMember.create({
-          data: {
-            userId: newUser.id,
-            groupId: assignedGroup.id,
-            role: 'MEMBER'
-          }
-        });
-        console.log(`🔍 User added to group successfully:`, groupMember)
+        // Add user to group's userIds array
+        const currentUserIds = assignedGroup.userIds ? JSON.parse(assignedGroup.userIds) : []
+        if (!currentUserIds.includes(newUser.id)) {
+          currentUserIds.push(newUser.id)
+          await prisma.group.update({
+            where: { id: assignedGroup.id },
+            data: { userIds: JSON.stringify(currentUserIds) }
+          })
+        }
+        console.log(`🔍 User added to group successfully`)
       } catch (groupError) {
         console.error(`❌ Failed to assign user to group:`, groupError)
         // Don't fail the entire user creation if group assignment fails
@@ -2862,30 +2988,13 @@ app.post('/api/stremio/connect', async (req, res) => {
       console.log(`🔍 No group assignment - groupName is empty or undefined`)
     }
 
-    // Log activity (non-blocking)
-    try {
-      await prisma.activityLog.create({
-        data: {
-          userId: newUser.id,
-          action: 'USER_JOINED',
-          details: `User connected Stremio account: ${email}${assignedGroup ? ` and joined group: ${assignedGroup.name}` : ''}`,
-          metadata: {
-            stremioUsername: userData?.username,
-            addonCount: Object.keys(addonsData).length,
-            groupName: assignedGroup?.name
-          }
-        }
-      });
-    } catch (activityErr) {
-      console.error('Activity log error (non-critical):', activityErr)
-    }
+    // ActivityLog model removed
 
     res.status(201).json({
       message: 'Successfully connected to Stremio',
       user: {
         id: newUser.id,
-        username: newUser.username,
-        stremioUsername: newUser.stremioUsername
+        username: newUser.username
       },
       addonsCount: Object.keys(addonsData).length,
       group: assignedGroup ? {
@@ -2956,7 +3065,7 @@ app.post('/api/stremio/connect', async (req, res) => {
 // Connect using existing Stremio authKey (create new Syncio user)
 app.post('/api/stremio/connect-authkey', async (req, res) => {
   try {
-    const { displayName, username, email, authKey, groupName } = req.body
+    const { username, email, authKey, groupName } = req.body
     if (!authKey) return res.status(400).json({ message: 'authKey is required' })
 
     // Validate auth key against Stremio (must be an active session)
@@ -2986,7 +3095,7 @@ app.post('/api/stremio/connect-authkey', async (req, res) => {
     while (await prisma.user.findFirst({ 
       where: { 
         username: finalUsername,
-        ...(AUTH_ENABLED && req.appAccountId ? { accountId: req.appAccountId } : {})
+        accountId: getAccountId(req)
       }
     })) {
       attempt += 1
@@ -2996,26 +3105,29 @@ app.post('/api/stremio/connect-authkey', async (req, res) => {
 
     const created = await prisma.user.create({
       data: {
-        ...(AUTH_ENABLED && req.appAccountId ? { accountId: req.appAccountId } : {}),
-        displayName: displayName || (verifiedUser?.name || verifiedUser?.username || verifiedUser?.email || email || finalUsername || 'User'),
+        accountId: getAccountId(req),
         email: (verifiedUser?.email || email || `${Date.now()}@example.invalid`).toLowerCase(),
         username: finalUsername,
-        role: 'USER',
-        stremioEmail: verifiedUser?.email || email || null,
-        // Stremio does not provide a stable username; keep Syncio username only
-        stremioUsername: null,
         stremioAuthKey: encryptedAuthKey,
-        stremioAddons: JSON.stringify(addonsData || {}),
+        isActive: true
       },
     })
 
     // Optional: create group and add user
     if (groupName) {
-      let group = await prisma.group.findFirst({ where: { name: groupName, ...(AUTH_ENABLED && req.appAccountId ? { accountId: req.appAccountId } : {}) } })
+      let group = await prisma.group.findFirst({ where: { name: groupName, accountId: getAccountId(req) } })
       if (!group) {
-        group = await prisma.group.create({ data: { name: groupName, ...(AUTH_ENABLED && req.appAccountId ? { accountId: req.appAccountId } : {}) } })
+        group = await prisma.group.create({ data: { name: groupName, accountId: getAccountId(req) } })
       }
-      await prisma.groupMember.create({ data: { userId: created.id, groupId: group.id } })
+      // Add user to group's userIds array
+      const currentUserIds = group.userIds ? JSON.parse(group.userIds) : []
+      if (!currentUserIds.includes(created.id)) {
+        currentUserIds.push(created.id)
+        await prisma.group.update({
+          where: { id: group.id },
+          data: { userIds: JSON.stringify(currentUserIds) }
+        })
+      }
     }
 
     // Hide sensitive fields
@@ -3038,7 +3150,7 @@ app.post('/api/users/:id/connect-stremio-authkey', async (req, res) => {
     const user = await prisma.user.findUnique({ 
       where: { 
         id,
-        ...(AUTH_ENABLED && req.appAccountId ? { accountId: req.appAccountId } : {})
+        accountId: getAccountId(req)
       }
     })
     if (!user) return res.status(404).json({ message: 'User not found' })
@@ -3066,10 +3178,8 @@ app.post('/api/users/:id/connect-stremio-authkey', async (req, res) => {
       data: {
         stremioAuthKey: encryptedAuthKey,
         stremioAddons: JSON.stringify(addonsData || {}),
-        stremioEmail: verifiedUser?.email || undefined,
-        // Do not override Syncio username from Stremio
-        stremioUsername: undefined,
         email: verifiedUser?.email ? verifiedUser.email.toLowerCase() : undefined,
+        isActive: true, // Reconnect user since they now have valid Stremio connection
       },
     })
 
@@ -3085,9 +3195,7 @@ app.post('/api/users/:id/connect-stremio-authkey', async (req, res) => {
 // Addons API
 app.get('/api/addons', async (req, res) => {
   try {
-    const whereScope = AUTH_ENABLED && req.appAccountId 
-      ? { accountId: req.appAccountId }
-      : {}
+    const whereScope = getAccountId(req) ? { accountId: getAccountId(req) } : {}
     const addons = await prisma.addon.findMany({
       where: whereScope,
       // return all addons, both active and inactive
@@ -3098,7 +3206,7 @@ app.get('/api/addons', async (req, res) => {
               include: {
                 _count: {
                   select: {
-                    members: true
+                      addons: true
                   }
                 }
               }
@@ -3106,28 +3214,58 @@ app.get('/api/addons', async (req, res) => {
           }
         }
       },
-      orderBy: { createdAt: 'asc' }
+        orderBy: { id: 'asc' }
     });
 
-    const transformedAddons = addons.map(addon => {
-      // Calculate total users across all groups that have this addon
-      const totalUsers = addon.groupAddons.reduce((sum, groupAddon) => {
-        return sum + (groupAddon.group._count.members || 0)
-      }, 0)
+    const transformedAddons = await Promise.all(addons.map(async addon => {
+      // Calculate total users across all groups that contain this addon
+      let totalUsers = 0
+      
+      if (addon.groupAddons && addon.groupAddons.length > 0) {
+        // Get all unique user IDs from all groups that contain this addon
+        const allUserIds = new Set()
+        
+        for (const groupAddon of addon.groupAddons) {
+          if (groupAddon.group && groupAddon.group.userIds) {
+            try {
+              const userIds = JSON.parse(groupAddon.group.userIds)
+              if (Array.isArray(userIds)) {
+                userIds.forEach(userId => allUserIds.add(userId))
+              }
+            } catch (e) {
+              console.error('Error parsing group userIds for addon:', e)
+            }
+          }
+        }
+        
+        // Count active users
+        if (allUserIds.size > 0) {
+          const activeUsers = await prisma.user.findMany({
+            where: {
+              id: { in: Array.from(allUserIds) },
+              isActive: true,
+              accountId: getAccountId(req)
+            },
+            select: { id: true }
+          })
+          totalUsers = activeUsers.length
+        }
+      }
       
       return {
         id: addon.id,
         name: addon.name,
         description: addon.description,
-        url: addon.manifestUrl,
+        manifestUrl: addon.manifestUrl,
+        url: addon.manifestUrl, // Keep both for compatibility
         version: addon.version,
-        tags: addon.tags || '',
         iconUrl: addon.iconUrl,
         status: addon.isActive ? 'active' : 'inactive',
         users: totalUsers,
-        groups: addon.groupAddons.length
+        groups: addon.groupAddons.length,
+        accountId: addon.accountId
       }
-    });
+    }));
 
     res.json(transformedAddons);
   } catch (error) {
@@ -3144,7 +3282,7 @@ app.put('/api/addons/:id/enable', async (req, res) => {
     const existing = await prisma.addon.findUnique({ 
       where: { 
         id,
-        ...(AUTH_ENABLED && req.appAccountId ? { accountId: req.appAccountId } : {})
+        accountId: getAccountId(req)
       }
     })
     if (!existing) return res.status(404).json({ message: 'Addon not found' })
@@ -3152,7 +3290,7 @@ app.put('/api/addons/:id/enable', async (req, res) => {
     const updated = await prisma.addon.update({ 
       where: { 
         id,
-        ...(AUTH_ENABLED && req.appAccountId ? { accountId: req.appAccountId } : {})
+        accountId: getAccountId(req)
       }, 
       data: { isActive: true } 
     })
@@ -3162,7 +3300,6 @@ app.put('/api/addons/:id/enable', async (req, res) => {
       description: updated.description,
       url: updated.manifestUrl,
       version: updated.version,
-      tags: updated.tags || '',
       status: updated.isActive ? 'active' : 'inactive',
       users: 0,
       groups: 0
@@ -3180,7 +3317,7 @@ app.put('/api/addons/:id/disable', async (req, res) => {
     const existing = await prisma.addon.findUnique({ 
       where: { 
         id,
-        ...(AUTH_ENABLED && req.appAccountId ? { accountId: req.appAccountId } : {})
+        accountId: getAccountId(req)
       }
     })
     if (!existing) return res.status(404).json({ message: 'Addon not found' })
@@ -3188,7 +3325,7 @@ app.put('/api/addons/:id/disable', async (req, res) => {
     const updated = await prisma.addon.update({ 
       where: { 
         id,
-        ...(AUTH_ENABLED && req.appAccountId ? { accountId: req.appAccountId } : {})
+        accountId: getAccountId(req)
       }, 
       data: { isActive: false } 
     })
@@ -3198,7 +3335,6 @@ app.put('/api/addons/:id/disable', async (req, res) => {
       description: updated.description,
       url: updated.manifestUrl,
       version: updated.version,
-      tags: updated.tags || '',
       status: updated.isActive ? 'active' : 'inactive',
       users: 0,
       groups: 0
@@ -3232,8 +3368,8 @@ function canonicalizeManifestUrl(raw) {
 
 
 app.post('/api/addons', async (req, res) => {
-        try {
-          const { url, tags, name, description, groupIds, manifestData: providedManifestData } = req.body;
+  try {
+          const { url, name, description, groupIds, manifestData: providedManifestData } = req.body;
     
     if (!url) {
       return res.status(400).json({ message: 'Addon URL is required' });
@@ -3254,21 +3390,26 @@ app.post('/api/addons', async (req, res) => {
     }
 
     // Exact URL duplicate detection (no canonical fuzzy matching)
-    const existingByUrl = await prisma.addon.findFirst({ where: { manifestUrl: sanitizedUrl, ...(AUTH_ENABLED && req.appAccountId ? { accountId: req.appAccountId } : {}) } })
+    const existingByUrl = await prisma.addon.findFirst({ 
+      where: { 
+        manifestUrl: sanitizedUrl,
+        accountId: getAccountId(req)
+      } 
+    })
 
     // Use provided manifest data if available, otherwise fetch it
     let manifestData = providedManifestData
     if (!manifestData) {
-      try {
-        console.log(`🔍 Fetching manifest for new addon: ${sanitizedUrl}`)
-        const resp = await fetch(sanitizedUrl)
-        if (!resp.ok) {
-          return res.status(400).json({ message: 'Failed to fetch addon manifest. The add-on URL may be incorrect.' })
-        }
-        manifestData = await resp.json()
-        console.log(`✅ Fetched manifest:`, manifestData?.name, manifestData?.version)
-      } catch (e) {
+    try {
+      console.log(`🔍 Fetching manifest for new addon: ${sanitizedUrl}`)
+      const resp = await fetch(sanitizedUrl)
+      if (!resp.ok) {
         return res.status(400).json({ message: 'Failed to fetch addon manifest. The add-on URL may be incorrect.' })
+      }
+      manifestData = await resp.json()
+      console.log(`✅ Fetched manifest:`, manifestData?.name, manifestData?.version)
+    } catch (e) {
+      return res.status(400).json({ message: 'Failed to fetch addon manifest. The add-on URL may be incorrect.' })
       }
     } else {
     }
@@ -3282,7 +3423,7 @@ app.post('/api/addons', async (req, res) => {
       const reactivated = await prisma.addon.update({
         where: { 
           id: existingByUrl.id,
-          ...(AUTH_ENABLED && req.appAccountId ? { accountId: req.appAccountId } : {})
+          accountId: getAccountId(req)
         },
         data: {
           isActive: true,
@@ -3290,10 +3431,9 @@ app.post('/api/addons', async (req, res) => {
           name: (name && name.trim()) ? name.trim() : (manifestData?.name || existingByUrl.name),
           description: description || manifestData?.description || existingByUrl.description || '',
           version: manifestData?.version || existingByUrl.version || null,
-          tags: tags || existingByUrl.tags || '',
           iconUrl: manifestData?.logo || existingByUrl.iconUrl || null // Store logo URL from manifest
         },
-        select: { id: true, name: true, description: true, manifestUrl: true, version: true, tags: true, isActive: true }
+        select: { id: true, name: true, description: true, manifestUrl: true, version: true, isActive: true }
       })
 
       // Handle group assignments for reactivated addon
@@ -3347,7 +3487,6 @@ app.post('/api/addons', async (req, res) => {
         description: reactivated.description,
         url: reactivated.manifestUrl,
         version: reactivated.version,
-        tags: reactivated.tags || '',
         status: reactivated.isActive ? 'active' : 'inactive',
         users: 0,
         groups: assignedGroups.length
@@ -3360,7 +3499,7 @@ app.post('/api/addons', async (req, res) => {
     let suffix = 2
     // Try to avoid Prisma unique constraint on name by adjusting
     while (true) {
-      const clash = await prisma.addon.findFirst({ where: { name: { equals: finalName }, ...(AUTH_ENABLED && req.appAccountId ? { accountId: req.appAccountId } : {}) } })
+      const clash = await prisma.addon.findFirst({ where: { name: { equals: finalName } } })
       if (!clash) break
       finalName = `${baseName} (${suffix})`
       suffix += 1
@@ -3374,11 +3513,10 @@ app.post('/api/addons', async (req, res) => {
         description: description || manifestData?.description || '',
         manifestUrl: sanitizedUrl,
         version: manifestData?.version || null,
-        tags: Array.isArray(tags) ? tags.join(',') : (tags || ''),
         iconUrl: manifestData?.logo || null, // Store logo URL from manifest
         isActive: true,
         // Enforce account ownership
-        ...(AUTH_ENABLED ? { accountId: req.appAccountId } : {}),
+        accountId: getAccountId(req),
       }
     });
 
@@ -3421,7 +3559,6 @@ app.post('/api/addons', async (req, res) => {
       description: addon.description,
       url: addon.manifestUrl,
       version: addon.version,
-      tags: addon.tags,
       iconUrl: addon.iconUrl,
       status: 'active',
       users: 0,
@@ -3482,7 +3619,7 @@ app.post('/api/addons/:id/reload', async (req, res) => {
     const updatedAddon = await prisma.addon.update({
       where: { 
         id,
-        ...(AUTH_ENABLED && req.appAccountId ? { accountId: req.appAccountId } : {})
+        accountId: getAccountId(req)
       },
       data: {
         name: addon.name, // explicitly preserve name
@@ -3518,7 +3655,7 @@ app.delete('/api/addons/:id', async (req, res) => {
     const existing = await prisma.addon.findUnique({ 
       where: { 
         id,
-        ...(AUTH_ENABLED && req.appAccountId ? { accountId: req.appAccountId } : {})
+        accountId: getAccountId(req)
       }
     })
     if (!existing) {
@@ -3528,11 +3665,11 @@ app.delete('/api/addons/:id', async (req, res) => {
     // Hard delete: remove relations then delete addon (transaction requires Prisma promises only)
     await prisma.$transaction([
       prisma.groupAddon.deleteMany({ where: { addonId: id } }),
-      prisma.addonSetting.deleteMany({ where: { addonId: id } }),
+      // AddonSetting model removed
       prisma.addon.delete({ 
         where: { 
           id,
-          ...(AUTH_ENABLED && req.appAccountId ? { accountId: req.appAccountId } : {})
+          accountId: getAccountId(req)
         }
       })
     ])
@@ -3581,21 +3718,53 @@ app.post('/api/addons/import', upload.single('file'), async (req, res) => {
     // Process each addon
     for (const addonData of addonsArray) {
       try {
+        // Get URL from either transportUrl or manifestUrl
+        const transportUrl = addonData.transportUrl || addonData.manifestUrl;
+        
         // Validate required fields
-        if (!addonData.transportUrl || !addonData.manifest) {
-          console.warn('Skipping addon with missing required fields:', addonData);
+        if (!transportUrl) {
+          console.warn('Skipping addon with missing URL:', addonData);
           failed++;
           continue;
         }
 
-        const manifest = addonData.manifest;
-        const transportUrl = addonData.transportUrl;
-        const transportName = addonData.transportName || manifest.name || 'Unknown';
+        // Get manifest data - use provided manifest or fetch from URL
+        let manifest = addonData.manifest;
+        if (!manifest) {
+          try {
+            console.log(`🔍 Fetching manifest for ${transportUrl}`);
+            const manifestResponse = await fetch(transportUrl);
+            if (manifestResponse.ok) {
+              manifest = await manifestResponse.json();
+              console.log(`✅ Fetched manifest: ${manifest?.name} ${manifest?.version}`);
+            } else {
+              console.warn(`⚠️ Failed to fetch manifest for ${transportUrl}`);
+              // Create a fallback manifest
+              manifest = {
+                id: addonData.name || 'unknown.addon',
+                name: addonData.name || 'Unknown',
+                version: addonData.version || null,
+                description: addonData.description || null
+              };
+            }
+          } catch (error) {
+            console.warn(`⚠️ Error fetching manifest for ${transportUrl}:`, error.message);
+            // Create a fallback manifest
+            manifest = {
+              id: addonData.name || 'unknown.addon',
+              name: addonData.name || 'Unknown',
+              version: addonData.version || null,
+              description: addonData.description || null
+            };
+          }
+        }
+
+        const transportName = addonData.transportName || addonData.name || manifest.name || 'Unknown';
 
         // Check if addon already exists (by manifestUrl or manifest.id)
         const existingAddon = await prisma.addon.findFirst({
           where: {
-            ...(AUTH_ENABLED ? { accountId: req.appAccountId } : {}),
+            accountId: getAccountId(req),
             OR: [
               { manifestUrl: transportUrl },
               { manifestUrl: { contains: manifest.id } }
@@ -3616,10 +3785,9 @@ app.post('/api/addons/import', upload.single('file'), async (req, res) => {
             description: manifest.description || '',
             manifestUrl: transportUrl,
             version: manifest.version || null,
-            tags: '', // Convert empty array to empty string for database
             iconUrl: manifest.logo || null,
             isActive: true,
-            ...(AUTH_ENABLED ? { accountId: req.appAccountId } : {}),
+            accountId: getAccountId(req),
           }
         });
 
@@ -3646,102 +3814,6 @@ app.post('/api/addons/import', upload.single('file'), async (req, res) => {
   }
 });
 
-// Import addons from JSON text
-app.post('/api/addons/import-text', async (req, res) => {
-  try {
-    if (AUTH_ENABLED && !req.appAccountId) {
-      return res.status(401).json({ message: 'Unauthorized' })
-    }
-    const { jsonData } = req.body;
-    
-    if (!jsonData) {
-      return res.status(400).json({ message: 'No JSON data provided' });
-    }
-
-    let importData;
-    try {
-      importData = JSON.parse(jsonData);
-    } catch (parseError) {
-      return res.status(400).json({ message: 'Invalid JSON format' });
-    }
-
-    // Normalize input: accept either root array or { addons: [...] }
-    const addonsArray = Array.isArray(importData) ? importData : importData.addons
-    if (!Array.isArray(addonsArray)) {
-      return res.status(400).json({ message: 'Invalid JSON structure. Expected an array or an object with "addons" array.' });
-    }
-
-    let successful = 0;
-    let failed = 0;
-    let redundant = 0;
-
-    // Process each addon
-    for (const addonData of addonsArray) {
-      try {
-        // Validate required fields
-        if (!addonData.transportUrl || !addonData.manifest) {
-          console.warn('Skipping addon with missing required fields:', addonData);
-          failed++;
-          continue;
-        }
-
-        const manifest = addonData.manifest;
-        const transportUrl = addonData.transportUrl;
-        const transportName = addonData.transportName || manifest.name || 'Unknown';
-
-        // Check if addon already exists (by manifestUrl or manifest.id)
-        const existingAddon = await prisma.addon.findFirst({
-          where: {
-            ...(AUTH_ENABLED ? { accountId: req.appAccountId } : {}),
-            OR: [
-              { manifestUrl: transportUrl },
-              { manifestUrl: { contains: manifest.id } }
-            ]
-          }
-        });
-
-        if (existingAddon) {
-          console.log(`Addon already exists: ${transportName}`);
-          redundant++;
-          continue;
-        }
-
-        // Create new addon
-        const newAddon = await prisma.addon.create({
-          data: {
-            name: transportName,
-            description: manifest.description || '',
-            manifestUrl: transportUrl,
-            version: manifest.version || null,
-            tags: '', // Convert empty array to empty string for database
-            iconUrl: manifest.logo || null,
-            isActive: true,
-            ...(AUTH_ENABLED ? { accountId: req.appAccountId } : {}),
-          }
-        });
-
-        console.log(`Successfully imported addon: ${transportName}`);
-        successful++;
-
-      } catch (addonError) {
-        console.error(`Failed to import addon:`, addonError);
-        failed++;
-      }
-    }
-
-    res.json({
-      message: 'Import completed',
-      successful,
-      failed,
-      redundant,
-      total: addonsArray.length
-    });
-
-  } catch (error) {
-    console.error('Error importing addons from text:', error);
-    res.status(500).json({ message: 'Failed to import addons', error: error?.message });
-  }
-});
 
 // Get individual addon details
 app.get('/api/addons/:id', async (req, res) => {
@@ -3757,7 +3829,7 @@ app.get('/api/addons/:id', async (req, res) => {
               include: {
                 _count: {
                   select: {
-                    members: true
+                      addons: true
                   }
                 }
               }
@@ -3810,8 +3882,7 @@ app.put('/api/addons/:id', async (req, res) => {
     // Check if addon exists
     const existingAddon = await prisma.addon.findUnique({
       where: { 
-        id,
-        ...(AUTH_ENABLED && req.appAccountId ? { accountId: req.appAccountId } : {})
+        id
       },
       include: { groupAddons: true }
     });
@@ -3838,9 +3909,7 @@ app.put('/api/addons/:id', async (req, res) => {
       const nextCanon = canonicalizeManifestUrl(sanitizedUrl)
       if (nextCanon !== prevCanon) {
         const all = await prisma.addon.findMany({ 
-          where: {
-            ...(AUTH_ENABLED && req.appAccountId ? { accountId: req.appAccountId } : {})
-          },
+          where: {},
           select: { id: true, manifestUrl: true } 
         })
         const conflict = all.find((a) => a.id !== id && canonicalizeManifestUrl(a.manifestUrl) === nextCanon)
@@ -3863,7 +3932,9 @@ app.put('/api/addons/:id', async (req, res) => {
     }
 
     // Prepare update data
-    const updateData = {};
+    const updateData = {
+      accountId: getAccountId(req) // Always set accountId
+    };
     
     if (name !== undefined) updateData.name = name;
     if (description !== undefined) updateData.description = description;
@@ -3884,8 +3955,7 @@ app.put('/api/addons/:id', async (req, res) => {
 
     const updatedAddon = await prisma.addon.update({
       where: { 
-        id,
-        ...(AUTH_ENABLED && req.appAccountId ? { accountId: req.appAccountId } : {})
+        id
       },
       data: updateData
     });
@@ -3896,10 +3966,7 @@ app.put('/api/addons/:id', async (req, res) => {
       // Get current group associations to preserve order
       const currentGroupAddons = await prisma.groupAddon.findMany({
         where: { 
-          addonId: id,
-          ...(AUTH_ENABLED && req.appAccountId ? { 
-            group: { accountId: req.appAccountId } 
-          } : {})
+          addonId: id
         },
         include: { group: true }
       });
@@ -3923,12 +3990,10 @@ app.put('/api/addons/:id', async (req, res) => {
       
       // Add addon to new groups (preserve existing order for unchanged groups)
       if (groupsToAdd.length > 0) {
-        // Validate that all groups to add belong to the current account
-        if (AUTH_ENABLED && req.appAccountId) {
+        // Validate that all groups to add exist
           const validGroups = await prisma.group.findMany({
             where: { 
-              id: { in: groupsToAdd },
-              accountId: req.appAccountId 
+            id: { in: groupsToAdd }
             },
             select: { id: true }
           });
@@ -3936,31 +4001,15 @@ app.put('/api/addons/:id', async (req, res) => {
           const invalidGroups = groupsToAdd.filter(id => !validGroupIds.has(id));
           if (invalidGroups.length > 0) {
             return res.status(403).json({ 
-              error: 'Some groups do not belong to your account',
+            error: 'Some groups do not exist',
               invalidGroups 
             });
-          }
         }
         
-        // Get the latest addedAt timestamp from existing group addons to maintain order
-        const latestAddedAt = await prisma.groupAddon.findFirst({
-          where: { 
-            groupId: { in: groupsToAdd },
-            ...(AUTH_ENABLED && req.appAccountId ? { 
-              group: { accountId: req.appAccountId } 
-            } : {})
-          },
-          orderBy: { addedAt: 'desc' },
-          select: { addedAt: true }
-        });
-        
-        const baseTimestamp = latestAddedAt ? new Date(latestAddedAt.addedAt.getTime() + 1000) : new Date();
-        
         await prisma.groupAddon.createMany({
-          data: groupsToAdd.map((groupId, index) => ({ 
+          data: groupsToAdd.map((groupId) => ({ 
             addonId: id, 
-            groupId,
-            addedAt: new Date(baseTimestamp.getTime() + (index * 1000)) // 1 second apart
+            groupId
           })),
         });
       }
@@ -3968,10 +4017,40 @@ app.put('/api/addons/:id', async (req, res) => {
 
     const addonWithGroups = await prisma.addon.findUnique({
       where: { id },
-      include: { groupAddons: { include: { group: { include: { _count: { select: { members: true } } } } } } }
+      include: { groupAddons: { include: { group: true } } }
     });
 
-    const totalUsers = addonWithGroups.groupAddons.reduce((sum, ga) => sum + (ga.group._count.members || 0), 0)
+    // Calculate total users across all groups that contain this addon
+    let totalUsers = 0
+    if (addonWithGroups.groupAddons && addonWithGroups.groupAddons.length > 0) {
+      // Get all unique user IDs from all groups that contain this addon
+      const allUserIds = new Set()
+      
+      for (const groupAddon of addonWithGroups.groupAddons) {
+        if (groupAddon.group && groupAddon.group.userIds) {
+          try {
+            const userIds = JSON.parse(groupAddon.group.userIds)
+            if (Array.isArray(userIds)) {
+              userIds.forEach(userId => allUserIds.add(userId))
+            }
+          } catch (e) {
+            console.error('Error parsing group userIds:', e)
+          }
+        }
+      }
+      
+      // Count only active users
+      if (allUserIds.size > 0) {
+        const activeUsers = await prisma.user.findMany({
+          where: {
+            id: { in: Array.from(allUserIds) },
+            isActive: true
+          },
+          select: { id: true }
+        })
+        totalUsers = activeUsers.length
+      }
+    }
 
     const transformedAddon = {
       id: addonWithGroups.id,
@@ -3979,7 +4058,6 @@ app.put('/api/addons/:id', async (req, res) => {
       description: addonWithGroups.description,
       url: addonWithGroups.manifestUrl,
       version: addonWithGroups.version,
-      tags: addonWithGroups.tags || '',
       status: addonWithGroups.isActive ? 'active' : 'inactive',
       users: totalUsers,
       groups: addonWithGroups.groupAddons.length
@@ -4004,27 +4082,50 @@ app.get('/api/groups', async (req, res) => {
       include: {
         _count: {
           select: {
-            members: true,
             addons: true
           }
         }
       },
       orderBy: {
-        createdAt: 'asc' // Consistent ordering by creation date
+        id: 'asc' // Consistent ordering by ID
       }
     });
 
-    const transformedGroups = groups.map(group => ({
+    const transformedGroups = await Promise.all(groups.map(async group => {
+      // Count only active users from userIds array
+      let activeMemberCount = 0
+      if (group.userIds) {
+        try {
+          const userIds = JSON.parse(group.userIds)
+          if (Array.isArray(userIds) && userIds.length > 0) {
+            const activeUsers = await prisma.user.findMany({
+              where: {
+                id: { in: userIds },
+                isActive: true,
+                accountId: getAccountId(req)
+              },
+              select: { id: true }
+            })
+            activeMemberCount = activeUsers.length
+          }
+        } catch (e) {
+          console.error('Error parsing group userIds:', e)
+        }
+      }
+
+      return {
       id: group.id,
       name: group.name,
       description: group.description,
-      members: group._count.members,
+        members: activeMemberCount,
       addons: group._count.addons,
       restrictions: 'none', // TODO: Implement restrictions logic
-      createdAt: group.createdAt,
       isActive: group.isActive,
       // Expose color index for UI
-      colorIndex: group.colorIndex || 1
+        colorIndex: group.colorIndex || 1,
+        // Include userIds for SQLite compatibility
+        userIds: group.userIds
+      }
     }));
     
     
@@ -4042,7 +4143,7 @@ app.get('/api/debug/addon/:name', async (req, res) => {
     const { name } = req.params
     const addon = await prisma.addon.findFirst({
       where: {
-        ...(AUTH_ENABLED && req.appAccountId ? { accountId: req.appAccountId } : {}),
+        accountId: getAccountId(req),
         OR: [
           { name: { contains: name } }
         ]
@@ -4059,9 +4160,7 @@ app.get('/api/debug/addon/:name', async (req, res) => {
       version: addon.version,
       description: addon.description,
       manifestUrl: addon.manifestUrl,
-      manifest: addon.manifest,
-      createdAt: addon.createdAt,
-      updatedAt: addon.updatedAt
+      manifest: addon.manifest
     })
   } catch (error) {
     console.error('Error fetching addon debug info:', error)
@@ -4091,8 +4190,7 @@ app.put('/api/debug/addon/:id', async (req, res) => {
       version: updatedAddon.version,
       description: updatedAddon.description,
       manifestUrl: updatedAddon.manifestUrl,
-      manifest: updatedAddon.manifest,
-      updatedAt: updatedAddon.updatedAt
+      manifest: updatedAddon.manifest
     })
   } catch (error) {
     console.error('Error updating addon:', error)
@@ -4107,19 +4205,20 @@ app.get('/api/debug/current-addons/:userId', async (req, res) => {
     
     // Get user with Stremio connection
     const user = await prisma.user.findUnique({
-      where: { id: userId },
+      where: { id: userId }
+    })
+
+    // Find groups that contain this user using userIds JSON array
+    const userGroups = await prisma.group.findMany({
+      where: {
+        userIds: {
+          contains: userId
+        }
+      },
       include: {
-        memberships: {
+        addons: {
           include: {
-            group: {
-              include: {
-                addons: {
-                  include: {
-                    addon: true
-                  }
-                }
-              }
-            }
+            addon: true
           }
         }
       }
@@ -4177,31 +4276,33 @@ app.get('/api/debug/sync/:userId', async (req, res) => {
   try {
     const { userId } = req.params
     
-    // Get user with group and addons
+    // Get user
     const user = await prisma.user.findUnique({
-      where: { id: userId },
-      include: {
-        memberships: {
-          include: {
-            group: {
-              include: {
-                addons: {
-                  include: {
-                    addon: true
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
+      where: { id: userId }
     })
 
     if (!user) {
       return res.status(404).json({ error: 'User not found' })
     }
 
-    const familyGroup = user.memberships?.[0]?.group
+    // Find groups that contain this user
+    const groups = await prisma.group.findMany({
+      where: {
+        accountId: getAccountId(req),
+        userIds: {
+          contains: user.id
+        }
+      },
+              include: {
+                addons: {
+                  include: {
+                    addon: true
+          }
+        }
+      }
+    })
+
+    const familyGroup = groups[0]
     const familyAddons = Array.isArray(familyGroup?.addons)
       ? familyGroup.addons
           .filter((ga) => (ga?.isEnabled !== false) && (ga?.addon?.isActive !== false))
@@ -4299,7 +4400,7 @@ app.post('/api/groups', async (req, res) => {
         name: name.trim(),
         description: description || '',
         colorIndex: colorIndex || 1,
-        ...(AUTH_ENABLED && req.appAccountId ? { accountId: req.appAccountId } : {}),
+        accountId: getAccountId(req),
       }
     });
 
@@ -4310,7 +4411,6 @@ app.post('/api/groups', async (req, res) => {
       members: 0,
       addons: 0,
       restrictions: 'none',
-      createdAt: newGroup.createdAt,
       isActive: newGroup.isActive,
       colorIndex: newGroup.colorIndex || 1,
     });
@@ -4438,23 +4538,9 @@ app.get('/api/groups/:id', async (req, res) => {
     const group = await prisma.group.findUnique({
       where: { id },
       include: {
-        members: { 
-          include: { 
-            user: {
-              select: {
-                id: true,
-                username: true,
-                email: true,
-                stremioAddons: true,
-                excludedAddons: true
-              }
-            }
-          }
-        },
         addons: { 
-          include: { addon: true },
-          orderBy: { addedAt: 'asc' }
-        },
+          include: { addon: true }
+        }
       }
     })
     if (!group) return res.status(404).json({ message: 'Group not found' })
@@ -4463,9 +4549,26 @@ app.get('/api/groups/:id', async (req, res) => {
       .filter(ga => ga.addon.manifestUrl && ga.addon.isActive !== false)
       .map(ga => ga.addon.manifestUrl)
     
-    const memberUsers = group.members.map((m) => {
-      const userStremioAddons = Array.isArray(m.user.stremioAddons) ? m.user.stremioAddons : Object.keys(m.user.stremioAddons || {})
-      const userExcludedAddons = m.user.excludedAddons || []
+    // Find users that belong to this group (SQLite approach) - only active users
+    const userIds = group.userIds ? JSON.parse(group.userIds) : []
+    const users = await prisma.user.findMany({
+      where: {
+        id: { in: userIds },
+        isActive: true,
+        accountId: getAccountId(req)
+      },
+      select: {
+        id: true,
+        username: true,
+        email: true,
+        stremioAddons: true,
+        excludedAddons: true
+      }
+    })
+
+    const memberUsers = users.map((user) => {
+      const userStremioAddons = Array.isArray(user.stremioAddons) ? user.stremioAddons : Object.keys(user.stremioAddons || {})
+      const userExcludedAddons = user.excludedAddons || []
       
       // Count addons that match the group's addons (excluding user's excluded addons)
       const matchingAddons = groupManifestUrls.filter(url => 
@@ -4473,9 +4576,9 @@ app.get('/api/groups/:id', async (req, res) => {
       )
       
       return {
-        id: m.user.id, 
-        username: m.user.username, 
-        email: m.user.email,
+        id: user.id, 
+        username: user.username, 
+        email: user.email,
         stremioAddonsCount: matchingAddons.length,
         excludedAddons: userExcludedAddons
       }
@@ -4484,7 +4587,6 @@ app.get('/api/groups/:id', async (req, res) => {
       id: group.id,
       name: group.name,
       description: group.description,
-      createdAt: group.createdAt,
       colorIndex: group.colorIndex || 1,
       users: memberUsers,
       addons: group.addons
@@ -4513,10 +4615,9 @@ app.put('/api/groups/:id', async (req, res) => {
     const group = await prisma.group.findUnique({ 
       where: { 
         id,
-        ...(AUTH_ENABLED && req.appAccountId ? { accountId: req.appAccountId } : {})
+        accountId: getAccountId(req)
       }, 
       include: { 
-        members: true, 
         addons: {
           include: {
             addon: true
@@ -4532,31 +4633,20 @@ app.put('/api/groups/:id', async (req, res) => {
     await prisma.group.update({ 
       where: { 
         id,
-        ...(AUTH_ENABLED && req.appAccountId ? { accountId: req.appAccountId } : {})
+        accountId: getAccountId(req)
       }, 
       data: { name: nextName ?? group.name, description: nextDesc ?? group.description } 
     })
 
-    // Sync members only if userIds is explicitly provided
+    // Sync members only if userIds is explicitly provided (SQLite approach)
     if (userIds !== undefined) {
-    const currentUserIds = new Set(group.members.map((m) => m.userId))
-    const desiredUserIds = new Set(Array.isArray(userIds) ? userIds : [])
-    const toRemoveMembers = group.members.filter((m) => !desiredUserIds.has(m.userId)).map((m) => m.userId)
-    const toAddMembers = [...desiredUserIds].filter((uid) => !currentUserIds.has(uid))
-
-    // Enforce one-group-per-user rule:
-    // - remove desired users from any other groups
-    // - then ensure membership in this group
-    await prisma.$transaction([
-      prisma.groupMember.deleteMany({ where: { groupId: id, userId: { in: toRemoveMembers } } }),
-      // Remove all memberships for users we are adding (from other groups)
-      prisma.groupMember.deleteMany({ where: { userId: { in: toAddMembers } } }),
-      ...toAddMembers.map((uid) => prisma.groupMember.upsert({
-        where: { userId_groupId: { userId: uid, groupId: id } },
-        update: { role: 'MEMBER' },
-        create: { groupId: id, userId: uid, role: 'MEMBER' },
-      })),
-    ])
+      const desiredUserIds = Array.isArray(userIds) ? userIds : []
+      
+      // Update the group's userIds array
+      await prisma.group.update({
+        where: { id },
+        data: { userIds: JSON.stringify(desiredUserIds) }
+      })
     }
 
     // Sync addons only if addonIds is explicitly provided
@@ -4590,7 +4680,7 @@ app.delete('/api/groups/:id', async (req, res) => {
     const existing = await prisma.group.findUnique({ 
       where: { 
         id,
-        ...(AUTH_ENABLED && req.appAccountId ? { accountId: req.appAccountId } : {})
+        accountId: getAccountId(req)
       }
     })
     if (!existing) {
@@ -4598,13 +4688,13 @@ app.delete('/api/groups/:id', async (req, res) => {
     }
 
     await prisma.$transaction([
-      prisma.groupMember.deleteMany({ where: { groupId: id } }),
+      // GroupMember model removed - using JSON arrays instead
       prisma.groupAddon.deleteMany({ where: { groupId: id } }),
-      prisma.activityLog.deleteMany({ where: { groupId: id } }),
+      // ActivityLog model removed
       prisma.group.delete({ 
         where: { 
           id,
-          ...(AUTH_ENABLED && req.appAccountId ? { accountId: req.appAccountId } : {})
+          accountId: getAccountId(req)
         }
       }),
     ])
@@ -4659,7 +4749,7 @@ function getSyncMode(req) {
 }
 
 // Reusable function to sync a single user's addons
-async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'normal') {
+async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'normal', unsafeMode = false) {
   try {
     console.log('🚀 Syncing user addons:', userId, { excludedManifestUrls })
     // Normalize and log exclusions early
@@ -4668,7 +4758,7 @@ async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'nor
     const normalizedExcl = rawExclArr.map((u) => localNormalize(u))
     console.log('🧪 Normalized exclusions:', normalizedExcl)
 
-    // Load user, their first group and its addons
+    // Load user
     const user = await prisma.user.findUnique({
       where: { id: userId },
       select: {
@@ -4676,18 +4766,7 @@ async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'nor
         stremioAuthKey: true,
         isActive: true,
         protectedAddons: true,
-        memberships: {
-          include: {
-            group: {
-              include: {
-                addons: { 
-                  include: { addon: true },
-                  orderBy: { addedAt: 'asc' }
-                }
-              }
-            }
-          }
-        }
+        accountId: true
       }
     })
 
@@ -4695,14 +4774,30 @@ async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'nor
     if (!user.isActive) return { success: false, error: 'User is disabled' }
     if (!user.stremioAuthKey) return { success: false, error: 'User is not connected to Stremio' }
 
+    // Find groups that contain this user
+    const groups = await prisma.group.findMany({
+      where: {
+        accountId: user.accountId,
+        userIds: {
+          contains: user.id
+        }
+      },
+      include: {
+        addons: {
+          include: {
+            addon: true
+          }
+        }
+      }
+    })
+
     const excludedSet = new Set(
       Array.isArray(excludedManifestUrls) ? excludedManifestUrls.map((u) => String(u).trim()) : []
     )
 
-    const familyGroup = user.memberships?.[0]?.group
+    const familyGroup = groups[0]
     const familyAddons = Array.isArray(familyGroup?.addons)
       ? familyGroup.addons
-          .sort((a, b) => new Date(a.addedAt || 0) - new Date(b.addedAt || 0)) // Sort by addedAt to match API order
           .filter((ga) => ga?.addon?.isActive !== false)
           .map((ga) => ({
             id: ga.addon.id,
@@ -4741,7 +4836,7 @@ async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'nor
             await prisma.addon.update({
               where: { 
                 id: fa.id,
-                ...(AUTH_ENABLED && req.appAccountId ? { accountId: req.appAccountId } : {})
+                accountId: getAccountId(req)
               },
               data: {
                 name: manifestData?.name || fa.name,
@@ -4803,11 +4898,14 @@ async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'nor
     // Helper function for URL normalization
     const normalize = (s) => (s || '').toString().trim().toLowerCase()
 
-    // Protected Stremio addons (never remove) - use same definition as defaultAddons
-    const protectedAddonIds = new Set(defaultAddons.ids)
-    const protectedManifestUrls = new Set(defaultAddons.manifestUrls.map(normalize))
+    // Protected addons logic:
+    // 1. Default Stremio addons: protected in safe mode, not protected in unsafe mode
+    // 2. User-defined protected addons: ALWAYS protected regardless of mode
+    
+    const protectedAddonIds = unsafeMode ? new Set() : new Set(defaultAddons.ids)
+    const protectedManifestUrls = unsafeMode ? new Set() : new Set(defaultAddons.manifestUrls.map(normalize))
 
-    // Parse user-defined protected addons
+    // Parse user-defined protected addons (ALWAYS protected regardless of mode)
     let userProtectedAddons = []
     try {
       userProtectedAddons = user.protectedAddons ? JSON.parse(user.protectedAddons) : []
@@ -4816,13 +4914,14 @@ async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'nor
       userProtectedAddons = []
     }
     
-    // Add user-defined protected addons to the protected URLs set
+    // Add user-defined protected addons to the protected URLs set (ALWAYS)
     userProtectedAddons.forEach(url => {
       if (url && typeof url === 'string') {
         protectedManifestUrls.add(normalize(url))
+        console.log(`🔒 Added user protected addon: ${url}`)
       }
     })
-
+    
     const isProtected = (a) => {
       const aid = a?.id || a?.manifest?.id || ''
       const url = normalize(a?.manifestUrl || a?.transportUrl || a?.url)
@@ -4834,13 +4933,6 @@ async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'nor
     const currentAddonsRaw = current?.addons || current || []
     const currentAddons = Array.isArray(currentAddonsRaw) ? currentAddonsRaw : (typeof currentAddonsRaw === 'object' ? Object.values(currentAddonsRaw) : [])
     console.log('📥 Current addons from Stremio:', currentAddons?.length || 0)
-    console.log('📊 Current addons details:', currentAddons.map(a => ({ 
-      name: a?.manifest?.name || a?.name, 
-      transportName: a?.transportName,
-      id: a?.manifest?.id || a?.id,
-      url: normalize(a?.transportUrl || a?.manifestUrl || a?.url),
-      protected: isProtected(a)
-    })))
 
     // Build desired group addon objects (fetch manifests with fallback to stored data)
     const desiredGroup = []
@@ -4915,94 +5007,51 @@ async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'nor
       }
     }
 
-    // Don't filter out protected group addons - if they're in groups, they should be synced
-    // Only filter out addons that are explicitly excluded
+    // Don't filter out any group addons here - the "locked positions" approach
+    // will handle protected addons by preserving their positions
     const nonProtectedGroupAddons = desiredGroup
-    console.log('📊 Group addons details:', nonProtectedGroupAddons.map(a => ({ 
-      name: a?.manifest?.name || a?.name, 
-      id: a?.manifest?.id || a?.id,
-      url: normalize(a?.transportUrl || a?.manifestUrl || a?.url)
-    })))
-
     // Build desired collection: preserve protected addons in their original positions, add group addons in correct order
-    console.log('🔍 Current addons order:', currentAddons.map(a => ({ 
-      name: a?.manifest?.name || a?.name, 
-      protected: isProtected(a),
-      url: normalize(a?.transportUrl || a?.manifestUrl || a?.url)
-    })))
-    console.log('🔍 Excluded addons:', excludedManifestUrls)
-    console.log('🔍 Current addons count:', currentAddons.length)
-    
-    console.log('🔍 Group addons order:', nonProtectedGroupAddons.map(a => ({ 
-      name: a?.manifest?.name || a?.name, 
-      url: normalize(a?.transportUrl || a?.manifestUrl || a?.url)
-    })))
 
-    // Build the desired collection by preserving protected addons in their original positions
-    // and inserting group addons in the correct order
+    // Build the desired collection using the "locked positions" approach:
+    // 1. Identify protected positions (locked, never move)
+    // 2. Fill available positions with group addons in order
+    // 3. Remove any addons that don't fit (excluded/deleted)
     
-    // First, identify all protected addons and their positions
-    const protectedAddons = []
+    // Step 1: Identify protected positions and their addons
     const protectedPositions = new Set()
+    const protectedAddons = new Map() // position -> addon
     
     for (let i = 0; i < currentAddons.length; i++) {
       const currentAddon = currentAddons[i]
       if (isProtected(currentAddon)) {
-        protectedAddons.push({ addon: currentAddon, position: i })
         protectedPositions.add(i)
-        console.log(`🔒 Found protected addon at position ${i}: ${currentAddon?.manifest?.name || currentAddon?.name}`)
+        protectedAddons.set(i, currentAddon)
       }
     }
     
-    // Create a new array with the same length as current addons, filled with nulls
+    // Step 2: Create result array with protected addons in their locked positions
     const result = new Array(currentAddons.length).fill(null)
-    
-    // Place protected addons in their original positions
-    for (const { addon, position } of protectedAddons) {
+    for (const [position, addon] of protectedAddons) {
       result[position] = addon
     }
     
-    // Track URLs already present (from protected/current) to avoid duplicates
-    const presentUrls = new Set(
-      currentAddons
-        .filter(a => isProtected(a))
-        .map(a => normalize(a?.transportUrl || a?.manifestUrl || a?.url))
-    )
-
-    // Now place group addons in the correct order, skipping protected positions
+    // Step 3: Fill available positions with group addons in order
     let groupAddonIndex = 0
     for (let i = 0; i < result.length && groupAddonIndex < nonProtectedGroupAddons.length; i++) {
       if (result[i] === null) {
         // This position is available for a group addon
-        const candidate = nonProtectedGroupAddons[groupAddonIndex]
-        const cUrl = normalize(candidate?.transportUrl || candidate?.manifestUrl || candidate?.url)
-        if (!presentUrls.has(cUrl)) {
-          result[i] = candidate
-          presentUrls.add(cUrl)
-          console.log(`✅ Placed group addon at position ${i}: ${candidate?.manifest?.name || candidate?.name}`)
-        } else {
-          console.log(`⏭️ Skipping duplicate group addon (already present): ${candidate?.manifest?.name || candidate?.name}`)
-        }
+        result[i] = nonProtectedGroupAddons[groupAddonIndex]
         groupAddonIndex++
       }
     }
     
-    // Add any remaining group addons at the end (skip duplicates)
+    // Step 4: Add any remaining group addons at the end
     while (groupAddonIndex < nonProtectedGroupAddons.length) {
-      const candidate = nonProtectedGroupAddons[groupAddonIndex]
-      const cUrl = normalize(candidate?.transportUrl || candidate?.manifestUrl || candidate?.url)
-      if (!presentUrls.has(cUrl)) {
-        result.push(candidate)
-        presentUrls.add(cUrl)
-        console.log(`➕ Added remaining group addon: ${candidate?.manifest?.name || candidate?.name}`)
-      } else {
-        console.log(`⏭️ Skipped remaining duplicate addon: ${candidate?.manifest?.name || candidate?.name}`)
-      }
+      result.push(nonProtectedGroupAddons[groupAddonIndex])
       groupAddonIndex++
     }
     
-    // Filter out null values to get the final desired collection
-    // Dedupe by URL once more as a safety net
+    // Step 5: Remove null values (holes) and dedupe by URL
     const seenUrls = new Set()
     const desiredCollection = result.filter(addon => {
       if (!addon) return false
@@ -5244,14 +5293,7 @@ app.post('/api/groups/:id/sync', async (req, res) => {
     
     // Get the group with its users
     const group = await prisma.group.findUnique({
-      where: { id: groupId },
-      include: {
-        members: {
-          include: {
-            user: true
-          }
-        }
-      }
+      where: { id: groupId }
     })
     
     if (!group) {
@@ -5262,7 +5304,18 @@ app.post('/api/groups/:id/sync', async (req, res) => {
       return res.status(400).json({ message: 'Group is disabled' })
     }
     
-    const groupUsers = group.members.map(member => member.user).filter(user => user.stremioAuthKey && user.isActive)
+    // Determine database type
+    const isSqlite = process.env.PRISMA_PROVIDER === 'sqlite'
+    
+    // Get users from the group using userIds JSON array (both SQLite and PostgreSQL)
+    const userIds = group.userIds ? JSON.parse(group.userIds) : []
+    const groupUsers = await prisma.user.findMany({
+      where: {
+        id: { in: userIds },
+        isActive: true,
+        stremioAuthKey: { not: null }
+      }
+    })
     
     if (groupUsers.length === 0) {
       return res.json({ 
@@ -5283,52 +5336,43 @@ app.post('/api/groups/:id/sync', async (req, res) => {
       try {
         debug.log(`🔄 Syncing user: ${user.username || user.email}`)
 
-        // Resolve membership-specific exclusions first, fallback to user-level
-        let memberExcluded = []
-        try {
-          const membership = await prisma.groupMember.findFirst({
-            where: { userId: user.id, groupId },
-            select: { excludedAddons: true }
-          })
-          if (membership?.excludedAddons) {
-            if (Array.isArray(membership.excludedAddons)) {
-              memberExcluded = membership.excludedAddons
-            } else if (typeof membership.excludedAddons === 'string') {
-              try { memberExcluded = JSON.parse(membership.excludedAddons) || [] } catch { memberExcluded = [] }
-            }
-          } else {
-            const userRes = await prisma.user.findUnique({ 
-              where: { 
-                id: user.id,
-                ...(AUTH_ENABLED && req.appAccountId ? { accountId: req.appAccountId } : {})
-              }, 
-              select: { excludedAddons: true } 
+        // Get user exclusions - handle both SQLite and PostgreSQL
+        let finalExcluded = []
+        
+        if (isSqlite) {
+          // SQLite: Check for membership-specific exclusions first, fallback to user-level
+          let memberExcluded = []
+          try {
+            const membership = await prisma.groupMember.findFirst({
+              where: { userId: user.id, groupId },
+              select: { excludedAddons: true }
             })
-            if (userRes?.excludedAddons) {
-              if (Array.isArray(userRes.excludedAddons)) {
-                memberExcluded = userRes.excludedAddons
-              } else if (typeof userRes.excludedAddons === 'string') {
-                try { memberExcluded = JSON.parse(userRes.excludedAddons) || [] } catch { memberExcluded = [] }
+            if (membership?.excludedAddons) {
+              if (Array.isArray(membership.excludedAddons)) {
+                memberExcluded = membership.excludedAddons
+              } else if (typeof membership.excludedAddons === 'string') {
+                try { memberExcluded = JSON.parse(membership.excludedAddons) || [] } catch { memberExcluded = [] }
               }
             }
+          } catch (e) {
+            console.warn('Failed to parse membership exclusions:', e)
           }
-        } catch (e) {
-          console.error('Failed to resolve membership/user exclusions:', e)
+          
+          const userExcluded = user.excludedAddons ? JSON.parse(user.excludedAddons) : []
+          finalExcluded = [...memberExcluded, ...userExcluded, ...excludedManifestUrls]
+        } else {
+          // PostgreSQL: Only user-level exclusions
+          const userExcluded = user.excludedAddons ? JSON.parse(user.excludedAddons) : []
+          finalExcluded = [...userExcluded, ...excludedManifestUrls]
         }
 
-        // Call the individual sync HTTP endpoint to ensure identical behavior
-        const response = await fetch(`http://localhost:4000/api/users/${user.id}/sync`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-sync-mode': syncMode },
-          body: JSON.stringify({ excludedManifestUrls: Array.isArray(memberExcluded) ? memberExcluded : [] })
-        })
-
-        const result = await response.json().catch(() => ({}))
-        if (response.ok) {
+        // Call the sync function directly to avoid authentication issues
+        try {
+          const result = await syncUserAddons(user.id, finalExcluded, false) // false = not unsafe mode
           syncedCount++
           debug.log(`✅ Successfully synced user: ${user.username || user.email}`)
-        } else {
-          const errorMsg = result?.message || result?.error || 'Unknown error'
+        } catch (syncError) {
+          const errorMsg = syncError?.message || 'Unknown sync error'
           errors.push(`${user.username || user.email}: ${errorMsg}`)
           console.log(`❌ Failed to sync user: ${user.username || user.email} - ${errorMsg}`)
         }
@@ -5360,6 +5404,102 @@ app.post('/api/groups/:id/sync', async (req, res) => {
   } catch (error) {
     console.error('Error syncing group:', error)
     res.status(500).json({ message: 'Failed to sync group', error: error?.message })
+  }
+})
+
+// Reorder addons in a user's Stremio account
+app.post('/api/users/:id/stremio-addons/reorder', async (req, res) => {
+  try {
+    const { id: userId } = req.params
+    const { orderedManifestUrls } = req.body || {}
+    
+    console.log(`🔄 Reordering Stremio addons for user ${userId}:`, orderedManifestUrls)
+    
+    if (!Array.isArray(orderedManifestUrls) || orderedManifestUrls.length === 0) {
+      return res.status(400).json({ message: 'orderedManifestUrls array is required' })
+    }
+    
+    // Get the user
+    const user = await prisma.user.findUnique({
+      where: { 
+        id: userId,
+        accountId: getAccountId(req)
+      }
+    })
+    
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' })
+    }
+    
+    if (!user.stremioAuthKey) {
+      return res.status(400).json({ message: 'User is not connected to Stremio' })
+    }
+    
+    // Decrypt auth key
+    let authKeyPlain
+    try { 
+      authKeyPlain = decrypt(user.stremioAuthKey) 
+    } catch { 
+      return res.status(500).json({ message: 'Failed to decrypt Stremio credentials' }) 
+    }
+    
+    // Use StremioAPIClient to get current addons
+    const apiClient = new StremioAPIClient({ endpoint: 'https://api.strem.io', authKey: authKeyPlain })
+    const current = await apiClient.request('addonCollectionGet', {})
+    const currentAddons = current?.addons || []
+    
+    // Create a map of manifest URLs to addon objects
+    const manifestToAddon = new Map()
+    currentAddons.forEach(addon => {
+      const manifestUrl = addon.transportUrl
+      if (manifestUrl) {
+        manifestToAddon.set(manifestUrl, addon)
+      }
+    })
+    
+    // Validate that all provided URLs exist in the user's addons
+    const invalidUrls = orderedManifestUrls.filter(url => !manifestToAddon.has(url))
+    if (invalidUrls.length > 0) {
+      return res.status(400).json({ 
+        message: `Invalid manifest URLs: ${invalidUrls.join(', ')}` 
+      })
+    }
+    
+    // Create the reordered addon collection
+    const reorderedAddons = orderedManifestUrls.map(url => manifestToAddon.get(url))
+    
+    // Set the reordered collection using the proper format
+    await apiClient.request('addonCollectionSet', { addons: reorderedAddons })
+    console.log(`✅ Successfully reordered ${reorderedAddons.length} addons for user ${userId}`)
+    
+    // Update user's stremioAddons in database
+    const updatedStremioAddons = reorderedAddons.reduce((acc, addon) => {
+      acc[addon.transportUrl] = {
+        url: addon.transportUrl,
+        installed: true,
+        installedAt: new Date().toISOString()
+      }
+      return acc
+    }, {})
+    
+    await prisma.user.update({
+      where: { 
+        id: userId,
+        accountId: getAccountId(req)
+      },
+      data: {
+        stremioAddons: JSON.stringify(updatedStremioAddons)
+      }
+    })
+    
+    res.json({ 
+      message: `Successfully reordered ${reorderedAddons.length} addons`,
+      reorderedCount: reorderedAddons.length
+    })
+    
+  } catch (error) {
+    console.error('Error reordering user Stremio addons:', error)
+    return res.status(500).json({ message: 'Failed to reorder addons', error: error?.message })
   }
 })
 
@@ -5409,26 +5549,26 @@ app.post('/api/groups/:id/addons/reorder', async (req, res) => {
       })
     }
     
-    // Update the order by updating the GroupAddon records
-    // Since we don't have an order field, we'll use the addedAt timestamp
-    // to maintain order by updating it based on the new order
-    const now = new Date()
-    for (let i = 0; i < orderedManifestUrls.length; i++) {
-      const manifestUrl = orderedManifestUrls[i]
-      const addonId = manifestToAddonId.get(manifestUrl)
-      
-      // Find the GroupAddon record
-      const groupAddon = group.addons.find(ga => ga.addon.id === addonId)
-      if (groupAddon) {
-        // Update the addedAt timestamp to reflect the new order
-        // We use a small offset to maintain the order
-        const newAddedAt = new Date(now.getTime() + (i * 1000)) // 1 second apart
-        
-        await prisma.groupAddon.update({
-          where: { id: groupAddon.id },
-          data: { addedAt: newAddedAt }
-        })
-      }
+    // For both SQLite and PostgreSQL, we delete and recreate GroupAddon records in the new order
+    // This maintains the order through the id field (creation order)
+    // This approach works for both databases since neither has a dedicated ordering field
+    
+    // Delete existing group addon relationships
+    await prisma.groupAddon.deleteMany({
+      where: { groupId }
+    })
+    
+    // Recreate them in the new order
+    const addonIds = orderedManifestUrls.map(url => manifestToAddonId.get(url))
+    const groupAddonData = addonIds.map(addonId => ({
+      groupId,
+      addonId
+    }))
+    
+    if (groupAddonData.length > 0) {
+      await prisma.groupAddon.createMany({
+        data: groupAddonData
+      })
     }
     
     console.log(`✅ Successfully reordered ${orderedManifestUrls.length} addons for group ${groupId}`)
@@ -5439,14 +5579,7 @@ app.post('/api/groups/:id/addons/reorder', async (req, res) => {
     try {
       // Call the existing group sync endpoint logic
       const group = await prisma.group.findUnique({
-        where: { id: groupId },
-        include: {
-          members: {
-            include: {
-              user: true
-            }
-          }
-        }
+        where: { id: groupId }
       })
       
       if (!group) {
@@ -5454,7 +5587,15 @@ app.post('/api/groups/:id/addons/reorder', async (req, res) => {
       } else if (!group.isActive) {
         console.log(`⚠️ Group ${groupId} is disabled`)
       } else {
-        const groupUsers = group.members.map(member => member.user).filter(user => user.stremioAuthKey)
+        // Get users from userIds array (SQLite approach)
+        const userIds = group.userIds ? JSON.parse(group.userIds) : []
+        const groupUsers = await prisma.user.findMany({
+          where: {
+            id: { in: userIds },
+            stremioAuthKey: { not: null },
+            accountId: getAccountId(req)
+          }
+        })
         
         if (groupUsers.length === 0) {
           console.log(`⚠️ No users with Stremio connections found in group ${groupId}`)
@@ -5465,10 +5606,11 @@ app.post('/api/groups/:id/addons/reorder', async (req, res) => {
           const errors = []
           
           // Get the group's addon order for syncing
+          // Use id ordering for both databases since neither has a dedicated ordering field
           const groupAddons = await prisma.groupAddon.findMany({
             where: { groupId },
             include: { addon: true },
-            orderBy: { addedAt: 'asc' }
+            orderBy: { id: 'asc' }
           })
           
           const orderedManifestUrls = groupAddons
@@ -5517,15 +5659,12 @@ app.post('/api/users/:id/clear-stremio-credentials', async (req, res) => {
     const updatedUser = await prisma.user.update({
       where: { 
         id,
-        ...(AUTH_ENABLED && req.appAccountId ? { accountId: req.appAccountId } : {})
+        accountId: getAccountId(req)
       },
       data: {
         stremioAuthKey: null,
-        stremioUserId: null,
-        stremioUsername: null,
-        stremioEmail: null,
         stremioAddons: null,
-        lastStremioSync: null,
+        isActive: false, // Disconnect user since Stremio credentials are cleared
       },
     });
 
@@ -5566,9 +5705,9 @@ app.post('/api/users/:id/connect-stremio', async (req, res) => {
     console.log('🔍 User stremioAuthKey type:', typeof existingUser.stremioAuthKey);
     console.log('🔍 User stremioAuthKey truthy:', !!existingUser.stremioAuthKey);
     
-    if (existingUser.stremioAuthKey) {
-      return res.status(409).json({ message: 'User already connected to Stremio' });
-    }
+    // Allow reconnection - we'll update the stremioAuthKey with new credentials
+    console.log('🔍 User stremioAuthKey exists:', !!existingUser.stremioAuthKey);
+    console.log('🔍 Allowing reconnection to update credentials');
     
     // Create a temporary storage object for this authentication session
     const tempStorage = {};
@@ -5730,15 +5869,14 @@ app.post('/api/users/:id/connect-stremio', async (req, res) => {
     const updatedUser = await prisma.user.update({
       where: { 
         id,
-        ...(AUTH_ENABLED && req.appAccountId ? { accountId: req.appAccountId } : {})
+        accountId: getAccountId(req)
       },
       data: {
-        stremioEmail: email,
-        stremioUsername: username || userData?.username || email.split('@')[0],
+        email: email,
+        username: username || userData?.username || email.split('@')[0],
         stremioAuthKey: encryptedAuthKey,
-        stremioUserId: userData?.id,
         stremioAddons: JSON.stringify(addonsData || {}),
-        lastStremioSync: new Date(),
+        isActive: true, // Re-enable the user after successful reconnection
       }
     });
     
@@ -5748,8 +5886,7 @@ app.post('/api/users/:id/connect-stremio', async (req, res) => {
       user: {
         id: updatedUser.id,
         username: updatedUser.username,
-        stremioEmail: updatedUser.stremioEmail,
-        stremioUsername: updatedUser.stremioUsername
+        email: updatedUser.email
       }
     });
     
@@ -5780,9 +5917,8 @@ app.post('/api/test/set-stremio-credentials/:userId', async (req, res) => {
       where: { id: userId },
       data: {
         stremioAuthKey: encryptedAuthKey,
-        stremioUserId: 'test-user-id',
-        stremioUsername: 'testuser',
-        stremioEmail: 'test@example.com'
+        email: 'test@example.com',
+        username: 'testuser'
       }
     });
     
@@ -5818,10 +5954,10 @@ process.on('SIGTERM', async () => {
 // Test endpoint to create users (for development only)
 app.post('/api/test/users', async (req, res) => {
   try {
-    const { displayName, email, username, firstName, lastName, role = 'USER', groupName } = req.body;
+    const { email, username, groupName } = req.body;
     
-    if (!displayName || !email || !username) {
-      return res.status(400).json({ message: 'displayName, email, and username are required' });
+    if (!email || !username) {
+      return res.status(400).json({ message: 'email and username are required' });
     }
 
     // Check if user already exists
@@ -5841,14 +5977,9 @@ app.post('/api/test/users', async (req, res) => {
     // Create user
     const newUser = await prisma.user.create({
       data: {
-        ...(AUTH_ENABLED && req.appAccountId ? { accountId: req.appAccountId } : {}),
-        displayName,
+        accountId: getAccountId(req),
         username,
         email,
-        firstName,
-        lastName,
-        role,
-        password: null, // No password for test users
         isActive: true
       }
     });
@@ -5860,13 +5991,15 @@ app.post('/api/test/users', async (req, res) => {
       });
       
       if (group) {
-        await prisma.groupMember.create({
-          data: {
-            userId: newUser.id,
-            groupId: group.id,
-            role: 'MEMBER'
-          }
-        });
+        // Add user to group's userIds array
+        const currentUserIds = group.userIds ? JSON.parse(group.userIds) : []
+        if (!currentUserIds.includes(newUser.id)) {
+          currentUserIds.push(newUser.id)
+          await prisma.group.update({
+            where: { id: group.id },
+            data: { userIds: JSON.stringify(currentUserIds) }
+          })
+        }
       }
     }
 
@@ -5874,10 +6007,9 @@ app.post('/api/test/users', async (req, res) => {
       message: 'Test user created successfully',
       user: {
         id: newUser.id,
-        displayName: newUser.displayName,
         username: newUser.username,
         email: newUser.email,
-        role: newUser.role,
+        isActive: newUser.isActive,
         groupName: groupName || null
       }
     });
@@ -5890,7 +6022,7 @@ app.post('/api/test/users', async (req, res) => {
 // Import user addons endpoint
 app.post('/api/users/:id/import-addons', async (req, res) => {
   try {
-    const { id } = req.params
+    const { id: userId } = req.params
     const { addons } = req.body || {}
 
     if (!Array.isArray(addons) || addons.length === 0) {
@@ -5899,8 +6031,8 @@ app.post('/api/users/:id/import-addons', async (req, res) => {
 
     const user = await prisma.user.findUnique({ 
       where: { 
-        id,
-        ...(AUTH_ENABLED && req.appAccountId ? { accountId: req.appAccountId } : {})
+        id: userId,
+        accountId: getAccountId(req)
       }
     })
     if (!user) return res.status(404).json({ message: 'User not found' })
@@ -5921,7 +6053,7 @@ app.post('/api/users/:id/import-addons', async (req, res) => {
           description: `Imported addons from ${user.username}`,
           colorIndex: 0, // Default color
           isActive: true,
-          ...(AUTH_ENABLED && req.appAccountId ? { accountId: req.appAccountId } : {})
+          accountId: getAccountId(req)
         }
       })
       debug.log(`✅ Created import group: ${groupName}`)
@@ -5931,22 +6063,37 @@ app.post('/api/users/:id/import-addons', async (req, res) => {
 
     // Ensure user is a member of the group ONLY if they have no group assigned yet
     // If the user already belongs to any group, do not auto-attach to the import group
-    const anyMembership = await prisma.groupMember.findFirst({ where: { userId: id } })
-    if (!anyMembership) {
-      const existingMembership = await prisma.groupMember.findFirst({
+    const allGroups = await prisma.group.findMany({
         where: {
-          groupId: group.id,
-          userId: id
-        }
-      })
-
-      if (!existingMembership) {
-        await prisma.groupMember.create({
-          data: {
-            groupId: group.id,
-            userId: id,
-            role: 'admin'
+        accountId: getAccountId(req)
+      },
+      select: { id: true, userIds: true }
+    })
+    
+    // Check if user is already in any group
+    let userInAnyGroup = false
+    for (const g of allGroups) {
+      if (g.userIds) {
+        try {
+          const userIds = JSON.parse(g.userIds)
+          if (Array.isArray(userIds) && userIds.includes(userId)) {
+            userInAnyGroup = true
+            break
           }
+        } catch (e) {
+          console.error('Error parsing group userIds:', e)
+        }
+      }
+    }
+    
+    if (!userInAnyGroup) {
+      // Check if user is already in this specific group
+      const currentUserIds = group.userIds ? JSON.parse(group.userIds) : []
+      if (!currentUserIds.includes(userId)) {
+        currentUserIds.push(userId)
+        await prisma.group.update({
+          where: { id: group.id },
+          data: { userIds: JSON.stringify(currentUserIds) }
         })
         debug.log(`✅ Added user to import group (user had no previous groups)`)
       }
@@ -5956,6 +6103,8 @@ app.post('/api/users/:id/import-addons', async (req, res) => {
 
     // Process each addon
     const processedAddons = []
+    const newlyImportedAddons = []
+    const existingAddons = []
     console.log(`🚀 Starting import of ${addons.length} addons for user ${userId}`)
     for (const addonData of addons) {
       const addonUrl = addonData.manifestUrl || addonData.transportUrl || addonData.url
@@ -5969,9 +6118,13 @@ app.post('/api/users/:id/import-addons', async (req, res) => {
       debug.log(`🔍 Processing addon: ID="${addonId}", URL="${addonUrl}"`)
 
       // SIMPLE RULE: if an addon with the exact manifestUrl exists, attach it to the group and continue
+      let addon = null
       try {
         const existingByExactUrl = await prisma.addon.findFirst({ 
-          where: { manifestUrl: addonUrl },
+        where: {
+            manifestUrl: addonUrl,
+            accountId: getAccountId(req)
+          },
           select: { id: true, name: true, manifestUrl: true, accountId: true }
         })
         if (existingByExactUrl) {
@@ -5983,7 +6136,11 @@ app.post('/api/users/:id/import-addons', async (req, res) => {
             try {
               const resp = await fetch(`http://127.0.0.1:${PORT}/api/addons/${existingByExactUrl.id}`, {
                 method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 
+                  'Content-Type': 'application/json',
+                  'Cookie': req.headers.cookie || '',
+                  'X-CSRF-Token': req.headers['x-csrf-token'] || ''
+                },
                 body: JSON.stringify({ groupIds: [group.id] }),
               })
               if (!resp.ok) {
@@ -5996,19 +6153,18 @@ app.post('/api/users/:id/import-addons', async (req, res) => {
               console.log(`⚠️ API attach threw error.`, e?.message || e)
             }
             processedAddons.push(existingByExactUrl)
+            existingAddons.push(existingByExactUrl)
+            addon = existingByExactUrl
             continue
           }
         }
+        addon = existingByExactUrl
       } catch (e) {
         console.log(`⚠️ Exact URL check failed for ${addonUrl}:`, e?.message || e)
       }
 
-      // Existence check step 1: exact manifestUrl match
-      let addon = await prisma.addon.findFirst({ where: { manifestUrl: addonUrl } })
-
-      if (addon) {
-        console.log(`✅ Found existing addon by URL: ${addon.name} (${addon.manifestUrl})`)
-      } else {
+      // If we didn't find an existing addon by exact URL, create a new one
+      if (!addon) {
         // Existence check step 2: fetch manifest to resolve a stable manifest.id
         console.log(`🔨 Creating new addon for: ${addonUrl}`)
         // Fetch manifest data to get the name
@@ -6027,114 +6183,82 @@ app.post('/api/users/:id/import-addons', async (req, res) => {
         }
         // Try existence check step 3: match any addon whose stored URL contains the manifest.id
         const manifestIdRaw = typeof manifestData?.id === 'string' ? manifestData.id : ''
-        const manifestId = manifestIdRaw.toLowerCase()
-        if (manifestId) {
-          const candidates = new Set()
-          candidates.add(manifestId)
-          const lastSeg = manifestId.split('.').pop()
-          if (lastSeg) candidates.add(lastSeg)
-          if (lastSeg && lastSeg.length > 8) candidates.add(lastSeg.slice(0, 8))
-          if (lastSeg && lastSeg.length > 12) candidates.add(lastSeg.slice(0, 12))
-          const candidateList = Array.from(candidates)
-          if (candidateList.length > 0) {
-            const byIdInUrl = await prisma.addon.findFirst({
-              where: {
-                OR: candidateList.map((frag) => ({ manifestUrl: { contains: frag, mode: 'insensitive' } }))
-              }
-            })
-            if (byIdInUrl) {
-              addon = byIdInUrl
-              console.log(`✅ Found existing addon by manifest.id fragment in URL: ${addon.name} (${addon.manifestUrl})`)
+        if (manifestIdRaw) {
+          // Check if any existing addon has this manifest ID in its URL
+          const byIdInUrl = await prisma.addon.findFirst({
+            where: {
+              manifestUrl: { contains: manifestIdRaw },
+              accountId: getAccountId(req)
             }
+          })
+          if (byIdInUrl) {
+            addon = byIdInUrl
+            console.log(`✅ Found existing addon by manifest.id in URL: ${addon.name} (${addon.manifestUrl})`)
           }
         }
 
         if (addon) {
           // Skip creation; will proceed to group attach below
         } else {
-        const baseName = addonData.name || addonData.manifest?.name || manifestData?.name || 'Imported Addon'
-        console.log(`🔍 Base name for addon: "${baseName}"`)
-        
-        // Auto-unique the name if necessary to handle conflicts
-        let finalName = baseName
-        let suffix = 1
-
-        // Creation with retry on P2002 unique(name)
-        while (true) {
-          // Ensure globally unique name (no account filter)
-          const clash = await prisma.addon.findFirst({ where: { name: { equals: finalName } } })
-          if (clash) {
-            console.log(`⚠️ Name "${finalName}" conflicts, trying "${baseName} #${suffix}"`)
-            finalName = `${baseName} #${suffix}`
-            suffix += 1
-            if (suffix > 50) {
-              console.log(`❌ Too many name conflicts, giving up on ${baseName}`)
-              break
+          // Use the existing addon creation endpoint which has proper duplicate detection
+          let isNewlyCreated = false
+          try {
+            const createResponse = await fetch(`http://127.0.0.1:${PORT}/api/addons`, {
+              method: 'POST',
+              headers: { 
+                'Content-Type': 'application/json',
+                'Cookie': req.headers.cookie || '',
+                'X-CSRF-Token': req.headers['x-csrf-token'] || ''
+              },
+              body: JSON.stringify({ 
+                url: addonUrl,
+                groupIds: [group.id]
+              }),
+            })
+            
+            if (createResponse.ok) {
+              const createdAddon = await createResponse.json()
+              addon = createdAddon
+              isNewlyCreated = true
+              console.log(`✅ Created new addon via API: ${addon.name} (ID: ${addon.id})`)
+            } else {
+              const errorText = await createResponse.text().catch(() => '')
+              console.log(`⚠️ Failed to create addon via API (${createResponse.status}): ${errorText}`)
+              
+              // If addon already exists, try to find it in the database
+              if (errorText.includes('already exists') || errorText.includes('Addon already exists')) {
+                console.log(`🔍 Addon already exists, looking it up in database...`)
+                const existingAddon = await prisma.addon.findFirst({
+                  where: {
+                    manifestUrl: addonUrl,
+                    accountId: getAccountId(req)
+                  }
+                })
+                
+                if (existingAddon) {
+                  addon = existingAddon
+                  isNewlyCreated = false
+                  console.log(`✅ Found existing addon: ${addon.name} (ID: ${addon.id})`)
+                } else {
+                  console.log(`❌ Could not find existing addon in database`)
+                  continue
+                }
+              } else {
+                continue
+              }
             }
+          } catch (error) {
+            console.log(`⚠️ Error creating addon via API:`, error.message)
             continue
           }
-
-          try {
-            console.log(`🔨 Creating addon with name: "${finalName}"`)
-            addon = await prisma.addon.create({
-              data: {
-                // Do NOT force external addonId into DB primary key; keep internal ids consistent
-                name: finalName,
-                description: addonData.description || addonData.manifest?.description || manifestData?.description || '',
-                manifestUrl: addonUrl,
-                version: addonData.version || addonData.manifest?.version || manifestData?.version || null,
-                tags: '',
-                iconUrl: addonData.iconUrl || addonData.manifest?.logo || manifestData?.logo || null,
-                isActive: true,
-                ...(AUTH_ENABLED && req.appAccountId ? { accountId: req.appAccountId } : {}),
-              }
-            })
-            console.log(`✅ Created new addon: ${addon.name} (ID: ${addon.id})`)
-            // Attach newly created addon to group via API
-            try {
-              const resp = await fetch(`http://127.0.0.1:${PORT}/api/addons/${addon.id}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ groupIds: [group.id] }),
-              })
-              if (!resp.ok) console.log(`⚠️ API attach (new addon) failed (${resp.status}).`)
-            } catch (e) {
-              console.log(`⚠️ API attach (new addon) threw error.`, e?.message || e)
-            }
-            break
-          } catch (e) {
-            if (e && e.code === 'P2002') {
-              console.log(`⚠️ P2002 on name "${finalName}", retrying with suffix...`)
-              // Before retrying, try to resolve the existing addon and use it
-              const manifestIdRaw = typeof manifestData?.id === 'string' ? manifestData.id : ''
-              const manifestId = manifestIdRaw.toLowerCase()
-              const orClauses = [{ manifestUrl: addonUrl }]
-              if (manifestId) {
-                orClauses.push({ manifestUrl: { contains: manifestId, mode: 'insensitive' } })
-                const tail = manifestId.split('.').pop()
-                if (tail) orClauses.push({ manifestUrl: { contains: tail, mode: 'insensitive' } })
-              }
-              orClauses.push({ name: baseName })
-              const existingOnConflict = await prisma.addon.findFirst({ where: { OR: orClauses }, select: { id:true, name:true, manifestUrl:true, accountId:true } })
-              if (existingOnConflict) {
-                if (!AUTH_ENABLED || !req.appAccountId || !existingOnConflict.accountId || existingOnConflict.accountId === req.appAccountId) {
-                  console.log(`✅ Resolved existing addon after P2002 (same account scope): ${existingOnConflict.name} (${existingOnConflict.manifestUrl})`)
-                  addon = existingOnConflict
-                  break
-                } else {
-                  console.log(`ℹ️ Conflict addon belongs to another account (${existingOnConflict.accountId}), continuing suffix to create scoped copy`)
-                }
-              }
-              // No resolution → continue suffixing
-              finalName = `${baseName} #${suffix}`
-              suffix += 1
-              continue
-            }
-            console.error(`❌ Failed to create addon for ${addonUrl}:`, e)
-            break
+          
+          // Track whether this was newly created or already existed
+          processedAddons.push(addon)
+          if (isNewlyCreated) {
+            newlyImportedAddons.push(addon)
+          } else {
+            existingAddons.push(addon)
           }
-        }
-        if (!addon) continue
         }
       }
 
@@ -6153,25 +6277,40 @@ app.post('/api/users/:id/import-addons', async (req, res) => {
         } else {
           console.log(`✅ Attached ${addon.name} to import group via API`)
         }
-        processedAddons.push(addon)
-      } catch (error) {
+          // Addon tracking is already handled above
+        } catch (error) {
         console.error(`❌ API attach error for ${addon.name}:`, error?.message || error)
       }
     }
 
     console.log(`🎉 Import completed! Processed ${processedAddons.length} addons out of ${addons.length} total addons`)
     console.log(`📋 Processed addons:`, processedAddons.map(a => `${a.name} (${a.id})`))
+    console.log(`📊 Newly imported: ${newlyImportedAddons.length}, Already existing: ${existingAddons.length}`)
     
+    let message = ''
+    if (newlyImportedAddons.length > 0 && existingAddons.length > 0) {
+      message = `Successfully imported ${newlyImportedAddons.length} addons to group "${groupName}" (${existingAddons.length} already existed)`
+    } else if (newlyImportedAddons.length > 0) {
+      message = `Successfully imported ${newlyImportedAddons.length} addons to group "${groupName}"`
+    } else if (existingAddons.length > 0) {
+      message = `All ${existingAddons.length} addons already existed in group "${groupName}"`
+    } else {
+      message = `No addons were processed`
+    }
+
     res.json({
-      message: `Successfully imported ${processedAddons.length} addons to group "${groupName}"`,
+      message,
       groupId: group.id,
       groupName: group.name,
-      addonCount: processedAddons.length
+      addonCount: processedAddons.length,
+      newlyImported: newlyImportedAddons.length,
+      existing: existingAddons.length
     })
 
   } catch (error) {
     console.error('❌ Import addons error:', error)
-    res.status(500).json({ message: 'Failed to import addons' })
+    console.error('❌ Error stack:', error.stack)
+    res.status(500).json({ message: 'Failed to import addons', error: error.message })
   }
 })
 
@@ -6183,81 +6322,3 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log('🎬 Stremio integration: ENABLED');
   console.log('💾 Storage: PostgreSQL with Prisma');
 });
-
-// Reorder Stremio addons in user's account
-app.post('/api/users/:id/stremio-addons/reorder', async (req, res) => {
-  try {
-    const { id } = req.params
-    const { orderedManifestUrls } = req.body || {}
-
-    if (!Array.isArray(orderedManifestUrls) || orderedManifestUrls.length === 0) {
-      return res.status(400).json({ message: 'orderedManifestUrls array is required' })
-    }
-
-    const user = await prisma.user.findUnique({ 
-      where: { 
-        id,
-        ...(AUTH_ENABLED && req.appAccountId ? { accountId: req.appAccountId } : {})
-      }
-    })
-    if (!user) return res.status(404).json({ message: 'User not found' })
-    if (!user.stremioAuthKey) return res.status(400).json({ message: 'User is not connected to Stremio' })
-
-    let authKeyPlain
-    try { authKeyPlain = decrypt(user.stremioAuthKey) } catch { return res.status(500).json({ message: 'Failed to decrypt Stremio credentials' }) }
-
-    const apiClient = new StremioAPIClient({ endpoint: 'https://api.strem.io', authKey: authKeyPlain })
-
-    // Pull current collection
-    const current = await apiClient.request('addonCollectionGet', {})
-    const currentAddonsRaw = current?.addons || current || []
-    const currentAddons = Array.isArray(currentAddonsRaw) ? currentAddonsRaw : (typeof currentAddonsRaw === 'object' ? Object.values(currentAddonsRaw) : [])
-
-    const normalize = (s) => (s || '').toString().trim().toLowerCase()
-
-    // Build map from normalized URL to addon object
-    const urlToAddon = new Map()
-    for (const a of currentAddons) {
-      const url = normalize(a?.manifestUrl || a?.transportUrl || a?.url)
-      if (url) urlToAddon.set(url, a)
-    }
-
-    // Construct new ordered list using provided order first, then append any remaining
-    const desiredOrder = []
-    const seen = new Set()
-    for (const rawUrl of orderedManifestUrls) {
-      const key = normalize(rawUrl)
-      if (key && urlToAddon.has(key) && !seen.has(key)) {
-        desiredOrder.push(urlToAddon.get(key))
-        seen.add(key)
-      }
-    }
-    for (const [key, addon] of urlToAddon.entries()) {
-      if (!seen.has(key)) desiredOrder.push(addon)
-    }
-
-    // No-op check
-    const sameLen = desiredOrder.length === currentAddons.length
-    let identical = sameLen
-    if (identical) {
-      for (let i = 0; i < desiredOrder.length; i++) {
-        const a = desiredOrder[i]
-        const b = currentAddons[i]
-        const au = normalize(a?.manifestUrl || a?.transportUrl || a?.url)
-        const bu = normalize(b?.manifestUrl || b?.transportUrl || b?.url)
-        if (au !== bu) { identical = false; break }
-      }
-    }
-    if (identical) {
-      return res.json({ message: 'Order unchanged', total: desiredOrder.length })
-    }
-
-    await apiClient.request('addonCollectionSet', { addons: desiredOrder })
-    await new Promise((r) => setTimeout(r, 1000))
-
-    return res.json({ message: 'Order updated', total: desiredOrder.length })
-  } catch (error) {
-    console.error('Error reordering addons:', error)
-    return res.status(500).json({ message: 'Failed to reorder addons', error: error?.message })
-  }
-})

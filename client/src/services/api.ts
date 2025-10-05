@@ -40,7 +40,13 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     // Only log out on actual authentication errors, not on Stremio connection errors
-    if (error.response?.status === 401 && !error.config?.url?.includes('/stremio/')) {
+    const isStremioEndpoint = error.config?.url?.includes('/stremio/') || 
+                             error.config?.url?.includes('/stremio-addons') ||
+                             error.config?.url?.includes('/connect-stremio') ||
+                             error.config?.url?.includes('/clear-stremio-credentials') ||
+                             error.config?.url?.includes('/stremio-credentials')
+    
+    if (error.response?.status === 401 && !isStremioEndpoint) {
       if (typeof window !== 'undefined') {
         try {
           window.dispatchEvent(new CustomEvent('sfm:auth:changed', { detail: { authed: false } }))
@@ -56,13 +62,8 @@ export interface User {
   id: string
   email: string
   username: string
-  firstName?: string
-  lastName?: string
-  role: 'admin' | 'parent' | 'child'
   status: 'active' | 'inactive'
   groups: string[]
-  createdAt: string
-  updatedAt: string
 }
 
 export interface Group {
@@ -82,7 +83,6 @@ export interface Addon {
   description: string
   url: string
   version?: string
-  tags: string
   iconUrl?: string
   status: 'active' | 'inactive'
   users: number
@@ -92,9 +92,6 @@ export interface Addon {
 export interface CreateUserData {
   email: string
   username: string
-  firstName?: string
-  lastName?: string
-  role: 'admin' | 'parent' | 'child'
 }
 
 export interface CreateGroupData {
@@ -148,17 +145,20 @@ export const usersAPI = {
   },
 
   // Get user sync status (lightweight)
-  getSyncStatus: async (id: string, groupId?: string): Promise<any> => {
-    const url = groupId ? `/users/${id}/sync-status?groupId=${encodeURIComponent(groupId)}` : `/users/${id}/sync-status`
+  getSyncStatus: async (id: string, groupId?: string, unsafeMode?: boolean): Promise<any> => {
+    const params = new URLSearchParams()
+    if (groupId) params.append('groupId', groupId)
+    if (unsafeMode) params.append('unsafe', 'true')
+    const url = `/users/${id}/sync-status${params.toString() ? '?' + params.toString() : ''}`
     const response: AxiosResponse<any> = await api.get(url)
     return response.data
   },
 
   // Sync one user via the dedicated endpoint
-  sync: async (id: string, excludedManifestUrls: string[] = [], syncMode: 'normal' | 'advanced' = 'normal'): Promise<any> => {
+  sync: async (id: string, excludedManifestUrls: string[] = [], syncMode: 'normal' | 'advanced' = 'normal', unsafeMode?: boolean): Promise<any> => {
     const response: AxiosResponse<any> = await api.post(
       `/users/${id}/sync`,
-      { excludedManifestUrls },
+      { excludedManifestUrls, unsafe: unsafeMode },
       { headers: { 'x-sync-mode': syncMode } }
     )
     return response.data
@@ -177,7 +177,7 @@ export const usersAPI = {
   },
 
   // Update user
-  update: async (id: string, userData: { displayName?: string; email?: string; password?: string; groupName?: string }): Promise<User> => {
+  update: async (id: string, userData: { email?: string; password?: string; groupName?: string }): Promise<User> => {
     const response: AxiosResponse<User> = await api.put(`/users/${id}`, userData)
     // Handle axios response wrapper
     if (response.data && typeof response.data === 'object' && (response.data as any).data) {
@@ -192,10 +192,9 @@ export const usersAPI = {
   },
 
   // Search users
-  search: async (query: string, role?: string): Promise<User[]> => {
+  search: async (query: string): Promise<User[]> => {
     const params = new URLSearchParams()
     if (query) params.append('q', query)
-    if (role && role !== 'all') params.append('role', role)
     
     const response: AxiosResponse<User[]> = await api.get(`/users/search?${params}`)
     return response.data
@@ -266,8 +265,13 @@ export const groupsAPI = {
 export const addonsAPI = {
   // Get all addons
   getAll: async (): Promise<Addon[]> => {
-    const response: AxiosResponse<Addon[]> = await api.get('/addons')
-    return response.data
+    const response: AxiosResponse<any> = await api.get('/addons')
+    // Be resilient to different response wrappers
+    const data = response.data
+    if (Array.isArray(data)) return data as Addon[]
+    if (data && Array.isArray(data.addons)) return data.addons as Addon[]
+    if (data && data.data && Array.isArray(data.data)) return data.data as Addon[]
+    return []
   },
 
   // Get addon by ID
@@ -325,7 +329,7 @@ export const addonsAPI = {
 // Stremio API
 export const stremioAPI = {
   // Connect to Stremio
-  connect: async (userData: { displayName?: string; email: string; password: string; username?: string; groupName?: string }): Promise<any> => {
+  connect: async (userData: { email: string; password: string; username?: string; groupName?: string }): Promise<any> => {
     const response: AxiosResponse<any> = await api.post('/stremio/connect', userData)
     return response.data
   },

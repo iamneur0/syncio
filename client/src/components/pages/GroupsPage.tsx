@@ -369,6 +369,30 @@ export default function GroupsPage() {
     }
     return 'card'
   })
+  
+  // Delete mode state
+  const [deleteMode, setDeleteMode] = useState<'safe' | 'unsafe'>('safe')
+  
+  // Load delete mode from localStorage
+  useEffect(() => {
+    const savedDeleteMode = localStorage.getItem('sfm_delete_mode') as 'safe' | 'unsafe' | null
+    if (savedDeleteMode) {
+      setDeleteMode(savedDeleteMode)
+    }
+  }, [])
+  
+  // Listen for delete mode changes from settings
+  useEffect(() => {
+    const handleDeleteModeChange = () => {
+      const savedDeleteMode = localStorage.getItem('sfm_delete_mode') as 'safe' | 'unsafe' | null
+      if (savedDeleteMode) {
+        setDeleteMode(savedDeleteMode)
+      }
+    }
+    
+    window.addEventListener('sfm:delete-mode:changed', handleDeleteModeChange)
+    return () => window.removeEventListener('sfm:delete-mode:changed', handleDeleteModeChange)
+  }, [])
   // Ensure highlight persists after refresh/hydration
   useLayoutEffect(() => {
     try {
@@ -1470,7 +1494,12 @@ export default function GroupsPage() {
     mutationFn: async ({ id, isActive }: { id: string; isActive: boolean }) => {
       const response = await fetch(`/api/groups/${id}/toggle-status`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': (document.cookie.split(';').find(c => c.trim().startsWith('__Host-sfm_csrf='))?.split('=')[1]
+            || document.cookie.split(';').find(c => c.trim().startsWith('sfm_csrf='))?.split('=')[1]
+            || '')
+        },
         body: JSON.stringify({ isActive: !isActive })
       })
       
@@ -1740,7 +1769,7 @@ export default function GroupsPage() {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
         credentials: 'include',
-        body: JSON.stringify({ groupName: '' })
+        body: JSON.stringify({ groupId: '' })
       })
       if (!response.ok) {
         throw new Error('Failed to remove user from group')
@@ -1996,15 +2025,18 @@ export default function GroupsPage() {
             } ${!group.isActive ? 'opacity-50' : ''}`}>
             <div className="flex items-start justify-between mb-4">
               <div className="flex items-center">
-                  <div className={`w-12 h-12 rounded-lg flex items-center justify-center ${
-                    isMono
-                      ? 'bg-black border border-white/20 text-white'
-                      : isModern
-                      ? 'bg-gradient-to-br from-purple-600 to-blue-800 text-white'
-                      : isModernDark
-                      ? 'bg-gradient-to-br from-purple-800 to-blue-900 text-white'
-                      : getGroupColorClass(group?.colorIndex)
-                  }`}>
+                  <div 
+                    className={`w-12 h-12 rounded-lg flex items-center justify-center ${
+                      isMono
+                        ? 'border border-white/20 text-white'
+                        : isModern
+                        ? 'bg-gradient-to-br from-purple-600 to-blue-800 text-white'
+                        : isModernDark
+                        ? 'bg-gradient-to-br from-purple-800 to-blue-900 text-white'
+                        : getGroupColorClass(group?.colorIndex)
+                    }`}
+                    style={isMono ? { backgroundColor: getColorValue(getGroupColorClass(group?.colorIndex)) } : undefined}
+                  >
                     <span className="text-white font-semibold text-lg">
                       {group.name ? group.name.charAt(0).toUpperCase() : 'G'}
                     </span>
@@ -2190,14 +2222,12 @@ export default function GroupsPage() {
               onClick={() => handleViewGroupDetails(group)}
             >
               <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center flex-1 min-w-0">
+                <div className="flex items-center flex-1 min-w-0 max-w-[calc(100%-200px)]">
                   <div
-                    className={`w-10 h-10 rounded-lg flex items-center justify-center mr-3 flex-shrink-0 text-white ${getGroupColorClass(group?.colorIndex)} ${
+                    className={`w-10 h-10 rounded-lg flex items-center justify-center mr-3 flex-shrink-0 text-white ${!isMono ? getGroupColorClass(group?.colorIndex) : ''} ${
                       isMono ? 'border border-white/20' : ''
                     }`}
-                    style={{
-                      backgroundColor: group?.colorIndex === 2 && isMono ? '#1f2937' : undefined
-                    }}
+                    style={isMono ? { backgroundColor: getColorValue(getGroupColorClass(group?.colorIndex)) } : undefined}
                   >
                     <span className="text-white font-semibold text-sm">
                       {group.name ? group.name.charAt(0).toUpperCase() : 'G'}
@@ -2255,7 +2285,7 @@ export default function GroupsPage() {
                       </div>
                     </div>
                     {group.description && (
-                      <p className={`hidden sm:block text-sm truncate ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
+                      <p className={`hidden sm:block text-sm truncate max-w-[250px] lg:max-w-[300px] ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
                         {group.description}
                       </p>
                     )}
@@ -2375,7 +2405,7 @@ export default function GroupsPage() {
       {/* Add Group Modal */}
       {showAddModal && (
         <div 
-          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50"
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 modal-root"
           onClick={(e) => {
             if (e.target === e.currentTarget) {
               setShowAddModal(false)
@@ -2500,7 +2530,7 @@ export default function GroupsPage() {
       {/* Edit Group Modal */}
       {showEditModal && editingGroupId && (
         <div 
-          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[100]"
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[100] modal-root"
           onClick={(e) => {
             if (e.target === e.currentTarget) {
               setShowEditModal(false)
@@ -2606,7 +2636,7 @@ export default function GroupsPage() {
       {/* Group Detail Modal */}
       {showDetailModal && selectedGroup && (
         <div 
-          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[90] p-4"
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[90] p-4 modal-root"
           onClick={(e) => {
             if (e.target === e.currentTarget) {
               setShowDetailModal(false)
@@ -2722,7 +2752,37 @@ export default function GroupsPage() {
                           }`}
                         >Cancel</button>
                         <button
-                          onClick={() => { setSavingUsers(true); updateGroupUsersMutation.mutate({ id: selectedGroup!.id, userIds: selectedUserIdsInline }) }}
+                          onClick={() => {
+                            if (!selectedGroup?.id) return
+                            // Determine users that would be moved from other groups
+                            const currentMembers = (selectedGroupDetails?.users || []).map((u: any) => u.id)
+                            const toAdd = selectedUserIdsInline.filter((id: string) => !currentMembers.includes(id))
+                            const toRemove = currentMembers.filter((id: string) => !selectedUserIdsInline.includes(id))
+
+                            // If adding users who already belong to another group, confirm move
+                            const needsConfirm = toAdd.some((uid: string) => {
+                              const u = safeUsers.find((su: any) => su.id === uid)
+                              // Show only if the user is in some group different from the current one
+                              return !!(u?.groupId && u.groupId !== selectedGroup!.id)
+                            })
+                            if (needsConfirm) {
+                              setConfirmConfig({
+                                title: 'Move user to this group?',
+                                description: 'Some selected users may already belong to another group. Move them here and remove them from their current group?',
+                                isDanger: false,
+                                onConfirm: () => {
+                                  setSavingUsers(true)
+                                  updateGroupUsersMutation.mutate({ id: selectedGroup!.id, userIds: selectedUserIdsInline })
+                                  setShowUserPicker(false)
+                                }
+                              })
+                              setConfirmOpen(true)
+                            } else {
+                              setSavingUsers(true)
+                              updateGroupUsersMutation.mutate({ id: selectedGroup!.id, userIds: selectedUserIdsInline })
+                              setShowUserPicker(false)
+                            }
+                          }}
                           disabled={savingUsers}
                           className={`w-[84px] h-8 min-h-8 max-h-8 text-sm rounded-lg border transition-colors disabled:opacity-50 ${
                             isDark ? 'bg-gray-600 border-gray-500 text-white hover:bg-gray-500' : 'bg-white border-gray-200 text-gray-900 hover:bg-gray-50'
@@ -2836,7 +2896,7 @@ export default function GroupsPage() {
                                     const syncMode = typeof window !== 'undefined' ? (localStorage.getItem('sfm_sync_mode') || 'normal') : 'normal'
                                     // Collect membership-specific exclusions if we have them in state
                                     const excluded = Array.from(globalUserExcludedSets.get(member.id) || [])
-                                    await usersAPI.sync(member.id, excluded, syncMode as any)
+                                    await usersAPI.sync(member.id, excluded, syncMode as any, deleteMode === 'unsafe')
                                     // mark cached status
                                     localStorage.setItem(`sfm_user_sync_status:${member.id}`, 'synced')
                                     const now = Date.now().toString()

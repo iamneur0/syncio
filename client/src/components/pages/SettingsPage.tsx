@@ -123,7 +123,8 @@ export default function SettingsPage() {
       const res = await api.get('/exports/addons')
       const blob = new Blob([JSON.stringify(res.data, null, 2)], { type: 'application/json' })
       const url = URL.createObjectURL(blob)
-      const a = document.createElement('a'); a.href = url; a.download = 'syncio-addon-export.json'; a.click(); URL.revokeObjectURL(url)
+      const date = new Date().toISOString().split('T')[0].replace(/-/g, '') // YYYYMMDD format
+      const a = document.createElement('a'); a.href = url; a.download = `${date}-syncio-addons.json`; a.click(); URL.revokeObjectURL(url)
       toast.success('Addons exported')
     } catch (e: any) {
       const msg = e?.response?.data?.error || e?.message || 'Export failed'
@@ -136,7 +137,8 @@ export default function SettingsPage() {
       const res = await api.get('/public-auth/export')
       const blob = new Blob([JSON.stringify(res.data, null, 2)], { type: 'application/json' })
       const url = URL.createObjectURL(blob)
-      const a = document.createElement('a'); a.href = url; a.download = 'syncio-config-export.json'; a.click(); URL.revokeObjectURL(url)
+      const date = new Date().toISOString().split('T')[0].replace(/-/g, '') // YYYYMMDD format
+      const a = document.createElement('a'); a.href = url; a.download = `${date}-syncio-config.json`; a.click(); URL.revokeObjectURL(url)
       toast.success('Configuration exported')
     } catch (e: any) {
       const msg = e?.response?.data?.error || e?.message || 'Export failed'
@@ -155,11 +157,27 @@ export default function SettingsPage() {
         formData.append('file', file)
         const resp = await api.post('/public-auth/import-config', formData, { headers: { 'Content-Type': 'multipart/form-data' } })
         const { addons, users, groups } = resp.data
-        toast.success(`Configuration imported:\n${addons.successful} addons\n${users.created} users\n${groups.created} groups`)
+        const totalAddons = (addons.created || 0) + (addons.reused || 0)
+        
+        // Build message with only non-zero values
+        const messageParts = []
+        if (totalAddons > 0) messageParts.push(`${totalAddons} addons`)
+        if (users.created > 0) messageParts.push(`${users.created} users`)
+        if (groups.created > 0) messageParts.push(`${groups.created} groups`)
+        
+        toast.success(`Configuration imported:\n${messageParts.join('\n')}`)
       } else if (configText.trim()) {
         const resp = await api.post('/public-auth/import-config', { jsonData: configText.trim() })
         const { addons, users, groups } = resp.data
-        toast.success(`Configuration imported:\n${addons.successful} addons\n${users.created} users\n${groups.created} groups`)
+        const totalAddons = (addons.created || 0) + (addons.reused || 0)
+        
+        // Build message with only non-zero values
+        const messageParts = []
+        if (totalAddons > 0) messageParts.push(`${totalAddons} addons`)
+        if (users.created > 0) messageParts.push(`${users.created} users`)
+        if (groups.created > 0) messageParts.push(`${groups.created} groups`)
+        
+        toast.success(`Configuration imported:\n${messageParts.join('\n')}`)
       } else {
         toast.error('Select a file or paste JSON first')
       }
@@ -180,7 +198,14 @@ export default function SettingsPage() {
       api.post('/public-auth/import-config', formData, { headers: { 'Content-Type': 'multipart/form-data' } })
         .then((resp) => {
           const { addons, users, groups } = resp.data
-          toast.success(`Configuration imported:\n${addons.successful} addons\n${users.created} users\n${groups.created} groups`)
+          const totalAddons = (addons.created || 0) + (addons.reused || 0)
+          // Build message with only non-zero values
+          const messageParts = []
+          if (totalAddons > 0) messageParts.push(`${totalAddons} addons`)
+          if (users.created > 0) messageParts.push(`${users.created} users`)
+          if (groups.created > 0) messageParts.push(`${groups.created} groups`)
+          
+          toast.success(`Configuration imported:\n${messageParts.join('\n')}`)
         })
         .catch((e) => {
           const msg = e?.response?.data?.message || e?.message || 'Import configuration failed'
@@ -203,7 +228,14 @@ export default function SettingsPage() {
       api.post('/public-auth/import-config', formData, { headers: { 'Content-Type': 'multipart/form-data' } })
         .then((resp) => {
           const { addons, users, groups } = resp.data
-          toast.success(`Configuration imported:\n${addons.successful} addons\n${users.created} users\n${groups.created} groups`)
+          const totalAddons = (addons.created || 0) + (addons.reused || 0)
+          // Build message with only non-zero values
+          const messageParts = []
+          if (totalAddons > 0) messageParts.push(`${totalAddons} addons`)
+          if (users.created > 0) messageParts.push(`${users.created} users`)
+          if (groups.created > 0) messageParts.push(`${groups.created} groups`)
+          
+          toast.success(`Configuration imported:\n${messageParts.join('\n')}`)
         })
         .catch((e) => {
           const msg = e?.response?.data?.message || e?.message || 'Import configuration failed'
@@ -636,7 +668,7 @@ export default function SettingsPage() {
             <RefreshCcw className="w-5 h-5 mr-2" /> Reset Configuration
           </button>
           {AUTH_ENABLED && (
-            <button onClick={deleteAccount} className={`flex items-center px-4 py-2 rounded-lg transition-colors ${isDark ? 'bg-red-700 hover:bg-red-600 text-white' : 'bg-red-100 hover:bg-red-200 text-red-800'}`}>
+            <button onClick={deleteAccount} className={`flex items-center px-4 py-2 rounded-lg transition-colors ${isDark ? 'bg-gray-700 hover:bg-gray-600 text-white' : 'bg-gray-100 hover:bg-gray-200 text-gray-900'}`}>
               <Trash2 className="w-5 h-5 mr-2" /> Delete Account
             </button>
           )}
