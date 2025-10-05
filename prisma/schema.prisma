@@ -4,7 +4,7 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -23,7 +23,7 @@ model User {
   protectedAddons String?  // JSON array of addon IDs that user has protected
   colorIndex      Int?     // UI color theme index
   accountId       String?  // For multi-tenant support
-  
+
   // Relationships
   addonSettings   AddonSetting[]
   activityLogs    ActivityLog[]
@@ -36,35 +36,35 @@ model Group {
   name        String
   description String?
   isActive    Boolean  @default(true)
-  colorIndex  Int?     // UI color theme index
-  accountId   String?  // For multi-tenant support
-  userIds     String?  // JSON array of user IDs
-  addonIds    String?  // JSON array of addon IDs
-  
+  colorIndex  Int?
+  accountId   String?
+  userIds     String?
+  addonIds    String?
+
   // Relationships
-  addons      GroupAddon[]
+  addons       GroupAddon[]
   activityLogs ActivityLog[]
 
   @@map("groups")
 }
 
-// GroupMember model removed - using JSON arrays in Group model instead
+// GroupMember and GroupInvite removed – using JSON arrays on Group
 
 model Addon {
   id             String   @id @default(cuid())
   name           String
   description    String?
   manifestUrl    String
-  manifest       String?  // Store the full manifest JSON as string (SQLite doesn't have native JSON)
+  manifest       Json?    // Store the full manifest JSON
   stremioAddonId String?
   version        String?
   author         String?
   isOfficial     Boolean  @default(false)
   isActive       Boolean  @default(true)
-  accountId      String?  // For multi-tenant support
+  accountId      String?
   tags           String?
   iconUrl        String?
-  
+
   // Relationships
   groupAddons    GroupAddon[]
   addonSettings  AddonSetting[]
@@ -76,7 +76,7 @@ model Addon {
 model GroupAddon {
   id        String   @id @default(cuid())
   isEnabled Boolean  @default(true)
-  settings  String?  // JSON string for addon-specific settings
+  settings  String?
   groupId   String
   group     Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
   addonId   String
@@ -103,12 +103,12 @@ model ActivityLog {
   id        String   @id @default(cuid())
   action    String
   details   String?
-  metadata  String?  // JSON string for additional data
+  metadata  String?
   userId    String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   groupId   String?
   group     Group?   @relation(fields: [groupId], references: [id], onDelete: SetNull)
-  accountId String?  // For multi-tenant support
+  accountId String?
 
   @@map("activity_logs")
 }
@@ -117,6 +117,9 @@ model AppAccount {
   id           String   @id @default(cuid())
   uuid         String   @unique
   passwordHash String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   @@map("app_accounts")
 }
+

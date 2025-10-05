@@ -366,7 +366,22 @@ app.get('/api/public-auth/export', async (req, res) => {
       prisma.group.findMany({ where: whereScope, include: { addons: true } }),
       prisma.addon.findMany({ where: whereScope, include: { groupAddons: true } })
     ])
-    const payload = { users, groups, addons }
+    
+    // Decrypt stremioAuthKey for each user before exporting
+    const decryptedUsers = users.map(user => {
+      const decryptedUser = { ...user }
+      if (user.stremioAuthKey) {
+        try {
+          decryptedUser.stremioAuthKey = decrypt(user.stremioAuthKey)
+        } catch (e) {
+          console.warn(`Failed to decrypt auth key for user ${user.id}:`, e.message)
+          decryptedUser.stremioAuthKey = null
+        }
+      }
+      return decryptedUser
+    })
+    
+    const payload = { users: decryptedUsers, groups, addons }
     res.setHeader('Content-Disposition', 'attachment; filename="syncio-export.json"')
     return res.json(payload)
   } catch (e) {
@@ -579,12 +594,7 @@ app.post('/api/public-auth/import-config', upload.single('file'), async (req, re
             username: username || email || `user_${Date.now()}`,
             email: email || `${Date.now()}@local`,
             isActive: u?.isActive !== false,
-            stremioEmail: u?.stremioEmail || null,
-            stremioUsername: u?.stremioUsername || null,
             stremioAuthKey: u?.stremioAuthKey ? encrypt(u.stremioAuthKey) : null,
-            stremioUserId: u?.stremioUserId || null,
-            stremioAddons: u?.stremioAddons || null,
-            lastStremioSync: u?.lastStremioSync ? new Date(u.lastStremioSync) : null,
             excludedAddons: u?.excludedAddons || null,
             protectedAddons: u?.protectedAddons || null,
             colorIndex: typeof u?.colorIndex === 'number' ? u.colorIndex : null,
@@ -838,8 +848,7 @@ app.delete('/api/public-auth/account', async (req, res) => {
     // Cascade delete scoped data
     await prisma.$transaction([
       prisma.activityLog.deleteMany({ where: { accountId: req.appAccountId } }),
-      prisma.groupMember.deleteMany({ where: { group: { accountId: req.appAccountId } } }),
-      prisma.groupInvite.deleteMany({ where: { group: { accountId: req.appAccountId } } }),
+      // GroupMember and GroupInvite models removed - using JSON arrays instead
       prisma.groupAddon.deleteMany({ where: { group: { accountId: req.appAccountId } } }),
       prisma.addonSetting.deleteMany({ where: { user: { accountId: req.appAccountId } } }),
       prisma.user.deleteMany({ where: { accountId: req.appAccountId } }),
@@ -2290,7 +2299,6 @@ app.put('/api/users/:id', async (req, res) => {
         id,
         accountId: getAccountId(req)
       },
-      include: { memberships: true }
     })
 
     if (!existingUser) {
@@ -2341,10 +2349,24 @@ app.put('/api/users/:id', async (req, res) => {
     // Handle group assignment
     console.log(`🔍 Group assignment - groupId: "${groupId}", type: ${typeof groupId}`)
     if (groupId !== undefined) {
-      // Always remove user from current member groups first
-      await prisma.groupMember.deleteMany({
-        where: { userId: id }
+      // Remove user from all groups first (update userIds arrays)
+      const currentGroups = await prisma.group.findMany({
+        where: {
+          accountId: getAccountId(req),
+          userIds: {
+            contains: id
+          }
+        }
       })
+      
+      for (const group of currentGroups) {
+        const userIds = group.userIds ? JSON.parse(group.userIds) : []
+        const updatedUserIds = userIds.filter(userId => userId !== id)
+        await prisma.group.update({
+          where: { id: group.id },
+          data: { userIds: JSON.stringify(updatedUserIds) }
+        })
+      }
       console.log(`🔍 Removed user from all groups`)
 
       // If a group ID is provided and not empty, assign to that group
@@ -2362,41 +2384,44 @@ app.put('/api/users/:id', async (req, res) => {
           return res.status(400).json({ error: 'Group not found' })
         }
         
-        // Create the group membership
-        await prisma.groupMember.create({
-          data: {
-            userId: id,
-            groupId: group.id,
-            role: 'MEMBER'
-          }
-        })
+        // Add user to group's userIds array
+        const currentUserIds = group.userIds ? JSON.parse(group.userIds) : []
+        if (!currentUserIds.includes(id)) {
+          currentUserIds.push(id)
+          await prisma.group.update({
+            where: { id: group.id },
+            data: { userIds: JSON.stringify(currentUserIds) }
+          })
+        }
         console.log(`🔍 User assigned to group: ${group.name}`)
       }
     }
 
     // Fetch updated user for response
     const userWithGroups = await prisma.user.findUnique({
-      where: { id },
-      include: {
-        memberships: {
-          include: {
-            group: true
-          }
+      where: { id }
+    })
+
+    // Find groups that contain this user using userIds JSON array
+    const userGroups = await prisma.group.findMany({
+      where: {
+        userIds: {
+          contains: id
         }
       }
     })
 
     // Transform for frontend response
-    const userGroup = userWithGroups.memberships?.[0]?.group
+    const userGroup = userGroups[0] // Get first group if any
     const transformedUser = {
       id: userWithGroups.id,
       username: userWithGroups.username || userWithGroups.stremioUsername,
       email: userWithGroups.stremioEmail || userWithGroups.email,
-      role: userWithGroups.role.toLowerCase(),
+      role: 'user', // Default role since we removed role field
       status: userWithGroups.isActive ? 'active' : 'inactive',
       addons: userWithGroups.stremioAddons ? 
         (Array.isArray(userWithGroups.stremioAddons) ? userWithGroups.stremioAddons.length : Object.keys(userWithGroups.stremioAddons).length) : 0,
-      groups: userWithGroups.memberships?.length || 0,
+      groups: userGroups.length,
       groupName: userGroup?.name || null,
       groupId: userGroup?.id || null,
       lastActive: userWithGroups.lastStremioSync || userWithGroups.createdAt,
@@ -2439,7 +2464,6 @@ app.patch('/api/users/:id', async (req, res) => {
         id,
         accountId: getAccountId(req)
       },
-      include: { memberships: true }
     })
     
     if (!existingUser) {
@@ -2498,14 +2522,7 @@ app.patch('/api/users/:id', async (req, res) => {
     // Update user
     const updatedUser = await prisma.user.update({
       where: { id },
-      data: updateData,
-      include: {
-        memberships: {
-          include: {
-            group: true
-          }
-        }
-      }
+      data: updateData
     })
     
     // Remove sensitive data
@@ -2566,10 +2583,30 @@ app.delete('/api/users/:id', async (req, res) => {
       return res.status(404).json({ message: 'User not found' })
     }
 
+    // Remove user from all groups first (update userIds arrays)
+    const groups = await prisma.group.findMany({
+      where: {
+        accountId: getAccountId(req),
+        userIds: {
+          contains: id
+        }
+      }
+    })
+    
+    // Update each group to remove the user from userIds array
+    for (const group of groups) {
+      const userIds = group.userIds ? JSON.parse(group.userIds) : []
+      const updatedUserIds = userIds.filter(userId => userId !== id)
+      await prisma.group.update({
+        where: { id: group.id },
+        data: { userIds: JSON.stringify(updatedUserIds) }
+      })
+    }
+
     // Delete related records first to avoid FK constraint errors
     await prisma.$transaction([
-      prisma.groupMember.deleteMany({ where: { userId: id } }),
-      prisma.activityLog.deleteMany({ where: { userId: id } }),
+      // Optional logs table (ignore if not present in schema at runtime)
+      prisma.activityLog ? prisma.activityLog.deleteMany({ where: { userId: id } }) : prisma.$executeRaw`SELECT 1`,
       prisma.user.delete({ 
         where: { 
           id,
@@ -2764,32 +2801,51 @@ app.post('/api/stremio/connect', async (req, res) => {
       }
     });
 
+    // Check if user has a valid Stremio connection
+    let hasValidStremioConnection = false
+    if (existingUser && existingUser.stremioAuthKey) {
+      try {
+        const decryptedKey = decrypt(existingUser.stremioAuthKey)
+        const validation = await validateStremioAuthKey(decryptedKey)
+        hasValidStremioConnection = !!(validation && validation.user)
+      } catch (e) {
+        // Invalid auth key - allow reconnection
+        hasValidStremioConnection = false
+      }
+    }
+
     if (existingUser) {
-      // User already exists in this account - return success (idempotent)
-      if (AUTH_ENABLED && req.appAccountId && existingUser.accountId === req.appAccountId) {
-        return res.status(200).json({
-          message: 'User already exists in this account',
-          user: { id: existingUser.id, username: existingUser.username || existingUser.stremioUsername },
-          addonsCount: 0,
-          group: null
-        })
+      // If user exists with valid Stremio connection, return conflict
+      if (hasValidStremioConnection) {
+        if (AUTH_ENABLED && req.appAccountId && existingUser.accountId === req.appAccountId) {
+          return res.status(200).json({
+            message: 'User already exists in this account',
+            user: { id: existingUser.id, username: existingUser.username || existingUser.stremioUsername },
+            addonsCount: 0,
+            group: null
+          })
+        }
+        
+        // Determine which field caused the conflict
+        if (existingUser.username === finalUsername) {
+          return res.status(409).json({ 
+            message: 'Username already exists',
+            error: 'Please choose a different username'
+          });
+        }
+        if (existingUser.email === email || existingUser.stremioEmail === email) {
+          return res.status(409).json({ 
+            message: 'Email already exists',
+            error: 'This email is already registered'
+          });
+        }
+        
+        return res.status(409).json({ message: 'User already exists' });
       }
       
-      // Determine which field caused the conflict
-      if (existingUser.username === finalUsername) {
-        return res.status(409).json({ 
-          message: 'Username already exists',
-          error: 'Please choose a different username'
-        });
-      }
-      if (existingUser.email === email || existingUser.stremioEmail === email) {
-        return res.status(409).json({ 
-          message: 'Email already exists',
-          error: 'This email is already registered'
-        });
-      }
-      
-      return res.status(409).json({ message: 'User already exists' });
+      // User exists but has invalid/no Stremio connection - allow reconnection
+      // We'll update the existing user instead of creating a new one
+      console.log(`🔄 User exists with invalid Stremio connection, allowing reconnection: ${existingUser.id}`)
     }
 
     // Create a temporary storage object for this authentication session
@@ -2902,23 +2958,34 @@ app.post('/api/stremio/connect', async (req, res) => {
     // Encrypt the auth key for secure storage
     const encryptedAuthKey = encrypt(authKey);
 
-    // Create user in database
-    const newUser = await prisma.user.create({
-      data: {
-        // Scope to current AppAccount when auth is enabled
-        accountId: getAccountId(req),
-        displayName: finalUsername,
-        username: finalUsername,
-        email,
-        stremioEmail: email,
-        stremioUsername: userData?.username || email.split('@')[0],
-        stremioAuthKey: encryptedAuthKey,
-        stremioUserId: userData?.id,
-        stremioAddons: JSON.stringify(addonsData || {}),
-        lastStremioSync: new Date(),
-        role: 'USER'
-      }
-    });
+    // Create or update user in database
+    let newUser;
+    if (existingUser && !hasValidStremioConnection) {
+      // Update existing user with new Stremio connection
+      newUser = await prisma.user.update({
+        where: { id: existingUser.id },
+        data: {
+          username: finalUsername,
+          email,
+          stremioAuthKey: encryptedAuthKey,
+          isActive: true
+        }
+      });
+      console.log(`✅ Updated existing user with new Stremio connection: ${newUser.id}`)
+    } else {
+      // Create new user
+      newUser = await prisma.user.create({
+        data: {
+          // Scope to current AppAccount when auth is enabled
+          accountId: getAccountId(req),
+          username: finalUsername,
+          email,
+          stremioAuthKey: encryptedAuthKey,
+          isActive: true
+        }
+      });
+      console.log(`✅ Created new user: ${newUser.id}`)
+    }
 
     // Handle group assignment if provided
     let assignedGroup = null;
@@ -2945,15 +3012,16 @@ app.post('/api/stremio/connect', async (req, res) => {
         }
         console.log(`🔍 Group found/created:`, assignedGroup)
 
-        // Add user to group
-        const groupMember = await prisma.groupMember.create({
-          data: {
-            userId: newUser.id,
-            groupId: assignedGroup.id,
-            role: 'MEMBER'
-          }
-        });
-        console.log(`🔍 User added to group successfully:`, groupMember)
+        // Add user to group's userIds array
+        const currentUserIds = assignedGroup.userIds ? JSON.parse(assignedGroup.userIds) : []
+        if (!currentUserIds.includes(newUser.id)) {
+          currentUserIds.push(newUser.id)
+          await prisma.group.update({
+            where: { id: assignedGroup.id },
+            data: { userIds: JSON.stringify(currentUserIds) }
+          })
+        }
+        console.log(`🔍 User added to group successfully`)
       } catch (groupError) {
         console.error(`❌ Failed to assign user to group:`, groupError)
         // Don't fail the entire user creation if group assignment fails
@@ -2965,18 +3033,20 @@ app.post('/api/stremio/connect', async (req, res) => {
 
     // Log activity (non-blocking)
     try {
-      await prisma.activityLog.create({
-        data: {
-          userId: newUser.id,
-          action: 'USER_JOINED',
-          details: `User connected Stremio account: ${email}${assignedGroup ? ` and joined group: ${assignedGroup.name}` : ''}`,
-          metadata: {
-            stremioUsername: userData?.username,
-            addonCount: Object.keys(addonsData).length,
-            groupName: assignedGroup?.name
+      if (prisma.activityLog) {
+        await prisma.activityLog.create({
+          data: {
+            userId: newUser.id,
+            action: 'USER_JOINED',
+            details: `User connected Stremio account: ${email}${assignedGroup ? ` and joined group: ${assignedGroup.name}` : ''}`,
+            metadata: JSON.stringify({
+              stremioUsername: userData?.username,
+              addonCount: Object.keys(addonsData).length,
+              groupName: assignedGroup?.name
+            })
           }
-        }
-      });
+        });
+      }
     } catch (activityErr) {
       console.error('Activity log error (non-critical):', activityErr)
     }
@@ -3098,25 +3168,28 @@ app.post('/api/stremio/connect-authkey', async (req, res) => {
     const created = await prisma.user.create({
       data: {
         accountId: getAccountId(req),
-        displayName: displayName || (verifiedUser?.name || verifiedUser?.username || verifiedUser?.email || email || finalUsername || 'User'),
         email: (verifiedUser?.email || email || `${Date.now()}@example.invalid`).toLowerCase(),
         username: finalUsername,
-        role: 'USER',
-        stremioEmail: verifiedUser?.email || email || null,
-        // Stremio does not provide a stable username; keep Syncio username only
-        stremioUsername: null,
         stremioAuthKey: encryptedAuthKey,
-        stremioAddons: JSON.stringify(addonsData || {}),
+        isActive: true
       },
     })
 
     // Optional: create group and add user
     if (groupName) {
-      let group = await prisma.group.findFirst({ where: { name: groupName, ...(AUTH_ENABLED && req.appAccountId ? { accountId: req.appAccountId } : {}) } })
+      let group = await prisma.group.findFirst({ where: { name: groupName, accountId: getAccountId(req) } })
       if (!group) {
-        group = await prisma.group.create({ data: { name: groupName, ...(AUTH_ENABLED && req.appAccountId ? { accountId: req.appAccountId } : {}) } })
+        group = await prisma.group.create({ data: { name: groupName, accountId: getAccountId(req) } })
       }
-      await prisma.groupMember.create({ data: { userId: created.id, groupId: group.id } })
+      // Add user to group's userIds array
+      const currentUserIds = group.userIds ? JSON.parse(group.userIds) : []
+      if (!currentUserIds.includes(created.id)) {
+        currentUserIds.push(created.id)
+        await prisma.group.update({
+          where: { id: group.id },
+          data: { userIds: JSON.stringify(currentUserIds) }
+        })
+      }
     }
 
     // Hide sensitive fields
@@ -3171,6 +3244,7 @@ app.post('/api/users/:id/connect-stremio-authkey', async (req, res) => {
         // Do not override Syncio username from Stremio
         stremioUsername: undefined,
         email: verifiedUser?.email ? verifiedUser.email.toLowerCase() : undefined,
+        isActive: true, // Reconnect user since they now have valid Stremio connection
       },
     })
 
@@ -4209,19 +4283,20 @@ app.get('/api/debug/current-addons/:userId', async (req, res) => {
     
     // Get user with Stremio connection
     const user = await prisma.user.findUnique({
-      where: { id: userId },
+      where: { id: userId }
+    })
+
+    // Find groups that contain this user using userIds JSON array
+    const userGroups = await prisma.group.findMany({
+      where: {
+        userIds: {
+          contains: userId
+        }
+      },
       include: {
-        memberships: {
+        addons: {
           include: {
-            group: {
-              include: {
-                addons: {
-                  include: {
-                    addon: true
-                  }
-                }
-              }
-            }
+            addon: true
           }
         }
       }
@@ -4693,7 +4768,7 @@ app.delete('/api/groups/:id', async (req, res) => {
     }
 
     await prisma.$transaction([
-      prisma.groupMember.deleteMany({ where: { groupId: id } }),
+      // GroupMember model removed - using JSON arrays instead
       prisma.groupAddon.deleteMany({ where: { groupId: id } }),
       prisma.activityLog.deleteMany({ where: { groupId: id } }),
       prisma.group.delete({ 
@@ -5309,36 +5384,18 @@ app.post('/api/groups/:id/sync', async (req, res) => {
       return res.status(400).json({ message: 'Group is disabled' })
     }
     
-    // Get users from the group - handle both SQLite and PostgreSQL
+    // Determine database type
     const isSqlite = process.env.PRISMA_PROVIDER === 'sqlite'
-    let groupUsers = []
     
-    if (isSqlite) {
-      // SQLite: Use members relationship
-      const groupWithMembers = await prisma.group.findUnique({
-        where: { id: groupId },
-        include: {
-          members: {
-            include: {
-              user: true
-            }
-          }
-        }
-      })
-      groupUsers = groupWithMembers?.members
-        ?.map(member => member.user)
-        ?.filter(user => user.isActive && user.stremioAuthKey) || []
-    } else {
-      // PostgreSQL: Use userIds array
-      const userIds = group.userIds ? JSON.parse(group.userIds) : []
-      groupUsers = await prisma.user.findMany({
-        where: {
-          id: { in: userIds },
-          isActive: true,
-          stremioAuthKey: { not: null }
-        }
-      })
-    }
+    // Get users from the group using userIds JSON array (both SQLite and PostgreSQL)
+    const userIds = group.userIds ? JSON.parse(group.userIds) : []
+    const groupUsers = await prisma.user.findMany({
+      where: {
+        id: { in: userIds },
+        isActive: true,
+        stremioAuthKey: { not: null }
+      }
+    })
     
     if (groupUsers.length === 0) {
       return res.json({ 
@@ -5692,6 +5749,7 @@ app.post('/api/users/:id/clear-stremio-credentials', async (req, res) => {
         stremioEmail: null,
         stremioAddons: null,
         lastStremioSync: null,
+        isActive: false, // Disconnect user since Stremio credentials are cleared
       },
     });
 
@@ -6022,13 +6080,15 @@ app.post('/api/test/users', async (req, res) => {
       });
       
       if (group) {
-        await prisma.groupMember.create({
-          data: {
-            userId: newUser.id,
-            groupId: group.id,
-            role: 'MEMBER'
-          }
-        });
+        // Add user to group's userIds array
+        const currentUserIds = group.userIds ? JSON.parse(group.userIds) : []
+        if (!currentUserIds.includes(newUser.id)) {
+          currentUserIds.push(newUser.id)
+          await prisma.group.update({
+            where: { id: group.id },
+            data: { userIds: JSON.stringify(currentUserIds) }
+          })
+        }
       }
     }
 
@@ -6036,10 +6096,9 @@ app.post('/api/test/users', async (req, res) => {
       message: 'Test user created successfully',
       user: {
         id: newUser.id,
-        displayName: newUser.displayName,
         username: newUser.username,
         email: newUser.email,
-        role: newUser.role,
+        isActive: newUser.isActive,
         groupName: groupName || null
       }
     });
