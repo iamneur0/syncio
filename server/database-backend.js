@@ -3518,9 +3518,11 @@ app.post('/api/addons', async (req, res) => {
     }
 
     // Exact URL duplicate detection (no canonical fuzzy matching)
+    // Use deterministic hash to check duplicates regardless of encryption
+    const { manifestUrlHash } = require('./utils/hash')
     const existingByUrl = await prisma.addon.findFirst({ 
       where: { 
-        manifestUrl: sanitizedUrl,
+        manifestUrlHash: manifestUrlHash(sanitizedUrl),
         accountId: getAccountId(req)
       } 
     })
