@@ -2891,12 +2891,11 @@ app.post('/api/stremio/connect', async (req, res) => {
     // Check if user with this email already exists
     const existingUser = await prisma.user.findFirst({
       where: {
+        accountId: getAccountId(req),
         OR: [
           { email: email },
           { username: finalUsername }
-        ],
-        // Only check within the current account when auth is enabled
-        accountId: getAccountId(req)
+        ]
       }
     });
 
@@ -2917,11 +2916,9 @@ app.post('/api/stremio/connect', async (req, res) => {
       // If user exists with valid Stremio connection, return conflict
       if (hasValidStremioConnection) {
         if (AUTH_ENABLED && req.appAccountId && existingUser.accountId === req.appAccountId) {
-          return res.status(200).json({
-            message: 'User already exists in this account',
-            user: { id: existingUser.id, username: existingUser.username },
-            addonsCount: 0,
-            group: null
+          return res.status(409).json({
+            message: 'User with this email already exists',
+            error: 'Email already exists in this account'
           })
         }
         
@@ -2934,8 +2931,8 @@ app.post('/api/stremio/connect', async (req, res) => {
         }
         if (existingUser.email === email) {
           return res.status(409).json({ 
-            message: 'Email already exists',
-            error: 'This email is already registered'
+            message: 'User with this email already exists',
+            error: 'Email already exists in this account'
           });
         }
         
