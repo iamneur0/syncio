@@ -14,7 +14,6 @@ model User {
   email           String   @unique
   isActive        Boolean  @default(true)
   stremioAuthKey  String?  // Encrypted Stremio auth key
-  stremioAddons   String?  // JSON string of Stremio addons
   excludedAddons  String?  // JSON array of addon IDs that user has excluded
   protectedAddons String?  // JSON array of addon IDs that user has protected
   colorIndex      Int?     // UI color theme index
@@ -33,7 +32,6 @@ model Group {
   colorIndex  Int?     // UI color theme index
   accountId   String?  // For multi-tenant support
   userIds     String?  // JSON array of user IDs
-  addonIds    String?  // JSON array of addon IDs
   
   // Relationships
   addons      GroupAddon[]
@@ -48,18 +46,20 @@ model Addon {
   name           String
   description    String?
   manifestUrl    String
-  manifest       String?  // Store the full manifest JSON as string (SQLite doesn't have native JSON)
+  manifest       String?  // Encrypted JSON string (AES-GCM)
   stremioAddonId String?
   version        String?
-  isOfficial     Boolean  @default(false)
   isActive       Boolean  @default(true)
   accountId      String?  // For multi-tenant support
   iconUrl        String?
+  // Deterministic hash of normalized manifestUrl for search/uniqueness (public mode)
+  manifestUrlHash String?
   
   // Relationships
   groupAddons    GroupAddon[]
 
   @@unique([name, accountId])
+  @@index([manifestUrlHash])
   @@map("addons")
 }
 

@@ -30,6 +30,7 @@ import toast from 'react-hot-toast'
 import ConfirmDialog from '../common/ConfirmDialog'
 import SyncBadge from '../common/SyncBadge'
 import { useDebounce } from '../../hooks/useDebounce'
+import { debug } from '../../utils/debug'
 
 
 // Simple sync badge for individual users in group view
@@ -1014,7 +1015,7 @@ export default function GroupsPage() {
           queryClient.invalidateQueries({ queryKey: ['user'] })
           toast.success('Addon order updated')
         })
-        .catch((error) => {
+        .catch((error: any) => {
           console.error('Failed to reorder addons:', error)
           toast.error(error?.message || 'Failed to update addon order')
         })
@@ -1081,16 +1082,16 @@ export default function GroupsPage() {
       const checkAuth = async () => {
         try {
           const response = await groupsAPI.getAll()
-          console.log('🔄 Auth check successful, user is authenticated')
+          debug.log('🔄 Auth check successful, user is authenticated')
           setAuthed(true)
         } catch (error: any) {
           // Only set authed to false if it's actually an authentication error
           if (error?.response?.status === 401 || error?.response?.status === 403) {
-            console.log('🔄 Auth check failed - authentication required:', error)
+            debug.log('🔄 Auth check failed - authentication required:', error)
             setAuthed(false)
           } else {
             // For other errors (like Stremio connection issues), keep current auth state
-            console.log('🔄 Auth check failed but not an auth error, keeping current state:', error)
+            debug.log('🔄 Auth check failed but not an auth error, keeping current state:', error)
           }
         }
       }
@@ -1101,7 +1102,7 @@ export default function GroupsPage() {
       // Check auth when tab becomes visible again
       const handleVisibilityChange = () => {
         if (!document.hidden) {
-          console.log('🔄 Tab became visible, checking authentication...')
+          debug.log('🔄 Tab became visible, checking authentication...')
           checkAuth()
         }
       }
@@ -1240,14 +1241,14 @@ export default function GroupsPage() {
   // Debug logging for group member
   React.useEffect(() => {
     if (firstGroupMemberWithStremio) {
-      console.log('🔍 First group member with Stremio:', {
+      debug.log('🔍 First group member with Stremio:', {
         id: firstGroupMemberWithStremio.id,
         name: firstGroupMemberWithStremio.name,
         hasStremioConnection: firstGroupMemberWithStremio.hasStremioConnection,
         showDetailModal
       })
     } else {
-      console.log('🔍 No group member with Stremio connection found')
+      debug.log('🔍 No group member with Stremio connection found')
     }
   }, [firstGroupMemberWithStremio, showDetailModal])
   
@@ -1256,18 +1257,18 @@ export default function GroupsPage() {
     queryKey: ['user', firstGroupMemberWithStremio?.id, 'stremio-addons'],
     queryFn: async () => {
       if (!firstGroupMemberWithStremio?.id) return null
-      console.log('🔍 Fetching Stremio addons for group member:', firstGroupMemberWithStremio.id)
+      debug.log('🔍 Fetching Stremio addons for group member:', firstGroupMemberWithStremio.id)
       const response = await fetch(`/api/users/${firstGroupMemberWithStremio.id}/stremio-addons`)
       if (!response.ok) {
         // If user is not connected to Stremio, return empty addons instead of throwing
         if (response.status === 400) {
-          console.log('🔍 User not connected to Stremio, returning empty addons')
+          debug.log('🔍 User not connected to Stremio, returning empty addons')
           return { addons: [] }
         }
         throw new Error('Failed to fetch Stremio addons')
       }
       const data = await response.json()
-      console.log('🔍 Fetched Stremio addons for group:', data)
+      debug.log('🔍 Fetched Stremio addons for group:', data)
       return data
     },
     enabled: !!firstGroupMemberWithStremio?.id && showDetailModal,
@@ -3043,7 +3044,7 @@ export default function GroupsPage() {
                       
                       // Debug logging - focused on the issue
                       if (addon.name === 'AIOStreams') {
-                        console.log('🔍 AIOStreams Debug:', {
+                        debug.log('🔍 AIOStreams Debug:', {
                           addonName: addon.name,
                           manifestUrl: addon?.manifestUrl,
                           iconUrl: addon.iconUrl,

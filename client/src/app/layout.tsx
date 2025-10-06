@@ -40,6 +40,9 @@ export default function RootLayout({
             __html: `
               (function(){
                 try {
+                  // Silence console in browser unless NEXT_PUBLIC_DEBUG is true
+                  var dbg = (typeof process !== 'undefined' && process.env && (process.env.NEXT_PUBLIC_DEBUG === 'true' || process.env.NEXT_PUBLIC_DEBUG === '1')) || (typeof window !== 'undefined' && (window.NEXT_PUBLIC_DEBUG === 'true' || window.NEXT_PUBLIC_DEBUG === '1'));
+                  if (!dbg) { var noop=function(){}; console.log=noop; console.info=noop; console.warn=noop; }
                   var d = document.documentElement;
                   var saved = localStorage.getItem('theme');
                   var isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;

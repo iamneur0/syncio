@@ -27,6 +27,7 @@ import toast from 'react-hot-toast'
 import React from 'react'
 import ConfirmDialog from '../common/ConfirmDialog'
 import { useDebounce } from '../../hooks/useDebounce'
+import { debug } from '../../utils/debug'
 
 // Canonicalize a manifest URL to detect duplicates locally
 function canonicalizeManifestUrl(raw: string): string {
@@ -358,12 +359,12 @@ export default function AddonsPage() {
       const checkAuth = async () => {
         try {
           const response = await addonsAPI.getAll()
-          console.log('🔄 Auth check successful, user is authenticated')
+          debug.log('🔄 Auth check successful, user is authenticated')
           setAuthed(true)
         } catch (error: any) {
           // Only set authed to false if it's actually an authentication error
           if (error?.response?.status === 401 || error?.response?.status === 403) {
-            console.log('🔄 Auth check failed - authentication required:', error)
+            debug.log('🔄 Auth check failed - authentication required:', error)
             setAuthed(false)
             // Clear all cached data when not authenticated
             queryClient.setQueryData(['addons'], [] as any)
@@ -371,7 +372,7 @@ export default function AddonsPage() {
             queryClient.setQueryData(['users'], [] as any)
           } else {
             // For other errors (like network issues), keep current auth state
-            console.log('🔄 Auth check failed but not an auth error, keeping current state:', error)
+            debug.log('🔄 Auth check failed but not an auth error, keeping current state:', error)
           }
         }
       }
@@ -382,7 +383,7 @@ export default function AddonsPage() {
       // Check auth when tab becomes visible again
       const handleVisibilityChange = () => {
         if (!document.hidden) {
-          console.log('🔄 Tab became visible, checking authentication...')
+          debug.log('🔄 Tab became visible, checking authentication...')
           checkAuth()
         }
       }
@@ -668,7 +669,7 @@ export default function AddonsPage() {
           detail: { addonId: deletedId } 
         }))
       } catch (e) {
-        console.warn('Failed to dispatch addon deleted event:', e)
+        debug.warn('Failed to dispatch addon deleted event:', e)
       }
       
       toast.success('Addon deleted successfully!')
