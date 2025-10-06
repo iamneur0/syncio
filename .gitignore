@@ -122,4 +122,7 @@ prisma/migrations/dev.db*
 local-addon/
 README-CI-CD.md
 *.tmp
+<<<<<<< HEAD
 ./*.js
+=======
+>>>>>>> 8db98e9 (feat: added missing crypt/hash files)
