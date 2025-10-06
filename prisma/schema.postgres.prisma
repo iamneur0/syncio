@@ -10,8 +10,8 @@ datasource db {
 
 model User {
   id              String   @id @default(cuid())
-  username        String   @unique
-  email           String   @unique
+  username        String
+  email           String
   isActive        Boolean  @default(true)
   stremioAuthKey  String?  // Encrypted Stremio auth key
   excludedAddons  String?  // JSON array of addon IDs that user has excluded
@@ -22,6 +22,8 @@ model User {
   // Relationships
 
   @@map("users")
+  @@unique([accountId, email])
+  @@unique([accountId, username])
 }
 
 model Group {
