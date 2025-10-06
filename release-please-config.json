@@ -7,9 +7,6 @@
     ".": {
       "release-type": "node",
       "include-component-in-tag": false,
-      "extra-files": [
-        "server/version.js"
-      ],
       "exclude-paths": [
         ".env.sample",
         ".gitignore",
