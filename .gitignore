@@ -1,3 +1,6 @@
+# Ignore all JavaScript files at repository root (keep app code under directories)
+/*.js
+
 # Dependencies
 node_modules/
 npm-debug.log*
@@ -118,3 +121,5 @@ prisma/migrations/dev.db*
 # Local development
 local-addon/
 README-CI-CD.md
+*.tmp
+./*.js

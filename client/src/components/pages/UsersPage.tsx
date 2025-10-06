@@ -252,7 +252,7 @@ function UserSyncBadge({ userId, userExcludedSet, userProtectedSet, isSyncing, l
 
       // If data is still loading, show checking state
       if (!syncStatus) {
-        console.log('Setting status to checking (data loading)')
+        debug.log('Setting status to checking (data loading)')
         setStatus('checking')
         return
       }
@@ -335,16 +335,12 @@ export default function UsersPage() {
   // Protected addon lists
   const protectedAddonIds = [
     'com.linvo.cinemeta', // Cinemeta
-    'org.stremio.local', // Local Files
-    'com.stremio.opensubtitles', // OpenSubtitles (if present)
-    'com.stremio.youtube', // YouTube (if present)
+    'org.stremio.local' // Local Files
   ]
 
   const protectedManifestUrls = [
     'https://v3-cinemeta.strem.io/manifest.json',
-    'http://127.0.0.1:11470/local-addon/manifest.json',
-    'https://v3-opensubtitles.strem.io/manifest.json',
-    'https://v3-youtube.strem.io/manifest.json',
+    'http://127.0.0.1:11470/local-addon/manifest.json'
   ]
 
   // Check if an addon is protected (built-in list)
@@ -513,16 +509,16 @@ export default function UsersPage() {
       const checkAuth = async () => {
         try {
           const response = await api.get('/users')
-          console.log('🔄 Auth check successful, user is authenticated')
+          debug.log('🔄 Auth check successful, user is authenticated')
           setAuthed(true)
         } catch (error: any) {
           // Only set authed to false if it's actually an authentication error
           if (error?.response?.status === 401 || error?.response?.status === 403) {
-            console.log('🔄 Auth check failed - authentication required:', error)
+            debug.log('🔄 Auth check failed - authentication required:', error)
             setAuthed(false)
           } else {
             // For other errors (like Stremio connection issues), keep current auth state
-            console.log('🔄 Auth check failed but not an auth error, keeping current state:', error)
+            debug.log('🔄 Auth check failed but not an auth error, keeping current state:', error)
           }
         }
       }
@@ -533,7 +529,7 @@ export default function UsersPage() {
       // Check auth when tab becomes visible again
       const handleVisibilityChange = () => {
         if (!document.hidden) {
-          console.log('🔄 Tab became visible, checking authentication...')
+          debug.log('🔄 Tab became visible, checking authentication...')
           checkAuth()
         }
       }
@@ -555,23 +551,23 @@ export default function UsersPage() {
   const { data: users = [], isLoading, error } = useQuery({
     queryKey: ['users'],
     queryFn: async () => {
-      console.log('🔄 Fetching users from API...')
+      debug.log('🔄 Fetching users from API...')
       const result = await usersAPI.getAll()
-      console.log('🔄 Users API result:', result)
+      debug.log('🔄 Users API result:', result)
       
       // Handle case where result might be wrapped in an axios response
       if (result && typeof result === 'object' && 'data' in result && Array.isArray((result as any).data)) {
-        console.log('🔄 Returning wrapped data:', (result as any).data)
+        debug.log('🔄 Returning wrapped data:', (result as any).data)
         return (result as any).data
       }
       
       // If result is already an array, return it
       if (Array.isArray(result)) {
-        console.log('🔄 Returning direct array result:', result)
+        debug.log('🔄 Returning direct array result:', result)
         return result
       }
       
-      console.log('🔄 Returning empty array')
+      debug.log('🔄 Returning empty array')
       return []
     },
     retry: 1,
@@ -581,7 +577,7 @@ export default function UsersPage() {
   })
   // Debug users data changes
   useEffect(() => {
-    console.log('🔄 Users data changed:', { users, count: users.length, isLoading, error, AUTH_ENABLED, authed })
+    debug.log('🔄 Users data changed:', { users, count: users.length, isLoading, error, AUTH_ENABLED, authed })
   }, [users, isLoading, error, AUTH_ENABLED, authed])
 
   // Clear cached users/groups on logout
@@ -847,11 +843,11 @@ export default function UsersPage() {
       // because protected addons that are in the group should be treated as group addons
       const allLiveAddonUrls = live.map((a: any) => (a?.manifestUrl || a?.transportUrl || a?.url || '').toString().trim().toLowerCase()).filter(Boolean)
       
-      console.log('🔍 Sync Status Debug for neur0:')
-      console.log('Group addon URLs:', groupAddonUrls)
-      console.log('Live addon URLs:', allLiveAddonUrls)
-      console.log('User protected set:', Array.from(userProtectedSet))
-      console.log('Live addons details:', live.map((a: any) => ({ 
+      debug.log('🔍 Sync Status Debug for neur0:')
+      debug.log('Group addon URLs:', groupAddonUrls)
+      debug.log('Live addon URLs:', allLiveAddonUrls)
+      debug.log('User protected set:', Array.from(userProtectedSet))
+      debug.log('Live addons details:', live.map((a: any) => ({ 
         name: a?.manifest?.name, 
         url: a?.manifestUrl, 
         protected: isAddonProtected(a),
@@ -863,33 +859,33 @@ export default function UsersPage() {
       const groupAddonPositions: number[] = []
       for (const groupUrl of groupAddonUrls) {
         const position = allLiveAddonUrls.findIndex((liveUrl: string) => liveUrl === groupUrl)
-        console.log(`Looking for group addon "${groupUrl}" in live addons, found at position:`, position)
+        debug.log(`Looking for group addon "${groupUrl}" in live addons, found at position:`, position)
         if (position === -1) { 
-          console.log('❌ Group addon not found in live addons')
+          debug.log('❌ Group addon not found in live addons')
           setIsUserSynced(false); return 
         }
         groupAddonPositions.push(position)
       }
       
-      console.log('Group addon positions:', groupAddonPositions)
+      debug.log('Group addon positions:', groupAddonPositions)
       
       // Check if group addons are in the same order (positions should be ascending)
       for (let i = 1; i < groupAddonPositions.length; i++) {
         if (groupAddonPositions[i] <= groupAddonPositions[i - 1]) {
-          console.log(`❌ Order check failed: position ${i} (${groupAddonPositions[i]}) <= position ${i-1} (${groupAddonPositions[i-1]})`)
+          debug.log(`❌ Order check failed: position ${i} (${groupAddonPositions[i]}) <= position ${i-1} (${groupAddonPositions[i-1]})`)
           setIsUserSynced(false); return
         }
       }
       
-      console.log('✅ Order check passed')
+      debug.log('✅ Order check passed')
 
       // Extras: check for addons that shouldn't be there
       const groupAddonIds = new Set(groupAddons.map((ga: any) => ga?.id || ga?.manifest?.id).filter(Boolean))
       const groupAddonUrlSet = new Set(groupAddonUrls)
       
       // Check non-protected addons - they should all be in the group
-      console.log('🔍 Checking non-protected addons:')
-      console.log('Non-protected live addons:', nonProtectedLive.map((a: any) => ({ 
+      debug.log('🔍 Checking non-protected addons:')
+      debug.log('Non-protected live addons:', nonProtectedLive.map((a: any) => ({ 
         name: a?.manifest?.name, 
         url: a?.manifestUrl 
       })))
@@ -898,9 +894,9 @@ export default function UsersPage() {
         const addonId = addon?.id || addon?.manifest?.id
         const addonUrl = (addon?.manifestUrl || addon?.transportUrl || addon?.url || '').toString().trim().toLowerCase()
         const isInGroup = (addonId && groupAddonIds.has(addonId)) || (addonUrl && groupAddonUrlSet.has(addonUrl))
-        console.log(`  ${addon?.manifest?.name || addon?.name} (${addonUrl}): in group = ${isInGroup}`)
+        debug.log(`  ${addon?.manifest?.name || addon?.name} (${addonUrl}): in group = ${isInGroup}`)
         if (!isInGroup) { 
-          console.log('❌ Non-protected addon not in group')
+          debug.log('❌ Non-protected addon not in group')
           setIsUserSynced(false); return 
         }
       }
@@ -909,8 +905,8 @@ export default function UsersPage() {
       // If a protected addon is in the group, it should be treated as a group addon
       // If a protected addon is NOT in the group, it should be ignored (personal addon)
       const protectedLive = live.filter((addon: any) => isAddonProtected(addon))
-      console.log('🔍 Checking protected addons:')
-      console.log('Protected live addons:', protectedLive.map((a: any) => ({ 
+      debug.log('🔍 Checking protected addons:')
+      debug.log('Protected live addons:', protectedLive.map((a: any) => ({ 
         name: a?.manifest?.name, 
         url: a?.manifestUrl,
         userProtected: userProtectedSet.has(a?.manifestUrl || a?.transportUrl || a?.url || '')
@@ -920,14 +916,14 @@ export default function UsersPage() {
         const addonId = addon?.id || addon?.manifest?.id
         const addonUrl = (addon?.manifestUrl || addon?.transportUrl || addon?.url || '').toString().trim().toLowerCase()
         const isInGroup = (addonId && groupAddonIds.has(addonId)) || (addonUrl && groupAddonUrlSet.has(addonUrl))
-        console.log(`  ${addon?.manifest?.name || addon?.name} (${addonUrl}): in group = ${isInGroup} - ${isInGroup ? 'treated as group addon' : 'personal addon (ignored)'}`)
+        debug.log(`  ${addon?.manifest?.name || addon?.name} (${addonUrl}): in group = ${isInGroup} - ${isInGroup ? 'treated as group addon' : 'personal addon (ignored)'}`)
         
         // If protected addon is in group, it should be treated as a group addon (already checked above)
         // If protected addon is NOT in group, it's a personal addon and should be ignored
         // So we don't need to do anything here - personal protected addons are allowed
       }
 
-      console.log('✅ All checks passed - setting synced to true')
+      debug.log('✅ All checks passed - setting synced to true')
       setIsUserSynced(true)
     }
 
@@ -3324,7 +3320,7 @@ export default function UsersPage() {
                             : null
                           // Debug logging - focused on the issue
                           if (addon.name === 'AIOStreams') {
-                            console.log('🔍 User AIOStreams Debug:', {
+                            debug.log('🔍 User AIOStreams Debug:', {
                               addonName: addon.name,
                               manifestUrl: addon?.manifestUrl,
                               iconUrl: addon.iconUrl,
@@ -3589,8 +3585,8 @@ export default function UsersPage() {
                                 
                                 // Debug: Log addon data structure
                                 if (index === 0) {
-                                  console.log('🔍 Stremio addon data structure:', addon)
-                                  console.log('🔍 Available icon fields:', {
+                                  debug.log('🔍 Stremio addon data structure:', addon)
+                                  debug.log('🔍 Available icon fields:', {
                                     iconUrl: addon?.iconUrl,
                                     manifestLogo: addon?.manifest?.logo,
                                     manifestIcon: addon?.manifest?.icon

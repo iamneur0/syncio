@@ -1,4 +1,5 @@
 // Manifest cache utility to prevent duplicate requests and rate limiting
+import { debug } from './debug'
 const manifestCache = new Map<string, { data: any; timestamp: number }>()
 const CACHE_DURATION = 5 * 60 * 1000 // 5 minutes
 let lastRequestTime = 0
@@ -50,7 +51,7 @@ export const fetchManifestCached = async (url: string): Promise<any | null> => {
     if (!res.ok) {
       if (res.status === 429) {
         // If rate limited, wait longer before retrying
-        console.warn(`Rate limited for ${url}, waiting 5 seconds...`)
+        debug.warn(`Rate limited for ${url}, waiting 5 seconds...`)
         await new Promise(resolve => setTimeout(resolve, 5000))
         return null
       }
@@ -62,7 +63,7 @@ export const fetchManifestCached = async (url: string): Promise<any | null> => {
     manifestCache.set(url, { data, timestamp: Date.now() })
     return data
   } catch (error) {
-    console.warn(`Failed to fetch manifest from ${url}:`, error)
+    debug.warn(`Failed to fetch manifest from ${url}:`, error)
     return null
   } finally {
     // Remove from pending requests

@@ -2,6 +2,7 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { PrismaClient } = require('@prisma/client');
+const { getServerKey, scryptKey, deriveDek, setAccountDek, clearAccountDek } = require('../utils/encryption')
 const { validate, registerSchema, loginSchema, changePasswordSchema } = require('../middleware/validation');
 const { authenticateToken } = require('../middleware/auth');
 
@@ -104,11 +105,20 @@ router.post('/login', validate(loginSchema), async (req, res, next) => {
     // Remove password from response
     const { password: _, ...userWithoutPassword } = user;
 
-    res.json({
-      message: 'Login successful',
-      user: userWithoutPassword,
-      token,
-    });
+    try {
+      const serverKey = getServerKey()
+      // Derive user key from password with email as salt
+      const userKey = await scryptKey(password, user.email)
+      const dek = deriveDek(serverKey, userKey)
+      // Use accountId for scope if present; else fallback to userId
+      const scopeId = user.accountId || user.id
+      setAccountDek(scopeId, dek)
+    } catch (e) {
+      // Non-fatal; private mode or missing key will still work with server-only key
+      console.warn('Could not set session DEK:', e?.message)
+    }
+
+    res.json({ message: 'Login successful', user: userWithoutPassword, token });
   } catch (error) {
     next(error);
   }
@@ -196,6 +206,10 @@ router.post('/refresh', authenticateToken, async (req, res, next) => {
 
 // Logout (client-side token removal)
 router.post('/logout', authenticateToken, (req, res) => {
+  try {
+    const scopeId = req.user?.accountId || req.user?.id
+    if (scopeId) clearAccountDek(scopeId)
+  } catch {}
   res.json({ message: 'Logged out successfully' });
 });
 

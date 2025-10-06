@@ -38,16 +38,12 @@ router.get('/', authenticateToken, async (req, res, next) => {
         version: true,
         author: true,
         category: true,
-        isOfficial: true,
         createdAt: true,
         _count: {
           select: { groupAddons: true },
         },
       },
-      orderBy: [
-        { isOfficial: 'desc' },
-        { name: 'asc' },
-      ],
+      orderBy: [ { name: 'asc' } ],
       skip,
       take: limit,
     });
@@ -119,18 +115,30 @@ router.post('/', authenticateToken, requireAdmin, validate(addAddonSchema), asyn
       // Use manifest data if not provided
       const addonData = {
         name: name || manifest.name,
-        manifestUrl,
+        // Store encrypted manifestUrl at rest; compute hash for lookup (public mode)
+        manifestUrl: manifestUrl,
+        manifestUrlHash: require('../utils/hash').manifestUrlHash
+          ? require('../utils/hash').manifestUrlHash(manifestUrl)
+          : undefined,
         description: description || manifest.description || '',
         iconUrl: iconUrl || manifest.logo || '',
         version: version || manifest.version || '1.0.0',
         author: author || manifest.author || '',
         category: category || 'Other',
-        isOfficial: false,
       };
 
-      const addon = await prisma.addon.create({
-        data: addonData,
-      });
+      const dbData = { ...addonData, stremioAddonId: (manifest && manifest.id) ? manifest.id : (addonData.stremioAddonId || null) }
+      try {
+        const { aesGcmEncrypt, getServerKey, getAccountDek } = require('../utils/encryption')
+        // Prefer per-account DEK if available (public mode), else server key (private)
+        const scopeId = req.appAccountId || (req.user && (req.user.accountId || req.user.id))
+        const dek = getAccountDek(scopeId)
+        const key = dek || getServerKey()
+        dbData.manifestUrl = aesGcmEncrypt(key, addonData.manifestUrl)
+        dbData.manifest = manifest ? aesGcmEncrypt(key, JSON.stringify(manifest)) : null
+      } catch {}
+
+      const addon = await prisma.addon.create({ data: dbData });
 
       res.status(201).json({
         message: 'Addon added successfully',
@@ -437,12 +445,7 @@ router.get('/statistics', authenticateToken, requireAdmin, async (req, res, next
       where: { isActive: true },
     });
 
-    const officialAddons = await prisma.addon.count({
-      where: {
-        isActive: true,
-        isOfficial: true,
-      },
-    });
+    const officialAddons = 0
 
     const addonsByCategory = await prisma.addon.groupBy({
       by: ['category'],
@@ -478,7 +481,7 @@ router.get('/statistics', authenticateToken, requireAdmin, async (req, res, next
     res.json({
       totalAddons,
       officialAddons,
-      communityAddons: totalAddons - officialAddons,
+      communityAddons: totalAddons,
       addonsByCategory,
       mostUsedAddons: mostUsedAddonsWithDetails,
     });
