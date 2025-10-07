@@ -635,7 +635,7 @@ export default function UsersPage() {
   
   const [hideSensitive, setHideSensitive] = React.useState<boolean>(false)
 
-  // Per-user excluded group addons (manifestUrl) — now from database
+  // Per-user excluded group addons (addon ID) — now from database
   const [userExcludedSet, setUserExcludedSet] = useState<Set<string>>(new Set())
   useEffect(() => {
     if (userDetailsData?.excludedAddons) {
@@ -700,15 +700,19 @@ export default function UsersPage() {
     })
   }, [users])
 
-  const toggleUserExcluded = async (manifestUrl?: string) => {
+  const toggleUserExcluded = async (addonId?: string) => {
     const uid = selectedUser?.id
-    if (!uid || !manifestUrl) return
+    if (!uid || !addonId) return
+    
+    console.log('🔍 Frontend toggleUserExcluded called with addonId:', addonId)
     
     setUserExcludedSet((prev) => {
       const next = new Set(prev)
-      const key = manifestUrl
+      const key = addonId
       if (next.has(key)) next.delete(key)
       else next.add(key)
+      
+      console.log('🔍 Frontend sending excludedAddons:', Array.from(next))
       
       // Update database
       api.put(`/users/${uid}/excluded-addons`, { excludedAddons: Array.from(next) }).then(() => {
@@ -3311,7 +3315,7 @@ export default function UsersPage() {
                         {userDetailsData.addons
                           .filter((addon: any) => addon.isEnabled !== false)
                           .map((addon: any, index: number) => {
-                          const excluded = userExcludedSet.has(addon?.manifestUrl)
+                          const excluded = userExcludedSet.has(addon?.id)
                           // Get icon from Stremio addons data if available
                           const stremioAddon = Array.isArray(stremioAddonsData?.addons) 
                             ? stremioAddonsData.addons.find((sa: any) => 
@@ -3381,7 +3385,7 @@ export default function UsersPage() {
                               </div>
                               <div className="ml-1 p-2 rounded-lg">
                                 <button
-                                  onClick={() => toggleUserExcluded(addon?.manifestUrl)}
+                                  onClick={() => toggleUserExcluded(addon?.id)}
                                   className={`flex items-center justify-center h-8 w-8 text-sm rounded transition-colors focus:outline-none ${
                                     excluded 
                                       ? (isDark ? 'text-red-300 hover:text-red-400' : 'text-red-600 hover:text-red-700')
