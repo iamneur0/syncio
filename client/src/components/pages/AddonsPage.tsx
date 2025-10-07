@@ -428,6 +428,10 @@ export default function AddonsPage() {
   const [editGroupIds, setEditGroupIds] = useState<string[]>([])
   const [editResources, setEditResources] = useState<any[]>([])
   
+  // Inline editing state for addon name
+  const [editingDetailAddonName, setEditingDetailAddonName] = useState<string | null>(null)
+  const [tempDetailAddonName, setTempDetailAddonName] = useState('')
+  
   // View mode state (card or list)
   const [viewMode, setViewMode] = useState<'card' | 'list'>(() => {
     if (typeof window !== 'undefined') {
@@ -717,6 +721,46 @@ export default function AddonsPage() {
     // Don't clear group selections here - let the useEffect handle it when addonDetail loads
     // This prevents the visual bug where groups appear unselected briefly
     setShowEditModal(true)
+  }
+
+  // Inline editing handlers for addon name
+  const handleStartEditDetailAddonName = (currentName: string) => {
+    setEditingDetailAddonName(editingAddonId)
+    setTempDetailAddonName(currentName)
+  }
+
+  const handleBlurDetailAddonName = (originalName: string) => {
+    if (tempDetailAddonName.trim()) {
+      // Only update if the name actually changed
+      if (tempDetailAddonName.trim() !== originalName) {
+        const newName = tempDetailAddonName.trim()
+        setEditName(newName)
+        
+        // Update the editingAddon object for immediate UI update
+        if (editingAddon) {
+          editingAddon.name = newName
+        }
+      }
+    }
+    setEditingDetailAddonName(null)
+    setTempDetailAddonName('')
+  }
+
+  const handleSaveDetailAddonName = (originalName: string) => {
+    if (tempDetailAddonName.trim()) {
+      // Only update if the name actually changed
+      if (tempDetailAddonName.trim() !== originalName) {
+        const newName = tempDetailAddonName.trim()
+        setEditName(newName)
+        
+        // Update the editingAddon object for immediate UI update
+        if (editingAddon) {
+          editingAddon.name = newName
+        }
+      }
+    }
+    setEditingDetailAddonName(null)
+    setTempDetailAddonName('')
   }
 
   const updateAddonMutation = useMutation({
@@ -1738,7 +1782,71 @@ export default function AddonsPage() {
             isDark ? 'bg-gray-800' : 'bg-white'
           }`}>
             <div className="flex justify-between items-center mb-4">
-              <h2 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>Edit Addon</h2>
+              <div className="flex items-center gap-4 flex-1 mr-4">
+                {/* Addon Logo */}
+                <div className={`w-12 h-12 rounded-lg flex items-center justify-center flex-shrink-0 overflow-hidden ${
+                  isMono ? 'border border-white/20' : ''
+                }`}>
+                  {editingAddon?.iconUrl ? (
+                    <img 
+                      src={editingAddon.iconUrl} 
+                      alt={`${editingAddon.name} logo`}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <Puzzle className={`w-6 h-6 ${isDark ? 'text-gray-400' : 'text-gray-500'}`} />
+                  )}
+                </div>
+                
+                {/* Editable Addon Name and Version */}
+                <div className="flex-1">
+                  <div className="flex items-center gap-4">
+                    {editingDetailAddonName === editingAddonId ? (
+                      <input
+                        type="text"
+                        value={tempDetailAddonName}
+                        onChange={(e) => setTempDetailAddonName(e.target.value)}
+                        onBlur={() => handleBlurDetailAddonName(editingAddon?.name || '')}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            handleSaveDetailAddonName(editingAddon?.name || '')
+                          } else if (e.key === 'Escape') {
+                            setEditingDetailAddonName(null)
+                            setTempDetailAddonName('')
+                          }
+                        }}
+                        placeholder={editingAddon?.name || ''}
+                        className={`px-2 py-1 text-xl font-bold border rounded focus:ring-2 focus:ring-stremio-purple focus:border-transparent w-48 ${
+                          isDark 
+                            ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
+                            : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
+                        }`}
+                        autoFocus
+                      />
+                    ) : (
+                      <h2 
+                        className={`text-xl font-bold cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 px-2 py-1 rounded transition-colors ${isDark ? 'text-white' : 'text-gray-900'}`}
+                        onClick={() => handleStartEditDetailAddonName(editingAddon?.name || '')}
+                        title="Click to edit addon name"
+                      >
+                        {editingAddon?.name || 'Unnamed Addon'}
+                      </h2>
+                    )}
+                    
+                    {/* Version Tag - Fixed position */}
+                    {editingAddon?.version && (
+                      <span className={`px-2 py-1 text-xs font-medium rounded-full flex-shrink-0 ${
+                        isDark 
+                          ? 'bg-gray-700 text-gray-300 border border-gray-600' 
+                          : 'bg-gray-100 text-gray-700 border border-gray-300'
+                      }`}>
+                        v{editingAddon.version}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+              
               <button
                 onClick={() => setShowEditModal(false)}
                 className={`w-8 h-8 flex items-center justify-center rounded transition-colors border-0 ${
@@ -1790,7 +1898,46 @@ export default function AddonsPage() {
                                 ? (isDark ? 'bg-purple-600 text-white border-purple-600' : 'bg-stremio-purple text-white border-stremio-purple')
                                 : (isDark ? 'bg-gray-700 text-gray-200 border-gray-600' : 'bg-gray-100 text-gray-800 border-gray-300')
                             }`}
-                            title={typeof res === 'string' ? res : JSON.stringify(res)}
+                            title={(() => {
+                              if (typeof res === 'string') return res
+                              if (res?.type === 'catalog') {
+                                // Get catalog names from the originalManifest
+                                const detailManifest: any = (addonDetail as any)?.originalManifest || (addonDetail as any)?.manifest
+                                console.log('🔍 Catalog tooltip debug:', {
+                                  'detailManifest.catalogs': detailManifest?.catalogs,
+                                  'res.catalogs': res?.catalogs,
+                                  'res.type': res?.type,
+                                  'res.name': res?.name,
+                                  'addonDetail.originalManifest': (addonDetail as any)?.originalManifest,
+                                  'addonDetail.manifest': (addonDetail as any)?.manifest
+                                })
+                                
+                                if (detailManifest?.catalogs && Array.isArray(detailManifest.catalogs) && detailManifest.catalogs.length > 0) {
+                                  const catalogNames = detailManifest.catalogs.map((cat: any) => cat.name || cat.id || 'Unknown').join(', ')
+                                  return `Catalog: ${catalogNames}`
+                                }
+                                // Fallback to resource's own catalogs if available
+                                if (res?.catalogs && Array.isArray(res.catalogs) && res.catalogs.length > 0) {
+                                  const catalogNames = res.catalogs.map((cat: any) => cat.name || cat.id || 'Unknown').join(', ')
+                                  return `Catalog: ${catalogNames}`
+                                }
+                                // If it's a catalog resource but we don't have catalog names, show generic
+                                return 'Catalog resource'
+                              }
+                              if (res?.type === 'stream' && res?.name) {
+                                return `Stream: ${res.name}`
+                              }
+                              if (res?.type === 'meta' && res?.name) {
+                                return `Meta: ${res.name}`
+                              }
+                              if (res?.type === 'subtitles' && res?.name) {
+                                return `Subtitles: ${res.name}`
+                              }
+                              if (res?.type) {
+                                return `${res.type.charAt(0).toUpperCase() + res.type.slice(1)} resource`
+                              }
+                              return res?.name || res?.type || 'Resource'
+                            })()}
                           >
                             {label}
                           </button>
@@ -1801,18 +1948,6 @@ export default function AddonsPage() {
                 )
               })()}
 
-              <div>
-                <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>Name</label>
-                <input
-                  type="text"
-                  value={editName}
-                  onChange={(e) => setEditName(e.target.value)}
-                  placeholder={editingAddon?.name || ''}
-                  className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-stremio-purple focus:border-transparent ${
-                    isDark ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
-                  }`}
-                />
-              </div>
               <div>
                 <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>Description</label>
                 <textarea
