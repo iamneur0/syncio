@@ -1045,7 +1045,14 @@ export default function GroupsPage() {
   const orderAddons = React.useCallback((arr: any[]) => {
     const orderToUse = isDragging ? previewOrder : addonOrder
     const pos = new Map(orderToUse.map((u, i) => [u, i]))
-    return [...arr].sort((a, b) => (pos.get(mapIdForAddon(a)) ?? 1e9) - (pos.get(mapIdForAddon(b)) ?? 1e9))
+    // Dedupe by mapped id to avoid duplicates in UI (e.g., cross-account leakage or repeated links)
+    const seen = new Set<string>()
+    const uniq = [] as any[]
+    for (const item of arr) {
+      const key = mapIdForAddon(item.addon || item)
+      if (!seen.has(key)) { seen.add(key); uniq.push(item) }
+    }
+    return uniq.sort((a, b) => (pos.get(mapIdForAddon(a.addon || a)) ?? 1e9) - (pos.get(mapIdForAddon(b.addon || b)) ?? 1e9))
   }, [isDragging, previewOrder, addonOrder])
 
 
