@@ -39,7 +39,7 @@ const nextConfig = {
   
   // Environment variables
   env: {
-    NEXT_PUBLIC_API_URL: 'http://localhost:4000/api',
+    NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || '/api',
     NEXT_PUBLIC_APP_VERSION: APP_VERSION,
   },
 
@@ -79,7 +79,8 @@ const nextConfig = {
 
   // Rewrites for API proxy in development
   async rewrites() {
-    console.log('API URL for rewrites: http://localhost:4000/api')
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api'
+    console.log('API URL for rewrites:', apiUrl)
     return [
       {
         source: '/api/:path*',

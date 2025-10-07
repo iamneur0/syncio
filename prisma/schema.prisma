@@ -4,26 +4,24 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "sqlite"
   url      = env("DATABASE_URL")
 }
 
 model User {
   id              String   @id @default(cuid())
-  username        String
-  email           String
+  username        String   @unique
+  email           String   @unique
   isActive        Boolean  @default(true)
   stremioAuthKey  String?  // Encrypted Stremio auth key
   excludedAddons  String?  // JSON array of addon IDs that user has excluded
   protectedAddons String?  // JSON array of addon IDs that user has protected
   colorIndex      Int?     // UI color theme index
   accountId       String?  // For multi-tenant support
-
+  
   // Relationships
 
   @@map("users")
-  @@unique([accountId, email])
-  @@unique([accountId, username])
 }
 
 model Group {
@@ -31,17 +29,17 @@ model Group {
   name        String
   description String?
   isActive    Boolean  @default(true)
-  colorIndex  Int?
-  accountId   String?
-  userIds     String?
-
+  colorIndex  Int?     // UI color theme index
+  accountId   String?  // For multi-tenant support
+  userIds     String?  // JSON array of user IDs
+  
   // Relationships
-  addons       GroupAddon[]
+  addons      GroupAddon[]
 
   @@map("groups")
 }
 
-// GroupMember and GroupInvite removed – using JSON arrays on Group
+// GroupMember model removed - using JSON arrays in Group model instead
 
 model Addon {
   id             String   @id @default(cuid())
@@ -52,11 +50,11 @@ model Addon {
   stremioAddonId String?
   version        String?
   isActive       Boolean  @default(true)
-  accountId      String?
+  accountId      String?  // For multi-tenant support
   iconUrl        String?
   // Deterministic hash of normalized manifestUrl for search/uniqueness (public mode)
-  manifestUrlHash String? @db.VarChar(64)
-
+  manifestUrlHash String?
+  
   // Relationships
   groupAddons    GroupAddon[]
 
@@ -68,7 +66,7 @@ model Addon {
 model GroupAddon {
   id        String   @id @default(cuid())
   isEnabled Boolean  @default(true)
-  settings  String?
+  settings  String?  // JSON string for addon-specific settings
   groupId   String
   group     Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
   addonId   String
@@ -86,4 +84,3 @@ model AppAccount {
 
   @@map("app_accounts")
 }
-
