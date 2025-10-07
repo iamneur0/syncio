@@ -1,5 +1,38 @@
 # Changelog
 
+## [0.0.14](https://github.com/iamneur0/syncio/compare/v0.0.12...v0.0.14) (2025-10-07)
+
+
+### Features
+
+* added missing crypt/hash files ([b38edc0](https://github.com/iamneur0/syncio/commit/b38edc09ab5de49ce0f7d54143b14a7686576bea))
+* added new features to private instances ([df4fcaa](https://github.com/iamneur0/syncio/commit/df4fcaa9921b95f15fdc9b8c108be9836f84340c))
+* added uniqueness of users + same-email user handling ([72c540d](https://github.com/iamneur0/syncio/commit/72c540d800b66786bc76f7a9cf4a343abdc2a630))
+* bumped version ([ba8b477](https://github.com/iamneur0/syncio/commit/ba8b4771f23537c09e5ee5b6e40f0d4d9a23cdcf))
+* public instance fixed + sync + export/import ([8c2b533](https://github.com/iamneur0/syncio/commit/8c2b533bbbd5a7c500edc1d0c37c4ba005d06798))
+* public instance with auth ([df201fc](https://github.com/iamneur0/syncio/commit/df201fca816dd5858bd1d84d07fe9ce7eb797d1c))
+* public release with new pipeline ([1b23d83](https://github.com/iamneur0/syncio/commit/1b23d8331baf030026479801a528627599066be9))
+
+
+### Bug Fixes
+
+* add latest tag to private Docker image in workflow ([f53d7f3](https://github.com/iamneur0/syncio/commit/f53d7f3449c32232e0524923b224654188d8a1ee))
+* added missing nexts files for docker build ([54dcaae](https://github.com/iamneur0/syncio/commit/54dcaae004c58c110a75beec8ea65a1432644809))
+* cleanup private and public logic ([813c3f9](https://github.com/iamneur0/syncio/commit/813c3f96aa5150a67ef3d5d833425b125a79d979))
+* fixed release please ([9f54395](https://github.com/iamneur0/syncio/commit/9f543953c8126a9983bd217333b4afc99baefff1))
+* polishing release ([998f69a](https://github.com/iamneur0/syncio/commit/998f69a3990abd66053b999fd590a63613593bea))
+* regressions cleaned up ([eaf5785](https://github.com/iamneur0/syncio/commit/eaf5785bc9ce0ee44b2e4e5d45988da6bc210465))
+* release fixed ([9a3a02a](https://github.com/iamneur0/syncio/commit/9a3a02ad7a97e38752ba2d85544f5b9a4445fb9e))
+* removed useless declarations for simplified docker envs ([6d7139d](https://github.com/iamneur0/syncio/commit/6d7139d75b3fc86fad17dd736e11f971522349f5))
+* reset release-please manifest to match actual latest tag v0.0.12 ([acc1e28](https://github.com/iamneur0/syncio/commit/acc1e28becfcc19af003fd30ab3076be54599404))
+* resolved changelog conflict ([4a127e7](https://github.com/iamneur0/syncio/commit/4a127e7bcde4392e815ddd3bc1a701116a2c0698))
+
+
+### Miscellaneous Chores
+
+* release 0.0.13 ([51188d7](https://github.com/iamneur0/syncio/commit/51188d783d8fb613d156db14c7fe1f844f17b44a))
+* release 0.0.14 ([3929546](https://github.com/iamneur0/syncio/commit/39295469831191e2c9f42ee34c510aa921818e62))
+
 ## [0.0.13](https://github.com/iamneur0/syncio/compare/v0.0.12...v0.0.13) (2025-10-06)
 
 ### Features

@@ -1,6 +1,6 @@
 {
   "name": "syncio",
-  "version": "0.0.13",
+  "version": "0.0.14",
   "description": "Syncio - Stremio addon and user management system",
   "main": "server/database-backend.js",
   "scripts": {
