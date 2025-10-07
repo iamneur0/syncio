@@ -566,6 +566,7 @@ app.get('/api/public-auth/export', async (req, res) => {
         description: addon.description,
         manifestUrl: getDecryptedManifestUrl(addon, req),
         manifest,
+        resources: (() => { try { return addon.resources ? JSON.parse(addon.resources) : (manifest?.resources || []) } catch { return manifest?.resources || [] } })(),
         // Always include stremioAddonId; fall back to manifest.id if needed
         stremioAddonId: addon.stremioAddonId || (manifest && manifest.id) || null,
         version: addon.version,
@@ -638,7 +639,7 @@ app.get('/api/exports/addons', async (req, res) => {
             logo: addon.iconUrl || null,
             background: null,
             types: [],
-            resources: [],
+            resources: (() => { try { return addon.resources ? JSON.parse(addon.resources) : [] } catch { return [] } })(),
             idPrefixes: null,
             catalogs: [],
             addonCatalogs: [],
@@ -650,6 +651,7 @@ app.get('/api/exports/addons', async (req, res) => {
           name: addon.name || '',
           manifestUrl: transportUrl,
           manifest,
+          resources: (() => { try { return addon.resources ? JSON.parse(addon.resources) : (manifest?.resources || []) } catch { return manifest?.resources || [] } })(),
           stremioAddonId: addon.stremioAddonId || (manifest && manifest.id) || null,
           flags: { protected: false },
         }
@@ -738,6 +740,24 @@ app.post('/api/public-auth/import-config', upload.single('file'), async (req, re
         }
 
         // Create with enriched fields
+        // Prepare filtered manifest according to selected resources (if provided)
+        const selectedResources = Array.isArray(entry?.resources) ? entry.resources : (Array.isArray(manifest?.resources) ? manifest.resources : [])
+        const filteredManifest = (() => {
+          if (!manifest) return null
+          if (!Array.isArray(selectedResources) || selectedResources.length === 0) return manifest
+          try {
+            const allow = new Set(selectedResources.map(r => typeof r === 'string' ? r : (r?.name || r?.type)).filter(Boolean))
+            const clone = JSON.parse(JSON.stringify(manifest))
+            if (Array.isArray(clone.resources)) {
+              clone.resources = clone.resources.filter(r => {
+                const key = typeof r === 'string' ? r : (r?.name || r?.type)
+                return key ? allow.has(key) : false
+              })
+            }
+            return clone
+          } catch { return manifest }
+        })()
+
         const created = await prisma.addon.create({
           data: {
             name: (transportName && transportName.trim()) || (manifest?.name || entry?.name || 'Unknown Addon'),
@@ -748,7 +768,9 @@ app.post('/api/public-auth/import-config', upload.single('file'), async (req, re
             iconUrl: (entry?.iconUrl ?? manifest?.logo ?? null),
             stremioAddonId: (manifest?.id || entry?.stremioAddonId || null),
             isActive: true,
-            manifest: manifest ? encrypt(JSON.stringify(manifest), req) : null,
+            originalManifest: manifest ? encrypt(JSON.stringify(manifest), req) : null,
+            manifest: filteredManifest ? encrypt(JSON.stringify(filteredManifest), req) : null,
+            resources: Array.isArray(manifest?.resources) ? JSON.stringify(manifest.resources) : (Array.isArray(entry?.resources) ? JSON.stringify(entry.resources) : null),
             accountId: getAccountId(req),
           }
         })
@@ -3860,7 +3882,24 @@ app.post('/api/addons/:id/reload', async (req, res) => {
       });
     }
 
-    // Update the addon with fresh manifest data but preserve display name
+    // Filter manifest according to selected resources stored on addon
+    let filtered = manifestData
+    try {
+      const selected = (() => { try { return addon.resources ? JSON.parse(addon.resources) : [] } catch { return [] } })()
+      if (Array.isArray(selected) && selected.length > 0 && manifestData) {
+        const allow = new Set(selected.map(r => typeof r === 'string' ? r : (r?.name || r?.type)).filter(Boolean))
+        const clone = JSON.parse(JSON.stringify(manifestData))
+        if (Array.isArray(clone.resources)) {
+          clone.resources = clone.resources.filter(r => {
+            const key = typeof r === 'string' ? r : (r?.name || r?.type)
+            return key ? allow.has(key) : false
+          })
+        }
+        filtered = clone
+      }
+    } catch {}
+
+    // Update the addon with fresh original manifest and derived manifest; preserve display name
     const updatedAddon = await prisma.addon.update({
       where: { 
         id,
@@ -3872,8 +3911,9 @@ app.post('/api/addons/:id/reload', async (req, res) => {
         version: manifestData?.version || addon.version,
         // Update logo URL from manifest
         iconUrl: manifestData?.logo || addon.iconUrl || null,
-        // Store encrypted manifest JSON
-        manifest: manifestData ? encrypt(JSON.stringify(manifestData), req) : addon.manifest
+        // Store encrypted manifests (original and filtered)
+        originalManifest: manifestData ? encrypt(JSON.stringify(manifestData), req) : addon.originalManifest,
+        manifest: filtered ? encrypt(JSON.stringify(filtered), req) : addon.manifest
       }
     });
 
@@ -4110,7 +4150,36 @@ app.get('/api/addons/:id', async (req, res) => {
       groups: addon.groupAddons.map(ga => ({
         id: ga.group.id,
         name: ga.group.name
-      }))
+    })),
+      resources: (() => { try { return addon.resources ? JSON.parse(addon.resources) : [] } catch { return [] } })(),
+      originalManifest: (() => {
+        try {
+          if (addon.originalManifest) return JSON.parse(decrypt(addon.originalManifest, req))
+        } catch {}
+        return null
+      })(),
+    // include manifest details for UI configuration (resources/types/etc.)
+    manifest: (() => {
+      let manifestObj = null
+      try {
+        if (addon.manifest) {
+          manifestObj = JSON.parse(decrypt(addon.manifest, req))
+        }
+      } catch {}
+      // Always return an object to avoid null checks client-side
+      if (!manifestObj) {
+        manifestObj = {
+          id: addon.stremioAddonId || addon.name || 'unknown',
+          name: addon.name || 'Unknown',
+          version: addon.version || 'unknown',
+          description: addon.description || '',
+          types: [],
+            resources: (() => { try { return addon.resources ? JSON.parse(addon.resources) : [] } catch { return [] } })(),
+          catalogs: []
+        }
+      }
+      return manifestObj
+    })()
     };
 
     res.json(transformedAddon);

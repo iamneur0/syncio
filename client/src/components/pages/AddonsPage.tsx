@@ -1738,6 +1738,37 @@ export default function AddonsPage() {
               </button>
             </div>
             <form onSubmit={(e) => { e.preventDefault(); handleUpdateAddon(); }} className="space-y-4">
+              {/* Manifest resources (read-only) */}
+              {(() => {
+                const storedResources: any[] = Array.isArray((addonDetail as any)?.resources) ? (addonDetail as any).resources : []
+                const detailManifest: any = (addonDetail as any)?.manifest
+                const resources: any[] = (storedResources.length > 0)
+                  ? storedResources
+                  : (Array.isArray(detailManifest?.resources) ? detailManifest.resources : [])
+                if (resources.length === 0) return null
+                return (
+                <div>
+                  <label className={`${isDark ? 'text-gray-300' : 'text-gray-700'} block text-sm font-medium mb-2`}>Resources</label>
+                  <div className="flex flex-wrap gap-2">
+                    {resources.map((res: any, idx: number) => {
+                      const label = typeof res === 'string' ? res : (res?.name || res?.type || JSON.stringify(res))
+                      return (
+                        <span
+                          key={idx}
+                          className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${
+                            isDark ? 'bg-gray-700 text-gray-200' : 'bg-gray-100 text-gray-800'
+                          }`}
+                          title={typeof res === 'string' ? res : JSON.stringify(res)}
+                        >
+                          {label}
+                        </span>
+                      )
+                    })}
+                  </div>
+                </div>
+                )
+              })()}
+
               <div>
                 <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>Name</label>
                 <input
