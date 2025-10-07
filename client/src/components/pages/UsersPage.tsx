@@ -3360,13 +3360,6 @@ export default function UsersPage() {
                                       <h4 className={`font-medium truncate ${isDark ? 'text-white' : 'text-gray-900'}`}>
                                         {addonName || 'Unnamed Addon'}
                                       </h4>
-                                      {excluded && (
-                                        <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium w-fit mt-1 min-[480px]:mt-0 ${
-                                          isDark ? 'bg-gray-700 text-gray-300' : 'bg-gray-200 text-gray-700'
-                                        }`}>
-                                          Excluded
-                                        </span>
-                                      )}
                                       {addon.version && (
                                         <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium w-fit mt-1 min-[480px]:mt-0 ${
                                           isDark ? 'bg-purple-600 text-white' : 'bg-purple-100 text-purple-800'
