@@ -1,20 +1,5 @@
 version: '3.9'
 services:
-
-  syncio:
-    image: ghcr.io/iamneur0/syncio:public
-    environment:
-      DATABASE_URL: 'postgresql://syncio:syncio@db:5432/syncio'
-      JWT_SECRET: 'dev-secret'
-      ENCRYPTION_KEY: 'dev-encryption-key-32-chars-long'
-      REDIS_URL: 'redis://redis:6379'
-    depends_on:
-      - db
-      - redis
-    ports:
-      - "3000:3000"
-      - "4000:4000"
-
   db:
     image: postgres:16-alpine
     environment:
@@ -37,6 +22,24 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        - INSTANCE=public
+    environment:
+      DATABASE_URL: 'postgresql://syncio:syncio@db:5432/syncio'
+      JWT_SECRET: 'dev-secret'
+      ENCRYPTION_KEY: 'dev-encryption-key-32-chars-long'
+      REDIS_URL: 'redis://redis:6379'
+    depends_on:
+      - db
+      - redis
+    ports:
+      - "3000:3000"
+      - "4000:4000"
 
 volumes:
   pgdata:

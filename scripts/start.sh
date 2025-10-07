@@ -47,9 +47,23 @@ fi
 echo "📊 Generating Prisma client..."
 npx prisma generate --schema "$PRISMA_SCHEMA_PATH"
 
-echo "📊 Applying Prisma migrations..."
-npx prisma migrate deploy --schema "$PRISMA_SCHEMA_PATH" || true
-echo "ℹ️ Ensuring schema is applied (db push)..."
+echo "📊 Applying Prisma schema..."
+if [ "$INSTANCE" = "public" ]; then
+  echo "➡️ Running migrate deploy (Postgres)"
+  npx prisma migrate deploy --schema "$PRISMA_SCHEMA_PATH" || true
+else
+  echo "➡️ Skipping migrate deploy for SQLite (private)"
+  # Clean up any migration conflicts for SQLite
+  if [ -f "prisma/migration_lock.toml" ]; then
+    echo "➡️ Cleaning up migration lock for SQLite"
+    rm -f prisma/migration_lock.toml
+  fi
+  if [ -d "prisma/migrations" ]; then
+    echo "➡️ Cleaning up migrations directory for SQLite"
+    rm -rf prisma/migrations
+  fi
+fi
+echo "➡️ Ensuring schema is applied (db push)"
 npx prisma db push --schema "$PRISMA_SCHEMA_PATH" --accept-data-loss || true
 
 export NODE_OPTIONS="--dns-result-order=ipv4first"
@@ -57,16 +71,16 @@ export NODE_OPTIONS="--dns-result-order=ipv4first"
 echo "🌐 Starting frontend server on port ${FRONTEND_PORT:-3000}..."
 # Use Next.js standalone output if available
 if [ -f "/app/client/.next/standalone/server.js" ]; then
-  cd /app/client && node .next/standalone/server.js -p ${FRONTEND_PORT:-3000} &
+  cd /app/client && HOSTNAME=0.0.0.0 node .next/standalone/server.js -p ${FRONTEND_PORT:-3000} &
 else
-  cd /app/client && PORT=${FRONTEND_PORT:-3000} npm start &
+  cd /app/client && HOSTNAME=0.0.0.0 PORT=${FRONTEND_PORT:-3000} npm start &
 fi
 FRONTEND_PID=$!
 
 sleep 2
 
 echo "🔧 Starting backend server on port ${BACKEND_PORT:-4000}..."
-cd /app && PORT=${BACKEND_PORT:-4000} AUTH_ENABLED=${AUTH_ENABLED} DATABASE_URL=${DATABASE_URL} node server/database-backend.js &
+cd /app && HOST=0.0.0.0 PORT=${BACKEND_PORT:-4000} AUTH_ENABLED=${AUTH_ENABLED} DATABASE_URL=${DATABASE_URL} node server/database-backend.js &
 BACKEND_PID=$!
 
 cleanup() {
