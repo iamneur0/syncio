@@ -6355,7 +6355,8 @@ app.post('/api/users/:id/import-addons', async (req, res) => {
                 manifestUrl: encrypt(addonUrl, req),
                 manifestUrlHash: manifestUrlHash(addonUrl),
                 version: manifestData?.version || addonData.version || null,
-                iconUrl: manifestData?.logo || null,
+                iconUrl: manifestData?.logo || addonData.iconUrl || null,
+                stremioAddonId: manifestData?.id || addonData.stremioAddonId || null,
                 isActive: true,
                 manifest: manifestData ? encrypt(JSON.stringify(manifestData), req) : null,
                 accountId: getAccountId(req)
