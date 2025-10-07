@@ -138,7 +138,30 @@ router.post('/', authenticateToken, requireAdmin, validate(addAddonSchema), asyn
         dbData.manifest = manifest ? aesGcmEncrypt(key, JSON.stringify(manifest)) : null
       } catch {}
 
-      const addon = await prisma.addon.create({ data: dbData });
+             // Persist resources and both manifests (original and filtered by selected resources)
+             if (manifest && Array.isArray(manifest.resources)) {
+               dbData.resources = JSON.stringify(manifest.resources)
+             }
+             try {
+               const selectedResources = Array.isArray(req.body?.resources) ? req.body.resources : (Array.isArray(manifest?.resources) ? manifest.resources : [])
+               const allow = new Set((selectedResources || []).map(r => typeof r === 'string' ? r : (r?.name || r?.type)).filter(Boolean))
+               const filtered = (() => {
+                 try {
+                   if (!Array.isArray(selectedResources) || selectedResources.length === 0) return manifest
+                   const clone = JSON.parse(JSON.stringify(manifest))
+                   if (Array.isArray(clone.resources)) {
+                     clone.resources = clone.resources.filter(r => {
+                       const key = typeof r === 'string' ? r : (r?.name || r?.type)
+                       return key ? allow.has(key) : false
+                     })
+                   }
+                   return clone
+                 } catch { return manifest }
+               })()
+               dbData.originalManifest = manifest ? aesGcmEncrypt(key, JSON.stringify(manifest)) : null
+               dbData.manifest = filtered ? aesGcmEncrypt(key, JSON.stringify(filtered)) : null
+             } catch {}
+             const addon = await prisma.addon.create({ data: dbData });
 
       res.status(201).json({
         message: 'Addon added successfully',
