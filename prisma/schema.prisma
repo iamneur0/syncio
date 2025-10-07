@@ -4,24 +4,26 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
 model User {
   id              String   @id @default(cuid())
-  username        String   @unique
-  email           String   @unique
+  username        String
+  email           String
   isActive        Boolean  @default(true)
   stremioAuthKey  String?  // Encrypted Stremio auth key
   excludedAddons  String?  // JSON array of addon IDs that user has excluded
   protectedAddons String?  // JSON array of addon IDs that user has protected
   colorIndex      Int?     // UI color theme index
   accountId       String?  // For multi-tenant support
-  
+
   // Relationships
 
   @@map("users")
+  @@unique([accountId, email])
+  @@unique([accountId, username])
 }
 
 model Group {
@@ -29,17 +31,17 @@ model Group {
   name        String
   description String?
   isActive    Boolean  @default(true)
-  colorIndex  Int?     // UI color theme index
-  accountId   String?  // For multi-tenant support
-  userIds     String?  // JSON array of user IDs
-  
+  colorIndex  Int?
+  accountId   String?
+  userIds     String?
+
   // Relationships
-  addons      GroupAddon[]
+  addons       GroupAddon[]
 
   @@map("groups")
 }
 
-// GroupMember model removed - using JSON arrays in Group model instead
+// GroupMember and GroupInvite removed – using JSON arrays on Group
 
 model Addon {
   id             String   @id @default(cuid())
@@ -51,13 +53,13 @@ model Addon {
   stremioAddonId String?
   version        String?
   isActive       Boolean  @default(true)
-  accountId      String?  // For multi-tenant support
+  accountId      String?
   iconUrl        String?
   // Deterministic hash of normalized manifestUrl for search/uniqueness (public mode)
-  manifestUrlHash String?
+  manifestUrlHash String? @db.VarChar(64)
   // Non-sensitive cached manifest resources for fast UI (JSON string array)
   resources      String?
-  
+
   // Relationships
   groupAddons    GroupAddon[]
 
@@ -69,7 +71,7 @@ model Addon {
 model GroupAddon {
   id        String   @id @default(cuid())
   isEnabled Boolean  @default(true)
-  settings  String?  // JSON string for addon-specific settings
+  settings  String?
   groupId   String
   group     Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
   addonId   String
@@ -87,3 +89,4 @@ model AppAccount {
 
   @@map("app_accounts")
 }
+

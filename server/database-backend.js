@@ -4951,7 +4951,7 @@ app.get('/api/groups/:id', async (req, res) => {
   try {
     const { id } = req.params
     const group = await prisma.group.findUnique({
-      where: { id },
+      where: { id, accountId: getAccountId(req) },
       include: {
         addons: { 
           include: { addon: true }
@@ -4995,7 +4995,7 @@ app.get('/api/groups/:id', async (req, res) => {
       colorIndex: group.colorIndex || 1,
       users: memberUsers,
       addons: group.addons
-        .filter((ga) => ga.addon.isActive !== false) // Only show enabled addons
+        .filter((ga) => ga.addon.isActive !== false && ga.addon.accountId === getAccountId(req)) // enforce account scoping
         .map((ga) => ({ 
           id: ga.addon.id, 
           name: ga.addon.name, 
