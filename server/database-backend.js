@@ -51,6 +51,86 @@ function getAccountId(req) {
   return DEFAULT_ACCOUNT_ID
 }
 
+// Helper to consistently scope Prisma queries to the current account
+function scopedWhere(req, extra) {
+  // Avoid throwing during unauthenticated requests; callers must decide whether to 401 or return empty
+  const accountId = AUTH_ENABLED ? (req.appAccountId || null) : (req.appAccountId || null)
+  return accountId ? { accountId, ...(extra || {}) } : (AUTH_ENABLED ? { accountId: '___no_account___', ...(extra || {}) } : { ...(extra || {}) })
+}
+
+// Ownership guards
+async function ensureUserInAccount(req, res, userId) {
+  const accountId = req.appAccountId
+  if (AUTH_ENABLED && !accountId) {
+    res.status(401).json({ message: 'Authentication required' })
+    return null
+  }
+  const user = await prisma.user.findFirst({ where: { id: userId, ...(accountId ? { accountId } : {}) } })
+  if (!user) {
+    res.status(404).json({ message: 'User not found' })
+    return null
+  }
+  return user
+}
+
+async function ensureGroupInAccount(req, res, groupId) {
+  const accountId = req.appAccountId
+  if (AUTH_ENABLED && !accountId) {
+    res.status(401).json({ message: 'Authentication required' })
+    return null
+  }
+  const group = await prisma.group.findFirst({ where: { id: groupId, ...(accountId ? { accountId } : {}) } })
+  if (!group) {
+    res.status(404).json({ message: 'Group not found' })
+    return null
+  }
+  return group
+}
+
+// Route-level ownership guards for any endpoint with :id under users/groups
+if (AUTH_ENABLED) {
+  // Only enforce ownership if we already have an authenticated account context.
+  app.use('/api/users/:id', async (req, res, next) => {
+    if (!req.appAccountId) return next()
+    try {
+      const owned = await ensureUserInAccount(req, res, req.params.id)
+      if (!owned) return
+      req.scopedUser = owned
+      next()
+    } catch (e) {
+      next(e)
+    }
+  })
+
+  app.use('/api/groups/:id', async (req, res, next) => {
+    if (!req.appAccountId) return next()
+    try {
+      const owned = await ensureGroupInAccount(req, res, req.params.id)
+      if (!owned) return
+      req.scopedGroup = owned
+      next()
+    } catch (e) {
+      next(e)
+    }
+  })
+
+  // Nested group membership routes
+  app.use('/api/groups/:groupId/members/:userId', async (req, res, next) => {
+    if (!req.appAccountId) return next()
+    try {
+      const group = await ensureGroupInAccount(req, res, req.params.groupId)
+      if (!group) return
+      const user = await ensureUserInAccount(req, res, req.params.userId)
+      if (!user) return
+      req.scopedGroup = group
+      req.scopedUser = user
+      next()
+    } catch (e) {
+      next(e)
+    }
+  })
+}
+
 // Helper function to ensure a user is only in one group at a time
 async function assignUserToGroup(userId, groupId, req) {
   // First, remove user from ALL groups in this account
@@ -1352,9 +1432,8 @@ app.get('/api/health', async (req, res) => {
 app.get('/api/users', async (req, res) => {
   debug.log('🔍 GET /api/users called');
   try {
-    const whereScope = getAccountId(req) ? { accountId: getAccountId(req) } : {}
     const users = await prisma.user.findMany({
-      where: whereScope,
+      where: scopedWhere(req, {}),
       include: {},
         orderBy: { id: 'asc' }
     });
@@ -1363,12 +1442,7 @@ app.get('/api/users', async (req, res) => {
     const transformedUsers = await Promise.all(users.map(async (user) => {
       // For SQLite, we need to find groups that contain this user
       const groups = await prisma.group.findMany({
-        where: {
-          accountId: getAccountId(req),
-          userIds: {
-            contains: user.id
-          }
-        },
+        where: scopedWhere(req, { userIds: { contains: user.id } }),
               include: {
                 addons: {
                   include: {
@@ -1505,18 +1579,30 @@ app.get('/api/users/:id', async (req, res) => {
 
     // Group addons come from the user's primary group assignment
     const familyGroup = groups[0]
+    const currentAccountId = getAccountId(req)
     const addons = Array.isArray(familyGroup?.addons)
-      ? familyGroup.addons
-          .filter((ga) => ga.addon.isActive !== false) // Only show enabled addons
-          .map((ga) => ({
-            id: ga.addon.id,
-            name: ga.addon.name,
-            description: ga.addon.description || '',
-            manifestUrl: ga.addon.manifestUrl,
-            version: ga.addon.version || null,
-            isEnabled: ga.addon.isActive,
-            iconUrl: ga.addon.iconUrl,
-          }))
+      ? (() => {
+          const seen = new Set()
+          return familyGroup.addons
+            .filter((ga) => {
+              const addon = ga?.addon
+              if (!addon) return false
+              if (addon.isActive === false) return false
+              if (currentAccountId && addon.accountId && addon.accountId !== currentAccountId) return false
+              if (seen.has(addon.id)) return false
+              seen.add(addon.id)
+              return true
+            })
+            .map((ga) => ({
+              id: ga.addon.id,
+              name: ga.addon.name,
+              description: ga.addon.description || '',
+              manifestUrl: ga.addon.manifestUrl,
+              version: ga.addon.version || null,
+              isEnabled: ga.addon.isActive,
+              iconUrl: ga.addon.iconUrl,
+            }))
+        })()
       : []
 
     // Get all groups the user belongs to
@@ -1815,6 +1901,11 @@ app.get('/api/users/:id/sync-status', async (req, res) => {
       },
       include: {
         addons: {
+          where: {
+            addon: {
+              accountId: getAccountId(req)
+            }
+          },
           include: {
             addon: true
           }
@@ -3476,7 +3567,7 @@ app.get('/api/addons', async (req, res) => {
   try {
     const whereScope = getAccountId(req) ? { accountId: getAccountId(req) } : {}
     const addons = await prisma.addon.findMany({
-      where: whereScope,
+      where: scopedWhere(req, {}),
       // return all addons, both active and inactive
       include: {
         groupAddons: {
@@ -3497,14 +3588,20 @@ app.get('/api/addons', async (req, res) => {
     });
 
     const transformedAddons = await Promise.all(addons.map(async addon => {
-      // Calculate total users across all groups that contain this addon
+      // Filter groupAddons to only include those from the current account
+      const currentAccountId = getAccountId(req)
+      const filteredGroupAddons = addon.groupAddons.filter(ga => 
+        ga.group && ga.group.accountId === currentAccountId
+      )
+
+      // Calculate total users across all groups that contain this addon (only from current account)
       let totalUsers = 0
       
-      if (addon.groupAddons && addon.groupAddons.length > 0) {
+      if (filteredGroupAddons && filteredGroupAddons.length > 0) {
         // Get all unique user IDs from all groups that contain this addon
         const allUserIds = new Set()
         
-        for (const groupAddon of addon.groupAddons) {
+        for (const groupAddon of filteredGroupAddons) {
           if (groupAddon.group && groupAddon.group.userIds) {
             try {
               const userIds = JSON.parse(groupAddon.group.userIds)
@@ -3530,7 +3627,7 @@ app.get('/api/addons', async (req, res) => {
           totalUsers = activeUsers.length
         }
       }
-      
+
       return {
         id: addon.id,
         name: addon.name,
@@ -3541,7 +3638,7 @@ app.get('/api/addons', async (req, res) => {
         iconUrl: addon.iconUrl,
         status: addon.isActive ? 'active' : 'inactive',
         users: totalUsers,
-        groups: addon.groupAddons.length,
+        groups: filteredGroupAddons.length,
         accountId: addon.accountId
       }
     }));
@@ -4169,8 +4266,14 @@ app.get('/api/addons/:id', async (req, res) => {
       return res.status(404).json({ error: 'Addon not found' });
     }
 
-    // Calculate total users across all groups that have this addon
-    const totalUsers = addon.groupAddons.reduce((sum, groupAddon) => {
+    // Filter groupAddons to only include those from the current account
+    const currentAccountId = getAccountId(req)
+    const filteredGroupAddons = addon.groupAddons.filter(ga => 
+      ga.group && ga.group.accountId === currentAccountId
+    )
+
+    // Calculate total users across all groups that have this addon (only from current account)
+    const totalUsers = filteredGroupAddons.reduce((sum, groupAddon) => {
       return sum + (groupAddon.group._count.members || 0)
     }, 0)
 
@@ -4183,7 +4286,7 @@ app.get('/api/addons/:id', async (req, res) => {
       category: addon.category || 'Other',
       status: addon.isActive ? 'active' : 'inactive',
       users: totalUsers,
-      groups: addon.groupAddons.map(ga => ({
+      groups: filteredGroupAddons.map(ga => ({
         id: ga.group.id,
         name: ga.group.name
     })),
@@ -4359,7 +4462,8 @@ app.put('/api/addons/:id', async (req, res) => {
 
     const updatedAddon = await prisma.addon.update({
       where: { 
-        id
+        id,
+        accountId: getAccountId(req)
       },
       data: updateData
     });
@@ -4419,18 +4523,24 @@ app.put('/api/addons/:id', async (req, res) => {
       }
     }
 
-    const addonWithGroups = await prisma.addon.findUnique({
-      where: { id },
+    const addonWithGroups = await prisma.addon.findFirst({
+      where: { id, accountId: getAccountId(req) },
       include: { groupAddons: { include: { group: true } } }
     });
 
-    // Calculate total users across all groups that contain this addon
+    // Filter groupAddons to only include those from the current account
+    const currentAccountId = getAccountId(req)
+    const filteredGroupAddons = addonWithGroups.groupAddons.filter(ga => 
+      ga.group && ga.group.accountId === currentAccountId
+    )
+
+    // Calculate total users across all groups that contain this addon (only from current account)
     let totalUsers = 0
-    if (addonWithGroups.groupAddons && addonWithGroups.groupAddons.length > 0) {
+    if (filteredGroupAddons && filteredGroupAddons.length > 0) {
       // Get all unique user IDs from all groups that contain this addon
       const allUserIds = new Set()
       
-      for (const groupAddon of addonWithGroups.groupAddons) {
+      for (const groupAddon of filteredGroupAddons) {
         if (groupAddon.group && groupAddon.group.userIds) {
           try {
             const userIds = JSON.parse(groupAddon.group.userIds)
@@ -4448,7 +4558,8 @@ app.put('/api/addons/:id', async (req, res) => {
         const activeUsers = await prisma.user.findMany({
           where: {
             id: { in: Array.from(allUserIds) },
-            isActive: true
+            isActive: true,
+            accountId: getAccountId(req)
           },
           select: { id: true }
         })
@@ -4464,7 +4575,7 @@ app.put('/api/addons/:id', async (req, res) => {
       version: addonWithGroups.version,
       status: addonWithGroups.isActive ? 'active' : 'inactive',
       users: totalUsers,
-      groups: addonWithGroups.groupAddons.length
+      groups: filteredGroupAddons.length
     };
 
     res.json(transformedAddon);
@@ -4482,17 +4593,12 @@ app.get('/api/groups', async (req, res) => {
   try {
     const whereScope = AUTH_ENABLED && req.appAccountId ? { accountId: req.appAccountId } : {}
     const groups = await prisma.group.findMany({
-      where: whereScope,
+      where: scopedWhere(req, {}),
       include: {
-        _count: {
-          select: {
-            addons: true
-          }
-        }
+        addons: { include: { addon: true } },
+        _count: { select: { addons: true } }
       },
-      orderBy: {
-        id: 'asc' // Consistent ordering by ID
-      }
+      orderBy: { id: 'asc' }
     });
 
     const transformedGroups = await Promise.all(groups.map(async group => {
@@ -4517,12 +4623,20 @@ app.get('/api/groups', async (req, res) => {
         }
       }
 
+      // Count unique active addons scoped to this account (avoid duplicates across accounts)
+      const accountId = getAccountId(req)
+      const uniqActiveAddonIds = new Set(
+        (group.addons || [])
+          .filter((ga) => ga?.addon && ga.addon.isActive !== false && (!accountId || ga.addon.accountId === accountId))
+          .map((ga) => ga.addon.id)
+      )
+
       return {
       id: group.id,
       name: group.name,
       description: group.description,
         members: activeMemberCount,
-      addons: group._count.addons,
+        addons: uniqActiveAddonIds.size,
       restrictions: 'none', // TODO: Implement restrictions logic
       isActive: group.isActive,
       // Expose color index for UI
@@ -4959,8 +5073,15 @@ app.get('/api/groups/:id', async (req, res) => {
       }
     })
     if (!group) return res.status(404).json({ message: 'Group not found' })
+    
+    // Filter addons to only include those from the current account
+    const currentAccountId = getAccountId(req)
+    const filteredAddons = group.addons.filter(ga => 
+      ga.addon && ga.addon.accountId === currentAccountId
+    )
+    
     // Get group addon manifest URLs for comparison (only enabled addons)
-    const groupManifestUrls = group.addons
+    const groupManifestUrls = filteredAddons
       .filter(ga => ga.addon.manifestUrl && ga.addon.isActive !== false)
       .map(ga => ga.addon.manifestUrl)
     
@@ -4994,8 +5115,8 @@ app.get('/api/groups/:id', async (req, res) => {
       description: group.description,
       colorIndex: group.colorIndex || 1,
       users: memberUsers,
-      addons: group.addons
-        .filter((ga) => ga.addon.isActive !== false && ga.addon.accountId === getAccountId(req)) // enforce account scoping
+      addons: filteredAddons
+        .filter((ga) => ga.addon.isActive !== false) // already filtered by accountId above
         .map((ga) => ({ 
           id: ga.addon.id, 
           name: ga.addon.name, 
@@ -5306,7 +5427,7 @@ async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'nor
       
       const updatedFamilyAddons = Array.isArray(updatedFamilyGroup?.addons)
         ? updatedFamilyGroup.addons
-            .filter((ga) => (ga?.isEnabled !== false) && (ga?.addon?.isActive !== false))
+            .filter((ga) => (ga?.isEnabled !== false) && (ga?.addon?.isActive !== false) && ga?.addon?.accountId === user.accountId)
             .map((ga) => ({
               id: ga.addon.id,
               name: ga.addon.name,
@@ -6050,7 +6171,7 @@ app.post('/api/groups/:id/addons/reorder', async (req, res) => {
           })
           
           const orderedManifestUrls = groupAddons
-            .filter(ga => ga.addon && ga.addon.manifestUrl)
+            .filter(ga => ga.addon && ga.addon.manifestUrl && ga.addon.accountId === getAccountId(req))
             .map(ga => ga.addon.manifestUrl)
           
           console.log(`📋 Group addon order for sync: ${orderedManifestUrls.length} addons`)
