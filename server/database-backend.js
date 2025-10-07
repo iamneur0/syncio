@@ -566,7 +566,17 @@ app.get('/api/public-auth/export', async (req, res) => {
         description: addon.description,
         manifestUrl: getDecryptedManifestUrl(addon, req),
         manifest,
-        resources: (() => { try { return addon.resources ? JSON.parse(addon.resources) : (manifest?.resources || []) } catch { return manifest?.resources || [] } })(),
+        resources: (() => {
+          try {
+            const stored = addon.resources ? JSON.parse(addon.resources) : null
+            if (Array.isArray(stored)) return stored
+            const src = Array.isArray(manifest?.resources) ? manifest.resources : []
+            return src.map(r => (typeof r === 'string' ? r : (r && (r.name || r.type)))).filter(Boolean)
+          } catch {
+            const src = Array.isArray(manifest?.resources) ? manifest.resources : []
+            return src.map(r => (typeof r === 'string' ? r : (r && (r.name || r.type)))).filter(Boolean)
+          }
+        })(),
         // Always include stremioAddonId; fall back to manifest.id if needed
         stremioAddonId: addon.stremioAddonId || (manifest && manifest.id) || null,
         version: addon.version,
@@ -613,7 +623,7 @@ app.get('/api/exports/addons', async (req, res) => {
     const addons = await prisma.addon.findMany({ where: whereScope })
 
     // Build Stremio-like addon objects with embedded manifests
-    const exported = await Promise.all(
+        const exported = await Promise.all(
       addons.map(async (addon) => {
         const transportUrl = getDecryptedManifestUrl(addon, req)
         // Prefer stored manifest if present
@@ -651,7 +661,17 @@ app.get('/api/exports/addons', async (req, res) => {
           name: addon.name || '',
           manifestUrl: transportUrl,
           manifest,
-          resources: (() => { try { return addon.resources ? JSON.parse(addon.resources) : (manifest?.resources || []) } catch { return manifest?.resources || [] } })(),
+          resources: (() => {
+            try {
+              const stored = addon.resources ? JSON.parse(addon.resources) : null
+              if (Array.isArray(stored)) return stored
+              const src = Array.isArray(manifest?.resources) ? manifest.resources : []
+              return src.map(r => (typeof r === 'string' ? r : (r && (r.name || r.type)))).filter(Boolean)
+            } catch {
+              const src = Array.isArray(manifest?.resources) ? manifest.resources : []
+              return src.map(r => (typeof r === 'string' ? r : (r && (r.name || r.type)))).filter(Boolean)
+            }
+          })(),
           stremioAddonId: addon.stremioAddonId || (manifest && manifest.id) || null,
           flags: { protected: false },
         }
@@ -770,7 +790,15 @@ app.post('/api/public-auth/import-config', upload.single('file'), async (req, re
             isActive: true,
             originalManifest: manifest ? encrypt(JSON.stringify(manifest), req) : null,
             manifest: filteredManifest ? encrypt(JSON.stringify(filteredManifest), req) : null,
-            resources: Array.isArray(manifest?.resources) ? JSON.stringify(manifest.resources) : (Array.isArray(entry?.resources) ? JSON.stringify(entry.resources) : null),
+            resources: (() => {
+              try {
+                const src = Array.isArray(entry?.resources)
+                  ? entry.resources
+                  : (Array.isArray(manifest?.resources) ? manifest.resources : [])
+                const names = src.map(r => (typeof r === 'string' ? r : (r && (r.name || r.type)))).filter(Boolean)
+                return names.length ? JSON.stringify(names) : null
+              } catch { return null }
+            })(),
             accountId: getAccountId(req),
           }
         })
@@ -3775,7 +3803,15 @@ app.post('/api/addons', async (req, res) => {
         iconUrl: manifestData?.logo || null, // Store logo URL from manifest
         stremioAddonId: manifestData?.id || null,
         isActive: true,
+        originalManifest: manifestData ? encrypt(JSON.stringify(manifestData), req) : null,
         manifest: manifestData ? encrypt(JSON.stringify(manifestData), req) : null,
+        resources: (() => {
+          try {
+            const src = Array.isArray(manifestData?.resources) ? manifestData.resources : []
+            const names = src.map(r => (typeof r === 'string' ? r : (r && (r.name || r.type)))).filter(Boolean)
+            return names.length ? JSON.stringify(names) : null
+          } catch { return null }
+        })(),
         // Enforce account ownership
         accountId: getAccountId(req),
       }
@@ -4193,7 +4229,7 @@ app.get('/api/addons/:id', async (req, res) => {
 app.put('/api/addons/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, description, url, version, groupIds } = req.body;
+    const { name, description, url, version, groupIds, resources } = req.body;
     
     console.log(`🔍 PUT /api/addons/${id} called with:`, { name, description, url, groupIds });
     console.log(`🔍 AUTH_ENABLED: ${AUTH_ENABLED}, req.appAccountId: ${req.appAccountId}`);
@@ -4268,6 +4304,58 @@ app.put('/api/addons/:id', async (req, res) => {
       id,
       ...(AUTH_ENABLED && req.appAccountId ? { accountId: req.appAccountId } : {})
     });
+
+    // If URL was changed, store encrypted URL and update its hash deterministically
+    if (nextUrl !== undefined) {
+      try {
+        updateData.manifestUrl = encrypt(nextUrl, req)
+        updateData.manifestUrlHash = require('./utils/hash').manifestUrlHash(nextUrl)
+      } catch (e) {
+        console.error('Failed to encrypt updated manifestUrl:', e)
+        return res.status(500).json({ error: 'Failed to encrypt updated manifestUrl' })
+      }
+    }
+
+    // If resources provided, re-derive manifest from originalManifest and persist both fields
+    if (resources !== undefined) {
+      try {
+        const key = getAccountDek(req.appAccountId || (req.user && (req.user.accountId || req.user.id))) || getServerKey()
+        let original = null
+        try { original = existingAddon.originalManifest ? JSON.parse(aesGcmDecrypt(key, existingAddon.originalManifest)) : null } catch {}
+        // Fallback: if no originalManifest, use decrypted current manifest
+        if (!original) {
+          try { original = existingAddon.manifest ? JSON.parse(aesGcmDecrypt(key, existingAddon.manifest)) : null } catch {}
+        }
+        if (original && Array.isArray(original.resources)) {
+          const selected = Array.isArray(resources) ? resources : []
+          // Build set of selected names handling both string and object forms
+          const selectedNames = new Set(
+            selected
+              .map((s) => (typeof s === 'string' ? s : (s && (s.name || s.type))))
+              .filter(Boolean)
+          )
+          const filtered = { ...original }
+          if (selected.length > 0) {
+            filtered.resources = original.resources.filter((r) => {
+              const label = typeof r === 'string' ? r : (r && (r.name || r.type))
+              return label && selectedNames.has(label)
+            })
+          }
+          // SDK guidance: keep keys but empty arrays when deselected
+          if (!selectedNames.has('catalog')) filtered.catalogs = []
+          if (!selectedNames.has('addon_catalog')) filtered.addonCatalogs = []
+
+          updateData.manifest = encrypt(JSON.stringify(filtered), req)
+          updateData.originalManifest = existingAddon.originalManifest // keep as is
+          updateData.resources = JSON.stringify(Array.from(selectedNames))
+        } else if (Array.isArray(resources)) {
+          const names = resources.map(r => (typeof r === 'string' ? r : (r && (r.name || r.type)))).filter(Boolean)
+          updateData.resources = names.length ? JSON.stringify(names) : JSON.stringify([])
+        }
+      } catch (e) {
+        console.error('Failed to update resources/filter manifest:', e)
+      }
+    }
 
     const updatedAddon = await prisma.addon.update({
       where: { 
@@ -4372,7 +4460,7 @@ app.put('/api/addons/:id', async (req, res) => {
       id: addonWithGroups.id,
       name: addonWithGroups.name,
       description: addonWithGroups.description,
-      url: addonWithGroups.manifestUrl,
+      url: getDecryptedManifestUrl(addonWithGroups, req),
       version: addonWithGroups.version,
       status: addonWithGroups.isActive ? 'active' : 'inactive',
       users: totalUsers,

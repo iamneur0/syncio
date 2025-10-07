@@ -426,6 +426,7 @@ export default function AddonsPage() {
   const [editUrl, setEditUrl] = useState('')
   const [editTags, setEditTags] = useState<string[]>([])
   const [editGroupIds, setEditGroupIds] = useState<string[]>([])
+  const [editResources, setEditResources] = useState<any[]>([])
   
   // View mode state (card or list)
   const [viewMode, setViewMode] = useState<'card' | 'list'>(() => {
@@ -572,12 +573,20 @@ export default function AddonsPage() {
     if (!addonDetail) {
       // Clear group selections when addonDetail is not available
       setEditGroupIds([])
+      setEditResources([])
       return
     }
     const groupIds = Array.isArray((addonDetail as any)?.groups)
       ? (addonDetail as any).groups.map((g: any) => g.id)
       : []
     setEditGroupIds(groupIds)
+    // Initialize resources selection from addonDetail
+    try {
+      const stored = Array.isArray((addonDetail as any)?.resources) ? (addonDetail as any).resources : []
+      const detailManifest: any = (addonDetail as any)?.manifest
+      const fallback = Array.isArray(detailManifest?.resources) ? detailManifest.resources : []
+      setEditResources(stored.length > 0 ? stored : fallback)
+    } catch { setEditResources([]) }
   }, [addonDetail])
 
   // Filter addons locally like groups does
@@ -806,6 +815,8 @@ export default function AddonsPage() {
     
     // Always send groupIds to preserve existing associations or handle group changes
     updateData.groupIds = editGroupIds
+    // Send resources if user adjusted them
+    if (Array.isArray(editResources)) updateData.resources = editResources
 
     updateAddonMutation.mutate({
       id: editingAddonId,
@@ -1738,34 +1749,55 @@ export default function AddonsPage() {
               </button>
             </div>
             <form onSubmit={(e) => { e.preventDefault(); handleUpdateAddon(); }} className="space-y-4">
-              {/* Manifest resources (read-only) */}
+              {/* Manifest resources (selectable) */}
               {(() => {
                 const storedResources: any[] = Array.isArray((addonDetail as any)?.resources) ? (addonDetail as any).resources : []
-                const detailManifest: any = (addonDetail as any)?.manifest
-                const resources: any[] = (storedResources.length > 0)
-                  ? storedResources
-                  : (Array.isArray(detailManifest?.resources) ? detailManifest.resources : [])
-                if (resources.length === 0) return null
+                const detailManifest: any = (addonDetail as any)?.originalManifest || (addonDetail as any)?.manifest
+                const allResources: any[] = Array.isArray(detailManifest?.resources) ? detailManifest.resources : (storedResources || [])
+                if (!Array.isArray(allResources) || allResources.length === 0) return null
+                const isSelected = (item: any) => {
+                  const label = typeof item === 'string' ? item : (item?.name || item?.type || JSON.stringify(item))
+                  return editResources.some((s) => {
+                    const sl = typeof s === 'string' ? s : (s?.name || s?.type || JSON.stringify(s))
+                    return sl === label
+                  })
+                }
                 return (
-                <div>
-                  <label className={`${isDark ? 'text-gray-300' : 'text-gray-700'} block text-sm font-medium mb-2`}>Resources</label>
-                  <div className="flex flex-wrap gap-2">
-                    {resources.map((res: any, idx: number) => {
-                      const label = typeof res === 'string' ? res : (res?.name || res?.type || JSON.stringify(res))
-                      return (
-                        <span
-                          key={idx}
-                          className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${
-                            isDark ? 'bg-gray-700 text-gray-200' : 'bg-gray-100 text-gray-800'
-                          }`}
-                          title={typeof res === 'string' ? res : JSON.stringify(res)}
-                        >
-                          {label}
-                        </span>
-                      )
-                    })}
+                  <div>
+                    <label className={`${isDark ? 'text-gray-300' : 'text-gray-700'} block text-sm font-medium mb-2`}>Resources</label>
+                    <div className="flex flex-wrap gap-2">
+                      {allResources.map((res: any, idx: number) => {
+                        const label = typeof res === 'string' ? res : (res?.name || res?.type || JSON.stringify(res))
+                        const selected = isSelected(res)
+                        return (
+                          <button
+                            type="button"
+                            key={idx}
+                            onClick={() => {
+                              setEditResources((prev) => {
+                                const exists = isSelected(res)
+                                if (exists) {
+                                  return prev.filter((p) => {
+                                    const pl = typeof p === 'string' ? p : (p?.name || p?.type || JSON.stringify(p))
+                                    return pl !== label
+                                  })
+                                }
+                                return [...prev, res]
+                              })
+                            }}
+                            className={`px-3 py-1 rounded-full text-xs font-medium border ${
+                              selected
+                                ? (isDark ? 'bg-purple-600 text-white border-purple-600' : 'bg-stremio-purple text-white border-stremio-purple')
+                                : (isDark ? 'bg-gray-700 text-gray-200 border-gray-600' : 'bg-gray-100 text-gray-800 border-gray-300')
+                            }`}
+                            title={typeof res === 'string' ? res : JSON.stringify(res)}
+                          >
+                            {label}
+                          </button>
+                        )
+                      })}
+                    </div>
                   </div>
-                </div>
                 )
               })()}
 

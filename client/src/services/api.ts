@@ -116,6 +116,7 @@ export interface UpdateAddonData {
   description?: string
   url?: string
   groupIds?: string[]
+  resources?: any[]
 }
 
 // API Functions
