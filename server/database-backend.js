@@ -51,11 +51,98 @@ function getAccountId(req) {
   return DEFAULT_ACCOUNT_ID
 }
 
+// Helper function to parse excluded/protected addons (handles both array and JSON string formats)
+function parseAddonIds(field) {
+  if (!field) return []
+  if (Array.isArray(field)) return field
+  if (typeof field === 'string') {
+    try {
+      const parsed = JSON.parse(field)
+      return Array.isArray(parsed) ? parsed : []
+    } catch {
+      return []
+    }
+  }
+  return []
+}
+
+function parseProtectedAddons(field, req) {
+  if (!field) return []
+  if (Array.isArray(field)) return field
+  if (typeof field === 'string') {
+    try {
+      const parsed = JSON.parse(field)
+      if (!Array.isArray(parsed)) return []
+      
+      // Decrypt each protected addon URL
+      return parsed.map(encryptedUrl => {
+        try {
+          return decrypt(encryptedUrl, req)
+        } catch (e) {
+          console.warn('Failed to decrypt protected addon URL:', e.message)
+          return null
+        }
+      }).filter(url => url !== null)
+    } catch {
+      return []
+    }
+  }
+  return []
+}
+
 // Helper to consistently scope Prisma queries to the current account
 function scopedWhere(req, extra) {
   // Avoid throwing during unauthenticated requests; callers must decide whether to 401 or return empty
   const accountId = AUTH_ENABLED ? (req.appAccountId || null) : (req.appAccountId || null)
   return accountId ? { accountId, ...(extra || {}) } : (AUTH_ENABLED ? { accountId: '___no_account___', ...(extra || {}) } : { ...(extra || {}) })
+}
+
+// Helper to convert manifest URLs to addon IDs
+async function convertManifestUrlsToAddonIds(manifestUrls, req) {
+  if (!Array.isArray(manifestUrls) || manifestUrls.length === 0) return []
+  
+  const accountId = getAccountId(req)
+  const addonIds = []
+  
+  for (const manifestUrl of manifestUrls) {
+    try {
+      // Try to find addon by manifestUrlHash first (for encrypted URLs)
+      const manifestUrlHash = require('./utils/hash').manifestUrlHash(manifestUrl)
+      let addon = await prisma.addon.findFirst({
+        where: {
+          manifestUrlHash,
+          accountId: AUTH_ENABLED ? accountId : undefined
+        }
+      })
+      
+      // If not found by hash, try to find by decrypted manifestUrl
+      if (!addon) {
+        const addons = await prisma.addon.findMany({
+          where: scopedWhere(req, { isActive: true })
+        })
+        
+        for (const candidate of addons) {
+          try {
+            const decryptedUrl = decrypt(candidate.manifestUrl, req)
+            if (decryptedUrl === manifestUrl) {
+              addon = candidate
+              break
+            }
+          } catch (e) {
+            // Skip if decryption fails
+          }
+        }
+      }
+      
+      if (addon) {
+        addonIds.push(addon.id)
+      }
+    } catch (e) {
+      console.warn(`Failed to find addon for manifestUrl: ${manifestUrl}`, e.message)
+    }
+  }
+  
+  return addonIds
 }
 
 // Ownership guards
@@ -1474,24 +1561,8 @@ app.get('/api/users', async (req, res) => {
           stremioAddonsCount = addonsNormalized.length
         } catch (error) {
           console.error(`Error fetching Stremio addons for user ${user.id}:`, error.message)
-          // Fallback to database value if live fetch fails
-          if (user.stremioAddons) {
-            try {
-              const parsedAddons = JSON.parse(user.stremioAddons)
-              if (Array.isArray(parsedAddons)) {
-                stremioAddonsCount = parsedAddons.length
-              } else if (typeof parsedAddons === 'object') {
-                stremioAddonsCount = Object.keys(parsedAddons).length
-              }
-            } catch (e) {
-              // Fallback for old data format
-              if (Array.isArray(user.stremioAddons)) {
-        stremioAddonsCount = user.stremioAddons.length
-              } else if (typeof user.stremioAddons === 'object') {
-                stremioAddonsCount = Object.keys(user.stremioAddons).length
-              }
-            }
-          }
+          // Note: stremioAddons field was removed from User schema
+          // No fallback to database value available
         }
       }
       
@@ -1499,21 +1570,9 @@ app.get('/api/users', async (req, res) => {
       let excludedAddons = []
       let protectedAddons = []
       
-      try {
-        if (user.excludedAddons) {
-          excludedAddons = JSON.parse(user.excludedAddons)
-        }
-      } catch (e) {
-        console.error('Error parsing excluded addons for user', user.id, ':', e)
-      }
+      excludedAddons = parseAddonIds(user.excludedAddons)
       
-      try {
-        if (user.protectedAddons) {
-          protectedAddons = JSON.parse(user.protectedAddons)
-        }
-      } catch (e) {
-        console.error('Error parsing protected addons for user', user.id, ':', e)
-      }
+      protectedAddons = parseProtectedAddons(user.protectedAddons, req)
       
       return {
         id: user.id,
@@ -1608,50 +1667,18 @@ app.get('/api/users/:id', async (req, res) => {
     // Get all groups the user belongs to
     const userGroups = groups.map(g => ({ id: g.id, name: g.name }))
 
-    // Calculate Stremio addons count and parse addons data (skip in basic mode)
+    // Note: stremioAddons field was removed from User schema
+    // Stremio addons are now fetched live when needed
     let stremioAddonsCount = 0
     let stremioAddons = []
-    if (!basic && user.stremioAddons) {
-      try {
-        const parsedAddons = JSON.parse(user.stremioAddons)
-        if (Array.isArray(parsedAddons)) {
-          stremioAddonsCount = parsedAddons.length
-          stremioAddons = parsedAddons
-        } else if (typeof parsedAddons === 'object') {
-          stremioAddonsCount = Object.keys(parsedAddons).length
-          stremioAddons = Object.values(parsedAddons)
-        }
-      } catch (e) {
-        // Fallback for old data format
-        if (Array.isArray(user.stremioAddons)) {
-          stremioAddonsCount = user.stremioAddons.length
-          stremioAddons = user.stremioAddons
-        } else if (typeof user.stremioAddons === 'object') {
-          stremioAddonsCount = Object.keys(user.stremioAddons).length
-          stremioAddons = Object.values(user.stremioAddons)
-        }
-      }
-    }
 
     // Parse excluded and protected addons from database
     let excludedAddons = []
     let protectedAddons = []
     
-    try {
-      if (user.excludedAddons) {
-        excludedAddons = JSON.parse(user.excludedAddons)
-      }
-    } catch (e) {
-      console.error('Error parsing excluded addons:', e)
-    }
+    excludedAddons = parseAddonIds(user.excludedAddons)
     
-    try {
-      if (user.protectedAddons) {
-        protectedAddons = JSON.parse(user.protectedAddons)
-      }
-    } catch (e) {
-      console.error('Error parsing protected addons:', e)
-    }
+    protectedAddons = parseProtectedAddons(user.protectedAddons, req)
 
     // Transform for frontend
     const transformedUser = {
@@ -1686,6 +1713,11 @@ app.put('/api/users/:id/excluded-addons', async (req, res) => {
     const { excludedAddons } = req.body
     
     console.log(`🔍 PUT /api/users/${id}/excluded-addons called with:`, excludedAddons)
+    console.log(`🔍 Type of excludedAddons:`, typeof excludedAddons, Array.isArray(excludedAddons))
+    
+    // Frontend sends addon IDs directly, no conversion needed
+    const addonIds = Array.isArray(excludedAddons) ? excludedAddons : []
+    console.log(`🔍 Using addon IDs directly:`, addonIds)
     
     const updatedUser = await prisma.user.update({
       where: { 
@@ -1693,13 +1725,13 @@ app.put('/api/users/:id/excluded-addons', async (req, res) => {
         accountId: getAccountId(req)
       },
       data: {
-        excludedAddons: JSON.stringify(excludedAddons || [])
+        excludedAddons: JSON.stringify(addonIds)
       }
     })
     
     res.json({ 
       message: 'Excluded addons updated successfully',
-      excludedAddons: excludedAddons || []
+      excludedAddons: addonIds
     })
   } catch (error) {
     console.error('Error updating excluded addons:', error)
@@ -1714,6 +1746,10 @@ app.put('/api/groups/:groupId/members/:userId/excluded-addons', async (req, res)
     const { excludedAddons } = req.body
     console.log(`🔍 PUT /api/groups/${groupId}/members/${userId}/excluded-addons called with:`, excludedAddons)
 
+    // Frontend sends addon IDs directly, no conversion needed
+    const addonIds = Array.isArray(excludedAddons) ? excludedAddons : []
+    console.log(`🔍 Using addon IDs directly:`, addonIds)
+
     const membership = await prisma.groupMember.findFirst({
       where: { groupId, userId },
       select: { id: true }
@@ -1724,12 +1760,12 @@ app.put('/api/groups/:groupId/members/:userId/excluded-addons', async (req, res)
 
     await prisma.groupMember.update({
       where: { id: membership.id },
-      data: { excludedAddons: JSON.stringify(excludedAddons || []) }
+      data: { excludedAddons: JSON.stringify(addonIds) }
     })
 
     res.json({
       message: 'Membership excluded addons updated successfully',
-      excludedAddons: excludedAddons || []
+      excludedAddons: addonIds
     })
   } catch (error) {
     console.error('Error updating membership excluded addons:', error)
@@ -1745,19 +1781,27 @@ app.put('/api/users/:id/protected-addons', async (req, res) => {
     
     console.log(`🔍 PUT /api/users/${id}/protected-addons called with:`, protectedAddons)
     
+    // Protected addons should store encrypted manifest URLs
+    const manifestUrls = Array.isArray(protectedAddons) ? protectedAddons : []
+    console.log(`🔍 Encrypting manifest URLs:`, manifestUrls)
+    
+    // Encrypt each manifest URL before storing
+    const encryptedUrls = manifestUrls.map(url => encrypt(url, req))
+    console.log(`🔍 Encrypted URLs count:`, encryptedUrls.length)
+    
     const updatedUser = await prisma.user.update({
       where: { 
         id,
         accountId: getAccountId(req)
       },
       data: {
-        protectedAddons: JSON.stringify(protectedAddons || [])
+        protectedAddons: JSON.stringify(encryptedUrls)
       }
     })
     
     res.json({ 
       message: 'Protected addons updated successfully',
-      protectedAddons: protectedAddons || []
+      protectedAddons: manifestUrls // Return unencrypted URLs to frontend
     })
   } catch (error) {
     console.error('Error updating protected addons:', error)
@@ -1886,9 +1930,9 @@ app.get('/api/users/:id/sync-status', async (req, res) => {
         })
       }
       
-      // Fallback to cached data if live fetch fails for other reasons
-      stremioAddons = user.stremioAddons ? 
-        (Array.isArray(user.stremioAddons) ? user.stremioAddons : Object.values(user.stremioAddons)) : []
+      // Note: stremioAddons field was removed from User schema
+      // No fallback to cached data available
+      stremioAddons = []
     }
 
     // Find groups that contain this user
@@ -1946,35 +1990,25 @@ app.get('/api/users/:id/sync-status', async (req, res) => {
           where: { userId: id, groupId: String(groupId) },
           select: { excludedAddons: true }
         })
-        if (membership?.excludedAddons) {
-          if (Array.isArray(membership.excludedAddons)) {
-            excludedAddons = membership.excludedAddons
-          } else if (typeof membership.excludedAddons === 'string') {
-            excludedAddons = JSON.parse(membership.excludedAddons)
-          }
-        }
+        excludedAddons = parseAddonIds(membership?.excludedAddons)
       }
       // Fallback to user-level exclusions if still empty
-      if (excludedAddons.length === 0 && user.excludedAddons) {
-        if (Array.isArray(user.excludedAddons)) {
-          excludedAddons = user.excludedAddons
-        } else if (typeof user.excludedAddons === 'string') {
-          excludedAddons = JSON.parse(user.excludedAddons)
-        }
+      if (excludedAddons.length === 0) {
+        excludedAddons = parseAddonIds(user.excludedAddons)
       }
     } catch (e) {
       console.error('Error resolving excluded addons:', e)
     }
     
 
-    // Filter out excluded addons from expected addons first
-    const excludedSet = new Set(excludedAddons.map(url => url.trim()))
+    // Filter out excluded addons from expected addons by addon ID
+    const excludedSet = new Set(excludedAddons.map(id => String(id).trim()))
     const filteredExpectedAddons = expectedAddons.filter(addon => 
-      !excludedSet.has(addon.manifestUrl)
+      !excludedSet.has(addon.id)
     )
     
-    debug.log(`🔍 Expected addons before filtering:`, expectedAddons.map(a => ({ name: a.name, manifestUrl: a.manifestUrl })))
-    debug.log(`🔍 Excluded addons:`, Array.from(excludedSet))
+    debug.log(`🔍 Expected addons before filtering:`, expectedAddons.map(a => ({ id: a.id, name: a.name })))
+    debug.log(`🔍 Excluded addon IDs:`, Array.from(excludedSet))
     debug.log(`🔍 Filtered out ${expectedAddons.length - filteredExpectedAddons.length} excluded addons, ${filteredExpectedAddons.length} expected addons remain`)
     
     // For sync comparison, we need to check if the user's Stremio addons match what's expected
@@ -2007,7 +2041,17 @@ app.get('/api/users/:id/sync-status', async (req, res) => {
     // Parse user-defined protected addons (ALWAYS protected regardless of mode)
     let userProtectedAddons = []
     try {
-      userProtectedAddons = user.protectedAddons ? JSON.parse(user.protectedAddons) : []
+      const encryptedUrls = user.protectedAddons ? JSON.parse(user.protectedAddons) : []
+      if (Array.isArray(encryptedUrls)) {
+        userProtectedAddons = encryptedUrls.map(encryptedUrl => {
+          try {
+            return decrypt(encryptedUrl, req)
+          } catch (e) {
+            console.warn('Failed to decrypt protected addon URL in sync status:', e.message)
+            return null
+          }
+        }).filter(url => url !== null)
+      }
     } catch (e) {
       console.warn('Failed to parse user protected addons:', e)
       userProtectedAddons = []
@@ -2050,8 +2094,8 @@ app.get('/api/users/:id/sync-status', async (req, res) => {
     const expectedAddonUrlsOrdered = expectedNonProtected.map(addon => addon.manifestUrl)
     const orderMatches = JSON.stringify(userGroupAddons) === JSON.stringify(expectedAddonUrlsOrdered)
     
-    debug.log(`🔍 Expected addons before filtering:`, filteredExpectedAddons.map(a => ({ name: a.name, manifestUrl: a.manifestUrl })))
-    debug.log(`🔍 Excluded addons:`, excludedAddons)
+    debug.log(`🔍 Expected addons after filtering:`, filteredExpectedAddons.map(a => ({ id: a.id, name: a.name })))
+    debug.log(`🔍 Excluded addon IDs:`, excludedAddons)
     debug.log(`🔍 Filtered out ${excludedAddons.length} excluded addons, ${expectedAddonUrlsOrdered.length} expected addons remain`)
     debug.log(`🔍 Stremio addons: ${stremioAddons.length} addons`)
     debug.log(`🔍 Expected addons: ${expectedAddonUrlsOrdered.length} addons`)
@@ -2577,11 +2621,8 @@ app.post('/api/users/:id/stremio-addons/clear', async (req, res) => {
       throw e
     }
 
-    // Update the user's stremioAddons field in the database to empty array
-    await prisma.user.update({
-      where: { id },
-      data: { stremioAddons: JSON.stringify([]) }
-    })
+    // Note: stremioAddons field was removed from User schema
+    // No database update needed for clearing addons
 
     return res.json({ message: 'All addons cleared successfully' })
   } catch (error) {
@@ -2615,7 +2656,17 @@ app.delete('/api/users/:id/stremio-addons/:addonId', async (req, res) => {
     // Parse user-defined protected addons (ALWAYS protected regardless of mode)
     let userProtectedAddons = []
     try {
-      userProtectedAddons = user.protectedAddons ? JSON.parse(user.protectedAddons) : []
+      const encryptedUrls = user.protectedAddons ? JSON.parse(user.protectedAddons) : []
+      if (Array.isArray(encryptedUrls)) {
+        userProtectedAddons = encryptedUrls.map(encryptedUrl => {
+          try {
+            return decrypt(encryptedUrl, req)
+          } catch (e) {
+            console.warn('Failed to decrypt protected addon URL in delete:', e.message)
+            return null
+          }
+        }).filter(url => url !== null)
+      }
     } catch (e) {
       console.warn('Failed to parse user protected addons in delete:', e)
       userProtectedAddons = []
@@ -2677,11 +2728,8 @@ app.delete('/api/users/:id/stremio-addons/:addonId', async (req, res) => {
       throw e
     }
 
-    // Update the user's stremioAddons field in the database with the filtered addons
-    await prisma.user.update({
-      where: { id },
-      data: { stremioAddons: JSON.stringify(filteredAddons || []) }
-    })
+    // Note: stremioAddons field was removed from User schema
+    // No database update needed for removing addons
 
     return res.json({ message: 'Addon removed from Stremio account successfully' })
   } catch (error) {
@@ -5323,7 +5371,7 @@ async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'nor
     })
 
     const excludedSet = new Set(
-      Array.isArray(excludedManifestUrls) ? excludedManifestUrls.map((u) => String(u).trim()) : []
+      Array.isArray(excludedManifestUrls) ? excludedManifestUrls.map((id) => String(id).trim()) : []
     )
 
     const familyGroup = groups[0]
@@ -5364,7 +5412,7 @@ async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'nor
               manifest: decrypted.manifest,
             }
           })
-          .filter((fa) => fa?.manifestUrl && !excludedSet.has(fa.manifestUrl))
+          .filter((fa) => fa?.manifestUrl && !excludedSet.has(fa.id))
       : []
 
     console.log('🔍 Group addons from database:', JSON.stringify(familyAddons, null, 2))
@@ -5465,7 +5513,17 @@ async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'nor
     // Parse user-defined protected addons (ALWAYS protected regardless of mode)
     let userProtectedAddons = []
     try {
-      userProtectedAddons = user.protectedAddons ? JSON.parse(user.protectedAddons) : []
+      const encryptedUrls = user.protectedAddons ? JSON.parse(user.protectedAddons) : []
+      if (Array.isArray(encryptedUrls)) {
+        userProtectedAddons = encryptedUrls.map(encryptedUrl => {
+          try {
+            return decrypt(encryptedUrl, req)
+          } catch (e) {
+            console.warn('Failed to decrypt protected addon URL in sync:', e.message)
+            return null
+          }
+        }).filter(url => url !== null)
+      }
     } catch (e) {
       console.warn('Failed to parse user protected addons in sync:', e)
       userProtectedAddons = []
@@ -5619,35 +5677,11 @@ async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'nor
       return true
     })
 
-    // Remove any current addons that are excluded (not in the desired collection)
-    // This ensures excluded addons are removed from the user's account
-    const desiredUrls = new Set(desiredCollection.map(a => normalize(a?.transportUrl || a?.manifestUrl || a?.url)))
-    const excludedUrls = new Set(excludedManifestUrls.map(url => normalize(url)))
+    // Note: Excluded addons are already filtered out at the database level when building familyAddons
+    // The desiredCollection already contains only non-excluded addons
+    const finalDesiredCollection = desiredCollection
     
-    console.log('🔍 Excluded URLs to remove:', Array.from(excludedUrls))
-    console.log('🔍 Desired URLs to keep:', Array.from(desiredUrls))
-    
-    // Filter out any current addons that are excluded and not protected
-    const filteredCurrentAddons = currentAddons.filter(currentAddon => {
-      const currentUrl = normalize(currentAddon?.transportUrl || currentAddon?.manifestUrl || currentAddon?.url)
-      const isExcluded = excludedUrls.has(currentUrl)
-      const isCurrentAddonProtected = isProtected(currentAddon)
-      
-      if (isExcluded && !isCurrentAddonProtected) {
-        console.log(`➖ Removing excluded addon: ${currentAddon?.manifest?.name || currentAddon?.name}`)
-        return false
-      }
-      
-      return true
-    })
-    
-    // Update the desired collection to only include non-excluded addons
-    const finalDesiredCollection = desiredCollection.filter(addon => {
-      const addonUrl = normalize(addon?.transportUrl || addon?.manifestUrl || addon?.url)
-      return !excludedUrls.has(addonUrl)
-    })
-    
-    console.log('🔍 Final desired collection (excluding excluded addons):', finalDesiredCollection.map(a => ({ 
+    console.log('🔍 Final desired collection (excluded addons already filtered):', finalDesiredCollection.map(a => ({ 
       name: a?.manifest?.name || a?.name, 
       protected: isProtected(a),
       url: normalize(a?.transportUrl || a?.manifestUrl || a?.url)
@@ -5742,13 +5776,9 @@ async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'nor
           const u = normalize(a?.transportUrl || a?.manifestUrl || a?.url)
           return currentByUrl.get(u) || a
         })
-        await prisma.user.update({
-          where: { id: userId },
-          data: {
-            stremioAddons: JSON.stringify(hydrated || [])
-          }
-        })
-        console.log('💾 Updated user stremioAddons in database')
+        // Note: stremioAddons field was removed from User schema
+        // No database update needed for sync
+        console.log('💾 Sync completed (stremioAddons field removed from schema)')
       } catch (updateError) {
         console.warn('⚠️ Failed to update user stremioAddons:', updateError.message)
       }
@@ -5815,18 +5845,9 @@ async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'nor
     const after = await apiClient.request('addonCollectionGet', {})
     const total = Array.isArray(after?.addons) ? after.addons.length : (after?.addons ? Object.keys(after.addons).length : 0)
 
-    // Update user's stremioAddons field with current addon collection
-    try {
-      await prisma.user.update({
-        where: { id: userId },
-        data: {
-          stremioAddons: JSON.stringify(after?.addons || [])
-        }
-      })
-      console.log('💾 Updated user stremioAddons in database')
-    } catch (updateError) {
-      console.warn('⚠️ Failed to update user stremioAddons:', updateError.message)
-    }
+    // Note: stremioAddons field was removed from User schema
+    // No database update needed for connect
+    console.log('💾 Connect completed (stremioAddons field removed from schema)')
 
     console.log('✅ Sync complete, total addons:', total)
     if (syncMode === 'advanced') {
@@ -5904,22 +5925,16 @@ app.post('/api/groups/:id/sync', async (req, res) => {
               where: { userId: user.id, groupId },
               select: { excludedAddons: true }
             })
-            if (membership?.excludedAddons) {
-              if (Array.isArray(membership.excludedAddons)) {
-                memberExcluded = membership.excludedAddons
-              } else if (typeof membership.excludedAddons === 'string') {
-                try { memberExcluded = JSON.parse(membership.excludedAddons) || [] } catch { memberExcluded = [] }
-              }
-            }
+            memberExcluded = parseAddonIds(membership?.excludedAddons)
           } catch (e) {
             console.warn('Failed to parse membership exclusions:', e)
           }
           
-          const userExcluded = user.excludedAddons ? JSON.parse(user.excludedAddons) : []
+          const userExcluded = parseAddonIds(user.excludedAddons)
           finalExcluded = [...memberExcluded, ...userExcluded, ...excludedManifestUrls]
         } else {
           // PostgreSQL: Only user-level exclusions
-          const userExcluded = user.excludedAddons ? JSON.parse(user.excludedAddons) : []
+          const userExcluded = parseAddonIds(user.excludedAddons)
           finalExcluded = [...userExcluded, ...excludedManifestUrls]
         }
 
@@ -6029,25 +6044,8 @@ app.post('/api/users/:id/stremio-addons/reorder', async (req, res) => {
     await apiClient.request('addonCollectionSet', { addons: reorderedAddons })
     console.log(`✅ Successfully reordered ${reorderedAddons.length} addons for user ${userId}`)
     
-    // Update user's stremioAddons in database
-    const updatedStremioAddons = reorderedAddons.reduce((acc, addon) => {
-      acc[addon.transportUrl] = {
-        url: addon.transportUrl,
-        installed: true,
-        installedAt: new Date().toISOString()
-      }
-      return acc
-    }, {})
-    
-    await prisma.user.update({
-      where: { 
-        id: userId,
-        accountId: getAccountId(req)
-      },
-      data: {
-        stremioAddons: JSON.stringify(updatedStremioAddons)
-      }
-    })
+    // Note: stremioAddons field was removed from User schema
+    // No database update needed for reordering
     
     res.json({ 
       message: `Successfully reordered ${reorderedAddons.length} addons`,
@@ -6740,7 +6738,9 @@ app.post('/api/users/:id/import-addons', async (req, res) => {
                 iconUrl: manifestData?.logo || addonData.iconUrl || null,
                 stremioAddonId: manifestData?.id || addonData.stremioAddonId || null,
                 isActive: true,
+                originalManifest: manifestData ? encrypt(JSON.stringify(manifestData), req) : null,
                 manifest: manifestData ? encrypt(JSON.stringify(manifestData), req) : null,
+                resources: manifestData?.resources ? JSON.stringify(manifestData.resources.map(r => typeof r === 'string' ? r : (r?.name || r?.type)).filter(Boolean)) : null,
                 accountId: getAccountId(req)
               }
             })

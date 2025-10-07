@@ -101,67 +101,54 @@ router.get('/categories', authenticateToken, async (req, res, next) => {
 // Add new addon (admin only)
 router.post('/', authenticateToken, requireAdmin, validate(addAddonSchema), async (req, res, next) => {
   try {
-    const { name, manifestUrl, description, iconUrl, version, author, category } = req.body;
+    const { name, manifestUrl, description, iconUrl, version, author, category, resources } = req.body;
 
     // Validate manifest URL by fetching it
     try {
       const response = await axios.get(manifestUrl, { timeout: 10000 });
-      const manifest = response.data;
+      const originalManifest = response.data;
 
-      if (!manifest.id || !manifest.name || !manifest.resources) {
+      if (!originalManifest.id || !originalManifest.name || !originalManifest.resources) {
         return res.status(400).json({ message: 'Invalid Stremio addon manifest' });
+      }
+
+      // Filter manifest based on provided resources
+      const filteredManifest = { ...originalManifest };
+      if (Array.isArray(resources) && resources.length > 0) {
+        filteredManifest.resources = originalManifest.resources.filter((res) => 
+          resources.includes(typeof res === 'string' ? res : (res?.name || res?.type))
+        );
       }
 
       // Use manifest data if not provided
       const addonData = {
-        name: name || manifest.name,
-        // Store encrypted manifestUrl at rest; compute hash for lookup (public mode)
-        manifestUrl: manifestUrl,
-        manifestUrlHash: require('../utils/hash').manifestUrlHash
-          ? require('../utils/hash').manifestUrlHash(manifestUrl)
-          : undefined,
-        description: description || manifest.description || '',
-        iconUrl: iconUrl || manifest.logo || '',
-        version: version || manifest.version || '1.0.0',
-        author: author || manifest.author || '',
+        name: name || originalManifest.name,
+        description: description || originalManifest.description || '',
+        iconUrl: iconUrl || originalManifest.logo || '',
+        version: version || originalManifest.version || '1.0.0',
+        author: author || originalManifest.author || '',
         category: category || 'Other',
+        stremioAddonId: originalManifest.id,
+        resources: resources || originalManifest.resources,
       };
 
-      const dbData = { ...addonData, stremioAddonId: (manifest && manifest.id) ? manifest.id : (addonData.stremioAddonId || null) }
-      try {
-        const { aesGcmEncrypt, getServerKey, getAccountDek } = require('../utils/encryption')
-        // Prefer per-account DEK if available (public mode), else server key (private)
-        const scopeId = req.appAccountId || (req.user && (req.user.accountId || req.user.id))
-        const dek = getAccountDek(scopeId)
-        const key = dek || getServerKey()
-        dbData.manifestUrl = aesGcmEncrypt(key, addonData.manifestUrl)
-        dbData.manifest = manifest ? aesGcmEncrypt(key, JSON.stringify(manifest)) : null
-      } catch {}
+      // Encrypt sensitive data
+      const { aesGcmEncrypt, getServerKey, getAccountDek } = require('../utils/encryption');
+      const scopeId = req.appAccountId || (req.user && (req.user.accountId || req.user.id));
+      const dek = getAccountDek(scopeId);
+      const key = dek || getServerKey();
 
-             // Persist resources and both manifests (original and filtered by selected resources)
-             if (manifest && Array.isArray(manifest.resources)) {
-               dbData.resources = JSON.stringify(manifest.resources)
-             }
-             try {
-               const selectedResources = Array.isArray(req.body?.resources) ? req.body.resources : (Array.isArray(manifest?.resources) ? manifest.resources : [])
-               const allow = new Set((selectedResources || []).map(r => typeof r === 'string' ? r : (r?.name || r?.type)).filter(Boolean))
-               const filtered = (() => {
-                 try {
-                   if (!Array.isArray(selectedResources) || selectedResources.length === 0) return manifest
-                   const clone = JSON.parse(JSON.stringify(manifest))
-                   if (Array.isArray(clone.resources)) {
-                     clone.resources = clone.resources.filter(r => {
-                       const key = typeof r === 'string' ? r : (r?.name || r?.type)
-                       return key ? allow.has(key) : false
-                     })
-                   }
-                   return clone
-                 } catch { return manifest }
-               })()
-               dbData.originalManifest = manifest ? aesGcmEncrypt(key, JSON.stringify(manifest)) : null
-               dbData.manifest = filtered ? aesGcmEncrypt(key, JSON.stringify(filtered)) : null
-             } catch {}
-             const addon = await prisma.addon.create({ data: dbData });
+      const dbData = {
+        ...addonData,
+        manifestUrl: aesGcmEncrypt(key, manifestUrl),
+        manifestUrlHash: require('../utils/hash').manifestUrlHash(manifestUrl),
+        originalManifest: aesGcmEncrypt(key, JSON.stringify(originalManifest)),
+        manifest: aesGcmEncrypt(key, JSON.stringify(filteredManifest)),
+        resources: JSON.stringify(addonData.resources.map(r => typeof r === 'string' ? r : (r?.name || r?.type)).filter(Boolean)),
+        accountId: req.appAccountId || req.user?.accountId || req.user?.id
+      };
+
+      const addon = await prisma.addon.create({ data: dbData });
 
       res.status(201).json({
         message: 'Addon added successfully',
