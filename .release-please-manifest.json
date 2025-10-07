@@ -1,8 +1,12 @@
 {
 <<<<<<< HEAD
+<<<<<<< HEAD
   ".": "0.0.14"
 =======
   ".": "0.0.13"
 >>>>>>> 5f65dcb (fix: reset release-please manifest to v0.0.13 to fix changelog generation)
+=======
+  ".": "0.0.14"
+>>>>>>> e974817 (fix: correct release-please manifest to v0.0.14)
 }
 
