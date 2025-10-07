@@ -13,6 +13,8 @@ if (!process.env.PRISMA_PROVIDER) {
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 const { StremioAPIStore, StremioAPIClient } = require('stremio-api-client');
 const debug = require('./utils/debug');
 require('dotenv').config();
@@ -198,6 +200,108 @@ function parseCookies(req) {
 function isProdEnv() {
   return String(process.env.NODE_ENV) === 'production';
 }
+
+// ------------------------------------------------------------
+// Automated backup scheduler (file-based frequency, global scope)
+// ------------------------------------------------------------
+// Persist backups under data/backup so Docker mount ./data captures them
+const BACKUP_DIR = path.join(process.cwd(), 'data', 'backup')
+const BACKUP_CFG = path.join(BACKUP_DIR, 'schedule.json')
+let backupTimer = null
+
+function ensureBackupDir() {
+  try { if (!fs.existsSync(BACKUP_DIR)) fs.mkdirSync(BACKUP_DIR, { recursive: true }) } catch {}
+}
+
+function readBackupFrequencyDays() {
+  try {
+    const raw = fs.readFileSync(BACKUP_CFG, 'utf8')
+    const cfg = JSON.parse(raw)
+    const days = Number(cfg?.days || 0)
+    return Number.isFinite(days) ? days : 0
+  } catch {
+    return 0
+  }
+}
+
+function writeBackupFrequencyDays(days) {
+  ensureBackupDir()
+  try { fs.writeFileSync(BACKUP_CFG, JSON.stringify({ days }), 'utf8') } catch {}
+}
+
+async function performBackupOnce() {
+  ensureBackupDir()
+  const ts = new Date()
+  const stamp = ts.toISOString().replace(/[:]/g, '-').split('.')[0]
+  const filename = path.join(BACKUP_DIR, `config-backup-${stamp}.json`)
+
+  try {
+    // call export endpoints on this same server
+    const baseUrl = `http://localhost:${process.env.PORT || 4000}`
+    let data = null
+    try {
+      const rsp = await fetch(`${baseUrl}/api/public-auth/export`)
+      if (rsp.ok) data = await rsp.json()
+    } catch {}
+    if (!data) {
+      try {
+        const rsp2 = await fetch(`${baseUrl}/api/exports/addons`)
+        if (rsp2.ok) data = await rsp2.json()
+      } catch {}
+    }
+    if (!data) throw new Error('No export data available')
+    fs.writeFileSync(filename, JSON.stringify(data, null, 2), 'utf8')
+    if (!QUIET) console.log(`📦 Backup written: ${filename}`)
+  } catch (e) {
+    if (!QUIET) console.warn('Backup failed:', e?.message || e)
+  }
+}
+
+function clearBackupSchedule() {
+  if (backupTimer) { clearInterval(backupTimer); backupTimer = null }
+}
+
+function scheduleBackups(days) {
+  clearBackupSchedule()
+  if (!days || days <= 0) return
+  const ms = days * 24 * 60 * 60 * 1000
+  performBackupOnce()
+  backupTimer = setInterval(performBackupOnce, ms)
+}
+
+// initialize on boot
+scheduleBackups(readBackupFrequencyDays())
+
+// Backup settings endpoints
+app.get('/api/settings/backup-frequency', async (req, res) => {
+  try {
+    return res.json({ days: readBackupFrequencyDays() })
+  } catch {
+    return res.status(500).json({ message: 'Failed to read backup frequency' })
+  }
+})
+
+app.put('/api/settings/backup-frequency', async (req, res) => {
+  try {
+    const days = Number(req.body?.days || 0)
+    if (!Number.isFinite(days) || days < 0) return res.status(400).json({ message: 'Invalid days' })
+    writeBackupFrequencyDays(days)
+    scheduleBackups(days)
+    return res.json({ message: 'Backup frequency updated', days })
+  } catch {
+    return res.status(500).json({ message: 'Failed to update backup frequency' })
+  }
+})
+
+// manual trigger
+app.post('/api/settings/backup-now', async (req, res) => {
+  try {
+    await performBackupOnce()
+    return res.json({ message: 'Backup started' })
+  } catch {
+    return res.status(500).json({ message: 'Failed to start backup' })
+  }
+})
 
 function cookieName(base) {
   return isProdEnv() ? `__Host-${base}` : base;

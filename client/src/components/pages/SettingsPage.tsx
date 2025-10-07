@@ -20,6 +20,7 @@ export default function SettingsPage() {
   const [configImporting, setConfigImporting] = React.useState<boolean>(false)
   const [showConfigImport, setShowConfigImport] = React.useState<boolean>(false)
   const [configText, setConfigText] = React.useState<string>('')
+  const [backupDays, setBackupDays] = React.useState<number>(0)
   
   const AUTH_ENABLED = process.env.NEXT_PUBLIC_AUTH_ENABLED === 'true'
 
@@ -32,6 +33,13 @@ export default function SettingsPage() {
     
     const savedDeleteMode = localStorage.getItem('sfm_delete_mode')
     setDeleteMode(savedDeleteMode === 'unsafe' ? 'unsafe' : 'safe')
+  }, [])
+
+  // Load backup frequency
+  React.useEffect(() => {
+    api.get('/settings/backup-frequency')
+      .then(r => setBackupDays(Number(r.data?.days || 0)))
+      .catch(() => {})
   }, [])
 
   const onToggle = (next: boolean) => {
@@ -657,6 +665,48 @@ export default function SettingsPage() {
             </div>
           </div>
         )}
+      </div>
+
+      {/* Automatic Backups */}
+      <div className={`p-4 rounded-lg border mt-6 ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
+        <h2 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>Automatic Backups</h2>
+        <p className={`text-sm mt-1 ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
+          Save configuration snapshots to the server-side "backup" folder on a schedule.
+        </p>
+        <div className="mt-4 flex items-center gap-3">
+          <label className={`${isDark ? 'text-gray-200' : 'text-gray-800'}`}>Frequency:</label>
+          <select
+            value={backupDays}
+            onChange={(e) => {
+              const days = Number(e.target.value)
+              setBackupDays(days)
+              api.put('/settings/backup-frequency', { days })
+                .then(() => toast.success('Backup schedule updated'))
+                .catch((err) => toast.error(err?.response?.data?.message || 'Failed to update backup schedule'))
+            }}
+            className={`${isDark ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'} border rounded px-3 py-2`}
+          >
+            <option value={0}>Disabled</option>
+            <option value={1}>Every day</option>
+            <option value={7}>Every week</option>
+            <option value={15}>Every 15 days</option>
+            <option value={30}>Every month</option>
+          </select>
+          <button
+            onClick={async () => {
+              try {
+                await api.post('/settings/backup-now')
+                toast.success('Backup started')
+              } catch (e: any) {
+                toast.error(e?.response?.data?.message || 'Failed to start backup')
+              }
+            }}
+            className={`${isDark ? 'bg-gray-700 hover:bg-gray-600 text-white' : 'bg-gray-100 hover:bg-gray-200 text-gray-900'} px-3 py-2 rounded`}
+          >Run now</button>
+        </div>
+        <div className={`text-xs mt-2 ${isDark ? 'text-gray-500' : 'text-gray-500'}`}>
+          Files are saved under server folder: data/backup/
+        </div>
       </div>
 
       {/* Account Management */}
