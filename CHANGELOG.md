@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.0.15](https://github.com/iamneur0/syncio/compare/v0.0.14...v0.0.15) (2025-10-07)
+
+
+### Bug Fixes
+
+* clean up release-please manifest JSON formatting ([8c012d9](https://github.com/iamneur0/syncio/commit/8c012d96b40a46931cca23f6994e55e6ae222507))
+* correct release-please manifest to v0.0.14 ([c37e3d2](https://github.com/iamneur0/syncio/commit/c37e3d2f14054557654f641cdfac5f62c0114b88))
+* correct release-please manifest to v0.0.14 ([aaaebe2](https://github.com/iamneur0/syncio/commit/aaaebe2a88f7216d6763f65d82a72825e569d5e9))
+* simplify release-please manifest JSON format ([5b7a5fd](https://github.com/iamneur0/syncio/commit/5b7a5fd2a69c6d9b688bd46797fcd80a5ef5a489))
+
 ## [0.0.14](https://github.com/iamneur0/syncio/compare/v0.0.12...v0.0.14) (2025-10-07)
 
 
