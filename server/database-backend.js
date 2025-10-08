@@ -66,6 +66,26 @@ function parseAddonIds(field) {
   return []
 }
 
+// Helper: filter a manifest by selected resource labels (name/type)
+function filterManifestByResources(manifestObj, selectedResourceNames) {
+  if (!manifestObj || typeof manifestObj !== 'object') return null
+  const selectedNames = new Set(
+    (Array.isArray(selectedResourceNames) ? selectedResourceNames : [])
+      .map((r) => (typeof r === 'string' ? r : (r && (r.name || r.type))))
+      .filter(Boolean)
+  )
+  const clone = JSON.parse(JSON.stringify(manifestObj))
+  if (Array.isArray(clone.resources)) {
+    clone.resources = clone.resources.filter((r) => {
+      const label = typeof r === 'string' ? r : (r && (r.name || r.type))
+      return label && selectedNames.has(label)
+    })
+  }
+  if (!selectedNames.has('catalog')) clone.catalogs = []
+  if (!selectedNames.has('addon_catalog')) clone.addonCatalogs = []
+  return clone
+}
+
 function parseProtectedAddons(field, req) {
   if (!field) return []
   if (Array.isArray(field)) return field
@@ -4167,9 +4187,9 @@ app.post('/api/addons/:id/reload', async (req, res) => {
   try {
     const { id } = req.params;
     
-    // Find the addon
-    const addon = await prisma.addon.findUnique({
-      where: { id }
+    // Find the addon (scope to account to avoid cross-account mismatches)
+    const addon = await prisma.addon.findFirst({
+      where: { id, accountId: getAccountId(req) }
     });
 
     if (!addon) {
@@ -4212,19 +4232,18 @@ app.post('/api/addons/:id/reload', async (req, res) => {
     // Filter manifest according to selected resources stored on addon
     let filtered = manifestData
     try {
-      const selected = (() => { try { return addon.resources ? JSON.parse(addon.resources) : [] } catch { return [] } })()
-      if (Array.isArray(selected) && selected.length > 0 && manifestData) {
-        const allow = new Set(selected.map(r => typeof r === 'string' ? r : (r?.name || r?.type)).filter(Boolean))
-        const clone = JSON.parse(JSON.stringify(manifestData))
-        if (Array.isArray(clone.resources)) {
-          clone.resources = clone.resources.filter(r => {
-            const key = typeof r === 'string' ? r : (r?.name || r?.type)
-            return key ? allow.has(key) : false
-          })
-        }
-        filtered = clone
+      const rawSelected = (() => { try { return addon.resources ? JSON.parse(addon.resources) : [] } catch { return [] } })()
+      const selected = Array.isArray(rawSelected)
+        ? rawSelected.map((r) => (typeof r === 'string' ? r : (r && (r.name || r.type)))).filter(Boolean)
+        : []
+      console.log(`🔍 Reload filtering with selected resources:`, selected)
+      if (Array.isArray(selected) && manifestData) {
+        filtered = filterManifestByResources(manifestData, selected)
+        console.log(`🔍 Filtered manifest catalogs:`, filtered?.catalogs?.length || 0)
       }
-    } catch {}
+    } catch (e) {
+      console.error('Failed to filter manifest on reload:', e)
+    }
 
     // Update the addon with fresh original manifest and derived manifest; preserve display name
     const updatedAddon = await prisma.addon.update({
@@ -4238,11 +4257,11 @@ app.post('/api/addons/:id/reload', async (req, res) => {
         version: manifestData?.version || addon.version,
         // Update logo URL from manifest
         iconUrl: manifestData?.logo || addon.iconUrl || null,
-        // Store encrypted manifests (original and filtered)
-        originalManifest: manifestData ? encrypt(JSON.stringify(manifestData), req) : addon.originalManifest,
-        manifest: filtered ? encrypt(JSON.stringify(filtered), req) : addon.manifest,
+        // Store encrypted manifests (original untouched, filtered current)
+        originalManifest: encrypt(JSON.stringify(manifestData), req),
+        manifest: encrypt(JSON.stringify(filtered), req),
         // Always recompute manifestHash on reload based on filtered manifest
-        manifestHash: filtered ? manifestHash(filtered) : null
+        manifestHash: manifestHash(filtered)
       }
     });
 
@@ -4596,18 +4615,7 @@ app.put('/api/addons/:id', async (req, res) => {
       // If URL changed and we fetched a fresh manifest, derive filtered manifest
       try {
         const selected = (() => { try { return existingAddon.resources ? JSON.parse(existingAddon.resources) : [] } catch { return [] } })()
-        let filtered = manifestData
-        if (Array.isArray(selected) && selected.length > 0 && manifestData) {
-          const allow = new Set(selected.map(r => typeof r === 'string' ? r : (r?.name || r?.type)).filter(Boolean))
-          const clone = JSON.parse(JSON.stringify(manifestData))
-          if (Array.isArray(clone.resources)) {
-            clone.resources = clone.resources.filter(r => {
-              const key = typeof r === 'string' ? r : (r?.name || r?.type)
-              return key ? allow.has(key) : false
-            })
-          }
-          filtered = clone
-        }
+        const filtered = filterManifestByResources(manifestData, selected) || manifestData
         updateData.originalManifest = encrypt(JSON.stringify(manifestData), req)
         updateData.manifest = encrypt(JSON.stringify(filtered), req)
         updateData.manifestHash = manifestHash(filtered)
@@ -4644,39 +4652,12 @@ app.put('/api/addons/:id', async (req, res) => {
         }
         if (original && Array.isArray(original.resources)) {
           const selected = Array.isArray(resources) ? resources : []
-          console.log(`🔍 Updating addon resources:`, { 
-            addonId: id, 
-            originalResourcesCount: original.resources.length,
-            selectedResources: selected,
-            selectedCount: selected.length 
-          })
-          // Build set of selected names handling both string and object forms
-          const selectedNames = new Set(
-            selected
-              .map((s) => (typeof s === 'string' ? s : (s && (s.name || s.type))))
-              .filter(Boolean)
-          )
-          const filtered = { ...original }
-          // Always filter resources based on selection (even if empty)
-          filtered.resources = original.resources.filter((r) => {
-            const label = typeof r === 'string' ? r : (r && (r.name || r.type))
-            return label && selectedNames.has(label)
-          })
-          // SDK guidance: keep keys but empty arrays when deselected
-          if (!selectedNames.has('catalog')) filtered.catalogs = []
-          if (!selectedNames.has('addon_catalog')) filtered.addonCatalogs = []
-
-          console.log(`🔍 Filtered manifest resources:`, {
-            filteredResourcesCount: filtered.resources.length,
-            filteredResources: filtered.resources,
-            catalogsEmpty: !selectedNames.has('catalog'),
-            addonCatalogsEmpty: !selectedNames.has('addon_catalog')
-          })
-
+          const filtered = filterManifestByResources(original, selected) || { ...original, catalogs: [], addonCatalogs: [] }
           updateData.manifest = encrypt(JSON.stringify(filtered), req)
           updateData.manifestHash = manifestHash(filtered)
           updateData.originalManifest = existingAddon.originalManifest // keep as is
-          updateData.resources = JSON.stringify(Array.from(selectedNames))
+          const normalized = selected.map(r => (typeof r === 'string' ? r : (r && (r.name || r.type)))).filter(Boolean)
+          updateData.resources = JSON.stringify(normalized)
         } else if (Array.isArray(resources)) {
           const names = resources.map(r => (typeof r === 'string' ? r : (r && (r.name || r.type)))).filter(Boolean)
           updateData.resources = names.length ? JSON.stringify(names) : JSON.stringify([])
