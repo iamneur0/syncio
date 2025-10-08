@@ -3970,7 +3970,7 @@ function canonicalizeManifestUrl(raw) {
 
 app.post('/api/addons', async (req, res) => {
   try {
-          const { url, name, description, groupIds, manifestData: providedManifestData } = req.body;
+    const { url, name, description, groupIds, manifestData: providedManifestData } = req.body;
     
     if (!url) {
       return res.status(400).json({ message: 'Addon URL is required' });
@@ -3990,12 +3990,10 @@ app.post('/api/addons', async (req, res) => {
       return res.status(400).json({ message: 'Invalid URL scheme. Please use http:// or https:// for the manifest URL.' });
     }
 
-    // Exact URL duplicate detection (no canonical fuzzy matching)
-    // Use deterministic hash to check duplicates regardless of encryption
-    const { manifestUrlHash } = require('./utils/hash')
-    const existingByUrl = await prisma.addon.findFirst({ 
+    // Check for duplicate addon name instead of URL
+    const existingByName = await prisma.addon.findFirst({ 
       where: { 
-        manifestUrlHash: manifestUrlHmac(req, sanitizedUrl),
+        name: name.trim(),
         accountId: getAccountId(req)
       } 
     })
@@ -4013,28 +4011,27 @@ app.post('/api/addons', async (req, res) => {
       console.log(`✅ Fetched manifest:`, manifestData?.name, manifestData?.version)
     } catch (e) {
       return res.status(400).json({ message: 'Failed to fetch addon manifest. The add-on URL may be incorrect.' })
-      }
-    } else {
+    }
     }
 
-    if (existingByUrl) {
-      if (existingByUrl.isActive) {
-        // Exact same URL already exists and is active: do not modify it; just report conflict
-        return res.status(409).json({ message: 'Addon already exists.' })
-      }
-      // Reactivate and refresh meta for inactive record
-      const reactivated = await prisma.addon.update({
+    if (existingByName) {
+      if (existingByName.isActive) {
+        // Addon with this name already exists and is active
+        return res.status(409).json({ message: 'Addon with this name already exists.' })
+      } else {
+        // Reactivate and refresh meta for inactive record
+        const reactivated = await prisma.addon.update({
         where: { 
-          id: existingByUrl.id,
+          id: existingByName.id,
           accountId: getAccountId(req)
         },
         data: {
           isActive: true,
           // Use provided name or manifest name when reactivating
-          name: (name && name.trim()) ? name.trim() : (manifestData?.name || existingByUrl.name),
-          description: description || manifestData?.description || existingByUrl.description || '',
-          version: manifestData?.version || existingByUrl.version || null,
-          iconUrl: manifestData?.logo || existingByUrl.iconUrl || null // Store logo URL from manifest
+          name: (name && name.trim()) ? name.trim() : (manifestData?.name || existingByName.name),
+          description: description || manifestData?.description || existingByName.description || '',
+          version: manifestData?.version || existingByName.version || null,
+          iconUrl: manifestData?.logo || existingByName.iconUrl || null // Store logo URL from manifest
         },
         select: { id: true, name: true, description: true, manifestUrl: true, version: true, isActive: true }
       })
@@ -4094,6 +4091,7 @@ app.post('/api/addons', async (req, res) => {
         users: 0,
         groups: assignedGroups.length
       })
+    }
     }
 
     // Auto-unique the name per account if necessary so different URLs can coexist
@@ -5865,9 +5863,11 @@ async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'nor
       for (const u of desiredUrlSet) { if (!currentUrlSet.has(u)) { allMatch = false; break } }
     }
     // If URLs match, compare manifest hashes pairwise by URL and sequence
+    let curSeq = []
+    let desSeq = []
     if (allMatch) {
-      const curSeq = currentAddons.map(toUrl)
-      const desSeq = finalDesiredCollection.map(toUrl)
+      curSeq = currentAddons.map(toUrl)
+      desSeq = finalDesiredCollection.map(toUrl)
       if (curSeq.length !== desSeq.length) {
         allMatch = false
       } else {

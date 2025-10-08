@@ -25,7 +25,8 @@ COPY . .
 # Generate Prisma client with correct engine
 ENV PRISMA_CLI_BINARY_TARGETS="linux-musl-openssl-3.0.x,linux-musl-arm64-openssl-3.0.x"
 RUN rm -rf node_modules/.prisma node_modules/@prisma/client/runtime/libquery_engine-*.so.node 2>/dev/null || true
-RUN npx prisma generate
+# Use the main schema file for generation
+RUN npx prisma generate --schema=prisma/schema.prisma
 
 # Set build-time variables
 # Use relative API path so the browser hits same origin; auth UI derived from INSTANCE
