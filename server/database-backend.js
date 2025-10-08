@@ -4371,38 +4371,26 @@ app.post('/api/addons/import', upload.single('file'), async (req, res) => {
           continue;
         }
 
-        // Get manifest data - use provided manifest or fetch from URL
-        let manifest = addonData.manifest;
-        if (!manifest) {
-          try {
-            console.log(`🔍 Fetching manifest for ${transportUrl}`);
-            const manifestResponse = await fetch(transportUrl);
-            if (manifestResponse.ok) {
-              manifest = await manifestResponse.json();
-              console.log(`✅ Fetched manifest: ${manifest?.name} ${manifest?.version}`);
-            } else {
-              console.warn(`⚠️ Failed to fetch manifest for ${transportUrl}`);
-              // Create a fallback manifest
-              manifest = {
-                id: addonData.name || 'unknown.addon',
-                name: addonData.name || 'Unknown',
-                version: addonData.version || null,
-                description: addonData.description || null
-              };
-            }
-          } catch (error) {
-            console.warn(`⚠️ Error fetching manifest for ${transportUrl}:`, error.message);
-            // Create a fallback manifest
-            manifest = {
-              id: addonData.name || 'unknown.addon',
-              name: addonData.name || 'Unknown',
-              version: addonData.version || null,
-              description: addonData.description || null
-            };
+        // Align with user-import semantics:
+        // - Use provided manifest as current
+        // - Fetch originalManifest from URL (full capabilities); fallback to provided
+        const currentManifest = addonData.manifest || null
+        let originalManifestObj = currentManifest
+        try {
+          const resp = await fetch(transportUrl)
+          if (resp.ok) {
+            originalManifestObj = await resp.json()
           }
+        } catch {}
+
+        const manifestBase = currentManifest || originalManifestObj || {
+          id: addonData.name || 'unknown.addon',
+          name: addonData.name || 'Unknown',
+          version: addonData.version || null,
+          description: addonData.description || null
         }
 
-        const transportName = addonData.name || addonData.transportName || manifest.name || 'Unknown';
+        const transportName = addonData.name || addonData.transportName || manifestBase.name || 'Unknown';
 
         // Check if addon already exists using per-account HMAC of manifestUrl
         const existingAddon = await prisma.addon.findFirst({
@@ -4421,7 +4409,9 @@ app.post('/api/addons/import', upload.single('file'), async (req, res) => {
         // Create new addon (store both original and processed manifests; compute hashes and resources)
         const resources = (() => {
           try {
-            const src = Array.isArray(manifest?.resources) ? manifest.resources : []
+            const src = Array.isArray(currentManifest?.resources)
+              ? currentManifest.resources
+              : (Array.isArray(addonData?.resources) ? addonData.resources : [])
             const names = src.map(r => (typeof r === 'string' ? r : (r && (r.name || r.type)))).filter(Boolean)
             return names.length ? JSON.stringify(names) : null
           } catch { return null }
@@ -4430,16 +4420,16 @@ app.post('/api/addons/import', upload.single('file'), async (req, res) => {
           data: {
             accountId: getAccountId(req),
             name: transportName,
-            description: manifest.description || '',
-            version: manifest.version || null,
-            iconUrl: manifest.logo || null,
-            stremioAddonId: manifest.id || null,
+            description: manifestBase.description || '',
+            version: manifestBase.version || null,
+            iconUrl: manifestBase.logo || null,
+            stremioAddonId: manifestBase.id || null,
             isActive: true,
             manifestUrl: encrypt(transportUrl, req),
             manifestUrlHash: manifestUrlHmac(req, transportUrl),
-            originalManifest: encrypt(JSON.stringify(manifest), req),
-            manifest: encrypt(JSON.stringify(manifest), req),
-            manifestHash: manifestHash(manifest),
+            originalManifest: originalManifestObj ? encrypt(JSON.stringify(originalManifestObj), req) : null,
+            manifest: currentManifest ? encrypt(JSON.stringify(currentManifest), req) : (manifestBase ? encrypt(JSON.stringify(manifestBase), req) : null),
+            manifestHash: currentManifest ? manifestHash(currentManifest) : (manifestBase ? manifestHash(manifestBase) : null),
             resources,
           }
         });
