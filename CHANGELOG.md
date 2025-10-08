@@ -1,5 +1,41 @@
 # Changelog
 
+## [0.0.16](https://github.com/iamneur0/syncio/compare/v0.0.15...v0.0.16) (2025-10-08)
+
+
+### Features
+
+* added addon resource selection ([1137ce6](https://github.com/iamneur0/syncio/commit/1137ce65acd5936f32232917f56b173ad47d83bd))
+* addon manifest fetching reworked to match resource filtering ([f9ef7b0](https://github.com/iamneur0/syncio/commit/f9ef7b09eddd194b996d6e82ef9002e065257882))
+* display addon ressources ([78e75a0](https://github.com/iamneur0/syncio/commit/78e75a09b8a40f096a8fced0f4f54c2fedc22fab))
+* improved addon import ([edaa948](https://github.com/iamneur0/syncio/commit/edaa9484bccfafcac7997d1ef171b6662689e441))
+* improved config import ([500cfff](https://github.com/iamneur0/syncio/commit/500cfffe76f4d59c99d9077721c9714b1a088587))
+* improved security for protectedAddons and excludedAddons and sync logic ([b199317](https://github.com/iamneur0/syncio/commit/b199317da4c2f248f9813e810ef03d8e4924a9cb))
+* reloading now resource filter based ([efb1b93](https://github.com/iamneur0/syncio/commit/efb1b9369c1981b9f98626f108f512fe122b61f5))
+* removed unused resources from exports ([864a8ee](https://github.com/iamneur0/syncio/commit/864a8eeac3ded430c2b4ebf1e92facf270babfb9))
+* scheduled backups ([4aa7c5b](https://github.com/iamneur0/syncio/commit/4aa7c5bf429aecfdf3db6bbc29eb0b474f3fba93))
+
+
+### Bug Fixes
+
+* account addon conflict impacting sync ([414cccf](https://github.com/iamneur0/syncio/commit/414cccfb25f9dff051783f11fd723b5f2cdca8cf))
+* added missing fields on user addon import ([508dd2e](https://github.com/iamneur0/syncio/commit/508dd2ea51c412243119d86876f0c5c912ab9c36))
+* Addon modal UX fixed, edit now needs confirmation ([71e4666](https://github.com/iamneur0/syncio/commit/71e46668a76a4e2576781cea409e1b8e83555548))
+* addonsPage fixes ([f39ee93](https://github.com/iamneur0/syncio/commit/f39ee93edacb770903a2116ebadacef87ce74568))
+* aligned UI components across themes ([d46e2a7](https://github.com/iamneur0/syncio/commit/d46e2a79d923d96fb5e53f0f6b046584c3aba79c))
+* group addon visual duplication ([a082f85](https://github.com/iamneur0/syncio/commit/a082f850b2f999926f2627ae46e409e8d2eade22))
+* now syncing manifest from db instead of live fetching ([50cb55d](https://github.com/iamneur0/syncio/commit/50cb55db9ce9288f6fe7c071fb802435a2da7524))
+* re-designed addon modal ([a2fda21](https://github.com/iamneur0/syncio/commit/a2fda21b74592de802d66c9beb43638fdda4d05f))
+* removed excluded tag, redundant with icon ([15dd09d](https://github.com/iamneur0/syncio/commit/15dd09db1c50a19e337c3b4c2628257ccec0d6f6))
+* replaced private compose ([5ec1944](https://github.com/iamneur0/syncio/commit/5ec19449b2c190ae75feb8c577e41e0119d297b4))
+* udpated db models for ressources ([0142845](https://github.com/iamneur0/syncio/commit/014284509e41d228aecb501d957de1df61dd0d2c))
+* updated compose files ([fd45b97](https://github.com/iamneur0/syncio/commit/fd45b9702da9485e96e0d5a571ad3f8cbd9db593))
+
+
+### Miscellaneous Chores
+
+* release 0.0.16 ([805d55f](https://github.com/iamneur0/syncio/commit/805d55f60dfa0ed1c6afb69c46f9f94fa58d9240))
+
 ## [0.0.15](https://github.com/iamneur0/syncio/compare/v0.0.14...v0.0.15) (2025-10-07)
 
 
