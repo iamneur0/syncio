@@ -106,16 +106,27 @@ async function convertManifestUrlsToAddonIds(manifestUrls, req) {
   
   for (const manifestUrl of manifestUrls) {
     try {
-      // Try to find addon by manifestUrlHash first (for encrypted URLs)
-      const manifestUrlHash = require('./utils/hash').manifestUrlHash(manifestUrl)
+      // Try HMAC-based hash first (per-account); fallback to legacy hash
+      const hmacHash = manifestUrlHmac(req, manifestUrl)
       let addon = await prisma.addon.findFirst({
         where: {
-          manifestUrlHash,
+          manifestUrlHash: hmacHash,
           accountId: AUTH_ENABLED ? accountId : undefined
         }
       })
       
       // If not found by hash, try to find by decrypted manifestUrl
+      if (!addon) {
+        // Legacy global peppered hash fallback
+        const legacyHash = manifestUrlHash(manifestUrl)
+        addon = await prisma.addon.findFirst({
+          where: {
+            manifestUrlHash: legacyHash,
+            accountId: AUTH_ENABLED ? accountId : undefined
+          }
+        })
+      }
+
       if (!addon) {
         const addons = await prisma.addon.findMany({
           where: scopedWhere(req, { isActive: true })
@@ -714,7 +725,7 @@ app.get('/api/public-auth/export', async (req, res) => {
       delete decryptedUser.stremioAddons
       return decryptedUser
     })
-
+    
     // Build addons with manifest hydrated and useless fields stripped
     const exportedAddons = await Promise.all(addons.map(async (addon) => {
       let manifest = null
@@ -790,7 +801,7 @@ app.get('/api/exports/addons', async (req, res) => {
     const addons = await prisma.addon.findMany({ where: whereScope })
 
     // Build Stremio-like addon objects with embedded manifests
-        const exported = await Promise.all(
+    const exported = await Promise.all(
       addons.map(async (addon) => {
         const transportUrl = getDecryptedManifestUrl(addon, req)
         // Prefer stored manifest if present
@@ -799,11 +810,11 @@ app.get('/api/exports/addons', async (req, res) => {
           try { manifest = JSON.parse(decrypt(addon.manifest, req)) } catch {}
         }
         if (!manifest && transportUrl) {
-          try {
-            const rsp = await fetch(transportUrl)
+        try {
+          const rsp = await fetch(transportUrl)
             if (rsp.ok) { manifest = await rsp.json() }
-          } catch (err) {
-            console.warn(`Failed to fetch manifest for ${transportUrl}:`, err?.message)
+        } catch (err) {
+          console.warn(`Failed to fetch manifest for ${transportUrl}:`, err?.message)
           }
         }
 
@@ -914,8 +925,7 @@ app.post('/api/public-auth/import-config', upload.single('file'), async (req, re
         let manifest = entry && entry.manifest ? entry.manifest : null
         if (!transportUrl) { failed++; continue }
 
-        const { manifestUrlHash } = require('./utils/hash')
-        const existing = await prisma.addon.findFirst({ where: { accountId: getAccountId(req), manifestUrlHash: manifestUrlHash(transportUrl) } })
+        const existing = await prisma.addon.findFirst({ where: { accountId: getAccountId(req), manifestUrlHash: manifestUrlHmac(req, transportUrl) } })
         if (existing) { redundant++; continue }
 
         // Attempt to fetch manifest if not provided to enrich fields
@@ -1181,9 +1191,9 @@ app.post('/api/public-auth/import-config', upload.single('file'), async (req, re
               }
             } catch {}
           }
+          }
         }
-      }
-    } catch (e) {
+      } catch (e) {
       console.warn('Addon→Group link backfill pass failed:', e?.message)
     }
 
@@ -1219,7 +1229,7 @@ app.post('/api/public-auth/import-config', upload.single('file'), async (req, re
                 
                 // Assign user to group (ensures user is only in one group)
                 await assignUserToGroup(user.id, group.id, req)
-                membershipsCreated++
+                  membershipsCreated++
               } catch {}
             }
           }
@@ -1350,6 +1360,20 @@ function decrypt(text, req) {
 // Normalization and hashing for manifestUrl (public mode hashed lookup support)
 // ---------------------------------------------------------------------------------
 const PEPPER = process.env.HASH_PEPPER || process.env.ENCRYPTION_KEY || 'syncio-pepper'
+function getAccountHmacKey(req) {
+  // Derive per-account HMAC key from DEK if available, fallback to PEPPER
+  try {
+    const dek = selectKeyForRequest(req) // Uint8Array/Buffer used for AES-GCM
+    const salt = Buffer.from('syncio-hmac-salt')
+    // Simple HKDF-like derivation using SHA-256 (not full HKDF API to avoid deps)
+    const ikm = Buffer.isBuffer(dek) ? dek : Buffer.from(String(dek || ''))
+    const prk = crypto.createHmac('sha256', salt).update(ikm).digest()
+    const okm = crypto.createHmac('sha256', prk).update('syncio-manifest-hmac').digest()
+    return okm
+  } catch {
+    return Buffer.from(String(PEPPER))
+  }
+}
 function normalizeUrl(u) {
   if (!u) return ''
   try {
@@ -1360,8 +1384,124 @@ function normalizeUrl(u) {
 function sha256Hex(input) {
   return crypto.createHash('sha256').update(input).digest('hex')
 }
+function hmacHex(keyBuf, input) {
+  return crypto.createHmac('sha256', keyBuf).update(input).digest('hex')
+}
 function manifestUrlHash(url) {
+  // Backward-compatible global peppered hash (kept for lookups)
   return sha256Hex(normalizeUrl(url) + '|' + PEPPER)
+}
+function manifestUrlHmac(req, url) {
+  // Per-account HMAC to avoid cross-account correlation and guessing
+  return hmacHex(getAccountHmacKey(req), normalizeUrl(url))
+}
+
+// ---------------- Manifest normalization & hashing (for deep equality checks) ----------------
+function normalizeManifestObject(manifest) {
+  if (!manifest || typeof manifest !== 'object') return '{}'
+  try {
+    // Pick only deterministic, sync-relevant fields
+    const pick = {}
+    if (manifest.id != null) pick.id = String(manifest.id)
+    if (manifest.name != null) pick.name = String(manifest.name)
+    if (manifest.version != null) pick.version = String(manifest.version)
+
+    if (Array.isArray(manifest.types)) {
+      pick.types = [...manifest.types].map(String).sort()
+    }
+
+    // Normalize resources to an array of labels (name/type), sorted
+    if (Array.isArray(manifest.resources)) {
+      const labels = manifest.resources
+        .map((r) => (typeof r === 'string' ? r : (r && (r.name || r.type))))
+        .filter(Boolean)
+        .map(String)
+        .sort()
+      pick.resources = labels
+    }
+
+    // Normalize catalogs to array of {id/name/type} strings for stability
+    if (Array.isArray(manifest.catalogs)) {
+      const catalogKeys = manifest.catalogs
+        .map((c) => {
+          if (!c || typeof c !== 'object') return null
+          const nm = c.name || c.id || ''
+          const tp = c.type || (Array.isArray(c.types) ? c.types.join(',') : '')
+          return `${String(nm)}::${String(tp)}`
+        })
+        .filter(Boolean)
+        .sort()
+      if (catalogKeys.length) pick.catalogs = catalogKeys
+    }
+
+    // behaviorHints is often used by Stremio to affect behavior
+    if (manifest.behaviorHints && typeof manifest.behaviorHints === 'object') {
+      // Sort keys deterministically
+      const entries = Object.entries(manifest.behaviorHints)
+        .map(([k, v]) => [String(k), v])
+        .sort((a, b) => a[0].localeCompare(b[0]))
+      const obj = {}
+      for (const [k, v] of entries) obj[k] = v
+      pick.behaviorHints = obj
+    }
+
+    // Stable stringify with sorted keys
+    const stable = (value) => {
+      if (value && typeof value === 'object' && !Array.isArray(value)) {
+        const out = {}
+        for (const k of Object.keys(value).sort()) out[k] = stable(value[k])
+        return out
+      }
+      if (Array.isArray(value)) return value.map(stable)
+      return value
+    }
+    return JSON.stringify(stable(pick))
+  } catch {
+    return '{}'
+  }
+}
+
+function manifestHash(manifest) {
+  return sha256Hex(normalizeManifestObject(manifest))
+}
+function manifestHmac(req, manifest) {
+  return hmacHex(getAccountHmacKey(req), normalizeManifestObject(manifest))
+}
+
+// Centralized helper to build addon DB data consistently
+function buildAddonDbData(req, params) {
+  const { name, description, sanitizedUrl, manifestObj, iconUrl, version, stremioAddonId, isActive = true } = params
+  const urlPlain = String(sanitizedUrl || '').trim()
+  const encUrl = encrypt(urlPlain, req)
+  const encManifest = manifestObj ? encrypt(JSON.stringify(manifestObj), req) : null
+  // Prefer per-account HMAC for stored manifestUrlHash; legacy/global is only for fallback reads
+  const urlHmac = manifestUrlHmac(req, urlPlain)
+  const mHash = manifestObj ? manifestHash(manifestObj) : null
+  const mHmac = manifestObj ? manifestHmac(req, manifestObj) : null
+
+  const resources = (() => {
+    try {
+      const src = Array.isArray(manifestObj?.resources) ? manifestObj.resources : []
+      const names = src.map(r => (typeof r === 'string' ? r : (r && (r.name || r.type)))).filter(Boolean)
+      return names.length ? JSON.stringify(names) : null
+    } catch { return null }
+  })()
+
+  return {
+    name,
+    description: description || (manifestObj?.description || ''),
+    manifestUrl: encUrl,
+    manifestUrlHash: urlHmac,
+    manifestHash: mHash,      // new content hash (unkeyed)
+    version: version || manifestObj?.version || null,
+    iconUrl: iconUrl || manifestObj?.logo || null,
+    stremioAddonId: stremioAddonId || manifestObj?.id || null,
+    isActive,
+    originalManifest: encManifest,
+    manifest: encManifest,
+    resources,
+    accountId: getAccountId(req)
+  }
 }
 
 function encryptIf(value, req) {
@@ -1652,15 +1792,15 @@ app.get('/api/users/:id', async (req, res) => {
               seen.add(addon.id)
               return true
             })
-            .map((ga) => ({
-              id: ga.addon.id,
-              name: ga.addon.name,
-              description: ga.addon.description || '',
-              manifestUrl: ga.addon.manifestUrl,
-              version: ga.addon.version || null,
-              isEnabled: ga.addon.isActive,
-              iconUrl: ga.addon.iconUrl,
-            }))
+          .map((ga) => ({
+            id: ga.addon.id,
+            name: ga.addon.name,
+            description: ga.addon.description || '',
+            manifestUrl: ga.addon.manifestUrl,
+            version: ga.addon.version || null,
+            isEnabled: ga.addon.isActive,
+            iconUrl: ga.addon.iconUrl,
+          }))
         })()
       : []
 
@@ -2103,7 +2243,55 @@ app.get('/api/users/:id/sync-status', async (req, res) => {
     debug.log(`🔍 User's group addons: ${JSON.stringify(userGroupAddons)}`)
     debug.log(`🔍 Order matches: ${orderMatches}`)
     
-    const isSynced = missingAddons.length === 0 && extraAddons.length === 0 && orderMatches
+    // Deep content comparison by manifest hash (only where URLs match)
+    let contentMismatch = false
+    try {
+      // Map expected URL -> expected manifestHash (stored, filtered)
+      const expectedUrlToHash = new Map()
+      for (const g of groups) {
+        for (const ga of g.addons) {
+          const url = getDecryptedManifestUrl(ga.addon, req)
+          if (url) expectedUrlToHash.set(url, ga.addon.manifestHash || null)
+        }
+      }
+
+      // For each matching Stremio addon URL, compute live manifest hash and compare
+      const stremioByUrl = new Map()
+      for (const a of stremioAddons) {
+        const url = a.transportUrl || a.manifestUrl
+        if (url) stremioByUrl.set(url, a)
+      }
+
+      const urlsToCheck = [...expectedAddonUrls].filter(url => stremioByUrl.has(url))
+      for (const url of urlsToCheck) {
+        const expectedHash = expectedUrlToHash.get(url)
+        if (!expectedHash) continue // no baseline
+
+        let liveManifest = null
+        const stremioObj = stremioByUrl.get(url) || {}
+        if (stremioObj && stremioObj.manifest && typeof stremioObj.manifest === 'object') {
+          liveManifest = stremioObj.manifest
+        } else {
+          // Fallback: fetch manifest from URL
+          try {
+            const resp = await fetch(url, { method: 'GET' })
+            if (resp.ok) {
+              liveManifest = await resp.json()
+            }
+          } catch {}
+        }
+
+        if (liveManifest) {
+          const liveHash = manifestHash(liveManifest)
+          if (liveHash !== expectedHash) {
+            contentMismatch = true
+            break
+          }
+        }
+      }
+    } catch {}
+
+    const isSynced = missingAddons.length === 0 && extraAddons.length === 0 && orderMatches && !contentMismatch
     
     debug.log(`🔍 Missing addons: ${missingAddons.length}`, missingAddons.map(a => a.name))
     debug.log(`🔍 Extra addons: ${extraAddons.length}`, extraAddons.map(a => a.name || a.manifest?.name))
@@ -2113,7 +2301,8 @@ app.get('/api/users/:id/sync-status', async (req, res) => {
       isSynced,
       status: isSynced ? 'synced' : 'unsynced',
       stremioAddonCount: stremioAddons.length,
-      expectedAddonCount: filteredExpectedAddons.length
+      expectedAddonCount: filteredExpectedAddons.length,
+      contentMismatch
     })
 
   } catch (error) {
@@ -3675,7 +3864,7 @@ app.get('/api/addons', async (req, res) => {
           totalUsers = activeUsers.length
         }
       }
-
+      
       return {
         id: addon.id,
         name: addon.name,
@@ -3818,7 +4007,7 @@ app.post('/api/addons', async (req, res) => {
     const { manifestUrlHash } = require('./utils/hash')
     const existingByUrl = await prisma.addon.findFirst({ 
       where: { 
-        manifestUrlHash: manifestUrlHash(sanitizedUrl),
+        manifestUrlHash: manifestUrlHmac(req, sanitizedUrl),
         accountId: getAccountId(req)
       } 
     })
@@ -3939,27 +4128,16 @@ app.post('/api/addons', async (req, res) => {
 
     // Create new addon (store sanitized URL)
     const addon = await prisma.addon.create({
-      data: {
+      data: buildAddonDbData(req, {
         name: finalName,
-        description: description || manifestData?.description || '',
-        manifestUrl: encrypt(sanitizedUrl, req),
-        manifestUrlHash: require('./utils/hash').manifestUrlHash(sanitizedUrl),
+        description,
+        sanitizedUrl,
+        manifestObj: manifestData,
+        iconUrl: manifestData?.logo || null,
         version: manifestData?.version || null,
-        iconUrl: manifestData?.logo || null, // Store logo URL from manifest
         stremioAddonId: manifestData?.id || null,
-        isActive: true,
-        originalManifest: manifestData ? encrypt(JSON.stringify(manifestData), req) : null,
-        manifest: manifestData ? encrypt(JSON.stringify(manifestData), req) : null,
-        resources: (() => {
-          try {
-            const src = Array.isArray(manifestData?.resources) ? manifestData.resources : []
-            const names = src.map(r => (typeof r === 'string' ? r : (r && (r.name || r.type)))).filter(Boolean)
-            return names.length ? JSON.stringify(names) : null
-          } catch { return null }
-        })(),
-        // Enforce account ownership
-        accountId: getAccountId(req),
-      }
+        isActive: true
+      })
     });
 
     // Handle group assignments if provided
@@ -4094,7 +4272,9 @@ app.post('/api/addons/:id/reload', async (req, res) => {
         iconUrl: manifestData?.logo || addon.iconUrl || null,
         // Store encrypted manifests (original and filtered)
         originalManifest: manifestData ? encrypt(JSON.stringify(manifestData), req) : addon.originalManifest,
-        manifest: filtered ? encrypt(JSON.stringify(filtered), req) : addon.manifest
+        manifest: filtered ? encrypt(JSON.stringify(filtered), req) : addon.manifest,
+        // Always recompute manifestHash on reload based on filtered manifest
+        manifestHash: filtered ? manifestHash(filtered) : null
       }
     });
 
@@ -4229,14 +4409,11 @@ app.post('/api/addons/import', upload.single('file'), async (req, res) => {
 
         const transportName = addonData.name || addonData.transportName || manifest.name || 'Unknown';
 
-        // Check if addon already exists (by manifestUrl or manifest.id)
+        // Check if addon already exists using per-account HMAC of manifestUrl
         const existingAddon = await prisma.addon.findFirst({
           where: {
             accountId: getAccountId(req),
-            OR: [
-              { manifestUrl: transportUrl },
-              { manifestUrl: { contains: manifest.id } }
-            ]
+            manifestUrlHash: manifestUrlHmac(req, transportUrl)
           }
         });
 
@@ -4246,19 +4423,29 @@ app.post('/api/addons/import', upload.single('file'), async (req, res) => {
           continue;
         }
 
-        // Create new addon
+        // Create new addon (store both original and processed manifests; compute hashes and resources)
+        const resources = (() => {
+          try {
+            const src = Array.isArray(manifest?.resources) ? manifest.resources : []
+            const names = src.map(r => (typeof r === 'string' ? r : (r && (r.name || r.type)))).filter(Boolean)
+            return names.length ? JSON.stringify(names) : null
+          } catch { return null }
+        })()
         const newAddon = await prisma.addon.create({
           data: {
+            accountId: getAccountId(req),
             name: transportName,
             description: manifest.description || '',
-            manifestUrl: encrypt(transportUrl, req),
-            manifestUrlHash: require('./utils/hash').manifestUrlHash(transportUrl),
             version: manifest.version || null,
             iconUrl: manifest.logo || null,
             stremioAddonId: manifest.id || null,
             isActive: true,
-            manifest: manifest ? encrypt(JSON.stringify(manifest), req) : null,
-            accountId: getAccountId(req),
+            manifestUrl: encrypt(transportUrl, req),
+            manifestUrlHash: manifestUrlHmac(req, transportUrl),
+            originalManifest: encrypt(JSON.stringify(manifest), req),
+            manifest: encrypt(JSON.stringify(manifest), req),
+            manifestHash: manifestHash(manifest),
+            resources,
           }
         });
 
@@ -4448,6 +4635,26 @@ app.put('/api/addons/:id', async (req, res) => {
       updateData.name = name ?? (existingAddon.name);
       updateData.description = description ?? (manifestData?.description || existingAddon.description || '');
       updateData.version = version ?? (manifestData?.version || existingAddon.version || null);
+
+      // If URL changed and we fetched a fresh manifest, derive filtered manifest
+      try {
+        const selected = (() => { try { return existingAddon.resources ? JSON.parse(existingAddon.resources) : [] } catch { return [] } })()
+        let filtered = manifestData
+        if (Array.isArray(selected) && selected.length > 0 && manifestData) {
+          const allow = new Set(selected.map(r => typeof r === 'string' ? r : (r?.name || r?.type)).filter(Boolean))
+          const clone = JSON.parse(JSON.stringify(manifestData))
+          if (Array.isArray(clone.resources)) {
+            clone.resources = clone.resources.filter(r => {
+              const key = typeof r === 'string' ? r : (r?.name || r?.type)
+              return key ? allow.has(key) : false
+            })
+          }
+          filtered = clone
+        }
+        updateData.originalManifest = encrypt(JSON.stringify(manifestData), req)
+        updateData.manifest = encrypt(JSON.stringify(filtered), req)
+        updateData.manifestHash = manifestHash(filtered)
+      } catch {}
     }
 
     console.log(`🔍 Attempting to update addon with data:`, updateData);
@@ -4460,7 +4667,8 @@ app.put('/api/addons/:id', async (req, res) => {
     if (nextUrl !== undefined) {
       try {
         updateData.manifestUrl = encrypt(nextUrl, req)
-        updateData.manifestUrlHash = require('./utils/hash').manifestUrlHash(nextUrl)
+        // Store per-account HMAC for URL hash
+        updateData.manifestUrlHash = manifestUrlHmac(req, nextUrl)
       } catch (e) {
         console.error('Failed to encrypt updated manifestUrl:', e)
         return res.status(500).json({ error: 'Failed to encrypt updated manifestUrl' })
@@ -4509,6 +4717,7 @@ app.put('/api/addons/:id', async (req, res) => {
           })
 
           updateData.manifest = encrypt(JSON.stringify(filtered), req)
+          updateData.manifestHash = manifestHash(filtered)
           updateData.originalManifest = existingAddon.originalManifest // keep as is
           updateData.resources = JSON.stringify(Array.from(selectedNames))
         } else if (Array.isArray(resources)) {
@@ -5162,9 +5371,9 @@ app.get('/api/groups/:id', async (req, res) => {
     })
 
     const memberUsers = users.map((user) => ({
-      id: user.id,
-      username: user.username,
-      email: user.email,
+        id: user.id, 
+        username: user.username, 
+        email: user.email,
       // Field kept for UI compatibility; with private mode we no longer store per-user stremioAddons
       stremioAddonsCount: 0,
       excludedAddons: user.excludedAddons || []
@@ -5416,10 +5625,10 @@ async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'nor
           .map((ga) => {
             const decrypted = resolveAddonFields(ga.addon)
             return {
-              id: ga.addon.id,
-              name: ga.addon.name,
-              version: ga.addon.version,
-              description: ga.addon.description,
+            id: ga.addon.id,
+            name: ga.addon.name,
+            version: ga.addon.version,
+            description: ga.addon.description,
               manifestUrl: decrypted.manifestUrl,
               manifest: decrypted.manifest,
             }
@@ -5576,28 +5785,28 @@ async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'nor
           })
         } else {
           // Fallback: fetch from URL only if no stored manifest
-          const resp = await fetch(fa.manifestUrl)
-          if (!resp.ok) {
-            throw new Error(`HTTP ${resp.status}: ${resp.statusText}`)
-          }
-          const manifest = await resp.json()
-          console.log(`🔍 Live manifest fetched for ${fa.name}:`, JSON.stringify(manifest, null, 2))
-          
-          // Ensure manifest has required fields
-          const safeManifest = {
-            id: manifest?.id || 'unknown',
-            name: manifest?.name || fa.name || 'Unknown',
-            version: manifest?.version || '1.0.0', // Default version if null
-            description: manifest?.description || fa.description || '',
-            ...manifest // Include all other manifest fields
-          }
-          console.log(`🔍 Safe manifest created:`, JSON.stringify(safeManifest, null, 2))
-          
-          desiredGroup.push({
-            transportUrl: fa.manifestUrl,
-            transportName: safeManifest.name,
-            manifest: safeManifest,
-          })
+        const resp = await fetch(fa.manifestUrl)
+        if (!resp.ok) {
+          throw new Error(`HTTP ${resp.status}: ${resp.statusText}`)
+        }
+        const manifest = await resp.json()
+        console.log(`🔍 Live manifest fetched for ${fa.name}:`, JSON.stringify(manifest, null, 2))
+        
+        // Ensure manifest has required fields
+        const safeManifest = {
+          id: manifest?.id || 'unknown',
+          name: manifest?.name || fa.name || 'Unknown',
+          version: manifest?.version || '1.0.0', // Default version if null
+          description: manifest?.description || fa.description || '',
+          ...manifest // Include all other manifest fields
+        }
+        console.log(`🔍 Safe manifest created:`, JSON.stringify(safeManifest, null, 2))
+        
+        desiredGroup.push({
+          transportUrl: fa.manifestUrl,
+          transportName: safeManifest.name,
+          manifest: safeManifest,
+        })
         }
       } catch (e) {
         console.warn(`⚠️ Failed to fetch manifest for ${fa.manifestUrl}:`, e.message)
@@ -5709,30 +5918,29 @@ async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'nor
       version: a?.manifest?.version
     })))
 
-    // Early no-op check: if current collection already equals desired, skip update
-    // Compare the entire desired collection with current collection
-    const toKey = (a) => {
-      const id = a?.manifest?.id || a?.id || ''
-      const url = normalize(a?.transportUrl || a?.manifestUrl || a?.url)
-      return `${id}@@${url}`
-    }
-    const currentKeys = new Set(currentAddons.map(toKey))
-    const desiredKeys = new Set(finalDesiredCollection.map(toKey))
-    const sameSize = currentKeys.size === desiredKeys.size
-    let allMatch = sameSize
+    // Early no-op check: URL equality first, then manifest hash equality
+    const toUrl = (a) => normalize(a?.transportUrl || a?.manifestUrl || a?.url)
+    const toUrlSet = (list) => new Set(list.map(toUrl))
+    const currentUrlSet = toUrlSet(currentAddons)
+    const desiredUrlSet = toUrlSet(finalDesiredCollection)
+    let allMatch = currentUrlSet.size === desiredUrlSet.size
     if (allMatch) {
-      for (const k of desiredKeys) { if (!currentKeys.has(k)) { allMatch = false; break } }
+      for (const u of desiredUrlSet) { if (!currentUrlSet.has(u)) { allMatch = false; break } }
     }
-    // If sets match, also ensure order matches exactly
-    let curSeq, desSeq
+    // If URLs match, compare manifest hashes pairwise by URL and sequence
     if (allMatch) {
-      curSeq = currentAddons.map((a) => normalize(a?.transportUrl || a?.manifestUrl || a?.url))
-      desSeq = finalDesiredCollection.map((a) => normalize(a?.transportUrl || a?.manifestUrl || a?.url))
+      const curSeq = currentAddons.map(toUrl)
+      const desSeq = finalDesiredCollection.map(toUrl)
       if (curSeq.length !== desSeq.length) {
         allMatch = false
       } else {
         for (let i = 0; i < curSeq.length; i++) {
           if (curSeq[i] !== desSeq[i]) { allMatch = false; break }
+          const cur = currentAddons[i]
+          const des = finalDesiredCollection[i]
+          const curHash = manifestHash(cur?.manifest || cur)
+          const desHash = manifestHash(des?.manifest || des)
+          if (curHash !== desHash) { allMatch = false; break }
         }
       }
     }
@@ -5750,11 +5958,10 @@ async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'nor
             a
           ])
         )
-        const collectionToPush = finalDesiredCollection.map((a) => {
-          const u = normalize(a?.transportUrl || a?.manifestUrl || a?.url)
+        const collectionToPush = finalDesiredCollection.map((des) => {
+          const u = normalize(des?.transportUrl || des?.manifestUrl || des?.url)
           const cur = currentByUrl.get(u)
-          if (cur) return cur
-          // Ensure Local Files always has a proper manifest when missing
+          // Prefer desired manifest (filtered from DB) even if URL already exists in current
           if (u === 'http://127.0.0.1:11470/local-addon/manifest.json') {
             return {
               transportUrl: u,
@@ -5762,12 +5969,12 @@ async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'nor
               manifest: {
                 id: 'org.stremio.local',
                 name: 'Local Files',
-                version: a?.manifest?.version || '1.0.0',
-                ...(a?.manifest || {})
+                version: des?.manifest?.version || '1.0.0',
+                ...(des?.manifest || {})
               }
             }
           }
-          return a
+          return cur ? { ...cur, transportName: des?.transportName || cur.transportName, manifest: des?.manifest || cur.manifest } : des
         })
         await apiClient.request('addonCollectionSet', { addons: collectionToPush })
         console.log('✅ Pushed addon collection to Stremio API')
@@ -5829,10 +6036,9 @@ async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'nor
           a
         ])
       )
-      const collectionToSet = finalDesiredCollection.map((a) => {
-        const u = normalize(a?.transportUrl || a?.manifestUrl || a?.url)
+      const collectionToSet = finalDesiredCollection.map((des) => {
+        const u = normalize(des?.transportUrl || des?.manifestUrl || des?.url)
         const cur = currentByUrlForSet.get(u)
-        if (cur) return cur
         if (u === 'http://127.0.0.1:11470/local-addon/manifest.json') {
           return {
             transportUrl: u,
@@ -5840,12 +6046,13 @@ async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'nor
             manifest: {
               id: 'org.stremio.local',
               name: 'Local Files',
-              version: a?.manifest?.version || '1.0.0',
-              ...(a?.manifest || {})
+              version: des?.manifest?.version || '1.0.0',
+              ...(des?.manifest || {})
             }
           }
         }
-        return a
+        // Prefer desired manifest to push filtered content
+        return cur ? { ...cur, transportName: des?.transportName || cur.transportName, manifest: des?.manifest || cur.manifest } : des
       })
       await apiClient.request('addonCollectionSet', { addons: collectionToSet })
       
@@ -6652,7 +6859,7 @@ app.post('/api/users/:id/import-addons', async (req, res) => {
     if (!userInAnyGroup) {
       // Assign user to group (ensures user is only in one group)
       await assignUserToGroup(userId, group.id, req)
-      debug.log(`✅ Added user to import group (user had no previous groups)`)
+        debug.log(`✅ Added user to import group (user had no previous groups)`)
     } else {
       debug.log(`ℹ️ Skipped adding user to import group (user already has a group)`)
     }
@@ -6678,7 +6885,7 @@ app.post('/api/users/:id/import-addons', async (req, res) => {
       try {
         const { manifestUrlHash } = require('./utils/hash')
         const existingByExactUrl = await prisma.addon.findFirst({ 
-          where: {
+        where: {
             manifestUrlHash: manifestUrlHash(addonUrl),
             accountId: getAccountId(req)
           },
@@ -6693,34 +6900,43 @@ app.post('/api/users/:id/import-addons', async (req, res) => {
               create: { groupId: group.id, addonId: existingByExactUrl.id, isEnabled: true }
             })
             console.log(`✅ Attached existing addon to group in DB: ${existingByExactUrl.name}`)
-          } catch (e) {
+            } catch (e) {
             console.log(`⚠️ DB attach failed:`, e?.message || e)
-          }
-          processedAddons.push(existingByExactUrl)
-          existingAddons.push(existingByExactUrl)
-          addon = existingByExactUrl
-          continue
+            }
+            processedAddons.push(existingByExactUrl)
+            existingAddons.push(existingByExactUrl)
+            addon = existingByExactUrl
+            continue
         }
         addon = existingByExactUrl
       } catch (e) {
         console.log(`⚠️ Exact URL check failed for ${addonUrl}:`, e?.message || e)
       }
 
-        // If we didn't find an existing addon by exact URL, create a new one
-        if (!addon) {
-          console.log(`🔨 Creating new addon for: ${addonUrl}`)
-          // Do NOT fetch manifests here. Always use the data returned by APIStore.pullAddonCollection()
-          // Fall back to a minimal synthesized manifest using the same payload if needed.
-          let manifestData = addonData.manifest || {
-            id: addonData.id || 'unknown',
-            name: addonData.name || 'Unknown Addon',
-            version: addonData.version || '1.0.0',
-            description: addonData.description || '',
-            resources: addonData.manifest?.resources || [],
-            types: addonData.manifest?.types || ['other'],
-            catalogs: addonData.manifest?.catalogs || []
+      // If we didn't find an existing addon by exact URL, create a new one
+      if (!addon) {
+        console.log(`🔨 Creating new addon for: ${addonUrl}`)
+        // Prefer full manifest from payload; if missing, fetch from URL to mirror addon creation flow
+        let manifestData = addonData.manifest
+        if (!manifestData) {
+          try {
+            const resp = await fetch(addonUrl)
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+            manifestData = await resp.json()
+            console.log(`ℹ️ Fetched manifest for import: ${manifestData?.name} ${manifestData?.version}`)
+          } catch (e) {
+            manifestData = {
+              id: addonData.id || 'unknown',
+              name: addonData.name || 'Unknown Addon',
+              version: addonData.version || '1.0.0',
+              description: addonData.description || '',
+              resources: addonData.manifest?.resources || [],
+              types: addonData.manifest?.types || ['other'],
+              catalogs: addonData.manifest?.catalogs || []
+            }
+            console.log(`ℹ️ Using synthesized manifest for import: ${manifestData?.name} ${manifestData?.version}`)
           }
-          console.log(`ℹ️ Using manifest from Stremio API payload: ${manifestData?.name} ${manifestData?.version}`)
+        }
         // Try existence check step 3: match any addon whose stored URL contains the manifest.id
         const manifestIdRaw = typeof manifestData?.id === 'string' ? manifestData.id : ''
         if (manifestIdRaw) {
@@ -6740,23 +6956,40 @@ app.post('/api/users/:id/import-addons', async (req, res) => {
         if (addon) {
           // Skip creation; will proceed to group attach below
         } else {
-          // Create addon directly in DB from API payload (no external fetch)
+          // Create addon directly in DB using explicit fields to separate originalManifest vs manifest
           try {
-            const { manifestUrlHash } = require('./utils/hash')
+            // originalManifest: full capabilities from live URL if possible; fallback to current manifest
+            let originalManifestObj = manifestData
+            try {
+              const resp = await fetch(addonUrl)
+              if (resp.ok) {
+                originalManifestObj = await resp.json()
+                console.log(`ℹ️ Fetched originalManifest for import: ${originalManifestObj?.name} ${originalManifestObj?.version}`)
+              }
+            } catch {}
+
+            const resourcesNames = (() => {
+              try {
+                const src = Array.isArray(manifestData?.resources) ? manifestData.resources : []
+                return JSON.stringify(src.map(r => (typeof r === 'string' ? r : (r && (r.name || r.type)))).filter(Boolean))
+              } catch { return JSON.stringify([]) }
+            })()
+
             const createdAddon = await prisma.addon.create({
               data: {
+                accountId: getAccountId(req),
                 name: manifestData?.name || addonData.name || 'Unknown Addon',
                 description: manifestData?.description || addonData.description || '',
-                manifestUrl: encrypt(addonUrl, req),
-                manifestUrlHash: manifestUrlHash(addonUrl),
                 version: manifestData?.version || addonData.version || null,
                 iconUrl: manifestData?.logo || addonData.iconUrl || null,
                 stremioAddonId: manifestData?.id || addonData.stremioAddonId || null,
                 isActive: true,
-                originalManifest: manifestData ? encrypt(JSON.stringify(manifestData), req) : null,
+                manifestUrl: encrypt(addonUrl, req),
+                manifestUrlHash: manifestUrlHmac(req, addonUrl),
+                originalManifest: originalManifestObj ? encrypt(JSON.stringify(originalManifestObj), req) : null,
                 manifest: manifestData ? encrypt(JSON.stringify(manifestData), req) : null,
-                resources: manifestData?.resources ? JSON.stringify(manifestData.resources.map(r => typeof r === 'string' ? r : (r?.name || r?.type)).filter(Boolean)) : null,
-                accountId: getAccountId(req)
+                manifestHash: manifestData ? manifestHash(manifestData) : null,
+                resources: resourcesNames
               }
             })
             addon = createdAddon
@@ -6779,7 +7012,7 @@ app.post('/api/users/:id/import-addons', async (req, res) => {
           create: { groupId: group.id, addonId: addon.id, isEnabled: true }
         })
         console.log(`✅ Attached ${addon.name} to import group in DB`)
-      } catch (error) {
+        } catch (error) {
         console.error(`❌ DB attach error for ${addon.name}:`, error?.message || error)
       }
     }

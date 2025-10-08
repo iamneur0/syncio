@@ -55,6 +55,8 @@ model Addon {
   iconUrl        String?
   // Deterministic hash of normalized manifestUrl for search/uniqueness (public mode)
   manifestUrlHash String?
+  // Normalized HMAC/SHA-256 of processed manifest (content equality check)
+  manifestHash    String?
   // Non-sensitive cached manifest resources for fast UI (JSON string array)
   resources      String?
   
@@ -63,6 +65,7 @@ model Addon {
 
   @@unique([name, accountId])
   @@index([manifestUrlHash])
+  @@index([manifestHash])
   @@map("addons")
 }
 
