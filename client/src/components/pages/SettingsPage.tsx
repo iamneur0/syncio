@@ -674,7 +674,6 @@ export default function SettingsPage() {
           Save configuration snapshots to the server-side "backup" folder on a schedule.
         </p>
         <div className="mt-4 flex items-center gap-3">
-          <label className={`${isDark ? 'text-gray-200' : 'text-gray-800'}`}>Frequency:</label>
           <select
             value={backupDays}
             onChange={(e) => {

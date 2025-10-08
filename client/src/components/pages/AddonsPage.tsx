@@ -723,6 +723,31 @@ export default function AddonsPage() {
     setShowEditModal(true)
   }
 
+  // Reset modal state to original values
+  const resetEditModal = () => {
+    if (editingAddon) {
+      setEditName(editingAddon.name || '')
+      setEditDescription(editingAddon.description || '')
+      setEditUrl(editingAddon.url || '')
+      setEditTags(editingAddon.tags || [])
+      setEditGroupIds(editingAddon.groupIds || [])
+      setEditResources(editingAddon.resources || [])
+    }
+  }
+
+  // Close modal and reset state
+  const handleCloseEditModal = () => {
+    setShowEditModal(false)
+    setEditingAddonId(null)
+    setEditingAddon(null)
+    setEditName('')
+    setEditDescription('')
+    setEditUrl('')
+    setEditTags([])
+    setEditGroupIds([])
+    setEditResources([])
+  }
+
   // Inline editing handlers for addon name
   const handleStartEditDetailAddonName = (currentName: string) => {
     setEditingDetailAddonName(editingAddonId)
@@ -735,11 +760,7 @@ export default function AddonsPage() {
       if (tempDetailAddonName.trim() !== originalName) {
         const newName = tempDetailAddonName.trim()
         setEditName(newName)
-        
-        // Update the editingAddon object for immediate UI update
-        if (editingAddon) {
-          editingAddon.name = newName
-        }
+        // Don't update editingAddon object - keep original for display
       }
     }
     setEditingDetailAddonName(null)
@@ -752,11 +773,7 @@ export default function AddonsPage() {
       if (tempDetailAddonName.trim() !== originalName) {
         const newName = tempDetailAddonName.trim()
         setEditName(newName)
-        
-        // Update the editingAddon object for immediate UI update
-        if (editingAddon) {
-          editingAddon.name = newName
-        }
+        // Don't update editingAddon object - keep original for display
       }
     }
     setEditingDetailAddonName(null)
@@ -964,7 +981,7 @@ export default function AddonsPage() {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         if (showAddModal) setShowAddModal(false)
-        if (showEditModal) setShowEditModal(false)
+        if (showEditModal) handleCloseEditModal()
       }
     }
     window.addEventListener('keydown', onKey)
@@ -1774,7 +1791,7 @@ export default function AddonsPage() {
           className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
           onClick={(e) => {
             if (e.target === e.currentTarget) {
-              setShowEditModal(false)
+              handleCloseEditModal()
             }
           }}
         >
@@ -1826,10 +1843,10 @@ export default function AddonsPage() {
                     ) : (
                       <h2 
                         className={`text-xl font-bold cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 px-2 py-1 rounded transition-colors ${isDark ? 'text-white' : 'text-gray-900'}`}
-                        onClick={() => handleStartEditDetailAddonName(editingAddon?.name || '')}
+                        onClick={() => handleStartEditDetailAddonName(editName || editingAddon?.name || '')}
                         title="Click to edit addon name"
                       >
-                        {editingAddon?.name || 'Unnamed Addon'}
+                        {editName || editingAddon?.name || 'Unnamed Addon'}
                       </h2>
                     )}
                     
@@ -1846,7 +1863,7 @@ export default function AddonsPage() {
               </div>
               
               <button
-                onClick={() => setShowEditModal(false)}
+                onClick={handleCloseEditModal}
                 className={`w-8 h-8 flex items-center justify-center rounded transition-colors border-0 ${
                   isDark ? 'text-gray-400 hover:text-gray-300 hover:bg-gray-700' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
                 }`}
@@ -2027,7 +2044,7 @@ export default function AddonsPage() {
               <div className="flex gap-3 pt-4">
                 <button
                   type="button"
-                  onClick={() => setShowEditModal(false)}
+                  onClick={handleCloseEditModal}
                   disabled={updateAddonMutation.isPending}
                   className={`flex-1 px-4 py-2 rounded-lg transition-colors disabled:opacity-50 ${
                     isDark 
