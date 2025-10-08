@@ -25,6 +25,12 @@ COPY . .
 # Generate Prisma client with correct engine
 ENV PRISMA_CLI_BINARY_TARGETS="linux-musl-openssl-3.0.x,linux-musl-arm64-openssl-3.0.x"
 RUN rm -rf node_modules/.prisma node_modules/@prisma/client/runtime/libquery_engine-*.so.node 2>/dev/null || true
+# Copy the appropriate schema file based on INSTANCE
+RUN if [ "$INSTANCE" = "public" ]; then \
+        cp prisma/schema.postgres.prisma prisma/schema.prisma; \
+    else \
+        cp prisma/schema.sqlite.prisma prisma/schema.prisma; \
+    fi
 # Use the main schema file for generation
 RUN npx prisma generate --schema=prisma/schema.prisma
 
@@ -67,6 +73,12 @@ COPY --from=builder --chown=appuser:nodejs /app/package*.json ./
 COPY --from=builder --chown=appuser:nodejs /app/node_modules ./node_modules
 COPY --from=builder --chown=appuser:nodejs /app/server ./server
 COPY --from=builder --chown=appuser:nodejs /app/prisma ./prisma
+# Ensure the correct schema.prisma file is available at runtime
+RUN if [ "$INSTANCE" = "public" ]; then \
+        cp prisma/schema.postgres.prisma prisma/schema.prisma; \
+    else \
+        cp prisma/schema.sqlite.prisma prisma/schema.prisma; \
+    fi
 COPY --from=builder --chown=appuser:nodejs /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder --chown=appuser:nodejs /app/client/.next ./client/.next
 COPY --from=builder --chown=appuser:nodejs /app/client/package*.json ./client/
