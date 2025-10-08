@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0](https://github.com/iamneur0/syncio/compare/v0.0.18...v0.1.0) (2025-10-08)
+
+
+### Features
+
+* disable automatic backup feature in public mode ([b3366a2](https://github.com/iamneur0/syncio/commit/b3366a20b3bf07f555b47c014c5c82f4f7c69f89))
+
 ## [0.0.18](https://github.com/iamneur0/syncio/compare/v0.0.17...v0.0.18) (2025-10-08)
 
 
