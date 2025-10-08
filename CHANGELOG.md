@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.18](https://github.com/iamneur0/syncio/compare/v0.0.17...v0.0.18) (2025-10-08)
+
+
+### Bug Fixes
+
+* dynamically create schema.prisma based on INSTANCE type ([bada755](https://github.com/iamneur0/syncio/commit/bada7554a542c0c3f6bf1ca17c58ef5ea09e92dc))
+
 ## [0.0.17](https://github.com/iamneur0/syncio/compare/v0.0.16...v0.0.17) (2025-10-08)
 
 
