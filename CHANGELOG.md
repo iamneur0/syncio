@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.17](https://github.com/iamneur0/syncio/compare/v0.0.16...v0.0.17) (2025-10-08)
+
+
+### Bug Fixes
+
+* resolve Docker build and backend runtime issues ([15c032d](https://github.com/iamneur0/syncio/commit/15c032dddf651132aecc4a433315a7378c579e40))
+
 ## [0.0.16](https://github.com/iamneur0/syncio/compare/v0.0.15...v0.0.16) (2025-10-08)
 
 
