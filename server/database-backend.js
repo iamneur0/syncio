@@ -936,24 +936,17 @@ app.post('/api/public-auth/import-config', upload.single('file'), async (req, re
           } catch {}
         }
 
-        // Create with enriched fields
-        // Prepare filtered manifest according to selected resources (if provided)
-        const selectedResources = Array.isArray(entry?.resources) ? entry.resources : (Array.isArray(manifest?.resources) ? manifest.resources : [])
-        const filteredManifest = (() => {
-          if (!manifest) return null
-          if (!Array.isArray(selectedResources) || selectedResources.length === 0) return manifest
-          try {
-            const allow = new Set(selectedResources.map(r => typeof r === 'string' ? r : (r?.name || r?.type)).filter(Boolean))
-            const clone = JSON.parse(JSON.stringify(manifest))
-            if (Array.isArray(clone.resources)) {
-              clone.resources = clone.resources.filter(r => {
-                const key = typeof r === 'string' ? r : (r?.name || r?.type)
-                return key ? allow.has(key) : false
-              })
-            }
-            return clone
-          } catch { return manifest }
-        })()
+        // Align with user-import semantics:
+        // - Use provided manifest from backup as the current manifest
+        // - Fetch originalManifest (full capabilities) from manifestUrl
+        const currentManifest = manifest || null
+        let originalManifestObj = currentManifest
+        try {
+          const rsp = await fetch(transportUrl)
+          if (rsp.ok) {
+            originalManifestObj = await rsp.json()
+          }
+        } catch {}
 
         const created = await prisma.addon.create({
           data: {
@@ -965,13 +958,15 @@ app.post('/api/public-auth/import-config', upload.single('file'), async (req, re
             iconUrl: (entry?.iconUrl ?? manifest?.logo ?? null),
             stremioAddonId: (manifest?.id || entry?.stremioAddonId || null),
             isActive: true,
-            originalManifest: manifest ? encrypt(JSON.stringify(manifest), req) : null,
-            manifest: filteredManifest ? encrypt(JSON.stringify(filteredManifest), req) : null,
+            // Persist originalManifest from live URL, fallback to provided; manifest is the provided (current)
+            originalManifest: originalManifestObj ? encrypt(JSON.stringify(originalManifestObj), req) : null,
+            manifest: currentManifest ? encrypt(JSON.stringify(currentManifest), req) : null,
             resources: (() => {
               try {
-                const src = Array.isArray(entry?.resources)
-                  ? entry.resources
-                  : (Array.isArray(manifest?.resources) ? manifest.resources : [])
+                // Derive from current (provided) manifest, fallback to entry.resources if explicitly given
+                const src = Array.isArray(currentManifest?.resources)
+                  ? currentManifest.resources
+                  : (Array.isArray(entry?.resources) ? entry.resources : [])
                 const names = src.map(r => (typeof r === 'string' ? r : (r && (r.name || r.type)))).filter(Boolean)
                 return names.length ? JSON.stringify(names) : null
               } catch { return null }
