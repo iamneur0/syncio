@@ -4,7 +4,7 @@ import React from 'react'
 import { useTheme } from '@/contexts/ThemeContext'
 import { useMutation } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
-import { Upload, RotateCcw, Sun, Moon, Sparkles, User, Users, Download, Trash2, RefreshCcw } from 'lucide-react'
+import { Upload, RotateCcw, Sun, Moon, Sparkles, User, Users, Download, Trash2, RefreshCcw, SunMoon } from 'lucide-react'
 import UserMenuButton from '@/components/auth/UserMenuButton'
 import api from '@/services/api'
 
@@ -442,7 +442,7 @@ export default function SettingsPage() {
             <label htmlFor="theme-light" className={`flex items-center ${isDark ? 'text-white' : 'text-gray-900'}`}>
               <Sun className="w-5 h-5 mr-3 text-yellow-500" />
               <div>
-                <div className="font-medium">Light Mode</div>
+                <div className="font-medium">Light</div>
                 <div className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
                   Clean and bright interface
                 </div>
@@ -462,7 +462,7 @@ export default function SettingsPage() {
             <label htmlFor="theme-dark" className={`flex items-center ${isDark ? 'text-white' : 'text-gray-900'}`}>
               <Moon className="w-5 h-5 mr-3 text-blue-400" />
               <div>
-                <div className="font-medium">Dark Mode</div>
+                <div className="font-medium">Dark</div>
                 <div className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
                   Easy on the eyes in low light
                 </div>
@@ -523,15 +523,56 @@ export default function SettingsPage() {
               className="mr-3"
             />
             <label htmlFor="theme-mono" className={`flex items-center ${isDark ? 'text-white' : 'text-gray-900'}`}>
-              <div className="w-5 h-5 mr-3 bg-black rounded border border-gray-600"></div>
+              <SunMoon className="w-5 h-5 mr-3 text-black" />
               <div>
                 <div className="font-medium">Black</div>
                 <div className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
-                  Black
+                  For the minimalism enjoyers
                 </div>
               </div>
             </label>
           </div>
+        </div>
+      </div>
+
+      {/* Automatic Backups */}
+      <div className={`p-4 rounded-lg border mt-6 ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
+        <h2 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>Automatic Backups</h2>
+        <p className={`text-sm mt-1 ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
+          Save configuration snapshots to the server-side "backup" folder on a schedule.
+        </p>
+        <div className="mt-4 flex items-center gap-3">
+          <select
+            value={backupDays}
+            onChange={(e) => {
+              const days = Number(e.target.value)
+              setBackupDays(days)
+              api.put('/settings/backup-frequency', { days })
+                .then(() => toast.success('Backup schedule updated'))
+                .catch((err) => toast.error(err?.response?.data?.message || 'Failed to update backup schedule'))
+            }}
+            className={`${isDark ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'} border rounded px-3 py-2`}
+          >
+            <option value={0}>Disabled</option>
+            <option value={1}>Every day</option>
+            <option value={7}>Every week</option>
+            <option value={15}>Every 15 days</option>
+            <option value={30}>Every month</option>
+          </select>
+          <button
+            onClick={async () => {
+              try {
+                await api.post('/settings/backup-now')
+                toast.success('Backup started')
+              } catch (e: any) {
+                toast.error(e?.response?.data?.message || 'Failed to start backup')
+              }
+            }}
+            className={`${isDark ? 'bg-gray-700 hover:bg-gray-600 text-white' : 'bg-gray-100 hover:bg-gray-200 text-gray-900'} px-3 py-2 rounded`}
+          >Run now</button>
+        </div>
+        <div className={`text-xs mt-2 ${isDark ? 'text-gray-500' : 'text-gray-500'}`}>
+          Files are saved under server folder: data/backup/
         </div>
       </div>
 
@@ -665,47 +706,6 @@ export default function SettingsPage() {
             </div>
           </div>
         )}
-      </div>
-
-      {/* Automatic Backups */}
-      <div className={`p-4 rounded-lg border mt-6 ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
-        <h2 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>Automatic Backups</h2>
-        <p className={`text-sm mt-1 ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
-          Save configuration snapshots to the server-side "backup" folder on a schedule.
-        </p>
-        <div className="mt-4 flex items-center gap-3">
-          <select
-            value={backupDays}
-            onChange={(e) => {
-              const days = Number(e.target.value)
-              setBackupDays(days)
-              api.put('/settings/backup-frequency', { days })
-                .then(() => toast.success('Backup schedule updated'))
-                .catch((err) => toast.error(err?.response?.data?.message || 'Failed to update backup schedule'))
-            }}
-            className={`${isDark ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'} border rounded px-3 py-2`}
-          >
-            <option value={0}>Disabled</option>
-            <option value={1}>Every day</option>
-            <option value={7}>Every week</option>
-            <option value={15}>Every 15 days</option>
-            <option value={30}>Every month</option>
-          </select>
-          <button
-            onClick={async () => {
-              try {
-                await api.post('/settings/backup-now')
-                toast.success('Backup started')
-              } catch (e: any) {
-                toast.error(e?.response?.data?.message || 'Failed to start backup')
-              }
-            }}
-            className={`${isDark ? 'bg-gray-700 hover:bg-gray-600 text-white' : 'bg-gray-100 hover:bg-gray-200 text-gray-900'} px-3 py-2 rounded`}
-          >Run now</button>
-        </div>
-        <div className={`text-xs mt-2 ${isDark ? 'text-gray-500' : 'text-gray-500'}`}>
-          Files are saved under server folder: data/backup/
-        </div>
       </div>
 
       {/* Account Management */}

@@ -1235,7 +1235,9 @@ export default function UsersPage() {
         name: addon.name || addon.manifest?.name,
         description: addon.description || addon.manifest?.description,
         version: addon.version || addon.manifest?.version,
-        iconUrl: addon.iconUrl || addon.manifest?.logo
+        iconUrl: addon.iconUrl || addon.manifest?.logo,
+        // Include full manifest so backend can persist stremioAddonId/resources/hash
+        manifest: addon.manifest || undefined
       }))
       const response = await api.post(`/users/${userId}/import-addons`, { addons })
       return response.data
