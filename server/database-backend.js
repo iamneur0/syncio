@@ -418,12 +418,12 @@ async function performBackupOnce() {
     const baseUrl = `http://localhost:${process.env.PORT || 4000}`
     let data = null
     try {
-      const rsp = await fetch(`${baseUrl}/api/public-auth/export`)
+      const rsp = await fetch(`${baseUrl}/api/public-auth/config-export`)
       if (rsp.ok) data = await rsp.json()
     } catch {}
     if (!data) {
       try {
-        const rsp2 = await fetch(`${baseUrl}/api/exports/addons`)
+        const rsp2 = await fetch(`${baseUrl}/api/public-auth/addon-export`)
         if (rsp2.ok) data = await rsp2.json()
       } catch {}
     }
@@ -686,8 +686,8 @@ app.post('/api/public-auth/logout', (req, res) => {
   return res.json({ message: 'Logged out' });
 });
 
-// Export all data for the logged-in account
-app.get('/api/public-auth/export', async (req, res) => {
+// Export all data for the logged-in account (config export)
+app.get('/api/public-auth/config-export', async (req, res) => {
   try {
     const whereScope = AUTH_ENABLED ? { accountId: req.appAccountId } : {}
     if (AUTH_ENABLED && !req.appAccountId) return res.status(401).json({ error: 'Unauthorized' })
@@ -744,17 +744,7 @@ app.get('/api/public-auth/export', async (req, res) => {
         description: addon.description,
         manifestUrl: getDecryptedManifestUrl(addon, req),
         manifest,
-        resources: (() => {
-          try {
-            const stored = addon.resources ? JSON.parse(addon.resources) : null
-            if (Array.isArray(stored)) return stored
-            const src = Array.isArray(manifest?.resources) ? manifest.resources : []
-            return src.map(r => (typeof r === 'string' ? r : (r && (r.name || r.type)))).filter(Boolean)
-          } catch {
-            const src = Array.isArray(manifest?.resources) ? manifest.resources : []
-            return src.map(r => (typeof r === 'string' ? r : (r && (r.name || r.type)))).filter(Boolean)
-          }
-        })(),
+        // omit resources from export; consumers can derive from manifest/originalManifest
         // Always include stremioAddonId; fall back to manifest.id if needed
         stremioAddonId: addon.stremioAddonId || (manifest && manifest.id) || null,
         version: addon.version,
@@ -791,10 +781,9 @@ app.get('/api/public-auth/export', async (req, res) => {
     return res.status(500).json({ error: 'Export failed' })
   }
 })
-
 // Export only addons for the logged-in account
 // Use a dedicated exports namespace to avoid shadowing by /api/addons/:id
-app.get('/api/exports/addons', async (req, res) => {
+app.get('/api/public-auth/addon-export', async (req, res) => {
   try {
     const whereScope = AUTH_ENABLED ? { accountId: req.appAccountId } : {}
     if (AUTH_ENABLED && !req.appAccountId) return res.status(401).json({ error: 'Unauthorized' })
@@ -839,17 +828,7 @@ app.get('/api/exports/addons', async (req, res) => {
           name: addon.name || '',
           manifestUrl: transportUrl,
           manifest,
-          resources: (() => {
-            try {
-              const stored = addon.resources ? JSON.parse(addon.resources) : null
-              if (Array.isArray(stored)) return stored
-              const src = Array.isArray(manifest?.resources) ? manifest.resources : []
-              return src.map(r => (typeof r === 'string' ? r : (r && (r.name || r.type)))).filter(Boolean)
-            } catch {
-              const src = Array.isArray(manifest?.resources) ? manifest.resources : []
-              return src.map(r => (typeof r === 'string' ? r : (r && (r.name || r.type)))).filter(Boolean)
-            }
-          })(),
+          // omit resources in addons-only export; can be derived on import
           stremioAddonId: addon.stremioAddonId || (manifest && manifest.id) || null,
           flags: { protected: false },
         }
@@ -864,9 +843,9 @@ app.get('/api/exports/addons', async (req, res) => {
   }
 })
 
-// Import full configuration with an account-scoped reset first
+// Import full configuration with an account-scoped reset first (canonical path)
 // Accepts multipart (file) or JSON body with { jsonData } string
-app.post('/api/public-auth/import-config', upload.single('file'), async (req, res) => {
+app.post('/api/public-auth/config-import', upload.single('file'), async (req, res) => {
   try {
     if (AUTH_ENABLED && !req.appAccountId) {
       return res.status(401).json({ message: 'Unauthorized' })
@@ -1408,8 +1387,7 @@ function normalizeManifestObject(manifest) {
     // Normalize resources to an array of labels (name/type), sorted
     if (Array.isArray(manifest.resources)) {
       const labels = manifest.resources
-        .map((r) => (typeof r === 'string' ? r : (r && (r.name || r.type))))
-        .filter(Boolean)
+        .map((r) => (typeof r === 'string' ? r : (r && (r.name || r.type)))).filter(Boolean)
         .map(String)
         .sort()
       pick.resources = labels
@@ -1571,7 +1549,6 @@ async function validateStremioAuthKey(authKey) {
   err.code = 1
   throw err
 }
-
 // Health check endpoint
 const serverStartTime = new Date().toISOString()
 app.get('/health', async (req, res) => {
@@ -1600,7 +1577,6 @@ app.get('/health', async (req, res) => {
     });
   }
 });
-
 // Debug endpoint to check addons in database
 app.get('/debug/addons', async (req, res) => {
   try {
@@ -2305,7 +2281,6 @@ app.get('/api/users/:id/sync-status', async (req, res) => {
     res.status(500).json({ message: 'Failed to check sync status', error: error?.message })
   }
 })
-
 // Get live addons from Stremio for a given user
 app.get('/api/users/:id/stremio-addons', async (req, res) => {
   try {
@@ -3035,7 +3010,6 @@ app.put('/api/users/:id', async (req, res) => {
     res.status(500).json({ error: 'Failed to update user' })
   }
 })
-
 // Patch user (for partial updates like username only)
 app.patch('/api/users/:id', async (req, res) => {
   try {
@@ -3793,7 +3767,6 @@ app.post('/api/users/:id/connect-stremio-authkey', async (req, res) => {
     return res.status(500).json({ message: 'Failed to connect existing user with authKey' })
   }
 })
-
 // Addons API
 app.get('/api/addons', async (req, res) => {
   try {
@@ -4327,8 +4300,8 @@ app.delete('/api/addons/:id', async (req, res) => {
   }
 });
 
-// Import addons from JSON file
-app.post('/api/addons/import', upload.single('file'), async (req, res) => {
+// Import addons from JSON file (canonical path)
+app.post('/api/public-auth/addon-import', upload.single('file'), async (req, res) => {
   try {
     if (AUTH_ENABLED && !req.appAccountId) {
       return res.status(401).json({ message: 'Unauthorized' })
@@ -4384,10 +4357,10 @@ app.post('/api/addons/import', upload.single('file'), async (req, res) => {
         } catch {}
 
         const manifestBase = currentManifest || originalManifestObj || {
-          id: addonData.name || 'unknown.addon',
-          name: addonData.name || 'Unknown',
-          version: addonData.version || null,
-          description: addonData.description || null
+              id: addonData.name || 'unknown.addon',
+              name: addonData.name || 'Unknown',
+              version: addonData.version || null,
+              description: addonData.description || null
         }
 
         const transportName = addonData.name || addonData.transportName || manifestBase.name || 'Unknown';
@@ -4547,7 +4520,6 @@ app.get('/api/addons/:id', async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch addon details' });
   }
 });
-
 // Update addon
 app.put('/api/addons/:id', async (req, res) => {
   try {
@@ -5313,7 +5285,6 @@ app.post('/api/groups/find-or-create', async (req, res) => {
     res.status(500).json({ message: 'Failed to find or create group' });
   }
 });
-
 // Get group details with users and addons
 app.get('/api/groups/:id', async (req, res) => {
   try {
@@ -6066,7 +6037,6 @@ async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'nor
     return { success: false, error: error?.message || 'Unknown error' }
   }
 }
-
 // Sync all users in a group
 app.post('/api/groups/:id/sync', async (req, res) => {
   try {
@@ -6773,7 +6743,6 @@ app.post('/api/test/users', async (req, res) => {
     res.status(500).json({ message: 'Failed to create test user', error: error?.message });
   }
 });
-
 // Import user addons endpoint
 app.post('/api/users/:id/import-addons', async (req, res) => {
   try {

@@ -69,10 +69,14 @@ export default function SettingsPage() {
       if (data.mode === 'file' && data.file) {
         const formData = new FormData()
         formData.append('file', data.file)
-        const response = await api.post('/addons/import', formData, { headers: { 'Content-Type': 'multipart/form-data' } })
+        const response = await api.post('/public-auth/addon-import', formData, { headers: { 'Content-Type': 'multipart/form-data' } })
         return response.data
       } else if (data.mode === 'text' && data.text) {
-        const response = await api.post('/addons/import-text', { jsonData: data.text })
+        // send text as a temporary file to the same endpoint
+        const blob = new Blob([data.text], { type: 'application/json' })
+        const formData = new FormData()
+        formData.append('file', new File([blob], 'addons.json', { type: 'application/json' }))
+        const response = await api.post('/public-auth/addon-import', formData, { headers: { 'Content-Type': 'multipart/form-data' } })
         return response.data
       } else {
         throw new Error('Invalid import data')
@@ -128,7 +132,7 @@ export default function SettingsPage() {
 
   const exportAddons = async () => {
     try {
-      const res = await api.get('/exports/addons')
+      const res = await api.get('/public-auth/addon-export')
       const blob = new Blob([JSON.stringify(res.data, null, 2)], { type: 'application/json' })
       const url = URL.createObjectURL(blob)
       const date = new Date().toISOString().split('T')[0].replace(/-/g, '') // YYYYMMDD format
@@ -142,7 +146,7 @@ export default function SettingsPage() {
 
   const exportConfig = async () => {
     try {
-      const res = await api.get('/public-auth/export')
+      const res = await api.get('/public-auth/config-export')
       const blob = new Blob([JSON.stringify(res.data, null, 2)], { type: 'application/json' })
       const url = URL.createObjectURL(blob)
       const date = new Date().toISOString().split('T')[0].replace(/-/g, '') // YYYYMMDD format
@@ -163,7 +167,7 @@ export default function SettingsPage() {
       if (file) {
         const formData = new FormData()
         formData.append('file', file)
-        const resp = await api.post('/public-auth/import-config', formData, { headers: { 'Content-Type': 'multipart/form-data' } })
+        const resp = await api.post('/public-auth/config-import', formData, { headers: { 'Content-Type': 'multipart/form-data' } })
         const { addons, users, groups } = resp.data
         const totalAddons = (addons.created || 0) + (addons.reused || 0)
         
@@ -175,7 +179,7 @@ export default function SettingsPage() {
         
         toast.success(`Configuration imported:\n${messageParts.join('\n')}`)
       } else if (configText.trim()) {
-        const resp = await api.post('/public-auth/import-config', { jsonData: configText.trim() })
+        const resp = await api.post('/public-auth/config-import', { jsonData: configText.trim() })
         const { addons, users, groups } = resp.data
         const totalAddons = (addons.created || 0) + (addons.reused || 0)
         
@@ -203,7 +207,7 @@ export default function SettingsPage() {
       const formData = new FormData()
       formData.append('file', file)
       setConfigImporting(true)
-      api.post('/public-auth/import-config', formData, { headers: { 'Content-Type': 'multipart/form-data' } })
+      api.post('/public-auth/config-import', formData, { headers: { 'Content-Type': 'multipart/form-data' } })
         .then((resp) => {
           const { addons, users, groups } = resp.data
           const totalAddons = (addons.created || 0) + (addons.reused || 0)
@@ -233,7 +237,7 @@ export default function SettingsPage() {
       const formData = new FormData()
       formData.append('file', file)
       setConfigImporting(true)
-      api.post('/public-auth/import-config', formData, { headers: { 'Content-Type': 'multipart/form-data' } })
+      api.post('/public-auth/config-import', formData, { headers: { 'Content-Type': 'multipart/form-data' } })
         .then((resp) => {
           const { addons, users, groups } = resp.data
           const totalAddons = (addons.created || 0) + (addons.reused || 0)

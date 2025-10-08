@@ -126,3 +126,4 @@ README-CI-CD.md
 ./*.js
 =======
 >>>>>>> 8db98e9 (feat: added missing crypt/hash files)
+prisma/schema.prisma
