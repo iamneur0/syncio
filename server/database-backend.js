@@ -467,39 +467,43 @@ function scheduleBackups(days) {
   backupTimer = setInterval(performBackupOnce, ms)
 }
 
-// initialize on boot
-scheduleBackups(readBackupFrequencyDays())
+// initialize on boot - only for private instances
+if (!AUTH_ENABLED) {
+  scheduleBackups(readBackupFrequencyDays())
+}
 
-// Backup settings endpoints
-app.get('/api/settings/backup-frequency', async (req, res) => {
-  try {
-    return res.json({ days: readBackupFrequencyDays() })
-  } catch {
-    return res.status(500).json({ message: 'Failed to read backup frequency' })
-  }
-})
+// Backup settings endpoints - only available in private mode
+if (!AUTH_ENABLED) {
+  app.get('/api/settings/backup-frequency', async (req, res) => {
+    try {
+      return res.json({ days: readBackupFrequencyDays() })
+    } catch {
+      return res.status(500).json({ message: 'Failed to read backup frequency' })
+    }
+  })
 
-app.put('/api/settings/backup-frequency', async (req, res) => {
-  try {
-    const days = Number(req.body?.days || 0)
-    if (!Number.isFinite(days) || days < 0) return res.status(400).json({ message: 'Invalid days' })
-    writeBackupFrequencyDays(days)
-    scheduleBackups(days)
-    return res.json({ message: 'Backup frequency updated', days })
-  } catch {
-    return res.status(500).json({ message: 'Failed to update backup frequency' })
-  }
-})
+  app.put('/api/settings/backup-frequency', async (req, res) => {
+    try {
+      const days = Number(req.body?.days || 0)
+      if (!Number.isFinite(days) || days < 0) return res.status(400).json({ message: 'Invalid days' })
+      writeBackupFrequencyDays(days)
+      scheduleBackups(days)
+      return res.json({ message: 'Backup frequency updated', days })
+    } catch {
+      return res.status(500).json({ message: 'Failed to update backup frequency' })
+    }
+  })
 
-// manual trigger
-app.post('/api/settings/backup-now', async (req, res) => {
-  try {
-    await performBackupOnce()
-    return res.json({ message: 'Backup started' })
-  } catch {
-    return res.status(500).json({ message: 'Failed to start backup' })
-  }
-})
+  // manual trigger
+  app.post('/api/settings/backup-now', async (req, res) => {
+    try {
+      await performBackupOnce()
+      return res.json({ message: 'Backup started' })
+    } catch {
+      return res.status(500).json({ message: 'Failed to start backup' })
+    }
+  })
+}
 
 function cookieName(base) {
   return isProdEnv() ? `__Host-${base}` : base;
