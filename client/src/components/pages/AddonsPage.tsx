@@ -1898,28 +1898,43 @@ export default function AddonsPage() {
                                 ? (isDark ? 'bg-purple-600 text-white border-purple-600' : 'bg-stremio-purple text-white border-stremio-purple')
                                 : (isDark ? 'bg-gray-700 text-gray-200 border-gray-600' : 'bg-gray-100 text-gray-800 border-gray-300')
                             }`}
-                            title={(() => {
-                              if (typeof res === 'string') return res
-                              if (res?.type === 'catalog') {
+                            onMouseEnter={() => {
+                              if (typeof res === 'string') return
+                              if (res?.type === 'catalog' || res?.name === 'catalog') {
                                 // Get catalog names from the originalManifest
                                 const detailManifest: any = (addonDetail as any)?.originalManifest || (addonDetail as any)?.manifest
-                                console.log('🔍 Catalog tooltip debug:', {
-                                  'detailManifest.catalogs': detailManifest?.catalogs,
-                                  'res.catalogs': res?.catalogs,
-                                  'res.type': res?.type,
-                                  'res.name': res?.name,
-                                  'addonDetail.originalManifest': (addonDetail as any)?.originalManifest,
-                                  'addonDetail.manifest': (addonDetail as any)?.manifest
-                                })
                                 
                                 if (detailManifest?.catalogs && Array.isArray(detailManifest.catalogs) && detailManifest.catalogs.length > 0) {
-                                  const catalogNames = detailManifest.catalogs.map((cat: any) => cat.name || cat.id || 'Unknown').join(', ')
-                                  return `Catalog: ${catalogNames}`
+                                  const catalogNames = detailManifest.catalogs.map((cat: any) => {
+                                    const name = cat.name || cat.id || 'Unknown'
+                                    const type = cat.type || 'unknown'
+                                    return `${name} (${type})`
+                                  }).join('\n')
+                                }
+                              }
+                            }}
+                            title={(() => {
+                              if (typeof res === 'string') return res
+                              if (res?.type === 'catalog' || res?.name === 'catalog') {
+                                // Get catalog names from the originalManifest
+                                const detailManifest: any = (addonDetail as any)?.originalManifest || (addonDetail as any)?.manifest
+                                
+                                if (detailManifest?.catalogs && Array.isArray(detailManifest.catalogs) && detailManifest.catalogs.length > 0) {
+                                  const catalogNames = detailManifest.catalogs.map((cat: any) => {
+                                    const name = cat.name || cat.id || 'Unknown'
+                                    const type = cat.type || 'unknown'
+                                    return `${name} (${type})`
+                                  }).join('\n')
+                                  return catalogNames
                                 }
                                 // Fallback to resource's own catalogs if available
                                 if (res?.catalogs && Array.isArray(res.catalogs) && res.catalogs.length > 0) {
-                                  const catalogNames = res.catalogs.map((cat: any) => cat.name || cat.id || 'Unknown').join(', ')
-                                  return `Catalog: ${catalogNames}`
+                                  const catalogNames = res.catalogs.map((cat: any) => {
+                                    const name = cat.name || cat.id || 'Unknown'
+                                    const type = cat.type || 'unknown'
+                                    return `${name} (${type})`
+                                  }).join('\n')
+                                  return catalogNames
                                 }
                                 // If it's a catalog resource but we don't have catalog names, show generic
                                 return 'Catalog resource'
