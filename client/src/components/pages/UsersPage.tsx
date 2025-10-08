@@ -2644,10 +2644,10 @@ export default function UsersPage() {
                             : 'Click to enable'}
                       >
                         <span
-                          className={`inline-block h-4 w-4 transform rounded-full transition-transform ${
+                          className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
                             user.isActive 
-                              ? 'translate-x-4 bg-purple-200' 
-                              : 'translate-x-0.5 bg-white'
+                              ? 'translate-x-4' 
+                              : 'translate-x-0.5'
                           }`}
                         />
                       </button>
