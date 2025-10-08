@@ -3197,6 +3197,8 @@ app.delete('/api/users/:id', async (req, res) => {
   }
 });
 
+
+
 // Stremio Integration
 // Stremio validation endpoint
 app.post('/api/stremio/validate', async (req, res) => {
@@ -4320,6 +4322,7 @@ app.delete('/api/addons/:id', async (req, res) => {
     res.status(500).json({ message: 'Failed to delete addon', error: error?.message });
   }
 });
+
 
 // Import addons from JSON file (canonical path)
 app.post('/api/public-auth/addon-import', upload.single('file'), async (req, res) => {
@@ -5447,6 +5450,7 @@ app.delete('/api/groups/:id', async (req, res) => {
     return res.status(500).json({ message: 'Failed to delete group', error: error?.message })
   }
 })
+
 
 // Toggle group status (enable/disable)
 app.patch('/api/groups/:id/toggle-status', async (req, res) => {

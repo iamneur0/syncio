@@ -35,11 +35,13 @@ export default function SettingsPage() {
     setDeleteMode(savedDeleteMode === 'unsafe' ? 'unsafe' : 'safe')
   }, [])
 
-  // Load backup frequency
+  // Load backup frequency (only in private mode)
   React.useEffect(() => {
-    api.get('/settings/backup-frequency')
-      .then(r => setBackupDays(Number(r.data?.days || 0)))
-      .catch(() => {})
+    if (process.env.NEXT_PUBLIC_AUTH_ENABLED !== 'true') {
+      api.get('/settings/backup-frequency')
+        .then(r => setBackupDays(Number(r.data?.days || 0)))
+        .catch(() => {})
+    }
   }, [])
 
   const onToggle = (next: boolean) => {
@@ -285,6 +287,167 @@ export default function SettingsPage() {
       // token is cookie-based now; just notify UI to reset
       try { window.dispatchEvent(new CustomEvent('sfm:auth:changed', { detail: { authed: false } })) } catch {}
       window.dispatchEvent(new CustomEvent('sfm:auth:changed', { detail: { authed: false } }))
+    }
+  }
+
+  // Bulk delete functions
+  const deleteAllAddons = async () => {
+    if (!confirm('Delete ALL addons? This cannot be undone.')) return
+    try {
+      // First get all addons
+      const addonsRes = await api.get('/addons')
+      const addons = addonsRes.data || []
+      
+      if (addons.length === 0) {
+        toast.success('No addons found to delete')
+        return
+      }
+
+      // Delete each addon using the existing individual delete endpoint
+      let successCount = 0
+      let errorCount = 0
+      
+      for (const addon of addons) {
+        try {
+          await api.delete(`/addons/${addon.id}`)
+          successCount++
+        } catch (error) {
+          console.error(`Failed to delete addon ${addon.id}:`, error)
+          errorCount++
+        }
+      }
+
+      if (errorCount === 0) {
+        toast.success(`All addons deleted successfully (${successCount} addons)`)
+      } else {
+        toast.success(`Addons deleted: ${successCount} successful, ${errorCount} failed`)
+      }
+      
+      // Refresh the page to update the UI
+      window.location.reload()
+    } catch (e: any) {
+      const msg = e?.response?.data?.error || e?.message || 'Delete failed'
+      toast.error(msg)
+    }
+  }
+
+  const deleteAllUsers = async () => {
+    if (!confirm('Delete ALL users? This cannot be undone.')) return
+    try {
+      // First get all users
+      const usersRes = await api.get('/users')
+      const users = usersRes.data || []
+      
+      if (users.length === 0) {
+        toast.success('No users found to delete')
+        return
+      }
+
+      // Delete each user using the existing individual delete endpoint
+      let successCount = 0
+      let errorCount = 0
+      
+      for (const user of users) {
+        try {
+          await api.delete(`/users/${user.id}`)
+          successCount++
+        } catch (error) {
+          console.error(`Failed to delete user ${user.id}:`, error)
+          errorCount++
+        }
+      }
+
+      if (errorCount === 0) {
+        toast.success(`All users deleted successfully (${successCount} users)`)
+      } else {
+        toast.success(`Users deleted: ${successCount} successful, ${errorCount} failed`)
+      }
+      
+      // Refresh the page to update the UI
+      window.location.reload()
+    } catch (e: any) {
+      const msg = e?.response?.data?.error || e?.message || 'Delete failed'
+      toast.error(msg)
+    }
+  }
+
+  const deleteAllGroups = async () => {
+    if (!confirm('Delete ALL groups? This cannot be undone.')) return
+    try {
+      // First get all groups
+      const groupsRes = await api.get('/groups')
+      const groups = groupsRes.data || []
+      
+      if (groups.length === 0) {
+        toast.success('No groups found to delete')
+        return
+      }
+
+      // Delete each group using the existing individual delete endpoint
+      let successCount = 0
+      let errorCount = 0
+      
+      for (const group of groups) {
+        try {
+          await api.delete(`/groups/${group.id}`)
+          successCount++
+        } catch (error) {
+          console.error(`Failed to delete group ${group.id}:`, error)
+          errorCount++
+        }
+      }
+
+      if (errorCount === 0) {
+        toast.success(`All groups deleted successfully (${successCount} groups)`)
+      } else {
+        toast.success(`Groups deleted: ${successCount} successful, ${errorCount} failed`)
+      }
+      
+      // Refresh the page to update the UI
+      window.location.reload()
+    } catch (e: any) {
+      const msg = e?.response?.data?.error || e?.message || 'Delete failed'
+      toast.error(msg)
+    }
+  }
+
+  const clearAllUserAddons = async () => {
+    if (!confirm('Clear addons from ALL users? This will remove all addons from all users but keep the users and addons themselves.')) return
+    try {
+      // First get all users
+      const usersRes = await api.get('/users')
+      const users = usersRes.data || []
+      
+      if (users.length === 0) {
+        toast.success('No users found to clear addons from')
+        return
+      }
+
+      // Clear addons for each user using the same endpoint as individual clear
+      let successCount = 0
+      let errorCount = 0
+      
+      for (const user of users) {
+        try {
+          await api.post(`/users/${user.id}/stremio-addons/clear`)
+          successCount++
+        } catch (error) {
+          console.error(`Failed to clear addons for user ${user.id}:`, error)
+          errorCount++
+        }
+      }
+
+      if (errorCount === 0) {
+        toast.success(`All user addons cleared successfully (${successCount} users)`)
+      } else {
+        toast.success(`User addons cleared for ${successCount} users, ${errorCount} failed`)
+      }
+      
+      // Refresh the page to update the UI
+      window.location.reload()
+    } catch (e: any) {
+      const msg = e?.response?.data?.error || e?.message || 'Clear failed'
+      toast.error(msg)
     }
   }
 
@@ -717,18 +880,90 @@ export default function SettingsPage() {
       {/* Account Management */}
       <div className={`p-4 rounded-lg border mt-6 ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
         <h2 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>Account Management</h2>
-        <p className={`text-sm mt-1 ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>Reset configuration or delete your account.</p>
-        <div className={`mt-4 flex gap-4 flex-wrap`}>
-          <button onClick={resetConfig} className={`flex items-center px-4 py-2 rounded-lg transition-colors ${isDark ? 'bg-gray-700 hover:bg-gray-600 text-white' : 'bg-gray-100 hover:bg-gray-200 text-gray-900'}`}>
+        <p className={`text-sm mt-1 ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
+          Delete all items of a specific type or perform bulk operations. These operations cannot be undone.
+        </p>
+        <div className={`mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4`}>
+            <button 
+              onClick={deleteAllAddons} 
+              className={`flex items-center justify-center px-4 py-3 rounded-lg transition-colors ${
+                (theme as any) === 'mono' 
+                  ? 'bg-gray-700 hover:bg-gray-600 text-white' 
+                  : isDark 
+                    ? 'bg-red-800 hover:bg-red-700 text-white' 
+                    : 'bg-red-100 hover:bg-red-200 text-red-800'
+              }`}
+            >
+              <Trash2 className="w-5 h-5 mr-2" /> Delete All Addons
+            </button>
+          <button 
+            onClick={deleteAllUsers} 
+            className={`flex items-center justify-center px-4 py-3 rounded-lg transition-colors ${
+              (theme as any) === 'mono' 
+                ? 'bg-gray-700 hover:bg-gray-600 text-white' 
+                : isDark 
+                  ? 'bg-red-800 hover:bg-red-700 text-white' 
+                  : 'bg-red-100 hover:bg-red-200 text-red-800'
+            }`}
+          >
+            <User className="w-5 h-5 mr-2" /> Delete All Users
+          </button>
+          <button 
+            onClick={deleteAllGroups} 
+            className={`flex items-center justify-center px-4 py-3 rounded-lg transition-colors ${
+              (theme as any) === 'mono' 
+                ? 'bg-gray-700 hover:bg-gray-600 text-white' 
+                : isDark 
+                  ? 'bg-red-800 hover:bg-red-700 text-white' 
+                  : 'bg-red-100 hover:bg-red-200 text-red-800'
+            }`}
+          >
+            <Users className="w-5 h-5 mr-2" /> Delete All Groups
+          </button>
+          <button 
+            onClick={clearAllUserAddons} 
+            className={`flex items-center justify-center px-4 py-3 rounded-lg transition-colors ${
+              (theme as any) === 'mono' 
+                ? 'bg-gray-700 hover:bg-gray-600 text-white' 
+                : isDark 
+                  ? 'bg-red-800 hover:bg-red-700 text-white' 
+                  : 'bg-red-100 hover:bg-red-200 text-red-800'
+            }`}
+          >
+            <RefreshCcw className="w-5 h-5 mr-2" /> Clear User Addons
+          </button>
+          <button 
+            onClick={resetConfig} 
+            className={`flex items-center justify-center px-4 py-3 rounded-lg transition-colors ${
+              (theme as any) === 'mono' 
+                ? 'bg-gray-700 hover:bg-gray-600 text-white' 
+                : isDark 
+                  ? 'bg-red-800 hover:bg-red-700 text-white' 
+                  : 'bg-red-100 hover:bg-red-200 text-red-800'
+            }`}
+          >
             <RefreshCcw className="w-5 h-5 mr-2" /> Reset Configuration
           </button>
           {AUTH_ENABLED && (
-            <button onClick={deleteAccount} className={`flex items-center px-4 py-2 rounded-lg transition-colors ${isDark ? 'bg-gray-700 hover:bg-gray-600 text-white' : 'bg-gray-100 hover:bg-gray-200 text-gray-900'}`}>
+            <button 
+              onClick={deleteAccount} 
+              className={`flex items-center justify-center px-4 py-3 rounded-lg transition-colors ${
+                (theme as any) === 'mono' 
+                  ? 'bg-gray-700 hover:bg-gray-600 text-white' 
+                  : isDark 
+                    ? 'bg-red-800 hover:bg-red-700 text-white' 
+                    : 'bg-red-100 hover:bg-red-200 text-red-800'
+              }`}
+            >
               <Trash2 className="w-5 h-5 mr-2" /> Delete Account
             </button>
           )}
         </div>
+        <div className={`text-xs mt-3 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+          ⚠️ These operations are permanent and cannot be undone. Consider exporting your data first.
+        </div>
       </div>
+
       </div>
       {/* Version badge */}
       <div className="fixed bottom-3 right-3 text-xs px-2 py-1 rounded-md opacity-80 select-none pointer-events-none"
