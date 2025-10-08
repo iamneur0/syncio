@@ -1835,10 +1835,8 @@ export default function AddonsPage() {
                     
                     {/* Version Tag - Fixed position */}
                     {editingAddon?.version && (
-                      <span className={`px-2 py-1 text-xs font-medium rounded-full flex-shrink-0 ${
-                        isDark 
-                          ? 'bg-gray-700 text-gray-300 border border-gray-600' 
-                          : 'bg-gray-100 text-gray-700 border border-gray-300'
+                      <span className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium w-fit flex-shrink-0 ${
+                        isDark ? 'bg-purple-600 text-white' : 'bg-purple-100 text-purple-800'
                       }`}>
                         v{editingAddon.version}
                       </span>
