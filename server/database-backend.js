@@ -4479,6 +4479,12 @@ app.put('/api/addons/:id', async (req, res) => {
         }
         if (original && Array.isArray(original.resources)) {
           const selected = Array.isArray(resources) ? resources : []
+          console.log(`🔍 Updating addon resources:`, { 
+            addonId: id, 
+            originalResourcesCount: original.resources.length,
+            selectedResources: selected,
+            selectedCount: selected.length 
+          })
           // Build set of selected names handling both string and object forms
           const selectedNames = new Set(
             selected
@@ -4486,15 +4492,21 @@ app.put('/api/addons/:id', async (req, res) => {
               .filter(Boolean)
           )
           const filtered = { ...original }
-          if (selected.length > 0) {
-            filtered.resources = original.resources.filter((r) => {
-              const label = typeof r === 'string' ? r : (r && (r.name || r.type))
-              return label && selectedNames.has(label)
-            })
-          }
+          // Always filter resources based on selection (even if empty)
+          filtered.resources = original.resources.filter((r) => {
+            const label = typeof r === 'string' ? r : (r && (r.name || r.type))
+            return label && selectedNames.has(label)
+          })
           // SDK guidance: keep keys but empty arrays when deselected
           if (!selectedNames.has('catalog')) filtered.catalogs = []
           if (!selectedNames.has('addon_catalog')) filtered.addonCatalogs = []
+
+          console.log(`🔍 Filtered manifest resources:`, {
+            filteredResourcesCount: filtered.resources.length,
+            filteredResources: filtered.resources,
+            catalogsEmpty: !selectedNames.has('catalog'),
+            addonCatalogsEmpty: !selectedNames.has('addon_catalog')
+          })
 
           updateData.manifest = encrypt(JSON.stringify(filtered), req)
           updateData.originalManifest = existingAddon.originalManifest // keep as is
@@ -5553,28 +5565,40 @@ async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'nor
     const desiredGroup = []
     for (const fa of familyAddons) {
       try {
-        const resp = await fetch(fa.manifestUrl)
-        if (!resp.ok) {
-          throw new Error(`HTTP ${resp.status}: ${resp.statusText}`)
+        // Use the stored manifest directly instead of fetching from URL
+        // This preserves the user's resource selections and customizations
+        if (fa.manifest && typeof fa.manifest === 'object') {
+          console.log(`🔍 Using stored manifest for ${fa.name} (preserves user selections)`)
+          desiredGroup.push({
+            transportUrl: fa.manifestUrl,
+            transportName: fa.manifest.name || fa.name,
+            manifest: fa.manifest,
+          })
+        } else {
+          // Fallback: fetch from URL only if no stored manifest
+          const resp = await fetch(fa.manifestUrl)
+          if (!resp.ok) {
+            throw new Error(`HTTP ${resp.status}: ${resp.statusText}`)
+          }
+          const manifest = await resp.json()
+          console.log(`🔍 Live manifest fetched for ${fa.name}:`, JSON.stringify(manifest, null, 2))
+          
+          // Ensure manifest has required fields
+          const safeManifest = {
+            id: manifest?.id || 'unknown',
+            name: manifest?.name || fa.name || 'Unknown',
+            version: manifest?.version || '1.0.0', // Default version if null
+            description: manifest?.description || fa.description || '',
+            ...manifest // Include all other manifest fields
+          }
+          console.log(`🔍 Safe manifest created:`, JSON.stringify(safeManifest, null, 2))
+          
+          desiredGroup.push({
+            transportUrl: fa.manifestUrl,
+            transportName: safeManifest.name,
+            manifest: safeManifest,
+          })
         }
-        const manifest = await resp.json()
-        console.log(`🔍 Live manifest fetched for ${fa.name}:`, JSON.stringify(manifest, null, 2))
-        
-        // Ensure manifest has required fields
-        const safeManifest = {
-          id: manifest?.id || 'unknown',
-          name: manifest?.name || fa.name || 'Unknown',
-          version: manifest?.version || '1.0.0', // Default version if null
-          description: manifest?.description || fa.description || '',
-          ...manifest // Include all other manifest fields
-        }
-        console.log(`🔍 Safe manifest created:`, JSON.stringify(safeManifest, null, 2))
-        
-        desiredGroup.push({
-          transportUrl: fa.manifestUrl,
-          transportName: safeManifest.name,
-          manifest: safeManifest,
-        })
       } catch (e) {
         console.warn(`⚠️ Failed to fetch manifest for ${fa.manifestUrl}:`, e.message)
         
@@ -5582,18 +5606,9 @@ async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'nor
         // Use stored manifest from the database as fallback
         let fallbackManifest
         if (fa.manifest && typeof fa.manifest === 'object') {
-          // Use the stored manifest JSON if available
-          fallbackManifest = {
-            id: fa.manifest.id || fa.id || 'unknown',
-            name: fa.manifest.name || fa.name || 'Unknown',
-            version: fa.manifest.version || fa.version || '1.0.0',
-            description: fa.manifest.description || fa.description || '',
-            types: fa.manifest.types || ['other'],
-            resources: fa.manifest.resources || [],
-            catalogs: fa.manifest.catalogs || [],
-            ...fa.manifest // Include all other manifest fields
-          }
-          console.log(`🔍 Using stored manifest for ${fa.name}:`, JSON.stringify(fallbackManifest, null, 2))
+          // Use the stored manifest JSON directly - no need to reconstruct it
+          fallbackManifest = fa.manifest
+          console.log(`🔍 Using stored manifest directly for ${fa.name}`)
         } else {
           // Fallback to database fields if no stored manifest
           fallbackManifest = {
