@@ -3976,7 +3976,7 @@ function canonicalizeManifestUrl(raw) {
 
 app.post('/api/addons', async (req, res) => {
   try {
-    const { url, name, description, groupIds, manifestData: providedManifestData } = req.body;
+          const { url, name, description, groupIds, manifestData: providedManifestData } = req.body;
     
     if (!url) {
       return res.status(400).json({ message: 'Addon URL is required' });
@@ -4017,7 +4017,7 @@ app.post('/api/addons', async (req, res) => {
       console.log(`✅ Fetched manifest:`, manifestData?.name, manifestData?.version)
     } catch (e) {
       return res.status(400).json({ message: 'Failed to fetch addon manifest. The add-on URL may be incorrect.' })
-    }
+      }
     }
 
     if (existingByName) {
@@ -4025,8 +4025,8 @@ app.post('/api/addons', async (req, res) => {
         // Addon with this name already exists and is active
         return res.status(409).json({ message: 'Addon with this name already exists.' })
       } else {
-        // Reactivate and refresh meta for inactive record
-        const reactivated = await prisma.addon.update({
+      // Reactivate and refresh meta for inactive record
+      const reactivated = await prisma.addon.update({
         where: { 
           id: existingByName.id,
           accountId: getAccountId(req)

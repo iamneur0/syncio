@@ -434,6 +434,10 @@ export default function GroupsPage() {
   useEffect(() => { setMounted(true) }, [])
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [confirmConfig, setConfirmConfig] = useState<{ title: string; description: string; isDanger?: boolean; onConfirm: () => void }>({ title: '', description: '', isDanger: true, onConfirm: () => {} })
+
+  // Selection state
+  const [selectedGroups, setSelectedGroups] = useState<string[]>([])
+  const [isSelectionMode, setIsSelectionMode] = useState(false)
   
   // Drag and drop state for group addons
   const [addonOrder, setAddonOrder] = useState<string[]>([])
@@ -539,6 +543,61 @@ export default function GroupsPage() {
   const openConfirm = (cfg: { title: string; description: string; isDanger?: boolean; onConfirm: () => void }) => {
     setConfirmConfig(cfg)
     setConfirmOpen(true)
+  }
+
+  // Selection handlers
+  const handleSelectAll = () => {
+    setSelectedGroups(groups?.map((group: any) => group.id) || [])
+  }
+
+  const handleDeselectAll = () => {
+    setSelectedGroups([])
+  }
+
+  const handleGroupToggle = (groupId: string) => {
+    setSelectedGroups(prev => 
+      prev.includes(groupId) 
+        ? prev.filter(id => id !== groupId)
+        : [...prev, groupId]
+    )
+  }
+
+  const handleBulkDelete = async () => {
+    if (selectedGroups.length === 0) {
+      toast.error('No groups selected')
+      return
+    }
+
+    if (!confirm(`Delete ${selectedGroups.length} selected groups? This cannot be undone.`)) return
+
+    try {
+      let successCount = 0
+      let errorCount = 0
+      
+      for (const groupId of selectedGroups) {
+        try {
+          await groupsAPI.delete(groupId)
+          successCount++
+        } catch (error) {
+          console.error(`Failed to delete group ${groupId}:`, error)
+          errorCount++
+        }
+      }
+
+      if (errorCount === 0) {
+        toast.success(`${selectedGroups.length} groups deleted successfully`)
+      } else {
+        toast.success(`Groups deleted: ${successCount} successful, ${errorCount} failed`)
+      }
+      
+      // Clear selection and refresh data
+      setSelectedGroups([])
+      setIsSelectionMode(false)
+      queryClient.invalidateQueries({ queryKey: ['groups'] })
+    } catch (e: any) {
+      const msg = e?.response?.data?.error || e?.message || 'Delete failed'
+      toast.error(msg)
+    }
   }
 
   // Handle view group details
@@ -1890,6 +1949,27 @@ export default function GroupsPage() {
               <span className="hidden sm:inline">Create Group</span>
               <span className="sm:hidden">Create</span>
             </button>
+            <button
+              onClick={() => {
+                setIsSelectionMode(!isSelectionMode)
+                if (isSelectionMode) {
+                  setSelectedGroups([])
+                }
+              }}
+              className={`flex items-center justify-center px-3 py-2 sm:px-4 rounded-lg transition-colors text-sm sm:text-base ${
+                isSelectionMode
+                  ? isDark 
+                    ? 'bg-red-600 hover:bg-red-700 text-white' 
+                    : 'bg-red-500 hover:bg-red-600 text-white'
+                  : isDark 
+                    ? 'bg-gray-700 hover:bg-gray-600 text-white' 
+                    : 'bg-gray-200 hover:bg-gray-300 text-gray-900'
+              }`}
+            >
+              <Grid3X3 className="w-4 h-4 sm:w-5 sm:h-5 mr-2" />
+              <span className="hidden sm:inline">{isSelectionMode ? 'Cancel' : 'Select'}</span>
+              <span className="sm:hidden">{isSelectionMode ? 'Cancel' : 'Select'}</span>
+            </button>
             {/* Desktop account button (mobile version is in the topbar) */}
             <div className="hidden lg:block ml-1">
               <UserMenuButton />
@@ -1913,7 +1993,46 @@ export default function GroupsPage() {
               }`}
             />
           </div>
-          
+
+          {/* Selection Controls */}
+          {isSelectionMode && (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleSelectAll}
+                className={`px-3 py-2 text-sm rounded-lg transition-colors ${
+                  isDark 
+                    ? 'bg-gray-700 hover:bg-gray-600 text-white' 
+                    : 'bg-gray-200 hover:bg-gray-300 text-gray-900'
+                }`}
+              >
+                Select All
+              </button>
+              <button
+                onClick={handleDeselectAll}
+                className={`px-3 py-2 text-sm rounded-lg transition-colors ${
+                  isDark 
+                    ? 'bg-gray-700 hover:bg-gray-600 text-white' 
+                    : 'bg-gray-200 hover:bg-gray-300 text-gray-900'
+                }`}
+              >
+                Deselect All
+              </button>
+              {selectedGroups.length > 0 && (
+                <button
+                  onClick={handleBulkDelete}
+                  className={`px-3 py-2 text-sm rounded-lg transition-colors ${
+                    isDark 
+                      ? 'bg-red-600 hover:bg-red-700 text-white' 
+                      : 'bg-red-500 hover:bg-red-600 text-white'
+                  }`}
+                >
+                  <Trash2 className="w-4 h-4 mr-1 inline" />
+                  Delete ({selectedGroups.length})
+                </button>
+              )}
+            </div>
+          )}
+
           {/* View Mode Toggle */}
           {mounted && (
             <div className="flex items-center">
@@ -2030,7 +2149,18 @@ export default function GroupsPage() {
                 : isDark 
               ? 'bg-gray-800 border-gray-700' 
               : 'bg-white border-gray-200'
-            } ${!group.isActive ? 'opacity-50' : ''}`}>
+            } ${!group.isActive ? 'opacity-50' : ''} ${isSelectionMode ? 'relative' : ''}`}>
+            {/* Selection Checkbox */}
+            {isSelectionMode && (
+              <div className="absolute top-4 left-4 z-10">
+                <input
+                  type="checkbox"
+                  checked={selectedGroups.includes(group.id)}
+                  onChange={() => handleGroupToggle(group.id)}
+                  className="w-5 h-5 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 focus:ring-2"
+                />
+              </div>
+            )}
             <div className="flex items-start justify-between mb-4">
               <div className="flex items-center">
                   <div 
@@ -2226,9 +2356,23 @@ export default function GroupsPage() {
               isDark 
                 ? 'bg-gray-800 border-gray-700' 
                 : 'bg-white border-gray-200'
-            } ${!group.isActive ? 'opacity-50' : ''}`}
-              onClick={() => handleViewGroupDetails(group)}
+            } ${!group.isActive ? 'opacity-50' : ''} ${isSelectionMode ? 'relative' : ''}`}
+              onClick={() => !isSelectionMode && handleViewGroupDetails(group)}
             >
+              {/* Selection Checkbox */}
+              {isSelectionMode && (
+                <div className="absolute top-4 left-4 z-10">
+                  <input
+                    type="checkbox"
+                    checked={selectedGroups.includes(group.id)}
+                    onChange={(e) => {
+                      e.stopPropagation()
+                      handleGroupToggle(group.id)
+                    }}
+                    className="w-5 h-5 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 focus:ring-2"
+                  />
+                </div>
+              )}
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center flex-1 min-w-0 max-w-[calc(100%-200px)]">
                   <div
@@ -2656,52 +2800,65 @@ export default function GroupsPage() {
           }`}>
             <div className="p-6">
               <div className="flex items-center justify-between mb-6">
-                <div className="flex flex-col">
-                  <div className="flex items-center gap-4">
-                    {editingDetailGroupName ? (
-                      <input
-                        type="text"
-                        value={tempDetailGroupName}
-                        onChange={(e) => setTempDetailGroupName(e.target.value)}
-                        onBlur={() => handleBlurDetailGroupName(selectedGroup.name)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            handleSaveDetailGroupName(selectedGroup.name)
-                          } else if (e.key === 'Escape') {
-                            setEditingDetailGroupName(false)
-                            setTempDetailGroupName('')
+                <div className="flex flex-col flex-1">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-4">
+                      <h2 
+                        contentEditable
+                        suppressContentEditableWarning
+                        className={`text-xl font-bold cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 px-2 py-1 rounded transition-colors focus:outline-none focus:ring-2 focus:ring-stremio-purple focus:bg-gray-100 dark:focus:bg-gray-700 ${isDark ? 'text-white' : 'text-gray-900'}`}
+                        onBlur={(e) => {
+                          const newValue = e.target.textContent?.trim() || '';
+                          if (newValue && newValue !== selectedGroup.name) {
+                            handleSaveDetailGroupName(newValue);
                           }
                         }}
-                        placeholder={selectedGroup.name}
-                        className={`px-2 py-1 text-xl font-bold border rounded focus:ring-2 focus:ring-stremio-purple focus:border-transparent ${
-                          isDark 
-                            ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
-                            : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
-                        }`}
-                        autoFocus
-                      />
-                    ) : (
-                      <h2 
-                        className={`text-xl font-bold cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 px-2 py-1 rounded transition-colors ${isDark ? 'text-white' : 'text-gray-900'}`}
-                        onClick={() => handleStartEditDetailGroupName(selectedGroup.name)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            const newValue = e.currentTarget.textContent?.trim() || '';
+                            if (newValue && newValue !== selectedGroup.name) {
+                              handleSaveDetailGroupName(newValue);
+                            }
+                            e.currentTarget.blur();
+                          } else if (e.key === 'Escape') {
+                            e.currentTarget.textContent = selectedGroup.name;
+                            e.currentTarget.blur();
+                          }
+                        }}
                         title="Click to edit group name"
                       >
                         {selectedGroup.name}
                       </h2>
-                    )}
+                      <GroupSyncBadge 
+                        groupId={selectedGroup.id} 
+                        onSync={handleGroupSync}
+                        isSyncing={syncingGroups.has(selectedGroup.id)}
+                      />
+                    </div>
                     <div className="flex items-center gap-4">
-                      <div className="flex items-center gap-2">
-                        <Users className={`w-4 h-4 ${isDark ? 'text-gray-400' : 'text-gray-500'}`} />
-                        <span className={`text-sm font-medium ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
-                          {selectedGroup.members || 0}
-                        </span>
+                      <div className="flex items-center gap-4">
+                        <div className="flex items-center gap-2">
+                          <Users className={`w-4 h-4 ${isDark ? 'text-gray-400' : 'text-gray-500'}`} />
+                          <span className={`text-sm font-medium ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
+                            {selectedGroup.members || 0}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Puzzle className={`w-4 h-4 ${isDark ? 'text-gray-400' : 'text-gray-500'}`} />
+                          <span className={`text-sm font-medium ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
+                            {selectedGroupDetails?.group?.addons?.length || selectedGroupDetails?.addons?.length || 0}
+                          </span>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <Puzzle className={`w-4 h-4 ${isDark ? 'text-gray-400' : 'text-gray-500'}`} />
-                        <span className={`text-sm font-medium ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
-                          {selectedGroupDetails?.group?.addons?.length || selectedGroupDetails?.addons?.length || 0}
-                        </span>
-                      </div>
+                      <button
+                        onClick={() => setShowDetailModal(false)}
+                        className={`w-8 h-8 flex items-center justify-center rounded transition-colors border-0 focus:outline-none ring-0 focus:ring-0 ${
+                          isMono ? 'text-white hover:text-white/80 hover:bg-white/10' : (isDark ? 'text-gray-400 hover:text-gray-300 hover:bg-gray-700' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100')
+                        }`}
+                      >
+                        ✕
+                      </button>
                     </div>
                   </div>
                   {selectedGroup.description && (
@@ -2709,21 +2866,6 @@ export default function GroupsPage() {
                       {selectedGroup.description}
                     </p>
                   )}
-                </div>
-                <div className="flex items-center gap-2">
-                  <GroupSyncBadge 
-                    groupId={selectedGroup.id} 
-                    onSync={handleGroupSync}
-                    isSyncing={syncingGroups.has(selectedGroup.id)}
-                  />
-                  <button
-                    onClick={() => setShowDetailModal(false)}
-                    className={`w-8 h-8 flex items-center justify-center rounded transition-colors border-0 focus:outline-none ring-0 focus:ring-0 ${
-                      isMono ? 'text-white hover:text-white/80 hover:bg-white/10' : (isDark ? 'text-gray-400 hover:text-gray-300 hover:bg-gray-700' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100')
-                    }`}
-                  >
-                    ✕
-                  </button>
                 </div>
               </div>
 
