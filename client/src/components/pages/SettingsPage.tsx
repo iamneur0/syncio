@@ -6,6 +6,7 @@ import { useMutation } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import { Upload, RotateCcw, Sun, Moon, Sparkles, User, Users, Download, Trash2, RefreshCcw, SunMoon } from 'lucide-react'
 import UserMenuButton from '@/components/auth/UserMenuButton'
+import ConfirmDialog from '@/components/common/ConfirmDialog'
 import api from '@/services/api'
 
 export default function SettingsPage() {
@@ -22,7 +23,16 @@ export default function SettingsPage() {
   const [configText, setConfigText] = React.useState<string>('')
   const [backupDays, setBackupDays] = React.useState<number>(0)
   
+  // Account management confirmation modals
+  const [confirmOpen, setConfirmOpen] = React.useState(false)
+  const [confirmConfig, setConfirmConfig] = React.useState<{ title: string; description: string; isDanger?: boolean; onConfirm: () => void }>({ title: '', description: '', isDanger: true, onConfirm: () => {} })
+  
   const AUTH_ENABLED = process.env.NEXT_PUBLIC_AUTH_ENABLED === 'true'
+
+  const openConfirm = (cfg: { title: string; description: string; isDanger?: boolean; onConfirm: () => void }) => {
+    setConfirmConfig(cfg)
+    setConfirmOpen(true)
+  }
 
   React.useEffect(() => {
     const saved = localStorage.getItem('sfm_hide_sensitive')
@@ -263,192 +273,228 @@ export default function SettingsPage() {
   }
 
   const resetConfig = async () => {
-    if (!confirm('Reset configuration (users, groups, addons)? This cannot be undone.')) return
-    try {
-      const res = await api.post('/public-auth/reset')
-      if (res.status !== 200) throw new Error('Reset failed')
-      toast.success('Configuration reset')
-    } catch (e: any) {
-      const msg = e?.response?.data?.error || e?.message || 'Reset failed'
-      toast.error(msg)
-    }
+    openConfirm({
+      title: 'Reset Configuration',
+      description: 'Reset configuration (users, groups, addons)? This cannot be undone.',
+      isDanger: true,
+      onConfirm: async () => {
+        try {
+          const res = await api.post('/public-auth/reset')
+          if (res.status !== 200) throw new Error('Reset failed')
+          toast.success('Configuration reset')
+        } catch (e: any) {
+          const msg = e?.response?.data?.error || e?.message || 'Reset failed'
+          toast.error(msg)
+        }
+      }
+    })
   }
 
   const deleteAccount = async () => {
-    if (!confirm('Delete your Syncio account and all data? This cannot be undone.')) return
-    try {
-      const res = await api.delete('/public-auth/account')
-      if (res.status !== 200) throw new Error('Delete failed')
-      toast.success('Account deleted')
-    } catch (e: any) {
-      const msg = e?.response?.data?.error || e?.message || 'Delete failed'
-      toast.error(msg)
-    } finally {
-      // token is cookie-based now; just notify UI to reset
-      try { window.dispatchEvent(new CustomEvent('sfm:auth:changed', { detail: { authed: false } })) } catch {}
-      window.dispatchEvent(new CustomEvent('sfm:auth:changed', { detail: { authed: false } }))
-    }
+    openConfirm({
+      title: 'Delete Account',
+      description: 'Delete your Syncio account and all data? This cannot be undone.',
+      isDanger: true,
+      onConfirm: async () => {
+        try {
+          const res = await api.delete('/public-auth/account')
+          if (res.status !== 200) throw new Error('Delete failed')
+          toast.success('Account deleted')
+        } catch (e: any) {
+          const msg = e?.response?.data?.error || e?.message || 'Delete failed'
+          toast.error(msg)
+        } finally {
+          // token is cookie-based now; just notify UI to reset
+          try { window.dispatchEvent(new CustomEvent('sfm:auth:changed', { detail: { authed: false } })) } catch {}
+          window.dispatchEvent(new CustomEvent('sfm:auth:changed', { detail: { authed: false } }))
+        }
+      }
+    })
   }
 
   // Bulk delete functions
   const deleteAllAddons = async () => {
-    if (!confirm('Delete ALL addons? This cannot be undone.')) return
-    try {
-      // First get all addons
-      const addonsRes = await api.get('/addons')
-      const addons = addonsRes.data || []
-      
-      if (addons.length === 0) {
-        toast.success('No addons found to delete')
-        return
-      }
-
-      // Delete each addon using the existing individual delete endpoint
-      let successCount = 0
-      let errorCount = 0
-      
-      for (const addon of addons) {
+    openConfirm({
+      title: 'Delete All Addons',
+      description: 'Delete ALL addons? This cannot be undone.',
+      isDanger: true,
+      onConfirm: async () => {
         try {
-          await api.delete(`/addons/${addon.id}`)
-          successCount++
-        } catch (error) {
-          console.error(`Failed to delete addon ${addon.id}:`, error)
-          errorCount++
+          // First get all addons
+          const addonsRes = await api.get('/addons')
+          const addons = addonsRes.data || []
+          
+          if (addons.length === 0) {
+            toast.success('No addons found to delete')
+            return
+          }
+
+          // Delete each addon using the existing individual delete endpoint
+          let successCount = 0
+          let errorCount = 0
+          
+          for (const addon of addons) {
+            try {
+              await api.delete(`/addons/${addon.id}`)
+              successCount++
+            } catch (error) {
+              console.error(`Failed to delete addon ${addon.id}:`, error)
+              errorCount++
+            }
+          }
+
+          if (errorCount === 0) {
+            toast.success(`All addons deleted successfully (${successCount} addons)`)
+          } else {
+            toast.success(`Addons deleted: ${successCount} successful, ${errorCount} failed`)
+          }
+          
+          // Refresh the page to update the UI
+          window.location.reload()
+        } catch (e: any) {
+          const msg = e?.response?.data?.error || e?.message || 'Delete failed'
+          toast.error(msg)
         }
       }
-
-      if (errorCount === 0) {
-        toast.success(`All addons deleted successfully (${successCount} addons)`)
-      } else {
-        toast.success(`Addons deleted: ${successCount} successful, ${errorCount} failed`)
-      }
-      
-      // Refresh the page to update the UI
-      window.location.reload()
-    } catch (e: any) {
-      const msg = e?.response?.data?.error || e?.message || 'Delete failed'
-      toast.error(msg)
-    }
+    })
   }
 
   const deleteAllUsers = async () => {
-    if (!confirm('Delete ALL users? This cannot be undone.')) return
-    try {
-      // First get all users
-      const usersRes = await api.get('/users')
-      const users = usersRes.data || []
-      
-      if (users.length === 0) {
-        toast.success('No users found to delete')
-        return
-      }
-
-      // Delete each user using the existing individual delete endpoint
-      let successCount = 0
-      let errorCount = 0
-      
-      for (const user of users) {
+    openConfirm({
+      title: 'Delete All Users',
+      description: 'Delete ALL users? This cannot be undone.',
+      isDanger: true,
+      onConfirm: async () => {
         try {
-          await api.delete(`/users/${user.id}`)
-          successCount++
-        } catch (error) {
-          console.error(`Failed to delete user ${user.id}:`, error)
-          errorCount++
+          // First get all users
+          const usersRes = await api.get('/users')
+          const users = usersRes.data || []
+          
+          if (users.length === 0) {
+            toast.success('No users found to delete')
+            return
+          }
+
+          // Delete each user using the existing individual delete endpoint
+          let successCount = 0
+          let errorCount = 0
+          
+          for (const user of users) {
+            try {
+              await api.delete(`/users/${user.id}`)
+              successCount++
+            } catch (error) {
+              console.error(`Failed to delete user ${user.id}:`, error)
+              errorCount++
+            }
+          }
+
+          if (errorCount === 0) {
+            toast.success(`All users deleted successfully (${successCount} users)`)
+          } else {
+            toast.success(`Users deleted: ${successCount} successful, ${errorCount} failed`)
+          }
+          
+          // Refresh the page to update the UI
+          window.location.reload()
+        } catch (e: any) {
+          const msg = e?.response?.data?.error || e?.message || 'Delete failed'
+          toast.error(msg)
         }
       }
-
-      if (errorCount === 0) {
-        toast.success(`All users deleted successfully (${successCount} users)`)
-      } else {
-        toast.success(`Users deleted: ${successCount} successful, ${errorCount} failed`)
-      }
-      
-      // Refresh the page to update the UI
-      window.location.reload()
-    } catch (e: any) {
-      const msg = e?.response?.data?.error || e?.message || 'Delete failed'
-      toast.error(msg)
-    }
+    })
   }
 
   const deleteAllGroups = async () => {
-    if (!confirm('Delete ALL groups? This cannot be undone.')) return
-    try {
-      // First get all groups
-      const groupsRes = await api.get('/groups')
-      const groups = groupsRes.data || []
-      
-      if (groups.length === 0) {
-        toast.success('No groups found to delete')
-        return
-      }
-
-      // Delete each group using the existing individual delete endpoint
-      let successCount = 0
-      let errorCount = 0
-      
-      for (const group of groups) {
+    openConfirm({
+      title: 'Delete All Groups',
+      description: 'Delete ALL groups? This cannot be undone.',
+      isDanger: true,
+      onConfirm: async () => {
         try {
-          await api.delete(`/groups/${group.id}`)
-          successCount++
-        } catch (error) {
-          console.error(`Failed to delete group ${group.id}:`, error)
-          errorCount++
+          // First get all groups
+          const groupsRes = await api.get('/groups')
+          const groups = groupsRes.data || []
+          
+          if (groups.length === 0) {
+            toast.success('No groups found to delete')
+            return
+          }
+
+          // Delete each group using the existing individual delete endpoint
+          let successCount = 0
+          let errorCount = 0
+          
+          for (const group of groups) {
+            try {
+              await api.delete(`/groups/${group.id}`)
+              successCount++
+            } catch (error) {
+              console.error(`Failed to delete group ${group.id}:`, error)
+              errorCount++
+            }
+          }
+
+          if (errorCount === 0) {
+            toast.success(`All groups deleted successfully (${successCount} groups)`)
+          } else {
+            toast.success(`Groups deleted: ${successCount} successful, ${errorCount} failed`)
+          }
+          
+          // Refresh the page to update the UI
+          window.location.reload()
+        } catch (e: any) {
+          const msg = e?.response?.data?.error || e?.message || 'Delete failed'
+          toast.error(msg)
         }
       }
-
-      if (errorCount === 0) {
-        toast.success(`All groups deleted successfully (${successCount} groups)`)
-      } else {
-        toast.success(`Groups deleted: ${successCount} successful, ${errorCount} failed`)
-      }
-      
-      // Refresh the page to update the UI
-      window.location.reload()
-    } catch (e: any) {
-      const msg = e?.response?.data?.error || e?.message || 'Delete failed'
-      toast.error(msg)
-    }
+    })
   }
 
   const clearAllUserAddons = async () => {
-    if (!confirm('Clear addons from ALL users? This will remove all addons from all users but keep the users and addons themselves.')) return
-    try {
-      // First get all users
-      const usersRes = await api.get('/users')
-      const users = usersRes.data || []
-      
-      if (users.length === 0) {
-        toast.success('No users found to clear addons from')
-        return
-      }
-
-      // Clear addons for each user using the same endpoint as individual clear
-      let successCount = 0
-      let errorCount = 0
-      
-      for (const user of users) {
+    openConfirm({
+      title: 'Clear All User Addons',
+      description: 'Clear addons from ALL users? This will remove all addons from all users but keep the users and addons themselves.',
+      isDanger: true,
+      onConfirm: async () => {
         try {
-          await api.post(`/users/${user.id}/stremio-addons/clear`)
-          successCount++
-        } catch (error) {
-          console.error(`Failed to clear addons for user ${user.id}:`, error)
-          errorCount++
+          // First get all users
+          const usersRes = await api.get('/users')
+          const users = usersRes.data || []
+          
+          if (users.length === 0) {
+            toast.success('No users found to clear addons from')
+            return
+          }
+
+          // Clear addons for each user using the same endpoint as individual clear
+          let successCount = 0
+          let errorCount = 0
+          
+          for (const user of users) {
+            try {
+              await api.post(`/users/${user.id}/stremio-addons/clear`)
+              successCount++
+            } catch (error) {
+              console.error(`Failed to clear addons for user ${user.id}:`, error)
+              errorCount++
+            }
+          }
+
+          if (errorCount === 0) {
+            toast.success(`All user addons cleared successfully (${successCount} users)`)
+          } else {
+            toast.success(`User addons cleared for ${successCount} users, ${errorCount} failed`)
+          }
+          
+          // Refresh the page to update the UI
+          window.location.reload()
+        } catch (e: any) {
+          const msg = e?.response?.data?.error || e?.message || 'Clear failed'
+          toast.error(msg)
         }
       }
-
-      if (errorCount === 0) {
-        toast.success(`All user addons cleared successfully (${successCount} users)`)
-      } else {
-        toast.success(`User addons cleared for ${successCount} users, ${errorCount} failed`)
-      }
-      
-      // Refresh the page to update the UI
-      window.location.reload()
-    } catch (e: any) {
-      const msg = e?.response?.data?.error || e?.message || 'Clear failed'
-      toast.error(msg)
-    }
+    })
   }
 
   return (
@@ -965,6 +1011,17 @@ export default function SettingsPage() {
       </div>
 
       </div>
+      
+      {/* Confirmation Dialog */}
+      <ConfirmDialog
+        open={confirmOpen}
+        title={confirmConfig.title}
+        description={confirmConfig.description}
+        isDanger={confirmConfig.isDanger}
+        onCancel={() => setConfirmOpen(false)}
+        onConfirm={() => { setConfirmOpen(false); confirmConfig.onConfirm?.() }}
+      />
+      
       {/* Version badge */}
       <div className="fixed bottom-3 right-3 text-xs px-2 py-1 rounded-md opacity-80 select-none pointer-events-none"
         style={{

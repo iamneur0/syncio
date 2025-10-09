@@ -967,6 +967,9 @@ export default function AddonsPage() {
 
   // Selection state
   const [selectedAddons, setSelectedAddons] = useState<string[]>([])
+  
+  // Bulk delete confirmation state
+  const [bulkDeleteConfirmOpen, setBulkDeleteConfirmOpen] = useState(false)
 
   const openConfirm = (cfg: { title: string; description: string; isDanger?: boolean; onConfirm: () => void }) => {
     setConfirmConfig(cfg)
@@ -975,7 +978,7 @@ export default function AddonsPage() {
 
   // Selection handlers
   const handleSelectAll = () => {
-    setSelectedAddons(addons?.map(addon => addon.id) || [])
+    setSelectedAddons(displayAddons.map(addon => addon.id))
   }
 
   const handleDeselectAll = () => {
@@ -996,8 +999,12 @@ export default function AddonsPage() {
       return
     }
 
-    if (!confirm(`Delete ${selectedAddons.length} selected addons? This cannot be undone.`)) return
+    setBulkDeleteConfirmOpen(true)
+  }
 
+  const confirmBulkDelete = async () => {
+    setBulkDeleteConfirmOpen(false)
+    
     try {
       let successCount = 0
       let errorCount = 0
@@ -1161,7 +1168,10 @@ export default function AddonsPage() {
                <Plus className="w-4 h-4 sm:w-5 sm:h-5" />
              </button>
              <button
-               onClick={() => reloadAllMutation.mutate()}
+               onClick={(e) => {
+                 e.stopPropagation()
+                 reloadAllMutation.mutate()
+               }}
                disabled={selectedAddons.length === 0 || reloadAllMutation.isPending || isReloadingAll || reloadAddonMutation.isPending || addons.length === 0}
                className={`w-10 h-10 sm:w-12 sm:h-12 rounded-lg transition-colors flex items-center justify-center ${
                  selectedAddons.length === 0
@@ -1175,7 +1185,10 @@ export default function AddonsPage() {
                <RefreshCw className={`w-4 h-4 sm:w-5 sm:h-5 ${isReloadingAll ? 'animate-spin' : ''}`} />
              </button>
              <button
-               onClick={handleBulkDelete}
+               onClick={(e) => {
+                 e.stopPropagation()
+                 handleBulkDelete()
+               }}
                disabled={selectedAddons.length === 0}
                className={`w-10 h-10 sm:w-12 sm:h-12 rounded-lg transition-colors flex items-center justify-center ${
                  selectedAddons.length === 0
@@ -2219,6 +2232,15 @@ export default function AddonsPage() {
         isDanger={confirmConfig.isDanger}
         onCancel={() => setConfirmOpen(false)}
         onConfirm={() => { setConfirmOpen(false); confirmConfig.onConfirm?.() }}
+      />
+
+      <ConfirmDialog
+        open={bulkDeleteConfirmOpen}
+        title={`Delete ${selectedAddons.length} selected addon${selectedAddons.length > 1 ? 's' : ''}`}
+        description="This action cannot be undone. All selected addons will be permanently deleted."
+        isDanger={true}
+        onCancel={() => setBulkDeleteConfirmOpen(false)}
+        onConfirm={confirmBulkDelete}
       />
     </div>
   )
