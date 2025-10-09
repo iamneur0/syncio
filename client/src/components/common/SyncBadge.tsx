@@ -87,13 +87,19 @@ export default function SyncBadge({
       if (isMono) {
         // Avoid generic .mono button styles adding unwanted borders by not using <button>
         return (
-          <div onClick={onClick} className="cursor-pointer select-none">
+          <div onClick={(e) => {
+            e.stopPropagation()
+            onClick()
+          }} className="cursor-pointer select-none">
             {content}
           </div>
         )
       }
       return (
-        <button onClick={onClick} className="focus:outline-none">
+        <button onClick={(e) => {
+          e.stopPropagation()
+          onClick()
+        }} className="focus:outline-none">
           {content}
         </button>
       )
@@ -129,13 +135,19 @@ export default function SyncBadge({
     if (isMono) {
       // Avoid generic .mono button styles adding unwanted borders by not using <button>
       return (
-        <div onClick={onClick} className="cursor-pointer select-none">
+        <div onClick={(e) => {
+          e.stopPropagation()
+          onClick()
+        }} className="cursor-pointer select-none">
           {content}
         </div>
       )
     }
     return (
-      <button onClick={onClick} className="focus:outline-none">
+      <button onClick={(e) => {
+        e.stopPropagation()
+        onClick()
+      }} className="focus:outline-none">
         {content}
       </button>
     )

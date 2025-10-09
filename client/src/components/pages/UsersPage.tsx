@@ -26,7 +26,9 @@ import {
   List,
   Import,
   Copy,
-  Download
+  Download,
+  Square,
+  CheckSquare
 } from 'lucide-react'
 import { useTheme } from '@/contexts/ThemeContext'
 import { getColorBgClass, getColorTextClass, getColorOptions } from '@/utils/colorMapping'
@@ -1482,7 +1484,9 @@ export default function UsersPage() {
 
   // Selection state
   const [selectedUsers, setSelectedUsers] = useState<string[]>([])
-  const [isSelectionMode, setIsSelectionMode] = useState(false)
+  
+  // Bulk delete confirmation state
+  const [bulkDeleteConfirmOpen, setBulkDeleteConfirmOpen] = useState(false)
 
   const openConfirm = (cfg: { title: string; description: string; isDanger?: boolean; onConfirm: () => void }) => {
     setConfirmConfig(cfg)
@@ -1491,7 +1495,7 @@ export default function UsersPage() {
 
   // Selection handlers
   const handleSelectAll = () => {
-    setSelectedUsers(users?.map((user: any) => user.id) || [])
+    setSelectedUsers(displayUsers.map(user => user.id))
   }
 
   const handleDeselectAll = () => {
@@ -1512,8 +1516,12 @@ export default function UsersPage() {
       return
     }
 
-    if (!confirm(`Delete ${selectedUsers.length} selected users? This cannot be undone.`)) return
+    setBulkDeleteConfirmOpen(true)
+  }
 
+  const confirmBulkDelete = async () => {
+    setBulkDeleteConfirmOpen(false)
+    
     try {
       let successCount = 0
       let errorCount = 0
@@ -1536,10 +1544,48 @@ export default function UsersPage() {
       
       // Clear selection and refresh data
       setSelectedUsers([])
-      setIsSelectionMode(false)
       queryClient.invalidateQueries({ queryKey: ['users'] })
     } catch (e: any) {
       const msg = e?.response?.data?.error || e?.message || 'Delete failed'
+      toast.error(msg)
+    }
+  }
+
+  const handleBulkSync = async () => {
+    if (selectedUsers.length === 0) {
+      toast.error('No users selected')
+      return
+    }
+
+    try {
+      let successCount = 0
+      let errorCount = 0
+      
+      for (const userId of selectedUsers) {
+        try {
+          await api.post(`/users/${userId}/sync`)
+          successCount++
+        } catch (error) {
+          console.error(`Failed to sync user ${userId}:`, error)
+          errorCount++
+        }
+      }
+
+      if (errorCount === 0) {
+        toast.success(`${selectedUsers.length} users synced successfully`)
+      } else {
+        toast.success(`Users synced: ${successCount} successful, ${errorCount} failed`)
+      }
+      
+      // Clear selection and refresh data
+      setSelectedUsers([])
+      queryClient.invalidateQueries({ queryKey: ['users'] })
+      // Invalidate sync status for all users to refresh badges
+      selectedUsers.forEach(userId => {
+        queryClient.invalidateQueries({ queryKey: ['user', userId, 'sync-status'] })
+      })
+    } catch (e: any) {
+      const msg = e?.response?.data?.error || e?.message || 'Sync failed'
       toast.error(msg)
     }
   }
@@ -2240,121 +2286,117 @@ export default function UsersPage() {
             <p className={`text-sm sm:text-base ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>Manage Stremio users for your group</p>
           </div>
           <div className="flex flex-row flex-wrap sm:flex-row gap-2 sm:gap-3 items-center">
-            <button
-              onClick={() => syncAllUsersMutation.mutate()}
-              disabled={syncAllUsersMutation.isPending || users.length === 0}
-              className={`flex items-center justify-center px-3 py-2 sm:px-4 text-white rounded-lg transition-colors disabled:opacity-50 text-sm sm:text-base ${
-                isModern
-                  ? 'bg-gradient-to-br from-purple-600 via-purple-700 to-blue-800 hover:from-purple-700 hover:via-purple-800 hover:to-blue-900'
-                  : isModernDark
-                  ? 'bg-gradient-to-br from-purple-800 via-purple-900 to-blue-900 hover:from-purple-900 hover:via-purple-950 hover:to-indigo-900'
-                  : isMono
-                  ? 'bg-black hover:bg-gray-800'
-                  : 'bg-blue-600 hover:bg-blue-700'
-              }`}
-            >
-              <RefreshCw className={`w-4 h-4 sm:w-5 sm:h-5 mr-2 ${syncAllUsersMutation.isPending ? 'animate-spin' : ''}`} />
-              <span className="hidden sm:inline">{syncAllUsersMutation.isPending ? 'Syncing...' : 'Sync All Users'}</span>
-              <span className="sm:hidden">{syncAllUsersMutation.isPending ? 'Syncing...' : 'Sync All'}</span>
-            </button>
-          <button
-            onClick={() => setShowConnectModal(true)}
-              className={`flex items-center justify-center px-3 py-2 sm:px-4 text-white rounded-lg transition-colors text-sm sm:text-base ${
-                isModern
-                  ? 'bg-gradient-to-br from-purple-600 via-purple-700 to-blue-800 hover:from-purple-700 hover:via-purple-800 hover:to-blue-900'
-                  : isModernDark
-                  ? 'bg-gradient-to-br from-purple-800 via-purple-900 to-blue-900 hover:from-purple-900 hover:via-purple-950 hover:to-indigo-900'
-                  : isMono
-                  ? 'bg-black hover:bg-gray-800'
-                  : 'bg-stremio-purple hover:bg-purple-700'
-              }`}
-            >
-              <Plus className="w-4 h-4 sm:w-5 sm:h-5 mr-2" />
-              <span className="hidden sm:inline">Add User</span>
-              <span className="sm:hidden">Add User</span>
-          </button>
-          <button
-            onClick={() => {
-              setIsSelectionMode(!isSelectionMode)
-              if (isSelectionMode) {
-                setSelectedUsers([])
-              }
-            }}
-            className={`flex items-center justify-center px-3 py-2 sm:px-4 rounded-lg transition-colors text-sm sm:text-base ${
-              isSelectionMode
-                ? isDark 
-                  ? 'bg-red-600 hover:bg-red-700 text-white' 
-                  : 'bg-red-500 hover:bg-red-600 text-white'
-                : isDark 
-                  ? 'bg-gray-700 hover:bg-gray-600 text-white' 
-                  : 'bg-gray-200 hover:bg-gray-300 text-gray-900'
-            }`}
-          >
-            <Grid3X3 className="w-4 h-4 sm:w-5 sm:h-5 mr-2" />
-            <span className="hidden sm:inline">{isSelectionMode ? 'Cancel' : 'Select'}</span>
-            <span className="sm:hidden">{isSelectionMode ? 'Cancel' : 'Select'}</span>
-          </button>
-          {/* Desktop account button (mobile version is in the topbar) */}
-          <div className="hidden lg:block ml-1">
-            <UserMenuButton />
+            {/* Desktop account button (mobile version is in the topbar) */}
+            <div className="hidden lg:block ml-1">
+              <UserMenuButton />
+            </div>
           </div>
-        </div>
         </div>
         {/* Search and View Toggle */}
         <div className="flex flex-row items-center gap-4">
+          {/* Selection Toggle */}
+          <button
+            onClick={() => {
+              if (selectedUsers.length === 0) {
+                // If nothing selected, select all
+                handleSelectAll()
+              } else {
+                // If items selected, deselect all
+                handleDeselectAll()
+              }
+            }}
+            className={`w-10 h-10 sm:w-12 sm:h-12 rounded-lg transition-colors flex items-center justify-center ${
+              selectedUsers.length === 0
+                ? isDark 
+                  ? 'bg-gray-700 hover:bg-gray-600 text-white' 
+                  : 'bg-gray-200 hover:bg-gray-300 text-gray-900'
+                : isDark 
+                  ? 'bg-purple-600 hover:bg-purple-700 text-white' 
+                  : 'bg-purple-500 hover:bg-purple-600 text-white'
+            }`}
+            title={selectedUsers.length === 0 ? 'Select All' : 'Deselect All'}
+          >
+            {selectedUsers.length > 0 ? (
+              <CheckSquare className="w-4 h-4 sm:w-5 sm:h-5" />
+            ) : (
+              <Square className="w-4 h-4 sm:w-5 sm:h-5" />
+            )}
+          </button>
+          
           <div className="relative flex-1">
-            <Search className={`absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 sm:w-5 sm:h-5 ${isDark ? 'text-gray-400' : 'text-gray-500'}`} />
+            <Search className={`absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 sm:w-5 sm:h-5 ${
+              isModern 
+                ? 'text-purple-500' 
+                : isModernDark
+                ? 'text-purple-400'
+                : isDark ? 'text-gray-400' : 'text-gray-500'
+            }`} />
             <input
               type="text"
               placeholder="Search users..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className={`w-full pl-9 sm:pl-10 pr-4 py-2 sm:py-3 border rounded-lg focus:ring-2 focus:ring-stremio-purple focus:border-transparent text-sm sm:text-base ${
-                isDark 
+                isModern
+                  ? 'bg-purple-50/80 border-purple-300/50 text-purple-900 placeholder-purple-500 focus:ring-purple-500'
+                  : isModernDark
+                  ? 'bg-purple-800/30 border-purple-600/50 text-purple-100 placeholder-purple-400 focus:ring-purple-500'
+                  : isDark 
                   ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
                   : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
               }`}
             />
           </div>
           
-          {/* Selection Controls */}
-          {isSelectionMode && (
-            <div className="flex items-center gap-2">
-              <button
-                onClick={handleSelectAll}
-                className={`px-3 py-2 text-sm rounded-lg transition-colors ${
-                  isDark 
-                    ? 'bg-gray-700 hover:bg-gray-600 text-white' 
-                    : 'bg-gray-200 hover:bg-gray-300 text-gray-900'
-                }`}
-              >
-                Select All
-              </button>
-              <button
-                onClick={handleDeselectAll}
-                className={`px-3 py-2 text-sm rounded-lg transition-colors ${
-                  isDark 
-                    ? 'bg-gray-700 hover:bg-gray-600 text-white' 
-                    : 'bg-gray-200 hover:bg-gray-300 text-gray-900'
-                }`}
-              >
-                Deselect All
-              </button>
-              {selectedUsers.length > 0 && (
-                <button
-                  onClick={handleBulkDelete}
-                  className={`px-3 py-2 text-sm rounded-lg transition-colors ${
-                    isDark 
-                      ? 'bg-red-600 hover:bg-red-700 text-white' 
-                      : 'bg-red-500 hover:bg-red-600 text-white'
-                  }`}
-                >
-                  <Trash2 className="w-4 h-4 mr-1 inline" />
-                  Delete ({selectedUsers.length})
-                </button>
-              )}
-            </div>
-          )}
+          {/* Bulk Action Buttons */}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowConnectModal(true)}
+              className={`w-10 h-10 sm:w-12 sm:h-12 rounded-lg transition-colors flex items-center justify-center ${
+                isDark 
+                  ? 'bg-purple-600 hover:bg-purple-700 text-white' 
+                  : 'bg-purple-500 hover:bg-purple-600 text-white'
+              }`}
+              title="Add new user"
+            >
+              <Plus className="w-4 h-4 sm:w-5 sm:h-5" />
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                handleBulkSync()
+              }}
+              disabled={selectedUsers.length === 0}
+              className={`w-10 h-10 sm:w-12 sm:h-12 rounded-lg transition-colors flex items-center justify-center ${
+                selectedUsers.length === 0
+                  ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                  : isDark 
+                    ? 'bg-purple-600 hover:bg-purple-700 text-white' 
+                    : 'bg-purple-500 hover:bg-purple-600 text-white'
+              }`}
+              title={selectedUsers.length === 0 ? 'Select users to sync' : `Sync ${selectedUsers.length} selected user${selectedUsers.length > 1 ? 's' : ''}`}
+            >
+              <RefreshCw className="w-4 h-4 sm:w-5 sm:h-5" />
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                handleBulkDelete()
+              }}
+              disabled={selectedUsers.length === 0}
+              className={`w-10 h-10 sm:w-12 sm:h-12 rounded-lg transition-colors flex items-center justify-center ${
+                selectedUsers.length === 0
+                  ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                  : isDark 
+                    ? 'bg-purple-600 hover:bg-purple-700 text-white' 
+                    : 'bg-purple-500 hover:bg-purple-600 text-white'
+              }`}
+              title={selectedUsers.length === 0 ? 'Select users to delete' : `Delete ${selectedUsers.length} selected user${selectedUsers.length > 1 ? 's' : ''}`}
+            >
+              <Trash2 className="w-4 h-4 sm:w-5 sm:h-5" />
+            </button>
+          </div>
+          
 
           {/* View Mode Toggle */}
           {mounted && (
@@ -2468,26 +2510,22 @@ export default function UsersPage() {
             /* Card Grid View */
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 items-stretch">
           {displayUsers.map((user: any) => (
-            <div key={user.id} className={`rounded-lg shadow-sm border p-6 hover:shadow-md transition-shadow flex flex-col h-full ${
-              isModern
-                ? 'bg-gradient-to-br from-purple-50/90 to-blue-50/90 backdrop-blur-sm border-purple-200/60'
-                : isModernDark
-                ? 'bg-gradient-to-br from-purple-800/40 to-blue-800/40 backdrop-blur-sm border-purple-600/50'
-                : isDark 
-                ? 'bg-gray-800 border-gray-700' 
-                : 'bg-white border-gray-200'
-                } ${!user.isActive ? 'opacity-50' : ''} ${isSelectionMode ? 'relative' : ''}`}>
-              {/* Selection Checkbox */}
-              {isSelectionMode && (
-                <div className="absolute top-4 left-4 z-10">
-                  <input
-                    type="checkbox"
-                    checked={selectedUsers.includes(user.id)}
-                    onChange={() => handleUserToggle(user.id)}
-                    className="w-5 h-5 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 focus:ring-2"
-                  />
-                </div>
-              )}
+            <div 
+              key={user.id} 
+              onClick={() => handleUserToggle(user.id)}
+              className={`rounded-lg shadow-sm border p-6 hover:shadow-md transition-shadow flex flex-col h-full relative group ${
+                isModern
+                  ? 'bg-gradient-to-br from-purple-50/90 to-blue-50/90 backdrop-blur-sm border-purple-200/60'
+                  : isModernDark
+                  ? 'bg-gradient-to-br from-purple-800/40 to-blue-800/40 backdrop-blur-sm border-purple-600/50'
+                  : isDark 
+                  ? 'bg-gray-800 border-gray-700' 
+                  : 'bg-white border-gray-200'
+              } ${!user.isActive ? 'opacity-50' : ''} cursor-pointer ${
+                selectedUsers.includes(user.id) 
+                  ? 'ring-2 ring-purple-500 border-purple-500' 
+                  : ''
+              }`}>
               <div className="flex items-start justify-between mb-4">
                 <div className="flex items-center">
                   <div className={`w-12 h-12 rounded-full flex items-center justify-center ${
@@ -2544,7 +2582,10 @@ export default function UsersPage() {
                           className={`font-medium cursor-pointer transition-colors ${
                             isModern ? 'text-purple-800 hover:text-purple-900' : isModernDark ? 'text-purple-200 hover:text-purple-100' : (isDark ? 'text-white hover:text-stremio-purple' : 'text-gray-900 hover:text-stremio-purple')
                           }`}
-                          onClick={() => handleStartEditUsername(user.id, user.username || user.email)}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            handleStartEditUsername(user.id, user.username || user.email)
+                          }}
                           title="Click to edit username"
                         >
                           {user.username || user.email}
@@ -2565,7 +2606,10 @@ export default function UsersPage() {
                 
                 <div className="flex items-center gap-2">
                   <button
-                    onClick={() => handleToggleUserStatus(user.id, user.isActive)}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      handleToggleUserStatus(user.id, user.isActive)
+                    }}
                     disabled={hasInvalidStremioConnection(user)}
                         className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
                           hasInvalidStremioConnection(user)
@@ -2618,7 +2662,10 @@ export default function UsersPage() {
 
               <div className="flex gap-2">
                 <button
-                  onClick={() => handleViewUserDetails(user)}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    handleViewUserDetails(user)
+                  }}
                   className={`flex-1 flex items-center justify-center px-3 py-2 h-8 min-h-8 max-h-8 text-sm rounded transition-colors hover:font-semibold ${
                     isModern
                       ? 'bg-gradient-to-r from-purple-100 to-blue-100 text-purple-800 hover:from-purple-200 hover:to-blue-200'
@@ -2635,7 +2682,10 @@ export default function UsersPage() {
                   View
                 </button>
                 <button
-                  onClick={() => importUserAddonsMutation.mutate(user.id)}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    importUserAddonsMutation.mutate(user.id)
+                  }}
                   disabled={importUserAddonsMutation.isPending}
                   className={`flex items-center justify-center px-3 py-2 h-8 min-h-8 max-h-8 text-sm rounded transition-colors disabled:opacity-50 ${
                     isModern
@@ -2655,7 +2705,10 @@ export default function UsersPage() {
                   )}
                 </button>
                 <button
-                  onClick={() => reloadUserAddonsMutation.mutate(user.id)}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    reloadUserAddonsMutation.mutate(user.id)
+                  }}
                   disabled={reloadUserAddonsMutation.isPending && reloadUserAddonsMutation.variables === user.id}
                   className={`flex items-center justify-center px-3 py-2 h-8 min-h-8 max-h-8 text-sm rounded transition-colors disabled:opacity-50 ${
                     isModern
@@ -2671,7 +2724,10 @@ export default function UsersPage() {
                       <RefreshCw className={`w-4 h-4 ${reloadUserAddonsMutation.isPending && reloadUserAddonsMutation.variables === user.id ? 'animate-spin' : ''}`} />
                 </button>
                 <button 
-                  onClick={() => handleDeleteUser(user.id, user.username)}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    handleDeleteUser(user.id, user.username)
+                  }}
                   disabled={deleteUserMutation.isPending}
                   className={`flex items-center justify-center px-3 py-2 h-8 min-h-8 max-h-8 text-sm rounded transition-colors disabled:opacity-50 ${
                     isModern
@@ -2695,27 +2751,22 @@ export default function UsersPage() {
               {displayUsers.map((user: any) => (
                 <div
                   key={user.id}
-                  className={`rounded-lg border p-4 hover:shadow-md transition-shadow cursor-pointer ${
-                  isDark 
-                    ? 'bg-gray-800 border-gray-700' 
-                    : 'bg-white border-gray-200'
-                } ${!user.isActive ? 'opacity-50' : ''} ${isSelectionMode ? 'relative' : ''}`}
-                  onClick={() => !isSelectionMode && handleViewUserDetails(user)}
-                >
-                  {/* Selection Checkbox */}
-                  {isSelectionMode && (
-                    <div className="absolute top-4 left-4 z-10">
-                      <input
-                        type="checkbox"
-                        checked={selectedUsers.includes(user.id)}
-                        onChange={(e) => {
-                          e.stopPropagation()
-                          handleUserToggle(user.id)
-                        }}
-                        className="w-5 h-5 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 focus:ring-2"
-                      />
-                    </div>
-                  )}
+                  onClick={() => handleUserToggle(user.id)}
+                  className={`rounded-lg border p-4 hover:shadow-md transition-shadow cursor-pointer relative group ${
+                    isModern
+                      ? 'bg-gradient-to-r from-purple-50/90 to-blue-50/90 border-purple-200/50 shadow-md shadow-purple-100/20'
+                      : isModernDark
+                      ? 'bg-gradient-to-r from-purple-800/40 to-blue-800/40 border-purple-600/50 shadow-md shadow-purple-900/20'
+                      : isMono
+                      ? 'bg-black border-white/20 shadow-none'
+                      : isDark 
+                      ? 'bg-gray-800 border-gray-700' 
+                      : 'bg-white border-gray-200'
+                  } ${!user.isActive ? 'opacity-50' : ''} ${
+                    selectedUsers.includes(user.id) 
+                      ? 'ring-2 ring-purple-500 border-purple-500' 
+                      : ''
+                  }`}>
                   <div className="flex items-center justify-between gap-3">
                     <div className="flex items-center flex-1 min-w-0">
                       <div className={`w-10 h-10 rounded-full flex items-center justify-center mr-3 flex-shrink-0 ${
@@ -3941,6 +3992,15 @@ export default function UsersPage() {
         isDanger={confirmConfig.isDanger}
         onCancel={() => setConfirmOpen(false)}
         onConfirm={() => { setConfirmOpen(false); confirmConfig.onConfirm?.() }}
+      />
+
+      <ConfirmDialog
+        open={bulkDeleteConfirmOpen}
+        title={`Delete ${selectedUsers.length} selected user${selectedUsers.length > 1 ? 's' : ''}`}
+        description="This action cannot be undone. All selected users will be permanently deleted."
+        isDanger={true}
+        onCancel={() => setBulkDeleteConfirmOpen(false)}
+        onConfirm={confirmBulkDelete}
       />
     </div>
   )
