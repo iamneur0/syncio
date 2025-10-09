@@ -1110,21 +1110,17 @@ export default function AddonsPage() {
                 handleDeselectAll()
               }
             }}
-            className={`w-10 h-10 sm:w-12 sm:h-12 rounded-lg transition-colors flex items-center justify-center ${
-              selectedAddons.length === 0
-                ? isDark 
-                  ? 'bg-gray-700 hover:bg-gray-600 text-white' 
-                  : 'bg-gray-200 hover:bg-gray-300 text-gray-900'
-                : isDark 
-                  ? 'bg-purple-600 hover:bg-purple-700 text-white' 
-                  : 'bg-purple-500 hover:bg-purple-600 text-white'
-            }`}
+            className={
+              `w-9 h-9 sm:w-10 sm:h-10 rounded-md flex items-center justify-center 
+               text-gray-500 hover:text-purple-600 bg-transparent border-none outline-none focus:outline-none ring-0 focus:ring-0 shadow-none`
+            }
+            style={{ border: 'none' }}
             title={selectedAddons.length === 0 ? 'Select All' : 'Deselect All'}
           >
             {selectedAddons.length > 0 ? (
-              <CheckSquare className="w-4 h-4 sm:w-5 sm:h-5" />
+              <CheckSquare className="w-5 h-5" />
             ) : (
-              <Square className="w-4 h-4 sm:w-5 sm:h-5" />
+              <Square className="w-5 h-5" />
             )}
           </button>
           
@@ -1136,12 +1132,12 @@ export default function AddonsPage() {
                 ? 'text-purple-400'
                 : isDark ? 'text-gray-400' : 'text-gray-500'
             }`} />
-            <input
+          <input
               type="text"
               placeholder="Search addons..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className={`w-full pl-9 sm:pl-10 pr-4 py-2 sm:py-3 border rounded-lg focus:ring-2 focus:ring-stremio-purple focus:border-transparent text-sm sm:text-base ${
+            className={`w-full pl-9 sm:pl-10 pr-3 py-1.5 sm:py-2 border rounded-lg focus:ring-2 focus:ring-stremio-purple focus:border-transparent text-sm ${
                 isModern
                   ? 'bg-purple-50/80 border-purple-300/50 text-purple-900 placeholder-purple-500 focus:ring-purple-500'
                   : isModernDark
@@ -1154,54 +1150,41 @@ export default function AddonsPage() {
           </div>
           
           
-           {/* Bulk Action Buttons */}
-           <div className="flex items-center gap-2">
-             <button
-               onClick={() => setShowAddModal(true)}
-               className={`w-10 h-10 sm:w-12 sm:h-12 rounded-lg transition-colors flex items-center justify-center ${
-                 isDark 
-                   ? 'bg-purple-600 hover:bg-purple-700 text-white' 
-                   : 'bg-purple-500 hover:bg-purple-600 text-white'
-               }`}
-               title="Add new addon"
-             >
-               <Plus className="w-4 h-4 sm:w-5 sm:h-5" />
-             </button>
-             <button
-               onClick={(e) => {
-                 e.stopPropagation()
-                 reloadAllMutation.mutate()
-               }}
-               disabled={selectedAddons.length === 0 || reloadAllMutation.isPending || isReloadingAll || reloadAddonMutation.isPending || addons.length === 0}
-               className={`w-10 h-10 sm:w-12 sm:h-12 rounded-lg transition-colors flex items-center justify-center ${
-                 selectedAddons.length === 0
-                   ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                   : isDark 
-                     ? 'bg-purple-600 hover:bg-purple-700 text-white' 
-                     : 'bg-purple-500 hover:bg-purple-600 text-white'
-               }`}
-               title={selectedAddons.length === 0 ? 'Select addons to reload' : 'Reload selected addons'}
-             >
-               <RefreshCw className={`w-4 h-4 sm:w-5 sm:h-5 ${isReloadingAll ? 'animate-spin' : ''}`} />
-             </button>
-             <button
-               onClick={(e) => {
-                 e.stopPropagation()
-                 handleBulkDelete()
-               }}
-               disabled={selectedAddons.length === 0}
-               className={`w-10 h-10 sm:w-12 sm:h-12 rounded-lg transition-colors flex items-center justify-center ${
-                 selectedAddons.length === 0
-                   ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                   : isDark 
-                     ? 'bg-purple-600 hover:bg-purple-700 text-white' 
-                     : 'bg-purple-500 hover:bg-purple-600 text-white'
-               }`}
-               title={selectedAddons.length === 0 ? 'Select addons to delete' : `Delete ${selectedAddons.length} selected addon${selectedAddons.length > 1 ? 's' : ''}`}
-             >
-               <Trash2 className="w-4 h-4 sm:w-5 sm:h-5" />
-             </button>
-           </div>
+          {/* Bulk Action Buttons */}
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => setShowAddModal(true)}
+              className="w-9 h-9 sm:w-10 sm:h-10 rounded-md flex items-center justify-center text-gray-500 hover:text-purple-600 bg-transparent border-none outline-none focus:outline-none ring-0 focus:ring-0 shadow-none"
+              style={{ border: 'none' }}
+              title="Add new addon"
+            >
+              <Plus className="w-5 h-5" />
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                reloadAllMutation.mutate()
+              }}
+              disabled={selectedAddons.length === 0 || reloadAllMutation.isPending || isReloadingAll || reloadAddonMutation.isPending || addons.length === 0}
+              className="w-9 h-9 sm:w-10 sm:h-10 rounded-md flex items-center justify-center text-gray-500 hover:text-purple-600 disabled:opacity-40 disabled:cursor-not-allowed bg-transparent border-none outline-none focus:outline-none ring-0 focus:ring-0 shadow-none"
+              style={{ border: 'none' }}
+              title={selectedAddons.length === 0 ? 'Select addons to reload' : 'Reload selected addons'}
+            >
+              <RefreshCw className={`w-5 h-5 ${isReloadingAll ? 'animate-spin' : ''}`} />
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                handleBulkDelete()
+              }}
+              disabled={selectedAddons.length === 0}
+              className="w-9 h-9 sm:w-10 sm:h-10 rounded-md flex items-center justify-center text-gray-500 hover:text-purple-600 disabled:opacity-40 disabled:cursor-not-allowed bg-transparent border-none outline-none focus:outline-none ring-0 focus:ring-0 shadow-none"
+              style={{ border: 'none' }}
+              title={selectedAddons.length === 0 ? 'Select addons to delete' : `Delete ${selectedAddons.length} selected addon${selectedAddons.length > 1 ? 's' : ''}`}
+            >
+              <Trash2 className="w-5 h-5" />
+            </button>
+          </div>
 
           {/* View Mode Toggle */}
           {mounted && (
@@ -1217,30 +1200,22 @@ export default function AddonsPage() {
               }`}>
                 <button
                   onClick={() => handleViewModeChange('card')}
-                  className={`flex items-center gap-2 px-3 py-2 sm:py-3 text-sm transition-colors h-10 sm:h-12 ${
+                  className={`flex items-center gap-2 px-2.5 py-1.5 sm:py-2 text-sm transition-colors h-9 sm:h-10 ${
                     isMono 
                       ? 'rounded-l-lg !border-0 !border-r-0 !rounded-r-none' 
                       : 'rounded-l-lg border-0 border-r-0'
                   } ${
                     viewMode === 'card'
-                      ? isMono
+                      ? (isMono
                         ? '!bg-white/10 text-white'
-                        : isModern
-                        ? 'bg-stremio-purple text-white'
-                        : isModernDark
-                        ? 'bg-stremio-purple text-white'
-                        : isDark
-                        ? 'bg-purple-600 text-white'
-                        : 'bg-stremio-purple text-white'
-                      : isMono
+                        : (isModern || !isDark && !isModernDark)
+                        ? 'bg-gray-100 text-gray-900'
+                        : 'bg-gray-700 text-white')
+                      : (isMono
                         ? 'text-white/70 hover:bg-white/10'
-                        : isModern
-                        ? 'text-purple-700 hover:bg-purple-100/50'
-                        : isModernDark
-                        ? 'text-purple-300 hover:bg-purple-700/50'
-                        : isDark
-                        ? 'text-gray-300 hover:bg-gray-700'
-                        : 'text-gray-700 hover:bg-gray-100'
+                        : (isModern || !isDark && !isModernDark)
+                        ? 'text-gray-800 hover:bg-gray-100'
+                        : 'text-gray-300 hover:bg-gray-700')
                   }`}
                   title="Card view"
                 >
@@ -1249,30 +1224,22 @@ export default function AddonsPage() {
                 </button>
                 <button
                   onClick={() => handleViewModeChange('list')}
-                  className={`flex items-center gap-2 px-3 py-2 sm:py-3 text-sm transition-colors h-10 sm:h-12 ${
+                  className={`flex items-center gap-2 px-2.5 py-1.5 sm:py-2 text-sm transition-colors h-9 sm:h-10 ${
                     isMono 
                       ? 'rounded-r-lg !border-0 !border-l-0 !rounded-l-none' 
                       : 'rounded-r-lg border-0 border-l-0'
                   } ${
                     viewMode === 'list'
-                      ? isMono
+                      ? (isMono
                         ? '!bg-white/10 text-white'
-                        : isModern
-                        ? 'bg-stremio-purple text-white'
-                        : isModernDark
-                        ? 'bg-stremio-purple text-white'
-                        : isDark
-                        ? 'bg-purple-600 text-white'
-                        : 'bg-stremio-purple text-white'
-                      : isMono
+                        : (isModern || !isDark && !isModernDark)
+                        ? 'bg-gray-100 text-gray-900'
+                        : 'bg-gray-700 text-white')
+                      : (isMono
                         ? 'text-white/70 hover:bg-white/10'
-                        : isModern
-                        ? 'text-purple-700 hover:bg-purple-100/50'
-                        : isModernDark
-                        ? 'text-purple-300 hover:bg-purple-700/50'
-                        : isDark
-                        ? 'text-gray-300 hover:bg-gray-700'
-                        : 'text-gray-700 hover:bg-gray-100'
+                        : (isModern || !isDark && !isModernDark)
+                        ? 'text-gray-800 hover:bg-gray-100'
+                        : 'text-gray-300 hover:bg-gray-700')
                   }`}
                   title="List view"
                 >
@@ -1353,14 +1320,14 @@ export default function AddonsPage() {
                       : 'bg-white border-gray-200'
                   } ${addon.status === 'inactive' ? 'opacity-50' : ''} cursor-pointer ${
                     selectedAddons.includes(addon.id) 
-                      ? 'ring-2 ring-purple-500 border-purple-500' 
+                      ? (isMono ? 'ring-2 ring-white/50 border-white/40' : 'ring-2 ring-purple-500 border-purple-500') 
                       : ''
                   }`}>
                   
                   <div className="flex items-start justify-between mb-4">
                     <div className="flex items-center flex-1 min-w-0">
                       <div className={`w-12 h-12 rounded-lg flex items-center justify-center mr-3 flex-shrink-0 overflow-hidden ${
-                        isMono ? 'border border-white/20' : ''
+                        isMono ? '' : ''
                       }`}>
                         {addon.iconUrl ? (
                           <img 
@@ -1576,7 +1543,7 @@ export default function AddonsPage() {
                   <div className="flex items-center justify-between gap-3">
                     <div className="flex items-center flex-1 min-w-0 max-w-[calc(100%-200px)]">
                       <div className={`w-10 h-10 rounded-lg flex items-center justify-center mr-3 flex-shrink-0 overflow-hidden ${
-                        isMono ? 'border border-white/20' : ''
+                        isMono ? '' : ''
                       }`}>
                         {addon.iconUrl ? (
                           <img 
@@ -1954,7 +1921,7 @@ export default function AddonsPage() {
               <div className="flex items-center gap-4 flex-1 mr-4">
                 {/* Addon Logo */}
                 <div className={`w-12 h-12 rounded-lg flex items-center justify-center flex-shrink-0 overflow-hidden ${
-                  isMono ? 'border border-white/20' : ''
+                  isMono ? '' : ''
                 }`}>
                   {editingAddon?.iconUrl ? (
                     <img 
