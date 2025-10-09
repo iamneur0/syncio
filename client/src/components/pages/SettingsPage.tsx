@@ -541,7 +541,11 @@ export default function SettingsPage() {
           </div>
           <button
             onClick={() => onToggle(!hideSensitive)}
-            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${hideSensitive ? 'bg-stremio-purple' : (isDark ? 'bg-gray-700' : 'bg-gray-300')}`}
+            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+              hideSensitive
+                ? (theme === 'mono' ? 'bg-white/30 border border-white/20' : (isDark ? 'bg-gray-600' : 'bg-gray-800'))
+                : (theme === 'mono' ? 'bg-white/15 border border-white/20' : (isDark ? 'bg-gray-700' : 'bg-gray-300'))
+            }`}
             aria-pressed={hideSensitive}
           >
             <span
