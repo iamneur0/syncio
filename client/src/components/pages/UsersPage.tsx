@@ -1480,9 +1480,68 @@ export default function UsersPage() {
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [confirmConfig, setConfirmConfig] = useState<{ title: string; description: string; isDanger?: boolean; onConfirm: () => void }>({ title: '', description: '', isDanger: true, onConfirm: () => {} })
 
+  // Selection state
+  const [selectedUsers, setSelectedUsers] = useState<string[]>([])
+  const [isSelectionMode, setIsSelectionMode] = useState(false)
+
   const openConfirm = (cfg: { title: string; description: string; isDanger?: boolean; onConfirm: () => void }) => {
     setConfirmConfig(cfg)
     setConfirmOpen(true)
+  }
+
+  // Selection handlers
+  const handleSelectAll = () => {
+    setSelectedUsers(users?.map((user: any) => user.id) || [])
+  }
+
+  const handleDeselectAll = () => {
+    setSelectedUsers([])
+  }
+
+  const handleUserToggle = (userId: string) => {
+    setSelectedUsers(prev => 
+      prev.includes(userId) 
+        ? prev.filter(id => id !== userId)
+        : [...prev, userId]
+    )
+  }
+
+  const handleBulkDelete = async () => {
+    if (selectedUsers.length === 0) {
+      toast.error('No users selected')
+      return
+    }
+
+    if (!confirm(`Delete ${selectedUsers.length} selected users? This cannot be undone.`)) return
+
+    try {
+      let successCount = 0
+      let errorCount = 0
+      
+      for (const userId of selectedUsers) {
+        try {
+          await usersAPI.delete(userId)
+          successCount++
+        } catch (error) {
+          console.error(`Failed to delete user ${userId}:`, error)
+          errorCount++
+        }
+      }
+
+      if (errorCount === 0) {
+        toast.success(`${selectedUsers.length} users deleted successfully`)
+      } else {
+        toast.success(`Users deleted: ${successCount} successful, ${errorCount} failed`)
+      }
+      
+      // Clear selection and refresh data
+      setSelectedUsers([])
+      setIsSelectionMode(false)
+      queryClient.invalidateQueries({ queryKey: ['users'] })
+    } catch (e: any) {
+      const msg = e?.response?.data?.error || e?.message || 'Delete failed'
+      toast.error(msg)
+    }
   }
 
   const handleDeleteUser = (id: string, username: string) => {
@@ -2214,6 +2273,27 @@ export default function UsersPage() {
               <span className="hidden sm:inline">Add User</span>
               <span className="sm:hidden">Add User</span>
           </button>
+          <button
+            onClick={() => {
+              setIsSelectionMode(!isSelectionMode)
+              if (isSelectionMode) {
+                setSelectedUsers([])
+              }
+            }}
+            className={`flex items-center justify-center px-3 py-2 sm:px-4 rounded-lg transition-colors text-sm sm:text-base ${
+              isSelectionMode
+                ? isDark 
+                  ? 'bg-red-600 hover:bg-red-700 text-white' 
+                  : 'bg-red-500 hover:bg-red-600 text-white'
+                : isDark 
+                  ? 'bg-gray-700 hover:bg-gray-600 text-white' 
+                  : 'bg-gray-200 hover:bg-gray-300 text-gray-900'
+            }`}
+          >
+            <Grid3X3 className="w-4 h-4 sm:w-5 sm:h-5 mr-2" />
+            <span className="hidden sm:inline">{isSelectionMode ? 'Cancel' : 'Select'}</span>
+            <span className="sm:hidden">{isSelectionMode ? 'Cancel' : 'Select'}</span>
+          </button>
           {/* Desktop account button (mobile version is in the topbar) */}
           <div className="hidden lg:block ml-1">
             <UserMenuButton />
@@ -2237,6 +2317,45 @@ export default function UsersPage() {
             />
           </div>
           
+          {/* Selection Controls */}
+          {isSelectionMode && (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleSelectAll}
+                className={`px-3 py-2 text-sm rounded-lg transition-colors ${
+                  isDark 
+                    ? 'bg-gray-700 hover:bg-gray-600 text-white' 
+                    : 'bg-gray-200 hover:bg-gray-300 text-gray-900'
+                }`}
+              >
+                Select All
+              </button>
+              <button
+                onClick={handleDeselectAll}
+                className={`px-3 py-2 text-sm rounded-lg transition-colors ${
+                  isDark 
+                    ? 'bg-gray-700 hover:bg-gray-600 text-white' 
+                    : 'bg-gray-200 hover:bg-gray-300 text-gray-900'
+                }`}
+              >
+                Deselect All
+              </button>
+              {selectedUsers.length > 0 && (
+                <button
+                  onClick={handleBulkDelete}
+                  className={`px-3 py-2 text-sm rounded-lg transition-colors ${
+                    isDark 
+                      ? 'bg-red-600 hover:bg-red-700 text-white' 
+                      : 'bg-red-500 hover:bg-red-600 text-white'
+                  }`}
+                >
+                  <Trash2 className="w-4 h-4 mr-1 inline" />
+                  Delete ({selectedUsers.length})
+                </button>
+              )}
+            </div>
+          )}
+
           {/* View Mode Toggle */}
           {mounted && (
             <div className="flex items-center">
@@ -2357,7 +2476,18 @@ export default function UsersPage() {
                 : isDark 
                 ? 'bg-gray-800 border-gray-700' 
                 : 'bg-white border-gray-200'
-                } ${!user.isActive ? 'opacity-50' : ''}`}>
+                } ${!user.isActive ? 'opacity-50' : ''} ${isSelectionMode ? 'relative' : ''}`}>
+              {/* Selection Checkbox */}
+              {isSelectionMode && (
+                <div className="absolute top-4 left-4 z-10">
+                  <input
+                    type="checkbox"
+                    checked={selectedUsers.includes(user.id)}
+                    onChange={() => handleUserToggle(user.id)}
+                    className="w-5 h-5 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 focus:ring-2"
+                  />
+                </div>
+              )}
               <div className="flex items-start justify-between mb-4">
                 <div className="flex items-center">
                   <div className={`w-12 h-12 rounded-full flex items-center justify-center ${
@@ -2438,12 +2568,12 @@ export default function UsersPage() {
                     onClick={() => handleToggleUserStatus(user.id, user.isActive)}
                     disabled={hasInvalidStremioConnection(user)}
                         className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                          hasInvalidStremioConnection(user) 
-                            ? 'bg-gray-400 cursor-not-allowed' 
+                          hasInvalidStremioConnection(user)
+                            ? 'bg-gray-400 cursor-not-allowed'
                             : user.isActive 
-                              ? 'bg-stremio-purple' 
-                              : (isDark ? 'bg-gray-700' : 'bg-gray-300')
-                    }`}
+                              ? (isMono ? 'bg-white/30 border border-white/20' : 'bg-stremio-purple') 
+                              : (isMono ? 'bg-white/15 border border-white/20' : (isDark ? 'bg-gray-700' : 'bg-gray-300'))
+                        }`}
                         aria-pressed={user.isActive}
                         title={hasInvalidStremioConnection(user) 
                           ? 'Cannot enable - invalid Stremio connection' 
@@ -2452,10 +2582,10 @@ export default function UsersPage() {
                             : 'Click to enable'}
                   >
                     <span
-                          className={`inline-block h-5 w-5 transform rounded-full transition-transform ${
+                      className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${
                         user.isActive 
-                          ? 'translate-x-5 bg-purple-200' 
-                          : 'translate-x-1 bg-white'
+                          ? 'translate-x-5' 
+                          : 'translate-x-1'
                       }`}
                     />
                   </button>
@@ -2569,9 +2699,23 @@ export default function UsersPage() {
                   isDark 
                     ? 'bg-gray-800 border-gray-700' 
                     : 'bg-white border-gray-200'
-                } ${!user.isActive ? 'opacity-50' : ''}`}
-                  onClick={() => handleViewUserDetails(user)}
+                } ${!user.isActive ? 'opacity-50' : ''} ${isSelectionMode ? 'relative' : ''}`}
+                  onClick={() => !isSelectionMode && handleViewUserDetails(user)}
                 >
+                  {/* Selection Checkbox */}
+                  {isSelectionMode && (
+                    <div className="absolute top-4 left-4 z-10">
+                      <input
+                        type="checkbox"
+                        checked={selectedUsers.includes(user.id)}
+                        onChange={(e) => {
+                          e.stopPropagation()
+                          handleUserToggle(user.id)
+                        }}
+                        className="w-5 h-5 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 focus:ring-2"
+                      />
+                    </div>
+                  )}
                   <div className="flex items-center justify-between gap-3">
                     <div className="flex items-center flex-1 min-w-0">
                       <div className={`w-10 h-10 rounded-full flex items-center justify-center mr-3 flex-shrink-0 ${
@@ -3187,40 +3331,46 @@ export default function UsersPage() {
           }`}>
             <div className="p-6">
               <div className="flex items-center justify-between mb-6">
-                <div className="flex items-start gap-4">
-                  <div className="flex flex-col">
+                <div className="flex flex-col flex-1">
+                  <div className="flex items-center justify-between">
                     <div className="flex items-center gap-4">
-                      {editingDetailUsername === selectedUser.id ? (
-                        <input
-                          type="text"
-                          value={tempDetailUsername}
-                          onChange={(e) => setTempDetailUsername(e.target.value)}
-                          onBlur={() => handleBlurDetailUsername(selectedUser.username || selectedUser.email)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              handleSaveDetailUsername(selectedUser.username || selectedUser.email)
-                            } else if (e.key === 'Escape') {
-                              setEditingDetailUsername(null)
-                              setTempDetailUsername('')
+                      <h2 
+                        contentEditable
+                        suppressContentEditableWarning
+                        className={`text-xl font-bold cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 px-2 py-1 rounded transition-colors focus:outline-none focus:ring-2 focus:ring-stremio-purple focus:bg-gray-100 dark:focus:bg-gray-700 ${isDark ? 'text-white' : 'text-gray-900'}`}
+                        onBlur={(e) => {
+                          const newValue = e.target.textContent?.trim() || '';
+                          if (newValue && newValue !== (selectedUser.username || selectedUser.email)) {
+                            handleSaveDetailUsername(newValue);
+                          }
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            const newValue = e.currentTarget.textContent?.trim() || '';
+                            if (newValue && newValue !== (selectedUser.username || selectedUser.email)) {
+                              handleSaveDetailUsername(newValue);
                             }
-                          }}
-                          placeholder={selectedUser.username || selectedUser.email}
-                          className={`px-2 py-1 text-xl font-bold border rounded focus:ring-2 focus:ring-stremio-purple focus:border-transparent ${
-                            isDark 
-                              ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
-                              : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
-                          }`}
-                          autoFocus
-                        />
-                      ) : (
-                        <h2 
-                          className={`text-xl font-bold cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 px-2 py-1 rounded transition-colors ${isDark ? 'text-white' : 'text-gray-900'}`}
-                          onClick={() => handleStartEditDetailUsername(selectedUser.username || selectedUser.email)}
-                          title="Click to edit username"
-                        >
-                          {selectedUser.username || selectedUser.email}
-                  </h2>
-                      )}
+                            e.currentTarget.blur();
+                          } else if (e.key === 'Escape') {
+                            e.currentTarget.textContent = selectedUser.username || selectedUser.email;
+                            e.currentTarget.blur();
+                          }
+                        }}
+                        title="Click to edit username"
+                      >
+                        {selectedUser.username || selectedUser.email}
+                      </h2>
+                      <UserSyncBadge 
+                        userId={selectedUser.id} 
+                        userExcludedSet={globalUserExcludedSets.get(selectedUser.id) || new Set()}
+                        userProtectedSet={globalUserProtectedSets.get(selectedUser.id) || new Set()}
+                        isSyncing={false}
+                        location="detailed-view"
+                        deleteMode={deleteMode}
+                      />
+                    </div>
+                    <div className="flex items-center gap-4">
                       {editingDetailGroup ? (
                         <div className="flex items-center gap-2">
                           <Users className="w-4 h-4 text-gray-400" />
@@ -3261,7 +3411,7 @@ export default function UsersPage() {
                               </option>
                             ))}
                           </select>
-                </div>
+                        </div>
                       ) : (
                         <div 
                           className="flex items-center gap-2 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 px-2 py-1 rounded transition-colors"
@@ -3274,29 +3424,19 @@ export default function UsersPage() {
                           </span>
                         </div>
                       )}
+                      <button
+                        onClick={() => setIsDetailModalOpen(false)}
+                        className={`w-8 h-8 flex items-center justify-center rounded transition-colors border-0 ${
+                          isDark ? 'text-gray-400 hover:text-gray-300 hover:bg-gray-700' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
+                        }`}
+                      >
+                        ✕
+                      </button>
                     </div>
-                    <p className={`text-sm mt-1 px-2 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
-                      {hideSensitive ? '••••••••@••••' : selectedUser.email}
-                    </p>
                   </div>
-                </div>
-                <div className="flex items-center gap-3">
-                  <UserSyncBadge 
-                    userId={selectedUser.id} 
-                    userExcludedSet={globalUserExcludedSets.get(selectedUser.id) || new Set()}
-                    userProtectedSet={globalUserProtectedSets.get(selectedUser.id) || new Set()}
-                    isSyncing={false}
-                    location="detailed-view"
-                    deleteMode={deleteMode}
-                  />
-                <button
-                  onClick={() => setIsDetailModalOpen(false)}
-                  className={`w-8 h-8 flex items-center justify-center rounded transition-colors border-0 ${
-                    isDark ? 'text-gray-400 hover:text-gray-300 hover:bg-gray-700' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
-                  }`}
-                >
-                  ✕
-                </button>
+                  <p className={`text-sm mt-1 px-2 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+                    {hideSensitive ? '••••••••@••••' : selectedUser.email}
+                  </p>
                 </div>
               </div>
 

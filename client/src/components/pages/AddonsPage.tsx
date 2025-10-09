@@ -7,7 +7,6 @@ import {
   Puzzle,
   Eye,
   Trash2,
-  Edit,
   Users,
   AlertTriangle,
   RefreshCw,
@@ -16,7 +15,11 @@ import {
   Grid3X3,
   List,
   ExternalLink,
-  Star
+  Star,
+  Square,
+  CheckSquare,
+  Circle,
+  Check
 } from 'lucide-react'
 import { useTheme } from '@/contexts/ThemeContext'
 import UserMenuButton from '@/components/auth/UserMenuButton'
@@ -962,9 +965,66 @@ export default function AddonsPage() {
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [confirmConfig, setConfirmConfig] = useState<{ title: string; description: string; isDanger?: boolean; onConfirm: () => void }>({ title: '', description: '', isDanger: true, onConfirm: () => {} })
 
+  // Selection state
+  const [selectedAddons, setSelectedAddons] = useState<string[]>([])
+
   const openConfirm = (cfg: { title: string; description: string; isDanger?: boolean; onConfirm: () => void }) => {
     setConfirmConfig(cfg)
     setConfirmOpen(true)
+  }
+
+  // Selection handlers
+  const handleSelectAll = () => {
+    setSelectedAddons(addons?.map(addon => addon.id) || [])
+  }
+
+  const handleDeselectAll = () => {
+    setSelectedAddons([])
+  }
+
+  const handleAddonToggle = (addonId: string) => {
+    setSelectedAddons(prev => 
+      prev.includes(addonId) 
+        ? prev.filter(id => id !== addonId)
+        : [...prev, addonId]
+    )
+  }
+
+  const handleBulkDelete = async () => {
+    if (selectedAddons.length === 0) {
+      toast.error('No addons selected')
+      return
+    }
+
+    if (!confirm(`Delete ${selectedAddons.length} selected addons? This cannot be undone.`)) return
+
+    try {
+      let successCount = 0
+      let errorCount = 0
+      
+      for (const addonId of selectedAddons) {
+        try {
+          await addonsAPI.delete(addonId)
+          successCount++
+        } catch (error) {
+          console.error(`Failed to delete addon ${addonId}:`, error)
+          errorCount++
+        }
+      }
+
+      if (errorCount === 0) {
+        toast.success(`${selectedAddons.length} addons deleted successfully`)
+      } else {
+        toast.success(`Addons deleted: ${successCount} successful, ${errorCount} failed`)
+      }
+      
+      // Clear selection and refresh data
+      setSelectedAddons([])
+      queryClient.invalidateQueries({ queryKey: ['addons'] })
+    } catch (e: any) {
+      const msg = e?.response?.data?.error || e?.message || 'Delete failed'
+      toast.error(msg)
+    }
   }
 
   const handleDeleteAddon = (id: string, name: string) => {
@@ -1022,49 +1082,45 @@ export default function AddonsPage() {
                 : isDark ? 'text-gray-400' : 'text-gray-600'
             }`}>Manage Stremio addons for your groups</p>
           </div>
-          <div className="flex flex-row flex-wrap sm:flex-row gap-2 sm:gap-3 items-center">
-            <button
-              onClick={() => reloadAllMutation.mutate()}
-              disabled={reloadAllMutation.isPending || isReloadingAll || reloadAddonMutation.isPending || addons.length === 0}
-              className={`flex items-center justify-center px-3 py-2 sm:px-4 text-white rounded-lg transition-colors disabled:opacity-50 text-sm sm:text-base ${
-                isModern
-                  ? 'bg-gradient-to-br from-purple-600 via-purple-700 to-blue-800 hover:from-purple-700 hover:via-purple-800 hover:to-blue-900'
-                  : isModernDark
-                  ? 'bg-gradient-to-br from-purple-800 via-purple-900 to-blue-900 hover:from-purple-900 hover:via-purple-950 hover:to-indigo-900'
-                  : isMono
-                  ? 'bg-black hover:bg-gray-800'
-                  : 'bg-blue-600 hover:bg-blue-700'
-              }`}
-            >
-              <RefreshCw className={`w-4 h-4 sm:w-5 sm:h-5 mr-2 ${isReloadingAll ? 'animate-spin' : ''}`} />
-              <span className="hidden sm:inline">{isReloadingAll ? 'Reloading...' : 'Reload All Addons'}</span>
-              <span className="sm:hidden">{isReloadingAll ? 'Reloading...' : 'Reload All'}</span>
-            </button>
-            <button
-              onClick={() => setShowAddModal(true)}
-              className={`flex items-center justify-center px-3 py-2 sm:px-4 text-white rounded-lg transition-colors text-sm sm:text-base ${
-                isModern
-                  ? 'bg-gradient-to-br from-purple-600 via-purple-700 to-blue-800 hover:from-purple-700 hover:via-purple-800 hover:to-blue-900'
-                  : isModernDark
-                  ? 'bg-gradient-to-br from-purple-800 via-purple-900 to-blue-900 hover:from-purple-900 hover:via-purple-950 hover:to-indigo-900'
-                  : isMono
-                  ? 'bg-black hover:bg-gray-800'
-                  : 'bg-stremio-purple hover:bg-purple-700'
-              }`}
-            >
-              <Plus className="w-4 h-4 sm:w-5 sm:h-5 mr-2" />
-              <span className="hidden sm:inline">Add Addon</span>
-              <span className="sm:hidden">Add</span>
-            </button>
-            {/* Desktop account button (mobile version is in the topbar) */}
-            <div className="hidden lg:block ml-1">
-              <UserMenuButton />
-            </div>
-          </div>
+           <div className="flex flex-row flex-wrap sm:flex-row gap-2 sm:gap-3 items-center">
+             {/* Desktop account button (mobile version is in the topbar) */}
+             <div className="hidden lg:block ml-1">
+               <UserMenuButton />
+             </div>
+           </div>
         </div>
 
         {/* Search and View Toggle */}
         <div className="flex flex-row items-center gap-4">
+          {/* Selection Toggle */}
+          <button
+            onClick={() => {
+              if (selectedAddons.length === 0) {
+                // If nothing selected, select all
+                handleSelectAll()
+              } else {
+                // If items selected, deselect all
+                handleDeselectAll()
+              }
+            }}
+            className={`w-10 h-10 sm:w-12 sm:h-12 rounded-lg transition-colors flex items-center justify-center ${
+              selectedAddons.length === 0
+                ? isDark 
+                  ? 'bg-gray-700 hover:bg-gray-600 text-white' 
+                  : 'bg-gray-200 hover:bg-gray-300 text-gray-900'
+                : isDark 
+                  ? 'bg-purple-600 hover:bg-purple-700 text-white' 
+                  : 'bg-purple-500 hover:bg-purple-600 text-white'
+            }`}
+            title={selectedAddons.length === 0 ? 'Select All' : 'Deselect All'}
+          >
+            {selectedAddons.length > 0 ? (
+              <CheckSquare className="w-4 h-4 sm:w-5 sm:h-5" />
+            ) : (
+              <Square className="w-4 h-4 sm:w-5 sm:h-5" />
+            )}
+          </button>
+          
           <div className="relative flex-1">
             <Search className={`absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 sm:w-5 sm:h-5 ${
               isModern 
@@ -1090,6 +1146,50 @@ export default function AddonsPage() {
             />
           </div>
           
+          
+           {/* Bulk Action Buttons */}
+           <div className="flex items-center gap-2">
+             <button
+               onClick={() => setShowAddModal(true)}
+               className={`w-10 h-10 sm:w-12 sm:h-12 rounded-lg transition-colors flex items-center justify-center ${
+                 isDark 
+                   ? 'bg-purple-600 hover:bg-purple-700 text-white' 
+                   : 'bg-purple-500 hover:bg-purple-600 text-white'
+               }`}
+               title="Add new addon"
+             >
+               <Plus className="w-4 h-4 sm:w-5 sm:h-5" />
+             </button>
+             <button
+               onClick={() => reloadAllMutation.mutate()}
+               disabled={selectedAddons.length === 0 || reloadAllMutation.isPending || isReloadingAll || reloadAddonMutation.isPending || addons.length === 0}
+               className={`w-10 h-10 sm:w-12 sm:h-12 rounded-lg transition-colors flex items-center justify-center ${
+                 selectedAddons.length === 0
+                   ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                   : isDark 
+                     ? 'bg-purple-600 hover:bg-purple-700 text-white' 
+                     : 'bg-purple-500 hover:bg-purple-600 text-white'
+               }`}
+               title={selectedAddons.length === 0 ? 'Select addons to reload' : 'Reload selected addons'}
+             >
+               <RefreshCw className={`w-4 h-4 sm:w-5 sm:h-5 ${isReloadingAll ? 'animate-spin' : ''}`} />
+             </button>
+             <button
+               onClick={handleBulkDelete}
+               disabled={selectedAddons.length === 0}
+               className={`w-10 h-10 sm:w-12 sm:h-12 rounded-lg transition-colors flex items-center justify-center ${
+                 selectedAddons.length === 0
+                   ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                   : isDark 
+                     ? 'bg-purple-600 hover:bg-purple-700 text-white' 
+                     : 'bg-purple-500 hover:bg-purple-600 text-white'
+               }`}
+               title={selectedAddons.length === 0 ? 'Select addons to delete' : `Delete ${selectedAddons.length} selected addon${selectedAddons.length > 1 ? 's' : ''}`}
+             >
+               <Trash2 className="w-4 h-4 sm:w-5 sm:h-5" />
+             </button>
+           </div>
+
           {/* View Mode Toggle */}
           {mounted && (
             <div className="flex items-center">
@@ -1227,15 +1327,23 @@ export default function AddonsPage() {
             /* Card Grid View */
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 items-start">
               {displayAddons.map((addon: any) => (
-                <div key={addon.id} className={`rounded-lg shadow-sm border p-6 hover:shadow-md transition-shadow flex flex-col self-start ${
-                  isModern
-                    ? 'bg-gradient-to-br from-purple-50/90 to-blue-50/90 border-purple-200/50 shadow-lg shadow-purple-100/30'
-                    : isModernDark
-                    ? 'bg-gradient-to-br from-purple-800/40 to-blue-800/40 border-purple-600/50 shadow-lg shadow-purple-900/30'
-                    : isDark 
-                    ? 'bg-gray-800 border-gray-700' 
-                    : 'bg-white border-gray-200'
-                } ${addon.status === 'inactive' ? 'opacity-50' : ''}`}>
+                <div 
+                  key={addon.id} 
+                  onClick={() => handleAddonToggle(addon.id)}
+                  className={`rounded-lg shadow-sm border p-6 hover:shadow-md transition-shadow flex flex-col self-start relative group ${
+                    isModern
+                      ? 'bg-gradient-to-br from-purple-50/90 to-blue-50/90 border-purple-200/50 shadow-lg shadow-purple-100/30'
+                      : isModernDark
+                      ? 'bg-gradient-to-br from-purple-800/40 to-blue-800/40 border-purple-600/50 shadow-lg shadow-purple-900/30'
+                      : isDark 
+                      ? 'bg-gray-800 border-gray-700' 
+                      : 'bg-white border-gray-200'
+                  } ${addon.status === 'inactive' ? 'opacity-50' : ''} cursor-pointer ${
+                    selectedAddons.includes(addon.id) 
+                      ? 'ring-2 ring-purple-500 border-purple-500' 
+                      : ''
+                  }`}>
+                  
                   <div className="flex items-start justify-between mb-4">
                     <div className="flex items-center flex-1 min-w-0">
                       <div className={`w-12 h-12 rounded-lg flex items-center justify-center mr-3 flex-shrink-0 overflow-hidden ${
@@ -1281,7 +1389,8 @@ export default function AddonsPage() {
                     </div>
                     {/* Enable/Disable toggle */}
                     <button
-                      onClick={async () => {
+                      onClick={async (e) => {
+                        e.stopPropagation()
                         try {
                           if (addon.status === 'active') {
                             await addonsAPI.disable(addon.id)
@@ -1295,6 +1404,7 @@ export default function AddonsPage() {
                           toast.error('Failed to toggle addon')
                         }
                       }}
+                      disabled={false}
                       className={`ml-3 relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
                         addon.status === 'active' ? (isMono ? 'bg-white/30 border border-white/20' : 'bg-stremio-purple') : (isMono ? 'bg-white/15 border border-white/20' : (isDark ? 'bg-gray-700' : 'bg-gray-300'))
                       }`}
@@ -1336,7 +1446,11 @@ export default function AddonsPage() {
 
                   <div className="flex items-center gap-2 mt-auto">
                     <button 
-                      onClick={() => handleEditAddon(addon)}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleEditAddon(addon)
+                      }}
+                      disabled={false}
                       className={`flex-1 flex items-center justify-center px-3 py-2 h-8 min-h-8 max-h-8 text-sm rounded transition-colors hover:font-semibold ${
                         isModern
                           ? 'bg-gradient-to-r from-purple-100 to-blue-100 text-purple-800 hover:from-purple-200 hover:to-blue-200'
@@ -1354,7 +1468,8 @@ export default function AddonsPage() {
                     </button>
                     {/* Settings: open configure URL in new tab */}
                     <button
-                      onClick={() => {
+                      onClick={(e) => {
+                        e.stopPropagation()
                         try {
                           const raw = addon.url || addon.manifestUrl || ''
                           if (!raw) return
@@ -1362,6 +1477,7 @@ export default function AddonsPage() {
                           window.open(configureUrl, '_blank', 'noreferrer')
                         } catch {}
                       }}
+                      disabled={false}
                       className={`flex items-center justify-center px-3 py-2 h-8 min-h-8 max-h-8 text-sm rounded transition-colors disabled:opacity-50 ${
                         isModern
                           ? 'bg-gradient-to-br from-purple-100 to-blue-100 text-purple-800 hover:from-purple-200 hover:to-blue-200'
@@ -1376,7 +1492,10 @@ export default function AddonsPage() {
                       <Settings className="w-4 h-4" />
                     </button>
                     <button 
-                      onClick={() => reloadAddonMutation.mutate(addon.id)}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        reloadAddonMutation.mutate(addon.id)
+                      }}
                       disabled={reloadAddonMutation.isPending && reloadAddonMutation.variables === addon.id}
                       className={`flex items-center justify-center px-3 py-2 h-8 min-h-8 max-h-8 text-sm rounded transition-colors disabled:opacity-50 ${
                         isModern
@@ -1393,7 +1512,10 @@ export default function AddonsPage() {
                     </button>
                     {/* Keep Remove (hard delete) always present */}
                     <button 
-                      onClick={() => handleDeleteAddon(addon.id, addon.name)}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleDeleteAddon(addon.id, addon.name)
+                      }}
                       disabled={deleteAddonMutation.isPending}
                       className={`flex items-center justify-center px-3 py-2 h-8 min-h-8 max-h-8 text-sm rounded transition-colors disabled:opacity-50 ${
                         isModern
@@ -1421,7 +1543,8 @@ export default function AddonsPage() {
               {displayAddons.map((addon: any) => (
                 <div
                   key={addon.id}
-                  className={`rounded-lg border p-4 hover:shadow-md transition-shadow cursor-pointer ${
+                  onClick={() => handleAddonToggle(addon.id)}
+                  className={`rounded-lg border p-4 hover:shadow-md transition-shadow relative group ${
                   isModern
                     ? 'bg-gradient-to-r from-purple-50/90 to-blue-50/90 border-purple-200/50 shadow-md shadow-purple-100/20'
                     : isModernDark
@@ -1431,9 +1554,12 @@ export default function AddonsPage() {
                     : isDark 
                     ? 'bg-gray-800 border-gray-700' 
                     : 'bg-white border-gray-200'
-                } ${addon.status === 'inactive' ? 'opacity-50' : ''}`}
-                  onClick={() => handleEditAddon(addon)}
-                >
+        } ${addon.status === 'inactive' ? 'opacity-50' : ''} cursor-pointer ${
+          selectedAddons.includes(addon.id) 
+            ? 'ring-2 ring-purple-500 border-purple-500' 
+            : ''
+        }`}>
+                  
                   <div className="flex items-center justify-between gap-3">
                     <div className="flex items-center flex-1 min-w-0 max-w-[calc(100%-200px)]">
                       <div className={`w-10 h-10 rounded-lg flex items-center justify-center mr-3 flex-shrink-0 overflow-hidden ${
@@ -1520,6 +1646,7 @@ export default function AddonsPage() {
                       <button
                         onClick={async (e) => {
                           e.stopPropagation()
+                          // Always allow action
                           try {
                             if (addon.status === 'active') {
                               await addonsAPI.disable(addon.id)
@@ -1533,6 +1660,7 @@ export default function AddonsPage() {
                             toast.error('Failed to toggle addon')
                           }
                         }}
+                        disabled={false}
                         className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
                           addon.status === 'active' ? 'bg-stremio-purple' : (isDark ? 'bg-gray-700' : 'bg-gray-300')
                         }`}
@@ -1549,7 +1677,9 @@ export default function AddonsPage() {
                       {/* Action buttons */}
                       <div className="flex items-center gap-1">
                         <button
-                          onClick={(e) => { e.stopPropagation();
+                          onClick={(e) => { 
+                            e.stopPropagation();
+                            // Always allow action;
                             try {
                               const raw = addon.url || addon.manifestUrl || ''
                               if (!raw) return
@@ -1557,6 +1687,7 @@ export default function AddonsPage() {
                               window.open(configureUrl, '_blank', 'noreferrer')
                             } catch {}
                           }}
+                          disabled={false}
                           className={`flex items-center justify-center h-8 w-8 text-sm rounded transition-colors focus:outline-none ${
                             isDark ? 'text-gray-300 hover:text-blue-400' : 'text-gray-600 hover:text-blue-600'
                           }`}
@@ -1565,7 +1696,11 @@ export default function AddonsPage() {
                           <Settings className="w-4 h-4" />
                         </button>
                         <button 
-                          onClick={(e) => { e.stopPropagation(); reloadAddonMutation.mutate(addon.id) }}
+                          onClick={(e) => { 
+                            e.stopPropagation(); 
+                            // Always allow action;
+                            reloadAddonMutation.mutate(addon.id) 
+                          }}
                           disabled={reloadAddonMutation.isPending && reloadAddonMutation.variables === addon.id}
                           className={`flex items-center justify-center h-8 w-8 text-sm rounded transition-colors disabled:opacity-50 focus:outline-none ${
                             isDark ? 'text-gray-300 hover:text-green-400' : 'text-gray-600 hover:text-green-600'
@@ -1575,7 +1710,11 @@ export default function AddonsPage() {
                           <RefreshCw className={`w-4 h-4 ${isReloadingAll || (reloadAddonMutation.isPending && reloadAddonMutation.variables === addon.id) ? 'animate-spin' : ''}`} />
                         </button>
                         <button 
-                          onClick={(e) => { e.stopPropagation(); handleDeleteAddon(addon.id, addon.name) }}
+                          onClick={(e) => { 
+                            e.stopPropagation(); 
+                            // Always allow action;
+                            handleDeleteAddon(addon.id, addon.name) 
+                          }}
                           disabled={deleteAddonMutation.isPending}
                           className={`flex items-center justify-center h-8 w-8 text-sm rounded transition-colors disabled:opacity-50 focus:outline-none ${
                             isDark ? 'text-gray-300 hover:text-red-400' : 'text-gray-600 hover:text-red-600'
