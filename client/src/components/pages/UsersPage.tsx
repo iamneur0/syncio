@@ -22,7 +22,7 @@ import {
   Puzzle,
   Unlock,
   LockKeyhole,
-  Grid3X3,
+  Grip,
   List,
   Import,
   Copy,
@@ -2305,10 +2305,8 @@ export default function UsersPage() {
                 handleDeselectAll()
               }
             }}
-            className={
-              `w-9 h-9 sm:w-10 sm:h-10 rounded-md flex items-center justify-center 
-               text-gray-500 hover:text-purple-600 bg-transparent border-none outline-none focus:outline-none ring-0 focus:ring-0 shadow-none`
-            }
+            className={`w-9 h-9 sm:w-10 sm:h-10 rounded-md flex items-center justify-center 
+               text-gray-500 ${isDark ? 'hover:text-gray-300' : 'hover:text-gray-700'} bg-transparent border-none outline-none focus:outline-none ring-0 focus:ring-0 shadow-none`}
             style={{ border: 'none' }}
             title={selectedUsers.length === 0 ? 'Select All' : 'Deselect All'}
           >
@@ -2348,7 +2346,7 @@ export default function UsersPage() {
         <div className="flex items-center gap-1.5">
             <button
               onClick={() => setShowConnectModal(true)}
-            className="w-9 h-9 sm:w-10 sm:h-10 rounded-md flex items-center justify-center text-gray-500 hover:text-purple-600 bg-transparent border-none outline-none focus:outline-none ring-0 focus:ring-0 shadow-none"
+            className={`w-9 h-9 sm:w-10 sm:h-10 rounded-md flex items-center justify-center text-gray-500 ${isDark ? 'hover:text-gray-300' : 'hover:text-gray-700'} bg-transparent border-none outline-none focus:outline-none ring-0 focus:ring-0 shadow-none`}
             style={{ border: 'none' }}
               title="Add new user"
             >
@@ -2360,7 +2358,7 @@ export default function UsersPage() {
                 handleBulkSync()
               }}
               disabled={selectedUsers.length === 0}
-            className="w-9 h-9 sm:w-10 sm:h-10 rounded-md flex items-center justify-center text-gray-500 hover:text-purple-600 disabled:opacity-40 disabled:cursor-not-allowed bg-transparent border-none outline-none focus:outline-none ring-0 focus:ring-0 shadow-none"
+            className={`w-9 h-9 sm:w-10 sm:h-10 rounded-md flex items-center justify-center text-gray-500 ${isDark ? 'hover:text-gray-300' : 'hover:text-gray-700'} disabled:opacity-40 disabled:cursor-not-allowed bg-transparent border-none outline-none focus:outline-none ring-0 focus:ring-0 shadow-none`}
             style={{ border: 'none' }}
               title={selectedUsers.length === 0 ? 'Select users to sync' : `Sync ${selectedUsers.length} selected user${selectedUsers.length > 1 ? 's' : ''}`}
             >
@@ -2372,7 +2370,7 @@ export default function UsersPage() {
                 handleBulkDelete()
               }}
               disabled={selectedUsers.length === 0}
-            className="w-9 h-9 sm:w-10 sm:h-10 rounded-md flex items-center justify-center text-gray-500 hover:text-purple-600 disabled:opacity-40 disabled:cursor-not-allowed bg-transparent border-none outline-none focus:outline-none ring-0 focus:ring-0 shadow-none"
+            className={`w-9 h-9 sm:w-10 sm:h-10 rounded-md flex items-center justify-center text-gray-500 ${isDark ? 'hover:text-gray-300' : 'hover:text-gray-700'} disabled:opacity-40 disabled:cursor-not-allowed bg-transparent border-none outline-none focus:outline-none ring-0 focus:ring-0 shadow-none`}
             style={{ border: 'none' }}
               title={selectedUsers.length === 0 ? 'Select users to delete' : `Delete ${selectedUsers.length} selected user${selectedUsers.length > 1 ? 's' : ''}`}
             >
@@ -2406,8 +2404,7 @@ export default function UsersPage() {
                   }`}
                   title="Card view"
                 >
-                  <Grid3X3 className="w-4 h-4" />
-                  <span className="hidden sm:inline">Cards</span>
+                  <Grip className="w-4 h-4" />
                 </button>
                 <button
                   onClick={() => handleViewModeChange('list')}
@@ -2431,7 +2428,6 @@ export default function UsersPage() {
                   title="List view"
                 >
                   <List className="w-4 h-4" />
-                  <span className="hidden sm:inline">List</span>
                 </button>
               </div>
             </div>
@@ -2444,7 +2440,7 @@ export default function UsersPage() {
       {/* Loading State */}
       {isLoading && (
         <div className="flex items-center justify-center py-12">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-stremio-purple"></div>
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 accent-border"></div>
           <span className={`ml-3 ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>Loading users...</span>
         </div>
       )}
@@ -2506,7 +2502,7 @@ export default function UsersPage() {
                   : 'bg-white border-gray-200'
               } ${!user.isActive ? 'opacity-50' : ''} cursor-pointer ${
                 selectedUsers.includes(user.id) 
-                  ? (isMono ? 'ring-2 ring-white/50 border-white/40' : 'ring-2 ring-purple-500 border-purple-500') 
+                  ? (isMono ? 'ring-2 ring-white/50 border-white/40' : 'ring-2 ring-gray-400 border-gray-400') 
                   : ''
               }`}>
               <div className="flex items-start justify-between mb-4">
@@ -2563,7 +2559,7 @@ export default function UsersPage() {
                           <div>
                         <h3 
                           className={`font-medium cursor-pointer transition-colors ${
-                            isModern ? 'text-purple-800 hover:text-purple-900' : isModernDark ? 'text-purple-200 hover:text-purple-100' : (isDark ? 'text-white hover:text-stremio-purple' : 'text-gray-900 hover:text-stremio-purple')
+                            isModern ? 'text-purple-800 hover:text-purple-900' : isModernDark ? 'text-purple-200 hover:text-purple-100' : (isDark ? 'text-white hover:text-gray-300' : 'text-gray-900 hover:text-gray-700')
                           }`}
                           onClick={(e) => {
                             e.stopPropagation()
@@ -2598,7 +2594,7 @@ export default function UsersPage() {
                           hasInvalidStremioConnection(user)
                             ? 'bg-gray-400 cursor-not-allowed'
                             : user.isActive 
-                              ? (isMono ? 'bg-white/30 border border-white/20' : 'bg-stremio-purple') 
+                              ? (isMono ? 'bg-white/30 border border-white/20' : (isDark ? 'bg-gray-600' : 'bg-gray-800')) 
                               : (isMono ? 'bg-white/15 border border-white/20' : (isDark ? 'bg-gray-700' : 'bg-gray-300'))
                         }`}
                         aria-pressed={user.isActive}
@@ -2747,7 +2743,7 @@ export default function UsersPage() {
                       : 'bg-white border-gray-200'
                   } ${!user.isActive ? 'opacity-50' : ''} ${
                     selectedUsers.includes(user.id) 
-                      ? (isMono ? 'ring-2 ring-white/50 border-white/40' : 'ring-2 ring-purple-500 border-purple-500') 
+                      ? (isMono ? 'ring-2 ring-white/50 border-white/40' : 'ring-2 ring-gray-400 border-gray-400') 
                       : ''
                   }`}>
                   <div className="flex items-center justify-between gap-3">
@@ -2813,7 +2809,7 @@ export default function UsersPage() {
                           hasInvalidStremioConnection(user)
                             ? 'bg-gray-400 cursor-not-allowed'
                             : user.isActive 
-                              ? (isMono ? 'bg-white/30 border border-white/20' : 'bg-stremio-purple') 
+                              ? (isMono ? 'bg-white/30 border border-white/20' : (isDark ? 'bg-gray-600' : 'bg-gray-800')) 
                               : (isMono ? 'bg-white/15 border border-white/20' : (isDark ? 'bg-gray-700' : 'bg-gray-300'))
                         }`}
                         aria-pressed={user.isActive}
@@ -2902,7 +2898,7 @@ export default function UsersPage() {
                     ? 'bg-gradient-to-br from-purple-800 via-purple-900 to-blue-900 hover:from-purple-900 hover:via-purple-950 hover:to-indigo-900'
                     : isMono
                     ? 'bg-black hover:bg-gray-800'
-                    : 'bg-stremio-purple hover:bg-purple-700'
+                    : 'accent-bg accent-text'
                 }`}
             >
                 <Plus className="w-4 h-4 sm:w-5 sm:h-5 mr-2" />
@@ -2955,14 +2951,14 @@ export default function UsersPage() {
                   <button
                     type="button"
                     onClick={() => setAuthMode('email')}
-                    className={`w-full py-2 text-sm font-medium rounded-md border ${authMode==='email' ? 'bg-stremio-purple text-white border-stremio-purple' : (isDark ? 'text-gray-300 border-gray-600' : 'text-gray-700 border-gray-300')}`}
+                    className={`w-full py-2 text-sm font-medium rounded-md border ${authMode==='email' ? 'accent-bg accent-text accent-border' : (isDark ? 'text-gray-300 border-gray-600' : 'text-gray-700 border-gray-300')}`}
                   >
                     Email & Password
                   </button>
                   <button
                     type="button"
                     onClick={() => setAuthMode('authkey')}
-                    className={`w-full py-2 text-sm font-medium rounded-md border ${authMode==='authkey' ? 'bg-stremio-purple text-white border-stremio-purple' : (isDark ? 'text-gray-300 border-gray-600' : 'text-gray-700 border-gray-300')}`}
+                    className={`w-full py-2 text-sm font-medium rounded-md border ${authMode==='authkey' ? 'accent-bg accent-text accent-border' : (isDark ? 'text-gray-300 border-gray-600' : 'text-gray-700 border-gray-300')}`}
                   >
                     Auth Key
                   </button>
@@ -3043,7 +3039,7 @@ export default function UsersPage() {
                   />
                   <div className={`mt-1 text-xs ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
                     Go to{' '}
-                    <a href="https://web.stremio.com/" target="_blank" rel="noreferrer" className="underline text-stremio-purple">web.stremio.com</a>
+                    <a href="https://web.stremio.com/" target="_blank" rel="noreferrer" className="underline accent-text">web.stremio.com</a>
                     , open the console and paste{' '}
                     <button
                       type="button"
@@ -3051,7 +3047,7 @@ export default function UsersPage() {
                         const snippet = 'JSON.parse(localStorage.getItem("profile")).auth.key'
                         try { navigator.clipboard.writeText(snippet); toast.success('Snippet copied') } catch {}
                       }}
-                      className={`underline text-stremio-purple hover:opacity-80`}
+                      className={`underline accent-text hover:opacity-80`}
                       title="Click to copy snippet"
                     >
                       this
@@ -3067,7 +3063,7 @@ export default function UsersPage() {
                     type="checkbox"
                     checked={stremioRegisterNew}
                     onChange={(e) => setStremioRegisterNew(e.target.checked)}
-                    className={`h-4 w-4 rounded border ${isDark ? 'border-gray-600 bg-gray-700' : 'border-gray-300'} text-stremio-purple focus:ring-stremio-purple`}
+                    className={`h-4 w-4 rounded border ${isDark ? 'border-gray-600 bg-gray-700' : 'border-gray-300'} accent-text focus:ring-0`}
                   />
                   <label htmlFor="stremio-register-new" className={`${isDark ? 'text-gray-300' : 'text-gray-700'} text-sm`}>
                     Register new Stremio account with these credentials
@@ -3149,7 +3145,7 @@ export default function UsersPage() {
                       ? 'bg-gradient-to-br from-purple-600 via-purple-700 to-blue-800 hover:from-purple-700 hover:via-purple-800 hover:to-blue-900'
                       : isModernDark
                       ? 'bg-gradient-to-br from-purple-800 via-purple-900 to-blue-900 hover:from-purple-900 hover:via-purple-950 hover:to-indigo-900'
-                      : 'bg-stremio-purple hover:bg-purple-700'
+                      : 'accent-bg accent-text'
                   }`}
                 >
                   {connectStremioMutation.isPending ? (stremioRegisterNew ? 'Registering...' : 'Connecting...') : (stremioRegisterNew ? 'Register & Connect' : 'Connect to Stremio')}
@@ -3336,7 +3332,7 @@ export default function UsersPage() {
                         ? 'bg-gradient-to-br from-purple-600 via-purple-700 to-blue-800 hover:from-purple-700 hover:via-purple-800 hover:to-blue-900'
                         : isModernDark
                         ? 'bg-gradient-to-br from-purple-800 via-purple-900 to-blue-900 hover:from-purple-900 hover:via-purple-950 hover:to-indigo-900'
-                        : 'bg-stremio-purple hover:bg-purple-700'
+                        : 'accent-bg accent-text'
                     }`}
                   >
                     {updateUserMutation.isPending ? 'Updating...' : 
@@ -3476,7 +3472,7 @@ export default function UsersPage() {
 
               {isLoadingDetails ? (
                 <div className="flex items-center justify-center py-8">
-                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-stremio-purple"></div>
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 accent-border"></div>
                 </div>
               ) : userDetailsData ? (
                 <div className="space-y-6">
@@ -3537,9 +3533,7 @@ export default function UsersPage() {
                                         {addonName || 'Unnamed Addon'}
                                       </h4>
                                       {addon.version && (
-                                        <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium w-fit mt-1 min-[480px]:mt-0 ${
-                                          isDark ? 'bg-purple-600 text-white' : 'bg-purple-100 text-purple-800'
-                                        }`}>
+                                        <span className={`inline-flex items-center px-1.5 py-0.5 text-xs font-medium w-fit mt-1 min-[480px]:mt-0 accent-chip`}>
                                           v{addon.version}
                                         </span>
                                       )}
@@ -3812,9 +3806,7 @@ export default function UsersPage() {
                                                     {fam?.name || addon.name || addon.id || 'Unnamed Addon'}
                                                   </h4>
                                                   {addon.version && (
-                                                    <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium w-fit mt-1 min-[480px]:mt-0 ${
-                                                      isDark ? 'bg-purple-600 text-white' : 'bg-purple-100 text-purple-800'
-                                                    }`}>
+                                                    <span className={`inline-flex items-center px-1.5 py-0.5 text-xs font-medium w-fit mt-1 min-[480px]:mt-0 accent-chip`}>
                                                       v{addon.version}
                                                     </span>
                                                   )}
@@ -3898,9 +3890,7 @@ export default function UsersPage() {
                                                   {fam?.name || activeAddon?.name || activeAddon?.id || 'Addon'}
                                                 </h4>
                                                 {activeAddon?.version && (
-                                                  <span className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium flex-shrink-0 ${
-                                                    isDark ? 'bg-purple-600 text-white' : 'bg-purple-100 text-purple-800'
-                                                  }`}>
+                                                  <span className={`inline-flex items-center px-2 py-1 text-xs font-medium flex-shrink-0 accent-chip`}>
                                                     v{activeAddon.version}
                                                   </span>
                                                 )}

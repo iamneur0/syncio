@@ -112,6 +112,26 @@ body.theme-loaded {
     background-color: inherit;
   }
 
+  /* Accent tokens (single source of truth) */
+  :root {
+    --accent-bg: #1f2937;        /* gray-800 */
+    --accent-text: #ffffff;      /* white */
+    --accent-border: #9ca3af;    /* gray-400 */
+    --accent-ring: #9ca3af;      /* gray-400 */
+  }
+  .dark :root, .dark {
+    --accent-bg: #4b5563;        /* gray-600 */
+    --accent-text: #ffffff;
+    --accent-border: #9ca3af;    /* gray-400 */
+    --accent-ring: #9ca3af;      /* gray-400 */
+  }
+  .mono :root, .mono {
+    --accent-bg: rgba(255,255,255,0.12);
+    --accent-text: #ffffff;
+    --accent-border: rgba(255,255,255,0.4);
+    --accent-ring: rgba(255,255,255,0.5);
+  }
+
   /* Override body background for modern themes */
   .modern html, .modern body {
     @apply bg-gradient-to-br from-purple-100 via-blue-100 to-indigo-100 text-purple-900;
@@ -683,6 +703,17 @@ body.theme-loaded {
 }
 
 @layer components {
+  /* Accent utility classes */
+  .accent-bg { background-color: var(--accent-bg) !important; }
+  .accent-text { color: var(--accent-text) !important; }
+  .accent-border { border-color: var(--accent-border) !important; }
+  .accent-ring { --tw-ring-color: var(--accent-ring) !important; }
+  .accent-chip {
+    background-color: var(--accent-bg) !important;
+    color: var(--accent-text) !important;
+    border: 1px solid var(--accent-border) !important;
+    border-radius: 0.5rem; /* rounded */
+  }
   /* When a modal overlay is present, dim all fixed headers/buttons except the modal */
   .modal-open .fixed,
   .modal-open [class*="z-"] {

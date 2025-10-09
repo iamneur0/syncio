@@ -16,7 +16,7 @@ import {
   ShieldAlert,
   RefreshCw,
   Copy,
-  Grid3X3,
+  Grip,
   List,
   AlertTriangle,
   EyeOff,
@@ -91,8 +91,8 @@ function GroupUserSyncBadge({ userId, userExcludedSet, userProtectedSet, isListM
         }
       case 'connect':
         return {
-          dotColor: 'bg-stremio-purple',
-          bgColor: 'bg-stremio-purple text-white'
+          dotColor: 'accent-bg',
+          bgColor: 'accent-bg accent-text'
         }
       case 'syncing':
         return {
@@ -1607,30 +1607,7 @@ export default function GroupsPage() {
   // Toggle group status mutation
   const toggleGroupStatusMutation = useMutation({
     mutationFn: async ({ id, isActive }: { id: string; isActive: boolean }) => {
-      const response = await fetch(`/api/groups/${id}/toggle-status`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-CSRF-Token': (document.cookie.split(';').find(c => c.trim().startsWith('__Host-sfm_csrf='))?.split('=')[1]
-            || document.cookie.split(';').find(c => c.trim().startsWith('sfm_csrf='))?.split('=')[1]
-            || '')
-        },
-        body: JSON.stringify({ isActive: !isActive })
-      })
-      
-      if (!response.ok) {
-        const errorText = await response.text()
-        let errorMessage = 'Failed to toggle group status'
-        try {
-          const error = JSON.parse(errorText)
-          errorMessage = error.message || errorMessage
-        } catch {
-          errorMessage = errorText || errorMessage
-        }
-        throw new Error(errorMessage)
-      }
-      
-      return await response.json()
+      return await api.patch(`/groups/${id}/toggle-status`, { isActive: !isActive })
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['groups'] })
@@ -1984,7 +1961,7 @@ export default function GroupsPage() {
                 handleDeselectAll()
               }
             }}
-            className={`w-9 h-9 sm:w-10 sm:h-10 rounded-md flex items-center justify-center text-gray-500 hover:text-purple-600 bg-transparent border-none outline-none focus:outline-none ring-0 focus:ring-0 shadow-none`}
+            className={`w-9 h-9 sm:w-10 sm:h-10 rounded-md flex items-center justify-center text-gray-500 ${isDark ? 'hover:text-gray-300' : 'hover:text-gray-700'} bg-transparent border-none outline-none focus:outline-none ring-0 focus:ring-0 shadow-none`}
             style={{ border: 'none' }}
             title={selectedGroups.length === 0 ? 'Select All' : 'Deselect All'}
           >
@@ -2024,7 +2001,7 @@ export default function GroupsPage() {
           <div className="flex items-center gap-1.5">
             <button
               onClick={() => setShowAddModal(true)}
-              className="w-9 h-9 sm:w-10 sm:h-10 rounded-md flex items-center justify-center text-gray-500 hover:text-purple-600 bg-transparent border-none outline-none focus:outline-none ring-0 focus:ring-0 shadow-none"
+            className={`w-9 h-9 sm:w-10 sm:h-10 rounded-md flex items-center justify-center text-gray-500 ${isDark ? 'hover:text-gray-300' : 'hover:text-gray-700'} bg-transparent border-none outline-none focus:outline-none ring-0 focus:ring-0 shadow-none`}
               style={{ border: 'none' }}
               title="Create new group"
             >
@@ -2036,7 +2013,7 @@ export default function GroupsPage() {
                 handleBulkSync()
               }}
               disabled={selectedGroups.length === 0}
-              className="w-9 h-9 sm:w-10 sm:h-10 rounded-md flex items-center justify-center text-gray-500 hover:text-purple-600 disabled:opacity-40 disabled:cursor-not-allowed bg-transparent border-none outline-none focus:outline-none ring-0 focus:ring-0 shadow-none"
+            className={`w-9 h-9 sm:w-10 sm:h-10 rounded-md flex items-center justify-center text-gray-500 ${isDark ? 'hover:text-gray-300' : 'hover:text-gray-700'} disabled:opacity-40 disabled:cursor-not-allowed bg-transparent border-none outline-none focus:outline-none ring-0 focus:ring-0 shadow-none`}
               style={{ border: 'none' }}
               title={selectedGroups.length === 0 ? 'Select groups to sync' : `Sync ${selectedGroups.length} selected group${selectedGroups.length > 1 ? 's' : ''}`}
             >
@@ -2082,8 +2059,7 @@ export default function GroupsPage() {
                   }`}
                   title="Card view"
                 >
-                  <Grid3X3 className="w-4 h-4" />
-                  <span className="hidden sm:inline">Cards</span>
+                  <Grip className="w-4 h-4" />
                 </button>
                 <button
                   onClick={() => handleViewModeChange('list')}
@@ -2107,7 +2083,6 @@ export default function GroupsPage() {
                   title="List view"
                 >
                   <List className="w-4 h-4" />
-                  <span className="hidden sm:inline">List</span>
                 </button>
               </div>
             </div>
@@ -2118,7 +2093,7 @@ export default function GroupsPage() {
       {/* Loading State */}
       {isLoading && (
         <div className="flex items-center justify-center py-12">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-stremio-purple"></div>
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 accent-border"></div>
           <span className={`ml-3 ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>Loading groups...</span>
         </div>
       )}
@@ -2178,7 +2153,7 @@ export default function GroupsPage() {
                   : 'bg-white border-gray-200'
               } ${!group.isActive ? 'opacity-50' : ''} cursor-pointer ${
                 selectedGroups.includes(group.id) 
-                  ? (isMono ? 'ring-2 ring-white/50 border-white/40' : 'ring-2 ring-purple-500 border-purple-500') 
+                  ? (isMono ? 'ring-2 ring-white/50 border-white/40' : 'ring-2 ring-gray-400 border-gray-400') 
                   : ''
               }`}>
             <div className="flex items-start justify-between mb-4">
@@ -2252,7 +2227,7 @@ export default function GroupsPage() {
                       handleToggleGroupStatus(group.id, group.isActive)
                     }}
                     className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                      group.isActive ? 'bg-stremio-purple' : (isDark ? 'bg-gray-700' : 'bg-gray-300')
+                      group.isActive ? (isDark ? 'bg-gray-600' : 'bg-gray-800') : (isDark ? 'bg-gray-700' : 'bg-gray-300')
                     }`}
                     aria-pressed={group.isActive}
                     title={group.isActive ? 'Click to disable' : 'Click to enable'}
@@ -2401,7 +2376,7 @@ export default function GroupsPage() {
                     : 'bg-white border-gray-200'
               } ${!group.isActive ? 'opacity-50' : ''} ${
                 selectedGroups.includes(group.id) 
-                  ? (isMono ? 'ring-2 ring-white/50 border-white/40' : 'ring-2 ring-purple-500 border-purple-500') 
+                  ? (isMono ? 'ring-2 ring-white/50 border-white/40' : 'ring-2 ring-gray-400 border-gray-400') 
                   : ''
               }`}>
               <div className="flex items-center justify-between gap-3">
@@ -2495,7 +2470,7 @@ export default function GroupsPage() {
                   <button
                     onClick={(e) => { e.stopPropagation(); handleToggleGroupStatus(group.id, group.isActive) }}
                     className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-                      group.isActive ? (isMono ? 'bg-white/30 border border-white/20' : 'bg-stremio-purple') : (isMono ? 'bg-white/15 border border-white/20' : (isDark ? 'bg-gray-700' : 'bg-gray-300'))
+                      group.isActive ? (isMono ? 'bg-white/30 border border-white/20' : (isDark ? 'bg-gray-600' : 'bg-gray-800')) : (isMono ? 'bg-white/15 border border-white/20' : (isDark ? 'bg-gray-700' : 'bg-gray-300'))
                     }`}
                     aria-pressed={group.isActive}
                     title={group.isActive ? 'Click to disable' : 'Click to enable'}
@@ -2576,7 +2551,7 @@ export default function GroupsPage() {
                     ? 'bg-gradient-to-br from-purple-800 via-purple-900 to-blue-900 hover:from-purple-900 hover:via-purple-950 hover:to-indigo-900'
                     : isMono
                     ? 'bg-black hover:bg-gray-800'
-                    : 'bg-stremio-purple hover:bg-purple-700'
+                    : 'accent-bg accent-text'
                 }`}
               >
                 <Plus className="w-4 h-4 sm:w-5 sm:h-5 mr-2" />
@@ -2704,7 +2679,7 @@ export default function GroupsPage() {
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 px-4 py-2 bg-stremio-purple text-white rounded-lg hover:bg-purple-700 transition-colors"
+                  className="flex-1 px-4 py-2 accent-bg accent-text rounded-lg transition-colors"
                 >
                   Create Group
                 </button>
@@ -2770,7 +2745,7 @@ export default function GroupsPage() {
                         key={u.id}
                         type="button"
                         onClick={() => setEditUserIds(prev => active ? prev.filter(id => id !== u.id) : [...prev, u.id])}
-                        className={`px-3 py-1 rounded-full border text-sm ${active ? 'bg-stremio-purple text-white border-stremio-purple' : (isDark ? 'bg-gray-700 text-gray-200 border-gray-600' : 'bg-gray-100 text-gray-700 border-gray-300')}`}
+                        className={`px-3 py-1 rounded-full border text-sm ${active ? 'accent-bg accent-text accent-border' : (isDark ? 'bg-gray-700 text-gray-200 border-gray-600' : 'bg-gray-100 text-gray-700 border-gray-300')}`}
                       >
                         {u.username || u.email} {active ? '✓' : ''}
                       </button>
@@ -2788,7 +2763,7 @@ export default function GroupsPage() {
                         key={a.id}
                         type="button"
                         onClick={() => setEditAddonIds(prev => active ? prev.filter(id => id !== a.id) : [...prev, a.id])}
-                        className={`px-3 py-1 rounded-full border text-sm ${active ? 'bg-stremio-purple text-white border-stremio-purple' : (isDark ? 'bg-gray-700 text-gray-200 border-gray-600' : 'bg-gray-100 text-gray-700 border-gray-300')}`}
+                        className={`px-3 py-1 rounded-full border text-sm ${active ? 'accent-bg accent-text accent-border' : (isDark ? 'bg-gray-700 text-gray-200 border-gray-600' : 'bg-gray-100 text-gray-700 border-gray-300')}`}
                       >
                         {a.name} {active ? '✓' : ''}
                       </button>
@@ -2809,7 +2784,7 @@ export default function GroupsPage() {
                 </button>
                 <button
                   onClick={() => updateGroupMutation.mutate({ id: editingGroupId, data: { name: editName, description: editDescription, userIds: editUserIds, addonIds: editAddonIds } })}
-                  className="flex-1 px-4 py-2 bg-stremio-purple text-white rounded-lg hover:bg-purple-700 transition-colors"
+                  className="flex-1 px-4 py-2 accent-bg accent-text rounded-lg transition-colors"
                 >
                   Save
                 </button>
@@ -2999,7 +2974,7 @@ export default function GroupsPage() {
                 )}
                 {isLoadingGroupDetails ? (
                   <div className="flex items-center justify-center py-8">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-stremio-purple"></div>
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 accent-border"></div>
                   </div>
                 ) : selectedGroupDetails?.users && selectedGroupDetails.users.length > 0 ? (
                   <div className="space-y-3">
@@ -3205,7 +3180,7 @@ export default function GroupsPage() {
                 )}
                 {isLoadingGroupDetails ? (
                   <div className="flex items-center justify-center py-8">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-stremio-purple"></div>
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 accent-border"></div>
                   </div>
                 ) : (selectedGroupDetails?.group?.addons && selectedGroupDetails.group.addons.length > 0) || (selectedGroupDetails?.addons && selectedGroupDetails.addons.length > 0) ? (
                   <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStartDnd} onDragEnd={handleDragEndDnd} onDragCancel={handleDragCancelDnd} modifiers={[restrictToVerticalAxis]}>
@@ -3274,7 +3249,7 @@ export default function GroupsPage() {
                                       onError={(e: any) => { e.currentTarget.style.display = 'none' }}
                                     />
                                   ) : null}
-                                  <div className={`w-full h-full ${iconUrl ? 'hidden' : 'flex'} bg-stremio-purple items-center justify-center`}>
+                                <div className={`w-full h-full ${iconUrl ? 'hidden' : 'flex'} accent-bg accent-text items-center justify-center`}>
                                     <Puzzle className="w-5 h-5 text-white" />
                                   </div>
                                 </div>
@@ -3284,9 +3259,7 @@ export default function GroupsPage() {
                                       {addonName || 'Unnamed Addon'}
                                     </h4>
                                     {addon.version && (
-                                      <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium w-fit mt-1 min-[480px]:mt-0 ${
-                                        isDark ? 'bg-purple-600 text-white' : 'bg-purple-100 text-purple-800'
-                                      }`}>
+                                      <span className={`inline-flex items-center px-1.5 py-0.5 text-xs font-medium w-fit mt-1 min-[480px]:mt-0 accent-chip`}>
                                         v{addon.version}
                                       </span>
                                     )}
@@ -3344,9 +3317,7 @@ export default function GroupsPage() {
                                   {addonName || 'Addon'}
                                 </h4>
                                 {addon?.version && (
-                                  <span className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium ${
-                                    isDark ? 'bg-purple-600 text-white' : 'bg-purple-100 text-purple-800'
-                                  }`}>
+                                  <span className={`inline-flex items-center px-2 py-1 text-xs font-medium accent-chip`}>
                                     v{addon.version}
                                   </span>
                                 )}

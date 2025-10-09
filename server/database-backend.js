@@ -5465,11 +5465,6 @@ app.patch('/api/groups/:id/toggle-status', async (req, res) => {
       where: { id },
       data: { isActive: !isActive },
       include: {
-        members: {
-          include: {
-            user: true
-          }
-        },
         addons: {
           include: {
             addon: true
