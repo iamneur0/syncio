@@ -1,6 +1,7 @@
 'use client'
 
 import React, { useState, useEffect, useMemo } from 'react'
+import { createPortal } from 'react-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTheme } from '@/contexts/ThemeContext'
 import { useDebounce } from '../../hooks/useDebounce'
@@ -309,6 +310,7 @@ export default function AddonsPageSimple() {
   const [selectedAddon, setSelectedAddon] = useState<any>(null)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [addonToDelete, setAddonToDelete] = useState<{ id: string; name: string } | null>(null)
+  const [mounted, setMounted] = useState(false)
   
   // Add modal state
   const [newAddonName, setNewAddonName] = useState('')
@@ -318,6 +320,11 @@ export default function AddonsPageSimple() {
   const [urlError, setUrlError] = useState<string>('')
   const [isLoadingManifest, setIsLoadingManifest] = useState(false)
   const [manifestData, setManifestData] = useState<any>(null)
+
+  useEffect(() => {
+    setMounted(true)
+  }, [])
+
 
   // Escape key handling for modals
   useEffect(() => {
@@ -787,7 +794,7 @@ export default function AddonsPageSimple() {
       )}
 
       {/* Add Addon Modal - Original Complex Implementation */}
-      {showAddModal && (
+      {showAddModal && mounted && typeof window !== 'undefined' && createPortal(
         <div 
           className="fixed top-0 left-0 right-0 bottom-0 bg-black bg-opacity-75 flex items-center justify-center p-4 z-[1000]"
           onClick={(e) => {
@@ -926,7 +933,8 @@ export default function AddonsPageSimple() {
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       <AddonDetailModal

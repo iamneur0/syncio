@@ -427,6 +427,7 @@ export default function UsersPageRefactored() {
   const [mounted, setMounted] = useState(false)
   
   useEffect(() => { setMounted(true) }, [])
+  
 
   // Custom hooks
   const {
@@ -926,7 +927,7 @@ export default function UsersPageRefactored() {
       )}
 
       {/* Add User Modal - Original Complex Implementation */}
-      {showConnectModal && createPortal(
+      {showConnectModal && mounted && typeof window !== 'undefined' && createPortal(
         <div 
           className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center p-4 z-[1000]"
           onClick={(e) => {
@@ -1132,7 +1133,7 @@ export default function UsersPageRefactored() {
 
 
       {/* User Detail Modal - Using original complex modal */}
-      {showDetailModal && selectedUser && (
+      {showDetailModal && selectedUser && mounted && typeof window !== 'undefined' && createPortal(
         <div 
           className="fixed top-0 left-0 right-0 bottom-0 bg-black bg-opacity-75 flex items-center justify-center z-[1000] p-4 modal-root"
           onClick={(e) => {
@@ -1451,7 +1452,8 @@ export default function UsersPageRefactored() {
               )}
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       <ConfirmDialog

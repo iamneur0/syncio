@@ -323,6 +323,7 @@ export default function GroupsPageRefactored() {
   const [groupToDelete, setGroupToDelete] = useState<{ id: string; name: string } | null>(null)
   
   useEffect(() => { setMounted(true) }, [])
+  
 
   // Custom hooks
   const {
@@ -902,7 +903,7 @@ export default function GroupsPageRefactored() {
 
 
       {/* Group Detail Modal - Using original complex modal */}
-      {showDetailModal && selectedGroup && createPortal(
+      {showDetailModal && selectedGroup && mounted && typeof window !== 'undefined' && createPortal(
         <div 
           className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-[1000] p-4"
           onClick={(e) => {
@@ -1283,7 +1284,8 @@ export default function GroupsPageRefactored() {
               </AddonList>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       <ConfirmDialog

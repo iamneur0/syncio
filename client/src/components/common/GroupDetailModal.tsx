@@ -38,6 +38,11 @@ export default function GroupDetailModal({
 }: GroupDetailModalProps) {
   const theme = useTheme()
   const { isDark, isModern, isModernDark, isMono } = theme
+  const [mounted, setMounted] = useState(false)
+
+  useEffect(() => {
+    setMounted(true)
+  }, [])
   const queryClient = useQueryClient()
 
   // Form state
@@ -138,6 +143,11 @@ export default function GroupDetailModal({
 
 
   if (!isOpen || !group) return null
+
+  // Don't render until mounted
+  if (!mounted) {
+    return null
+  }
 
   return createPortal(
     <div 
