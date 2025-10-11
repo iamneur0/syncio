@@ -7,6 +7,8 @@ html, body, #__next, :root {
   background-color: transparent; /* allow theme to control actual color */
   color-scheme: light; /* default */
   min-height: 100%;
+  margin: 0;
+  padding: 0;
 }
 
 /* Match browser chrome/overscroll color to theme by default */
@@ -86,10 +88,14 @@ body.theme-loaded {
 @layer base {
   html {
     font-family: 'Inter', system-ui, sans-serif;
+    margin: 0;
+    padding: 0;
   }
   
   body {
     @apply bg-gray-50 text-gray-900; /* light fallback */
+    margin: 0;
+    padding: 0;
   }
 
   /* Ensure overscroll/rubber-band shows correct theme color (html/body) */
@@ -713,15 +719,6 @@ body.theme-loaded {
     color: var(--accent-text) !important;
     border: 1px solid var(--accent-border) !important;
     border-radius: 0.5rem; /* rounded */
-  }
-  /* When a modal overlay is present, dim all fixed headers/buttons except the modal */
-  .modal-open .fixed,
-  .modal-open [class*="z-"] {
-    filter: brightness(0.8);
-  }
-  .modal-open .modal-root,
-  .modal-open .modal-root * {
-    filter: none !important;
   }
   .btn {
     @apply inline-flex items-center justify-center px-4 py-2 text-sm font-medium rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed;
