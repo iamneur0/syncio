@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.0](https://github.com/iamneur0/syncio/compare/v0.0.18...v0.1.0) (2025-10-11)
+
+
+### Features
+
+* added more account management options, category full deletion ([0b0ce45](https://github.com/iamneur0/syncio/commit/0b0ce45b92bacb8f06f730d5e9e175cd83d286cb))
+* addon selection and UI buttons reworked ([10a9087](https://github.com/iamneur0/syncio/commit/10a908740787f02c29ef1535c31cfe26e5ebd874))
+* disable automatic backup feature in public mode ([b3366a2](https://github.com/iamneur0/syncio/commit/b3366a20b3bf07f555b47c014c5c82f4f7c69f89))
+* finished UI + fixed group toggle ([e4d3ab8](https://github.com/iamneur0/syncio/commit/e4d3ab82deb44a1025772bca476ece74eb9b5731))
+* improved UI ([3f755ba](https://github.com/iamneur0/syncio/commit/3f755ba95c9f6aa675ceb7eb5c029c7a03bf6e05))
+* selection to user and group tabs ([4626429](https://github.com/iamneur0/syncio/commit/46264293b086fb2c8957a04d483ceff707597c23))
+* UI Refactor ([fea5ed4](https://github.com/iamneur0/syncio/commit/fea5ed469aff2b252fc25c480b341c5dcf4c8885))
+
 ## [0.0.18](https://github.com/iamneur0/syncio/compare/v0.0.17...v0.0.18) (2025-10-08)
 
 
