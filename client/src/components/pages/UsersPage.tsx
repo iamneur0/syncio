@@ -1,323 +1,27 @@
 'use client'
 
-import React, { useState, useMemo, useEffect, useRef, useLayoutEffect } from 'react'
+import React, { useState, useMemo, useEffect, useCallback } from 'react'
+import { createPortal } from 'react-dom'
+import { useTheme } from '@/contexts/ThemeContext'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { usersAPI, groupsAPI, type User } from '@/services/api'
+import api from '@/services/api'
+import { useDebounce } from '../../hooks/useDebounce'
+import { debug } from '../../utils/debug'
+import PageHeader from '../common/PageHeader'
+import EntityCard from '../common/EntityCard'
+import { LoadingSkeleton, EmptyState, SyncBadge, AddonList, ConfirmDialog } from '../common'
+import { Users, Puzzle, RefreshCw, Trash2, Grip, Eye, EyeOff, LockKeyhole, Unlock, X, Search, Plus, Square, CheckSquare, List } from 'lucide-react'
 import { DndContext, DragOverlay, PointerSensor, TouchSensor, useSensor, useSensors, closestCenter } from '@dnd-kit/core'
 import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { restrictToVerticalAxis } from '@dnd-kit/modifiers'
-import { 
-  Plus, 
-  Search,
-  Eye,
-  EyeOff,
-  Trash2,
-  Edit,
-  ShieldCheck,
-  UserCircle,
-  AlertTriangle,
-  Link,
-  CheckCircle,
-  RefreshCw,
-  Users,
-  Puzzle,
-  Unlock,
-  LockKeyhole,
-  Grip,
-  List,
-  Import,
-  Copy,
-  Download,
-  Square,
-  CheckSquare
-} from 'lucide-react'
-import { useTheme } from '@/contexts/ThemeContext'
-import { getColorBgClass, getColorTextClass, getColorOptions } from '@/utils/colorMapping'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { usersAPI, groupsAPI, addonsAPI, type User } from '@/services/api'
-import api from '@/services/api'
-import UserMenuButton from '@/components/auth/UserMenuButton'
+import { getColorBgClass, getColorOptions } from '@/utils/colorMapping'
 import toast from 'react-hot-toast'
-import ConfirmDialog from '../common/ConfirmDialog'
-import SyncBadge from '../common/SyncBadge'
-import { useDebounce } from '../../hooks/useDebounce'
-import { debug } from '../../utils/debug'
 
-import { fetchManifestCached } from '../../utils/manifestCache'
-
-// Small badge that shows per-user sync status in list view
-function UserSyncBadge({ userId, userExcludedSet, userProtectedSet, isSyncing, location = 'unknown', isListMode = false, deleteMode = 'safe' }: { userId: string, userExcludedSet: Set<string>, userProtectedSet: Set<string>, isSyncing?: boolean, location?: string, isListMode?: boolean, deleteMode?: 'safe' | 'unsafe' }) {
-  const { isDark, isModern, isModernDark, isMono } = useTheme()
-  const { data: syncStatus } = useQuery({
-    queryKey: ['user', userId, 'sync-status', deleteMode],
-    queryFn: async () => usersAPI.getSyncStatus(userId, undefined, deleteMode === 'unsafe'),
-    staleTime: 30_000,
-    refetchOnMount: 'always',
-  })
-
-  // Fetch stremio-addons data to check for needsReconnect flag
-  const { data: stremioAddonsData } = useQuery({
-    queryKey: ['user', userId, 'stremio-addons'],
-    queryFn: async () => {
-      try {
-        const response = await api.get(`/users/${userId}/stremio-addons`)
-        return response.data
-      } catch (error: any) {
-        // If user is not connected to Stremio, return empty addons instead of throwing
-        if (error.response?.status === 400) {
-          return { addons: [] }
-        }
-        // If decryption fails (bad stremioAuthKey), return empty addons and mark for reconnection
-        if (error.response?.status === 500 && error.response?.data?.message?.includes('decrypt')) {
-          return { addons: [], needsReconnect: true }
-        }
-        throw error
-      }
-    },
-    enabled: !!userId,
-    staleTime: 5 * 60 * 1000, // Cache for 5 minutes
-    refetchOnMount: false, // Don't refetch on mount if we have cached data
-    refetchOnWindowFocus: false
-  })
-
-  // userExcludedSet and userProtectedSet are now passed as props from parent component
-  const [status, setStatus] = React.useState<'synced' | 'unsynced' | 'stale' | 'connect' | 'syncing' | 'checking'>('checking')
-  const [manuallySet, setManuallySet] = React.useState(false)
-  const currentUserIdRef = React.useRef<string | null>(null)
-
-  // Use sync status from API
-  React.useEffect(() => {
-    if (!syncStatus) return
-
-    if (!manuallySet) {
-      setStatus(syncStatus.status || 'checking')
-    }
-  }, [syncStatus, manuallySet])
-
-  // Check for needsReconnect flag from stremio-addons data
-  React.useEffect(() => {
-    if (stremioAddonsData?.needsReconnect && !manuallySet) {
-      setStatus('connect')
-    }
-  }, [stremioAddonsData?.needsReconnect, manuallySet])
-
-  // Protected addon IDs and URLs - same as main component
-  const protectedAddonIds = ['org.stremio.local', 'com.stremio.opensubtitles']
-  const protectedManifestUrls = [
-    'http://127.0.0.1:11470/local-addon/manifest.json',
-    'https://opensubtitles.strem.io/manifest.json'
-  ]
-
-  // Check if an addon is built-in protected (Stremio default)
-  const isAddonProtectedBuiltIn = (addon: any) => {
-    const addonId = addon?.id || addon?.manifest?.id
-    const manifestUrl = addon?.manifestUrl || addon?.transportUrl || addon?.url
-    
-    // Check by ID
-    if (addonId && protectedAddonIds.includes(addonId)) return true
-    
-    // Check by manifest URL
-    if (manifestUrl && protectedManifestUrls.includes(manifestUrl)) return true
-    
-    // Check if manifest URL contains any protected addon ID
-    if (manifestUrl && protectedAddonIds.some(id => manifestUrl.includes(id))) return true
-    
-    return false
-  }
-
-  // Check if an addon is protected (built-in + user-defined) - same logic as main component
-  const isAddonProtected = (addon: any) => {
-    const manifestUrl = addon?.manifestUrl || addon?.transportUrl || addon?.url
-    
-    // Check if built-in protected
-    if (isAddonProtectedBuiltIn(addon)) return true
-    
-    // Check if user-protected
-    return userProtectedSet.has(manifestUrl || '')
-  }
-
-  const handleConnectStremio = () => {
-    if (syncStatus) {
-      // This will be handled by the parent component
-      // We'll use a custom event to communicate with the parent
-      window.dispatchEvent(new CustomEvent('connectStremio', { detail: { id: userId } }))
-    }
-  }
-  const { data: live } = useQuery({
-    queryKey: ['user', userId, 'stremio-addons'],
-    queryFn: async () => {
-      try {
-        const response = await api.get(`/users/${userId}/stremio-addons`)
-        return response.data
-      } catch (error) {
-        return { addons: [] }
-      }
-    },
-    staleTime: 60_000, // 1 minute
-    refetchOnMount: 'always',
-    refetchInterval: 120_000, // 2 minutes
-    enabled: !!syncStatus && syncStatus.status !== 'connect', // Only fetch if user is connected to Stremio
-  })
-
-  // Listen for Users tab activation and force a re-check
-  React.useEffect(() => {
-    const onTab = (e: CustomEvent) => {
-      if (e.detail?.id === 'users') {
-        setStatus('checking')
-      }
-    }
-    window.addEventListener('sfm:tab:activated' as any, onTab as any)
-    return () => window.removeEventListener('sfm:tab:activated' as any, onTab as any)
-  }, [])
-
-  // Listen for user status changes (e.g., when addon is deleted)
-  React.useEffect(() => {
-    const onUserStatus = (e: CustomEvent) => {
-      debug.log(`UserSyncBadge [${location}] received sfm:user-status event:`, e.detail, 'for userId:', userId)
-      if (e.detail?.userId === userId) {
-        debug.log(`UserSyncBadge [${location}] setting status to:`, e.detail.status)
-        setStatus(e.detail.status)
-        
-        // Only set manual flag for unsynced status, and clear it after a short delay
-        if (e.detail.status === 'unsynced') {
-          debug.log(`UserSyncBadge [${location}] setting unsynced with temporary manual flag`)
-          setManuallySet(true)
-          // Clear the manual flag after 1 second to allow normal sync checking
-          setTimeout(() => {
-            debug.log(`UserSyncBadge [${location}] clearing manual flag`)
-            setManuallySet(false)
-          }, 1000)
-        }
-      }
-    }
-    window.addEventListener('sfm:user-status' as any, onUserStatus as any)
-    return () => window.removeEventListener('sfm:user-status' as any, onUserStatus as any)
-  }, [userId, location])
-
-  const deepSort = (obj: any): any => {
-    if (Array.isArray(obj)) return obj.map(deepSort)
-    if (obj && typeof obj === 'object') {
-      return Object.keys(obj).sort().reduce((acc: any, key: string) => {
-        acc[key] = deepSort(obj[key])
-        return acc
-      }, {} as any)
-    }
-    return obj
-  }
-
-
-
-
-  // Remove duplicate - already defined above
-
-  // Reset status when userId changes to avoid showing stale data
-  React.useLayoutEffect(() => {
-    if (currentUserIdRef.current !== userId) {
-      currentUserIdRef.current = userId
-      setStatus('checking')
-      setManuallySet(false)
-    }
-  }, [userId])
-
-  // Persist last-known user sync status for cross-tab consumers (e.g., Groups page)
-  React.useEffect(() => {
-    if (status === 'synced' || status === 'unsynced') {
-      try {
-        localStorage.setItem(`sfm_user_sync_status:${userId}`, status)
-        window.dispatchEvent(new CustomEvent('sfm:user-status' as any, { detail: { userId, status } }))
-      } catch {}
-    }
-  }, [status, userId])
-
-  React.useEffect(() => {
-    const checkSync = () => {
-      debug.log(`UserSyncBadge [${location}] checkSync running for userId:`, userId)
-      debug.log(`UserSyncBadge [${location}] isSyncing:`, isSyncing, 'manuallySet:', manuallySet)
-      
-      // Skip if this is not the current user (avoid stale data)
-      if (currentUserIdRef.current !== userId) {
-        debug.log(`UserSyncBadge [${location}] skipping checkSync - userId mismatch`)
-        return
-      }
-      
-      // Skip checkSync if status was manually set recently
-      if (manuallySet) {
-        debug.log(`UserSyncBadge [${location}] skipping checkSync - status was manually set`)
-        return
-      }
-      
-      // If currently syncing, show syncing state
-      if (isSyncing) {
-        debug.log('Setting status to syncing (currently syncing)')
-        setStatus('syncing')
-        return
-      }
-
-      // If data is still loading, show checking state
-      if (!syncStatus) {
-        debug.log('Setting status to checking (data loading)')
-        setStatus('checking')
-        return
-      }
-
-      // Use the status from the API
-      setStatus(syncStatus.status || 'checking')
-    }
-
-    checkSync()
-  }, [syncStatus, isSyncing, manuallySet])
-
-  const handleSync = () => {
-    // Trigger sync for this user
-    window.dispatchEvent(new CustomEvent('syncUser', { detail: { userId } }))
-  }
-
-  const getTitle = () => {
-    switch (status) {
-      case 'synced':
-        return 'User is synced'
-      case 'unsynced':
-        return 'Click to sync user'
-      case 'stale':
-        return 'User is stale'
-      case 'connect':
-        return 'Click to connect Stremio'
-      case 'syncing':
-        return 'Syncing user...'
-      case 'checking':
-        return 'Checking sync status...'
-      default:
-        return ''
-    }
-  }
-
-  // Only render if this is the current user (avoid showing stale data)
-  if (currentUserIdRef.current !== userId) {
-    return (
-      <SyncBadge
-        status="checking"
-        isClickable={false}
-        title="Checking sync status..."
-        isListMode={isListMode}
-      />
-    )
-  }
-
-  return (
-    <SyncBadge
-      status={status}
-      isClickable={status === 'unsynced' || status === 'connect'}
-      onClick={status === 'unsynced' ? handleSync : status === 'connect' ? handleConnectStremio : undefined}
-      title={getTitle()}
-      isListMode={isListMode}
-    />
-  )
-}
-
-export default function UsersPage() {
+// Custom hooks for better organization
+function useUserModals() {
   const [searchTerm, setSearchTerm] = useState('')
-  const debouncedSearchTerm = useDebounce(searchTerm, 300)
-  
-  // View mode state (card or list)
   const [viewMode, setViewMode] = useState<'card' | 'list'>(() => {
     if (typeof window !== 'undefined') {
       const raw = String(localStorage.getItem('global-view-mode') || 'card').toLowerCase().trim()
@@ -325,295 +29,124 @@ export default function UsersPage() {
     }
     return 'card'
   })
-  // Ensure highlight persists after refresh/hydration
-  useLayoutEffect(() => {
-    try {
-      const raw = String(localStorage.getItem('global-view-mode') || 'card').toLowerCase().trim()
-      const stored = raw === 'list' ? 'list' : 'card'
-      setViewMode(stored)
-    } catch {}
-  }, [])
+  const [selectedUsers, setSelectedUsers] = useState<string[]>([])
+  const [showAddModal, setShowAddModal] = useState(false)
+  const [showDetailModal, setShowDetailModal] = useState(false)
+  const [selectedUser, setSelectedUser] = useState<any>(null)
   
-  // Protected addon lists
-  const protectedAddonIds = [
-    'com.linvo.cinemeta', // Cinemeta
-    'org.stremio.local' // Local Files
-  ]
-
-  const protectedManifestUrls = [
-    'https://v3-cinemeta.strem.io/manifest.json',
-    'http://127.0.0.1:11470/local-addon/manifest.json'
-  ]
-
-  // Check if an addon is protected (built-in list)
-  const isAddonProtectedBuiltIn = (addon: any) => {
-    const addonId = addon?.id || addon?.manifest?.id
-    const manifestUrl = addon?.manifestUrl || addon?.transportUrl || addon?.url
-    
-    // Check by ID
-    if (addonId && protectedAddonIds.includes(addonId)) return true
-    
-    // Check by manifest URL
-    if (manifestUrl && protectedManifestUrls.includes(manifestUrl)) return true
-    
-    // Check if manifest URL contains any protected IDs (for cases where URL contains the ID)
-    if (manifestUrl) {
-      return protectedAddonIds.some((id: string) => manifestUrl.includes(id)) ||
-             protectedManifestUrls.some((url: string) => manifestUrl.includes(url))
-    }
-    
-    return false
-  }
-
-  // Check if an addon is protected (built-in + user-defined)
-  const isAddonProtected = (addon: any) => isAddonProtectedBuiltIn(addon) || userProtectedSet.has(addon?.manifestUrl || addon?.transportUrl || addon?.url || '')
-  
-  const [showConnectModal, setShowConnectModal] = useState(false)
-  const [authMode, setAuthMode] = useState<'email' | 'authkey'>('email')
+  // Add user modal state
   const [stremioEmail, setStremioEmail] = useState('')
   const [stremioPassword, setStremioPassword] = useState('')
   const [stremioUsername, setStremioUsername] = useState('')
-  const [stremioAuthKey, setStremioAuthKey] = useState('')
-  const [stremioRegisterNew, setStremioRegisterNew] = useState(false)
+  const [authMode, setAuthMode] = useState<'email' | 'authkey'>('email')
   const [selectedGroup, setSelectedGroup] = useState('')
   const [newGroupName, setNewGroupName] = useState('')
+  const [showConnectModal, setShowConnectModal] = useState(false)
+  const [stremioRegisterNew, setStremioRegisterNew] = useState(false)
   
-  // Edit user modal state
-  const [editingUser, setEditingUser] = useState<any>(null)
-  const [isEditModalOpen, setIsEditModalOpen] = useState(false)
-  const [editFormData, setEditFormData] = useState({
-    username: '',
-    email: '',
-    password: '',
-    groupName: ''
-  })
-  const [editingUsername, setEditingUsername] = useState<string | null>(null)
-  const [tempUsername, setTempUsername] = useState<string>('')
+  // Drag and drop state for Stremio addons
+  const [isDndActive, setIsDndActive] = useState(false)
+  const [activeId, setActiveId] = useState<string | null>(null)
+  const [stremioAddonOrder, setStremioAddonOrder] = useState<string[]>([])
   
-  // User detail modal state
-  const [selectedUser, setSelectedUser] = useState<any>(null)
-  const [isDetailModalOpen, setIsDetailModalOpen] = useState(false)
-  
-  // Detailed view editing state
-  const [editingDetailUsername, setEditingDetailUsername] = useState<string | null>(null)
-  const [tempDetailUsername, setTempDetailUsername] = useState<string>('')
-  const [editingDetailGroup, setEditingDetailGroup] = useState<boolean>(false)
-  const [tempDetailGroup, setTempDetailGroup] = useState<string>('')
-  const { isDark, isModern, isModernDark, isMono } = useTheme()
-  const queryClient = useQueryClient()
-  const [mounted, setMounted] = useState(false)
-  useEffect(() => { setMounted(true) }, [])
-  
-  // Delete mode state
-  const [deleteMode, setDeleteMode] = useState<'safe' | 'unsafe'>('safe')
-  
-  // Load delete mode from localStorage
-  useEffect(() => {
-    const savedDeleteMode = localStorage.getItem('sfm_delete_mode') as 'safe' | 'unsafe' | null
-    if (savedDeleteMode) {
-      setDeleteMode(savedDeleteMode)
-    }
-  }, [])
-  
-  // Listen for delete mode changes from settings
-  useEffect(() => {
-    const handleDeleteModeChange = () => {
-      const savedDeleteMode = localStorage.getItem('sfm_delete_mode') as 'safe' | 'unsafe' | null
-      if (savedDeleteMode) {
-        setDeleteMode(savedDeleteMode)
-      }
-    }
-    
-    window.addEventListener('sfm:settings:changed', handleDeleteModeChange)
-    return () => window.removeEventListener('sfm:settings:changed', handleDeleteModeChange)
-  }, [])
-  
-  // Listen for user detail view requests from other components (like GroupsPage)
-  useEffect(() => {
-    const handleViewUserDetails = (e: CustomEvent) => {
-      const { user } = e.detail || {}
-      if (user) {
-        setSelectedUser(user)
-        setIsDetailModalOpen(true)
-        // Reset editing states when opening detail view
-        setEditingDetailUsername(null)
-        setTempDetailUsername('')
-        setEditingDetailGroup(false)
-        setTempDetailGroup('')
-      }
-    }
-    
-    window.addEventListener('sfm:view-user-details', handleViewUserDetails as any)
-    return () => {
-      window.removeEventListener('sfm:view-user-details', handleViewUserDetails as any)
-    }
-  }, [])
-  
-  // Backend restart detection
-  const [lastServerStartTime, setLastServerStartTime] = useState<string | null>(null)
-  
-  // Check for backend restarts and refresh data if needed
-  useEffect(() => {
-    const checkBackendRestart = async () => {
-      try {
-        const response = await fetch('/api/health')
-        if (response.ok) {
-          const health = await response.json()
-          if (lastServerStartTime && health.serverStartTime !== lastServerStartTime) {
-            // Backend restarted, refresh all user data
-            // Invalidate all queries to ensure fresh data
-            queryClient.invalidateQueries()
-            // Also clear the cache to force refetch
-            queryClient.clear()
-            toast.success('Backend restarted - data refreshed')
-          }
-          setLastServerStartTime(health.serverStartTime)
-        }
-      } catch (error) {
-        // Health check failed - backend might be down
-      }
-    }
-    
-    // Check immediately and then every 5 seconds
-    checkBackendRestart()
-    const interval = setInterval(checkBackendRestart, 5000)
-    
-    return () => clearInterval(interval)
-  }, [lastServerStartTime, queryClient])
+  // Delete confirmation state
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [userToDelete, setUserToDelete] = useState<{ id: string; name: string } | null>(null)
 
-  // Listen for settings changes
-  useEffect(() => {
-    const handleSettingsChange = () => {
-      const savedDeleteMode = localStorage.getItem('sfm_delete_mode')
-      setDeleteMode(savedDeleteMode === 'unsafe' ? 'unsafe' : 'safe')
-    }
-    
-    // Load initial delete mode
-    handleSettingsChange()
-    
-    // Listen for changes
-    window.addEventListener('sfm:settings:changed', handleSettingsChange)
-    
-    return () => {
-      window.removeEventListener('sfm:settings:changed', handleSettingsChange)
-    }
-  }, [])
+  return {
+    searchTerm,
+    setSearchTerm,
+    viewMode,
+    setViewMode,
+    selectedUsers,
+    setSelectedUsers,
+    showAddModal,
+    setShowAddModal,
+    showDetailModal,
+    setShowDetailModal,
+    selectedUser,
+    setSelectedUser,
+    // Add user modal
+    stremioEmail,
+    setStremioEmail,
+    stremioPassword,
+    setStremioPassword,
+    stremioUsername,
+    setStremioUsername,
+    authMode,
+    setAuthMode,
+    selectedGroup,
+    setSelectedGroup,
+    newGroupName,
+    setNewGroupName,
+    showConnectModal,
+    setShowConnectModal,
+    stremioRegisterNew,
+    setStremioRegisterNew,
+    // Drag and drop
+    isDndActive,
+    setIsDndActive,
+    activeId,
+    setActiveId,
+    stremioAddonOrder,
+    setStremioAddonOrder,
+    // Delete confirmation
+    showDeleteConfirm,
+    setShowDeleteConfirm,
+    userToDelete,
+    setUserToDelete
+  }
+}
 
-
-  // Fetch users from API
-  const AUTH_ENABLED = process.env.NEXT_PUBLIC_AUTH_ENABLED === 'true'
-  const [authed, setAuthed] = useState<boolean>(() => !AUTH_ENABLED ? true : false)
-  
-  // Check authentication status on mount and when tab becomes visible
-  useEffect(() => {
-    if (AUTH_ENABLED) {
-      // Check if user is already authenticated by making a test API call
-      const checkAuth = async () => {
-        try {
-          const response = await api.get('/users')
-          debug.log('🔄 Auth check successful, user is authenticated')
-          setAuthed(true)
-        } catch (error: any) {
-          // Only set authed to false if it's actually an authentication error
-          if (error?.response?.status === 401 || error?.response?.status === 403) {
-            debug.log('🔄 Auth check failed - authentication required:', error)
-            setAuthed(false)
-          } else {
-            // For other errors (like Stremio connection issues), keep current auth state
-            debug.log('🔄 Auth check failed but not an auth error, keeping current state:', error)
-          }
-        }
-      }
-      
-      // Check auth on mount
-      checkAuth()
-      
-      // Check auth when tab becomes visible again
-      const handleVisibilityChange = () => {
-        if (!document.hidden) {
-          debug.log('🔄 Tab became visible, checking authentication...')
-          checkAuth()
-        }
-      }
-      
-      document.addEventListener('visibilitychange', handleVisibilityChange)
-      
-      return () => {
-        document.removeEventListener('visibilitychange', handleVisibilityChange)
-      }
-    }
-  }, [AUTH_ENABLED])
-  
-  useEffect(() => {
-    const handler = (e: any) => setAuthed(!!e?.detail?.authed)
-    window.addEventListener('sfm:auth:changed', handler as any)
-    return () => window.removeEventListener('sfm:auth:changed', handler as any)
-  }, [])
-
-  const { data: users = [], isLoading, error } = useQuery({
+function useUserData() {
+  const { data: users = [], isLoading, error, isSuccess } = useQuery({
     queryKey: ['users'],
     queryFn: async () => {
       debug.log('🔄 Fetching users from API...')
       const result = await usersAPI.getAll()
       debug.log('🔄 Users API result:', result)
       
-      // Handle case where result might be wrapped in an axios response
       if (result && typeof result === 'object' && 'data' in result && Array.isArray((result as any).data)) {
-        debug.log('🔄 Returning wrapped data:', (result as any).data)
         return (result as any).data
       }
       
-      // If result is already an array, return it
       if (Array.isArray(result)) {
-        debug.log('🔄 Returning direct array result:', result)
         return result
       }
       
-      debug.log('🔄 Returning empty array')
       return []
     },
-    retry: 1,
-    refetchOnMount: 'always',
-    refetchOnWindowFocus: false,
-    enabled: !AUTH_ENABLED || authed,
   })
-  // Debug users data changes
-  useEffect(() => {
-    debug.log('🔄 Users data changed:', { users, count: users.length, isLoading, error, AUTH_ENABLED, authed })
-  }, [users, isLoading, error, AUTH_ENABLED, authed])
 
-  // Clear cached users/groups on logout
-  useEffect(() => {
-    const handler = (e: any) => {
-      if (!e?.detail?.authed) {
-        queryClient.setQueryData(['users'], [] as any)
-        queryClient.setQueryData(['groups'], [] as any)
-      }
-    }
-    window.addEventListener('sfm:auth:changed', handler as any)
-    return () => window.removeEventListener('sfm:auth:changed', handler as any)
-  }, [queryClient])
+  const { data: groups = [] } = useQuery({
+    queryKey: ['groups'],
+    queryFn: groupsAPI.getAll,
+  })
 
+  return { users, groups, isLoading, error, isSuccess }
+}
 
+function useUserDetails(selectedUser: any, showDetailModal: boolean, deleteStremioAddonMutation: any) {
+  const queryClient = useQueryClient()
   // Fetch user details (without Stremio addons to avoid duplicate API calls)
   const { data: userDetailsData, isLoading: isLoadingDetails } = useQuery({
     queryKey: ['user', selectedUser?.id, 'basic'],
     queryFn: async () => {
       if (!selectedUser?.id) return null
-      const response = await api.get(`/users/${selectedUser.id}?basic=true`)
-      return response.data
+      const response = await fetch(`/api/users/${selectedUser.id}?basic=true`)
+      return response.json()
     },
-    enabled: !!selectedUser?.id
+    enabled: !!selectedUser?.id && showDetailModal
   })
 
-  // Fetch live Stremio addons for the selected user (this will be the single source of truth)
+  // Fetch live Stremio addons for the selected user
   const { data: stremioAddonsData, isLoading: isLoadingStremioAddons } = useQuery({
     queryKey: ['user', selectedUser?.id, 'stremio-addons'],
     queryFn: async () => {
       if (!selectedUser?.id) return null
       try {
-        const response = await api.get(`/users/${selectedUser.id}/stremio-addons`)
-        return response.data
+        const response = await fetch(`/api/users/${selectedUser.id}/stremio-addons`)
+        return response.json()
       } catch (error: any) {
         // If user is not connected to Stremio, return empty addons instead of throwing
         if (error.response?.status === 400) {
@@ -626,16 +159,11 @@ export default function UsersPage() {
         throw error
       }
     },
-    enabled: !!selectedUser?.id && !!selectedUser?.hasStremioConnection,
+    enabled: !!selectedUser?.id && !!selectedUser?.hasStremioConnection && showDetailModal,
     staleTime: 5 * 60 * 1000, // Cache for 5 minutes
     refetchOnMount: false, // Don't refetch on mount if we have cached data
     refetchOnWindowFocus: false
   })
-
-  // Calculate sync status from cached Stremio addons data (no additional API call needed)
-  const [isUserSynced, setIsUserSynced] = React.useState<boolean>(false)
-  
-  const [hideSensitive, setHideSensitive] = React.useState<boolean>(false)
 
   // Per-user excluded group addons (addon ID) — now from database
   const [userExcludedSet, setUserExcludedSet] = useState<Set<string>>(new Set())
@@ -647,66 +175,19 @@ export default function UsersPage() {
     }
   }, [userDetailsData?.excludedAddons])
 
-  // Global states for all users (used by UserSyncBadge components)
-  const [globalUserExcludedSets, setGlobalUserExcludedSets] = useState<Map<string, Set<string>>>(new Map())
-  const [globalUserProtectedSets, setGlobalUserProtectedSets] = useState<Map<string, Set<string>>>(new Map())
-
-  // Load excluded and protected sets for all users
+  // User-defined protected addons, persisted per user (by manifestUrl) — now from database
+  const [userProtectedSet, setUserProtectedSet] = useState<Set<string>>(new Set())
   useEffect(() => {
-    if (!users) return
-    
-    const newExcludedSets = new Map<string, Set<string>>()
-    const newProtectedSets = new Map<string, Set<string>>()
-    
-    users.forEach((user: any) => {
-      const uid = user.id
-      if (!uid) return
-      
-      // Load excluded and protected addons from user data
-      const excludedAddons = user.excludedAddons || []
-      const protectedAddons = user.protectedAddons || []
-      
-      newExcludedSets.set(uid, new Set(excludedAddons))
-      newProtectedSets.set(uid, new Set(protectedAddons))
-    })
-    
-    // Only update state if the data has actually changed
-    setGlobalUserExcludedSets(prev => {
-      // Check if the new data is different from current data
-      if (prev.size !== newExcludedSets.size) return newExcludedSets
-      
-      for (const [key, value] of Array.from(newExcludedSets.entries())) {
-        const prevValue = prev.get(key)
-        if (!prevValue || prevValue.size !== value.size || 
-            !Array.from(value).every(item => prevValue.has(item))) {
-          return newExcludedSets
-        }
-      }
-      
-      return prev // No change, return same reference
-    })
-    
-    setGlobalUserProtectedSets(prev => {
-      // Check if the new data is different from current data
-      if (prev.size !== newProtectedSets.size) return newProtectedSets
-      
-      for (const [key, value] of Array.from(newProtectedSets.entries())) {
-        const prevValue = prev.get(key)
-        if (!prevValue || prevValue.size !== value.size || 
-            !Array.from(value).every(item => prevValue.has(item))) {
-          return newProtectedSets
-        }
-      }
-      
-      return prev // No change, return same reference
-    })
-  }, [users])
+    if (userDetailsData?.protectedAddons) {
+      setUserProtectedSet(new Set(userDetailsData.protectedAddons))
+    } else {
+      setUserProtectedSet(new Set())
+    }
+  }, [userDetailsData?.protectedAddons])
 
   const toggleUserExcluded = async (addonId?: string) => {
     const uid = selectedUser?.id
     if (!uid || !addonId) return
-    
-    console.log('🔍 Frontend toggleUserExcluded called with addonId:', addonId)
     
     setUserExcludedSet((prev) => {
       const next = new Set(prev)
@@ -714,546 +195,165 @@ export default function UsersPage() {
       if (next.has(key)) next.delete(key)
       else next.add(key)
       
-      console.log('🔍 Frontend sending excludedAddons:', Array.from(next))
-      
-      // Update database
-      api.put(`/users/${uid}/excluded-addons`, { excludedAddons: Array.from(next) }).then(() => {
-        // Update global sets for this user
-        setGlobalUserExcludedSets(prev => {
-          const newMap = new Map(prev)
-          newMap.set(uid, next)
-          return newMap
+      // Update database using dedicated endpoint
+      api.put(`/users/${uid}/excluded-addons`, { excludedAddons: Array.from(next) })
+        .then(() => {
+          // Invalidate queries to update UI
+          queryClient.invalidateQueries({ queryKey: ['user', uid] })
+          queryClient.invalidateQueries({ queryKey: ['user', uid, 'stremio-addons'] })
         })
-        
-        // Invalidate queries to update sync badges
-        queryClient.invalidateQueries({ queryKey: ['user', uid] })
-        queryClient.invalidateQueries({ queryKey: ['user', uid, 'stremio-addons'] })
-      }).catch(error => console.error('Failed to update excluded addons:', error))
-      
-      // Update global state for all users
-      setGlobalUserExcludedSets(prev => {
-        const newGlobal = new Map(prev)
-        newGlobal.set(uid, next)
-        return newGlobal
-      })
-      
-      // Invalidate user queries to update sync badges in general view
-      queryClient.invalidateQueries({ queryKey: ['user', uid] })
-      queryClient.invalidateQueries({ queryKey: ['users'] })
+        .catch(error => console.error('Failed to update excluded addons:', error))
       
       return next
     })
   }
 
-  React.useEffect(() => {
-    const read = () => {
-      const saved = typeof window !== 'undefined' ? localStorage.getItem('sfm_hide_sensitive') : null
-      setHideSensitive(saved === '1')
-    }
-    read()
-    const onChanged = () => read()
-    window.addEventListener('sfm:settings:changed' as any, onChanged)
-    return () => window.removeEventListener('sfm:settings:changed' as any, onChanged)
-  }, [])
-
-  // Handle connectStremio events from UserSyncBadge
-  React.useEffect(() => {
-    const handleConnectStremio = (event: CustomEvent) => {
-      const userDetail = event.detail
-      handleConnectExistingUserToStremio(userDetail.id || userDetail)
-    }
-
-    window.addEventListener('connectStremio', handleConnectStremio as EventListener)
+  const toggleUserProtected = (manifestUrl?: string) => {
+    if (!manifestUrl) return
+    const uid = selectedUser?.id
+    if (!uid) return
     
-    return () => {
-      window.removeEventListener('connectStremio', handleConnectStremio as EventListener)
+    setUserProtectedSet((prev) => {
+      const next = new Set(prev)
+      const key = manifestUrl
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      
+      // Update database using dedicated endpoint
+      api.put(`/users/${uid}/protected-addons`, { protectedAddons: Array.from(next) })
+        .then(() => {
+          // Invalidate queries to update UI
+        queryClient.invalidateQueries({ queryKey: ['user', uid] })
+        queryClient.invalidateQueries({ queryKey: ['user', uid, 'stremio-addons'] })
+        })
+        .catch(error => console.error('Failed to update protected addons:', error))
+      
+      return next
+    })
+  }
+
+  const handleDeleteStremioAddon = async (manifestUrl: string, addonName: string) => {
+    if (!selectedUser?.id) return
+    
+    try {
+      await deleteStremioAddonMutation.mutateAsync({ 
+        userId: selectedUser.id, 
+        addonId: manifestUrl 
+      })
+    } catch (error) {
+      console.error('Failed to delete Stremio addon:', error)
+      // Error is already handled by the mutation
     }
-  }, [])
+  }
 
-  React.useEffect(() => {
-    let cancelled = false
+  return { 
+    userDetailsData, 
+    stremioAddonsData, 
+    isLoadingDetails, 
+    isLoadingStremioAddons,
+    userExcludedSet,
+    userProtectedSet,
+    toggleUserExcluded,
+    toggleUserProtected,
+    handleDeleteStremioAddon
+  }
+}
 
-    const run = async () => {
-      if (!userDetailsData) { setIsUserSynced(false); return }
-      const allGroupAddons = Array.isArray(userDetailsData.addons) ? userDetailsData.addons : []
-      const groupAddons = allGroupAddons.filter((ga: any) => !userExcludedSet.has(ga?.manifestUrl) && ga?.isEnabled !== false)
-      if (groupAddons.length === 0) { setIsUserSynced(true); return }
-      
-      // Check if user needs to reconnect due to bad stremioAuthKey
-      if (stremioAddonsData?.needsReconnect) {
-        setIsUserSynced(false)
-        return
-      }
-      
-      const live = Array.isArray(stremioAddonsData?.addons) ? stremioAddonsData.addons : []
-      if (live.length === 0) { setIsUserSynced(false); return }
+function useUserMutations() {
+  const queryClient = useQueryClient()
 
-      // Build sets from ALL live addons for presence checks (include protected)
-      const allLiveById = new Map<string, any[]>()
-      const allLiveUrlSet = new Set<string>()
-      for (const a of live) {
-        const id = a?.id || a?.manifest?.id || ''
-        if (id) {
-          if (!allLiveById.has(id)) allLiveById.set(id, [])
-          allLiveById.get(id)!.push(a)
-        }
-        const url = a?.manifestUrl || a?.transportUrl || a?.url
-        if (url) allLiveUrlSet.add(url.toString().trim().toLowerCase())
-      }
-
-      // Use non-protected live only to detect extras that should not be present
-      const nonProtectedLive = live.filter((addon: any) => !isAddonProtected(addon))
-
-      const deepSort = (obj: any): any => {
-        if (Array.isArray(obj)) return obj.map(deepSort)
-        if (obj && typeof obj === 'object') {
-          return Object.keys(obj).sort().reduce((acc: any, key: string) => {
-            acc[key] = deepSort(obj[key])
-            return acc
-          }, {} as any)
-        }
-        return obj
-      }
-
-      // Ensure every group addon exists in the account (protected or not)
-      for (const ga of groupAddons) {
-        const groupId = ga?.id || ga?.manifest?.id
-        const groupUrl = (ga?.manifestUrl || '').toString().trim().toLowerCase()
-        if (groupUrl && allLiveUrlSet.has(groupUrl)) {
-          continue
-        }
-        if (groupId && allLiveById.has(groupId)) {
-          const userAddonsWithId = allLiveById.get(groupId) || []
-          let foundMatchingManifest = false
-          for (const userAddon of userAddonsWithId) {
-            try {
-              const groupManifest = await fetchManifestCached(ga?.manifestUrl)
-              const userManifest = userAddon?.manifest
-              if (groupManifest && userManifest) {
-                const groupKey = JSON.stringify(deepSort(groupManifest))
-                const userKey = JSON.stringify(deepSort(userManifest))
-                if (groupKey === userKey) { foundMatchingManifest = true; break }
-              }
-            } catch {}
-          }
-          if (!foundMatchingManifest) { setIsUserSynced(false); return }
-        } else {
-          setIsUserSynced(false); return
-        }
-      }
-
-      // Check order: group addons should appear in the same order in Stremio account
-      const groupAddonUrls = groupAddons.map((ga: any) => (ga?.manifestUrl || '').toString().trim().toLowerCase()).filter(Boolean)
-      
-      // For order checking, we need to consider ALL live addons (including protected ones)
-      // because protected addons that are in the group should be treated as group addons
-      const allLiveAddonUrls = live.map((a: any) => (a?.manifestUrl || a?.transportUrl || a?.url || '').toString().trim().toLowerCase()).filter(Boolean)
-      
-      debug.log('🔍 Sync Status Debug for neur0:')
-      debug.log('Group addon URLs:', groupAddonUrls)
-      debug.log('Live addon URLs:', allLiveAddonUrls)
-      debug.log('User protected set:', Array.from(userProtectedSet))
-      debug.log('Live addons details:', live.map((a: any) => ({ 
-        name: a?.manifest?.name, 
-        url: a?.manifestUrl, 
-        protected: isAddonProtected(a),
-        builtInProtected: isAddonProtectedBuiltIn(a),
-        userProtected: userProtectedSet.has(a?.manifestUrl || a?.transportUrl || a?.url || '')
-      })))
-      
-      // Find the positions of group addons in the live addons list
-      const groupAddonPositions: number[] = []
-      for (const groupUrl of groupAddonUrls) {
-        const position = allLiveAddonUrls.findIndex((liveUrl: string) => liveUrl === groupUrl)
-        debug.log(`Looking for group addon "${groupUrl}" in live addons, found at position:`, position)
-        if (position === -1) { 
-          debug.log('❌ Group addon not found in live addons')
-          setIsUserSynced(false); return 
-        }
-        groupAddonPositions.push(position)
-      }
-      
-      debug.log('Group addon positions:', groupAddonPositions)
-      
-      // Check if group addons are in the same order (positions should be ascending)
-      for (let i = 1; i < groupAddonPositions.length; i++) {
-        if (groupAddonPositions[i] <= groupAddonPositions[i - 1]) {
-          debug.log(`❌ Order check failed: position ${i} (${groupAddonPositions[i]}) <= position ${i-1} (${groupAddonPositions[i-1]})`)
-          setIsUserSynced(false); return
-        }
-      }
-      
-      debug.log('✅ Order check passed')
-
-      // Extras: check for addons that shouldn't be there
-      const groupAddonIds = new Set(groupAddons.map((ga: any) => ga?.id || ga?.manifest?.id).filter(Boolean))
-      const groupAddonUrlSet = new Set(groupAddonUrls)
-      
-      // Check non-protected addons - they should all be in the group
-      debug.log('🔍 Checking non-protected addons:')
-      debug.log('Non-protected live addons:', nonProtectedLive.map((a: any) => ({ 
-        name: a?.manifest?.name, 
-        url: a?.manifestUrl 
-      })))
-      
-      for (const addon of nonProtectedLive) {
-        const addonId = addon?.id || addon?.manifest?.id
-        const addonUrl = (addon?.manifestUrl || addon?.transportUrl || addon?.url || '').toString().trim().toLowerCase()
-        const isInGroup = (addonId && groupAddonIds.has(addonId)) || (addonUrl && groupAddonUrlSet.has(addonUrl))
-        debug.log(`  ${addon?.manifest?.name || addon?.name} (${addonUrl}): in group = ${isInGroup}`)
-        if (!isInGroup) { 
-          debug.log('❌ Non-protected addon not in group')
-          setIsUserSynced(false); return 
-        }
-      }
-      
-      // Check protected addons - they should either be in the group OR be personal protected addons
-      // If a protected addon is in the group, it should be treated as a group addon
-      // If a protected addon is NOT in the group, it should be ignored (personal addon)
-      const protectedLive = live.filter((addon: any) => isAddonProtected(addon))
-      debug.log('🔍 Checking protected addons:')
-      debug.log('Protected live addons:', protectedLive.map((a: any) => ({ 
-        name: a?.manifest?.name, 
-        url: a?.manifestUrl,
-        userProtected: userProtectedSet.has(a?.manifestUrl || a?.transportUrl || a?.url || '')
-      })))
-      
-      for (const addon of protectedLive) {
-        const addonId = addon?.id || addon?.manifest?.id
-        const addonUrl = (addon?.manifestUrl || addon?.transportUrl || addon?.url || '').toString().trim().toLowerCase()
-        const isInGroup = (addonId && groupAddonIds.has(addonId)) || (addonUrl && groupAddonUrlSet.has(addonUrl))
-        debug.log(`  ${addon?.manifest?.name || addon?.name} (${addonUrl}): in group = ${isInGroup} - ${isInGroup ? 'treated as group addon' : 'personal addon (ignored)'}`)
-        
-        // If protected addon is in group, it should be treated as a group addon (already checked above)
-        // If protected addon is NOT in group, it's a personal addon and should be ignored
-        // So we don't need to do anything here - personal protected addons are allowed
-      }
-
-      debug.log('✅ All checks passed - setting synced to true')
-      setIsUserSynced(true)
-    }
-
-    run()
-    return () => { cancelled = true }
-  }, [userDetailsData, stremioAddonsData, userExcludedSet])
-
-
-  // Reload user addons mutation
-  const reloadUserAddonsMutation = useMutation({
-    mutationFn: async (userId: string) => {
-      const response = await api.post(`/users/${userId}/reload-addons`)
-      return response.data
-    },
-    onSuccess: (data, userId) => {
-      // Reload-only: refresh user's live stremio addons panel; do not change sync views
-      queryClient.invalidateQueries({ queryKey: ['user', userId, 'stremio-addons'] })
-      queryClient.invalidateQueries({ queryKey: ['user', userId] })
-
-      // Force refetch the live addons immediately
-      queryClient.refetchQueries({ queryKey: ['user', userId, 'stremio-addons'] })
-      queryClient.refetchQueries({ queryKey: ['user', userId] })
-
-      toast.success(data?.message || 'User addons reloaded successfully!')
+  const createUserMutation = useMutation({
+    mutationFn: usersAPI.create,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['users'] })
+      toast.success('User created successfully')
     },
     onError: (error: any) => {
-      toast.error(error?.message || 'Failed to reload user addons')
+      toast.error(error?.response?.data?.message || 'Failed to create user')
     }
   })
 
-  // Sync user mutation (triggered by the sync badge)
-  const syncUserMutation = useMutation({
-    mutationFn: async ({ userId, excluded }: { userId: string; excluded: string[] }) => {
-      // Use normal mode unless advanced is explicitly needed
-      return usersAPI.sync(userId, excluded, 'normal', deleteMode === 'unsafe')
+  const updateUserMutation = useMutation({
+    mutationFn: ({ id, userData }: { id: string; userData: any }) => 
+      usersAPI.update(id, userData),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['users'] })
+      toast.success('User updated successfully')
     },
-    onSuccess: (_data, variables) => {
-      const userId = variables.userId
-      // Refresh only the user's sync status and basic data
-      queryClient.invalidateQueries({ queryKey: ['user', userId, 'sync-status'] })
-      queryClient.invalidateQueries({ queryKey: ['user', userId] })
-      queryClient.refetchQueries({ queryKey: ['user', userId, 'sync-status'] })
+    onError: (error: any) => {
+      toast.error(error?.response?.data?.message || 'Failed to update user')
+    }
+  })
+
+  const deleteUserMutation = useMutation({
+    mutationFn: usersAPI.delete,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['users'] })
+      toast.success('User deleted successfully')
+    },
+    onError: (error: any) => {
+      toast.error(error?.response?.data?.message || 'Failed to delete user')
+    }
+  })
+
+  const syncUserMutation = useMutation({
+    mutationFn: (userId: string) => usersAPI.sync(userId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['users'] })
       toast.success('User synced successfully')
     },
     onError: (error: any) => {
-      toast.error(error?.message || 'Failed to sync user')
+      toast.error(error?.response?.data?.message || 'Failed to sync user')
     }
   })
 
-  // Force-refetch users and per-user data when Users tab is activated
-  React.useEffect(() => {
-    const onUsersTab = async (e: CustomEvent) => {
-      if (e.detail?.id !== 'users') return
-      try {
-        // Refetch whether mounted or not so next mount shows fresh data
-        await Promise.all([
-          queryClient.refetchQueries({ queryKey: ['users'] as any, type: 'all' }),
-          queryClient.refetchQueries({ queryKey: ['user'] as any, type: 'all' }),
-          // Also refresh groups in the background so their badges are fresh when switching back
-          queryClient.refetchQueries({ queryKey: ['groups'] as any, type: 'all' }),
-        ])
-        // Nudge group badges to recompute immediately from cached user statuses
-        try {
-          window.dispatchEvent(new CustomEvent('sfm:groups:recheck' as any, { detail: { source: 'users-tab' } }))
-        } catch {}
-      } catch {}
-    }
-    window.addEventListener('sfm:tab:activated' as any, onUsersTab as any)
-    return () => window.removeEventListener('sfm:tab:activated' as any, onUsersTab as any)
-  }, [queryClient])
-
-  // Handle syncUser events from UserSyncBadge
-  React.useEffect(() => {
-    const handleSyncUser = (event: CustomEvent) => {
-      const { userId } = event.detail
-      const excluded = Array.from((globalUserExcludedSets.get(userId) || new Set<string>()).values())
-      syncUserMutation.mutate({ userId, excluded })
-    }
-
-    window.addEventListener('syncUser', handleSyncUser as EventListener)
-    
-    return () => {
-      window.removeEventListener('syncUser', handleSyncUser as EventListener)
-    }
-  }, [syncUserMutation, globalUserExcludedSets])
-
-  // Fetch groups for the dropdown
-  const { data: groupsRaw = [] } = useQuery({
-    queryKey: ['groups'],
-    queryFn: async () => {
-      const result = await groupsAPI.getAll()
-      
-      // Handle case where result might be wrapped in an axios response
-      if (result && typeof result === 'object' && 'data' in result && Array.isArray((result as any).data)) {
-        return (result as any).data
-      }
-      
-      // If result is already an array, return it
-      if (Array.isArray(result)) {
-        return result
-      }
-      
-      return []
-    },
-    retry: 1,
-    enabled: !AUTH_ENABLED || authed,
-  })
-
-  const groups = React.useMemo(() => {
-    if (Array.isArray(groupsRaw)) return groupsRaw
-    if (groupsRaw && typeof groupsRaw === 'object' && Array.isArray((groupsRaw as any).data)) return (groupsRaw as any).data
-    return []
-  }, [groupsRaw])
-
-  // Filter users locally like groups does
-  const filteredUsers = useMemo(() => {
-    const base = Array.isArray(users) ? users : []
-    return base.filter((user: any) => {
-      const username = String(user.username || '')
-      const email = String(user.email || '')
-      const groupName = String(user.groupName || '')
-      const matchesSearch = username.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
-                           email.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
-                           groupName.toLowerCase().includes(debouncedSearchTerm.toLowerCase())
-      return matchesSearch
-    })
-  }, [users, debouncedSearchTerm])
-
-  // Connect Stremio user mutation
-  const connectStremioMutation = useMutation({
-    mutationFn: async (userData: { email: string; password: string; username: string; groupName?: string; userId?: string }) => {
-      // If userId is provided, connect existing user to Stremio
-      if (userData.userId) {
-        try {
-          const response = await api.post(`/users/${userData.userId}/connect-stremio`, {
-            email: userData.email,
-            password: userData.password,
-            username: userData.username
-          })
-          return response.data
-        } catch (error: any) {
-          // Treat idempotent 200/409 cases gracefully: refetch and continue
-          if (error.response?.status === 409 || error.response?.status === 200) {
-            await queryClient.refetchQueries({ queryKey: ['users'] as any, type: 'active' })
-          }
-          throw new Error(error.response?.data?.message || error.message || 'Failed to connect to Stremio')
-        }
-      } else {
-        // Create new user with Stremio credentials
-        try {
-          const response = await api.post('/stremio/connect', userData)
-          return response.data
-        } catch (error: any) {
-          throw new Error(error.response?.data?.message || error.message || 'Failed to connect to Stremio')
-        }
-      }
+  const toggleUserStatusMutation = useMutation({
+    mutationFn: async ({ id, isActive, userName }: { id: string; isActive: boolean; userName: string }) => {
+      console.log('🔄 User mutation called:', { id, isActive, willSend: !isActive, userName })
+      const response = await api.patch(`/users/${id}/toggle-status`, { isActive: !isActive })
+      console.log('✅ User mutation success:', response.data)
+      return response.data
     },
     onSuccess: (data, variables) => {
-      console.log('🎉 ConnectStremioMutation success:', { data, variables })
-      
-      // Simple invalidation like addons/groups pages
-      console.log('🔄 Invalidating users query...')
+      console.log('✅ User mutation onSuccess called')
       queryClient.invalidateQueries({ queryKey: ['users'] })
-      queryClient.invalidateQueries({ queryKey: ['groups'] })
-      console.log('🔄 Query invalidation completed')
-      if (variables.userId) {
-        queryClient.invalidateQueries({ queryKey: ['user', variables.userId] })
-        queryClient.invalidateQueries({ queryKey: ['user', variables.userId, 'stremio-addons'] })
-      }
-      
-      // Close modal
-      setShowConnectModal(false)
-      setStremioEmail('')
-      setStremioPassword('')
-      setStremioUsername('')
-      setSelectedGroup('')
-      setNewGroupName('')
-      setEditingUser(null)
-      
-      toast.success(`Connected to Stremio! Found ${data.addonsCount || 0} addons`)
+      toast.success(`${variables.userName} ${!variables.isActive ? 'enabled' : 'disabled'}`)
     },
     onError: (error: any) => {
-      toast.error(error.message || 'Failed to connect to Stremio')
+      console.error('❌ User mutation error:', error)
+      toast.error(error?.response?.data?.message || 'Failed to update user status')
     },
   })
 
-  // Connect Stremio using authKey mutation
-  const connectStremioWithAuthKeyMutation = useMutation({
-    mutationFn: async (payload: { authKey: string; username?: string; groupName?: string; userId?: string }) => {
-      if (payload.userId) {
-        const response = await api.post(`/users/${payload.userId}/connect-stremio-authkey`, {
-          authKey: payload.authKey
-        })
-        return response.data
-      } else {
-        const response = await api.post('/stremio/connect-authkey', {
-          authKey: payload.authKey,
-          username: payload.username,
-          displayName: payload.username,
-          groupName: payload.groupName
-        })
-        return response.data
+  const bulkSyncMutation = useMutation({
+    mutationFn: async (userIds: string[]) => {
+      // Simulate bulk sync by syncing each user individually
+      for (const userId of userIds) {
+        await usersAPI.sync(userId)
       }
-    },
-    onSuccess: (data, variables) => {
-      console.log('🎉 ConnectStremioWithAuthKeyMutation success:', { data, variables })
-      
-      // Simple invalidation like addons/groups pages
-      queryClient.invalidateQueries({ queryKey: ['users'] })
-      queryClient.invalidateQueries({ queryKey: ['groups'] })
-      if (variables.userId) {
-        queryClient.invalidateQueries({ queryKey: ['user', variables.userId] })
-      }
-      
-      // Close modal
-      setShowConnectModal(false)
-      setStremioAuthKey('')
-      setStremioEmail(''); setStremioPassword(''); setStremioUsername('')
-      setSelectedGroup(''); setNewGroupName(''); setEditingUser(null)
-      
-      toast.success('Connected to Stremio via auth key')
-    },
-    onError: (err: any) => toast.error(err?.message || 'Failed to connect with auth key')
-  })
-
-  // Register new Stremio account (email/password)
-  const registerStremioMutation = useMutation({
-    mutationFn: async (payload: { email: string; password: string }) => {
-      const response = await api.post('/stremio/register', payload)
-      return response.data
     },
     onSuccess: () => {
-      console.log('🎉 RegisterStremioMutation success')
-      
-      // Simple invalidation like addons/groups pages
       queryClient.invalidateQueries({ queryKey: ['users'] })
-      
-      toast.success('Stremio account registered')
+      toast.success('Users synced successfully')
     },
-    onError: (err: any) => {
-      console.error('❌ RegisterStremioMutation error:', err)
-      toast.error(err?.response?.data?.message || err?.message || 'Failed to register Stremio account')
-      // Don't throw here - let the error propagate to the calling code
+    onError: (error: any) => {
+      toast.error(error?.response?.data?.message || 'Failed to sync users')
     }
   })
 
-  // Delete user mutation with optimistic updates like addons/groups
-  const deleteUserMutation = useMutation({
-    mutationFn: async (id: string) => {
-      const response = await api.delete(`/users/${id}`)
-      return response.data
+  const bulkDeleteMutation = useMutation({
+    mutationFn: async (userIds: string[]) => {
+      // Simulate bulk delete by deleting each user individually
+      for (const userId of userIds) {
+        await usersAPI.delete(userId)
+      }
     },
-    onSuccess: (data, deletedId: string) => {
-      console.log('🎉 DeleteUserMutation success')
-      
-      // Optimistic update like addons/groups pages
-      queryClient.setQueryData(['users'], (prev: any) => {
-        const arr = Array.isArray(prev) ? prev : (prev?.data && Array.isArray(prev.data) ? prev.data : [])
-        return arr.filter((u: any) => u.id !== deletedId)
-      })
-      
-      // Also invalidate to ensure consistency
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['users'] })
-      
-      toast.success('User deleted successfully!')
+      toast.success('Users deleted successfully')
     },
     onError: (error: any) => {
-      const msg = typeof error?.message === 'string' ? error.message : (error?.response?.data?.message || 'Failed to delete user')
-      toast.error(msg)
-    },
-  })
-
-  // Import addons from user mutation
-  const importUserAddonsMutation = useMutation({
-    mutationFn: async (userId: string) => {
-      // Prefer live Stremio addons first
-      let addonsSource: any[] = []
-      try {
-        const liveRes = await api.get(`/users/${userId}/stremio-addons`)
-        const liveAddons = Array.isArray(liveRes.data?.addons) ? liveRes.data.addons : []
-        if (liveAddons.length > 0) {
-          addonsSource = liveAddons
-        }
-      } catch {}
-      if (addonsSource.length === 0) {
-        try {
-          await api.post(`/users/${userId}/reload-addons`)
-          const liveRetry = await api.get(`/users/${userId}/stremio-addons`)
-          const liveAddons = Array.isArray(liveRetry.data?.addons) ? liveRetry.data.addons : []
-          if (liveAddons.length > 0) {
-            addonsSource = liveAddons
-          }
-        } catch {}
-      }
-      if (addonsSource.length === 0) {
-        const userRes = await api.get(`/users/${userId}`)
-        const persisted = Array.isArray(userRes.data?.stremioAddons) ? userRes.data.stremioAddons : []
-        addonsSource = persisted
-      }
-      if (!Array.isArray(addonsSource) || addonsSource.length === 0) {
-        throw new Error('No Stremio addons available to import')
-      }
-      const addons = addonsSource.map((addon: any) => ({
-        manifestUrl: addon.manifestUrl || addon.transportUrl || addon.url,
-        name: addon.name || addon.manifest?.name,
-        description: addon.description || addon.manifest?.description,
-        version: addon.version || addon.manifest?.version,
-        iconUrl: addon.iconUrl || addon.manifest?.logo,
-        // Include full manifest so backend can persist stremioAddonId/resources/hash
-        manifest: addon.manifest || undefined
-      }))
-      const response = await api.post(`/users/${userId}/import-addons`, { addons })
-      return response.data
-    },
-    onSuccess: async (data) => {
-      toast.success(data.message || `Successfully imported ${data.addonCount} addons to group "${data.groupName}"`)
-      queryClient.invalidateQueries({ queryKey: ['groups'] })
-      queryClient.invalidateQueries({ queryKey: ['users'] })
-      // Refresh any addons queries (covers ['addons', authScopeKey])
-      queryClient.invalidateQueries({ queryKey: ['addons'], exact: false })
-      queryClient.refetchQueries({ queryKey: ['addons'], exact: false })
-    },
-    onError: (error: any) => {
-      toast.error(error?.message || 'Failed to import addons')
+      toast.error(error?.response?.data?.message || 'Failed to delete users')
     }
   })
 
@@ -1263,239 +363,296 @@ export default function UsersPage() {
       const response = await api.post(`/users/${userId}/stremio-addons/clear`)
       return response.data
     },
-    // Optimistic UI update to immediately clear addons and set unsynced status
-    onMutate: async (userId) => {
-      await queryClient.cancelQueries({ queryKey: ['user', userId, 'stremio-addons'] })
-      const prev = queryClient.getQueryData<any>(['user', userId, 'stremio-addons'])
-      if (prev && Array.isArray(prev.addons)) {
-        const next = { ...prev, addons: [] }
-        queryClient.setQueryData(['user', userId, 'stremio-addons'], next)
-      }
-      // Immediately set to unsynced - any change means unsynced
-      try {
-        localStorage.setItem(`sfm_user_sync_status:${userId}`, 'unsynced')
-        console.log('Dispatching sfm:user-status event for userId:', userId, 'status: unsynced')
-        window.dispatchEvent(new CustomEvent('sfm:user-status' as any, { detail: { userId, status: 'unsynced' } }))
-      } catch {}
-      return { prev }
-    },
     onSuccess: () => {
-      toast.success('All addons wiped successfully')
-    },
-    onError: (error: any, vars, context) => {
-      // Rollback on error
-      if (context?.prev) {
-        queryClient.setQueryData(['user', selectedUser?.id, 'stremio-addons'], context.prev)
-        toast.error(error?.message || 'Failed to wipe addons')
-      }
-    },
-    onSettled: (data, error, variables) => {
-      // After any change, invalidate queries to trigger re-evaluation
-      console.log('Wipe operation settled, invalidating queries for userId:', variables)
-      queryClient.invalidateQueries({ queryKey: ['user', variables, 'stremio-addons'] })
-      queryClient.invalidateQueries({ queryKey: ['user', variables] })
-      queryClient.invalidateQueries({ queryKey: ['users'] })
-      // Don't dispatch checking status - let the normal sync evaluation handle it
-    }
-  })
-
-  // Update username mutation
-  const updateUsernameMutation = useMutation({
-    mutationFn: async ({ userId, username }: { userId: string; username: string }) => {
-      const response = await api.patch(`/users/${userId}`, { username })
-      return response.data
-    },
-    onSuccess: (data, variables) => {
-      toast.success('Username updated successfully')
-      queryClient.invalidateQueries({ queryKey: ['users'] })
-      // Also invalidate user details query to refresh detailed view
-      if (variables.userId) {
-        queryClient.invalidateQueries({ queryKey: ['user', variables.userId] })
-      }
-      setEditingUsername(null)
-      setTempUsername('')
-      // Note: Detailed view editing states are now handled locally in the handlers
-    },
-    onError: (error: any) => {
-      toast.error(error?.message || 'Failed to update username')
-    }
-  })
-
-  // Update user mutation
-  const updateUserMutation = useMutation({
-    mutationFn: async ({ id, userData }: { id: string; userData: any }) => {
-      
-      // Use inline API call to bypass import issues
-      const response = await api.put(`/users/${id}`, userData)
-      
-      return response.data
-    },
-    onSuccess: (data, variables) => {
-      queryClient.invalidateQueries({ queryKey: ['users'] })
-      // Also invalidate user details query to refresh detailed view
-      if (variables.id) {
-        queryClient.invalidateQueries({ queryKey: ['user', variables.id] })
-        queryClient.invalidateQueries({ queryKey: ['user', variables.id, 'sync-status'] })
-      }
-      // Invalidate groups query to refresh group details
-      queryClient.invalidateQueries({ queryKey: ['groups'] })
-      setIsEditModalOpen(false)
-      setEditingUser(null)
-      setEditFormData({ username: '', email: '', password: '', groupName: '' })
-      setIsStremioValid(true)
-      setStremioValidationError(null)
-      setIsValidatingStremio(false)
-      // Also reset detailed view editing states
-      setEditingDetailGroup(false)
-      setTempDetailGroup('')
-      toast.success('User updated successfully!')
-    },
-    onError: (error: any) => {
-      console.error('Update user error:', error)
-      toast.error(error.response?.data?.message || 'Failed to update user')
-    }
-  })
-
-  // Toggle user status mutation
-  const toggleUserStatusMutation = useMutation({
-    mutationFn: async ({ id, isActive }: { id: string; isActive: boolean }) => {
-      const response = await api.patch(`/users/${id}/toggle-status`, { isActive: !isActive })
-      return response.data
-    },
-    onSuccess: (data, variables) => {
-      console.log('🎉 ToggleUserStatusMutation success:', { variables })
-      // Immediately invalidate and refetch
-      queryClient.invalidateQueries({ queryKey: ['users'] })
-      queryClient.refetchQueries({ queryKey: ['users'] as any, type: 'active' })
-      // If user was enabled, refresh their sync status
-      if (variables.isActive) {
-        queryClient.invalidateQueries({ queryKey: ['user', variables.id, 'sync-status'] })
-        queryClient.refetchQueries({ queryKey: ['user', variables.id, 'sync-status'] })
-      }
-      toast.success('User status updated successfully!')
-    },
-    onError: (error: any) => {
-      console.error('Toggle user status error:', error)
-      toast.error(error.message || 'Failed to toggle user status')
-    }
-  })
-
-  // Sync all users mutation
-  const syncAllUsersMutation = useMutation({
-    mutationFn: async () => {
-      const response = await api.post('/users/sync-all')
-      return response.data
-    },
-    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['users'] })
       queryClient.invalidateQueries({ queryKey: ['user'] })
-      toast.success(data.message || 'All users synced successfully')
+      toast.success('All addons cleared from Stremio account')
     },
     onError: (error: any) => {
-      toast.error(error?.message || 'Failed to sync all users')
+      toast.error(error?.message || 'Failed to clear addons')
+    }
+  })
+
+  // Delete Stremio addon mutation
+  const deleteStremioAddonMutation = useMutation({
+    mutationFn: async ({ userId, addonId }: { userId: string; addonId: string }) => {
+      const encodedAddonId = encodeURIComponent(addonId)
+      const response = await api.delete(`/users/${userId}/stremio-addons/${encodedAddonId}`)
+      return response.data
     },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['users'] })
+      queryClient.invalidateQueries({ queryKey: ['user'] })
+      toast.success('Addon deleted successfully')
+    },
+    onError: (error: any) => {
+      toast.error(error?.message || 'Failed to delete addon')
+    }
   })
 
-  // Check if user has invalid Stremio connection (disabled with stremioAuthKey)
-  const hasInvalidStremioConnection = (user: any) => {
-    return !user.isActive && user.hasStremioConnection && user.stremioAddonsCount === 0
-  }
-
-  // Handle toggle user status
-  const handleToggleUserStatus = (userId: string, currentStatus: boolean) => {
-    toggleUserStatusMutation.mutate({ id: userId, isActive: !currentStatus })
-  }
-
-  // Get user details query (for edit modal)
-  const { data: editUserDetails } = useQuery({
-    queryKey: ['user', editingUser?.id],
-    queryFn: () => usersAPI.getById(editingUser.id),
-    enabled: !!editingUser?.id,
+  // Reorder Stremio addons mutation
+  const reorderStremioAddonsMutation = useMutation({
+    mutationFn: async ({ userId, orderedManifestUrls }: { userId: string; orderedManifestUrls: string[] }) => {
+      const response = await api.post(`/users/${userId}/stremio-addons/reorder`, { orderedManifestUrls })
+      return response.data
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['users'] })
+      queryClient.invalidateQueries({ queryKey: ['user'] })
+      toast.success('Addon order updated')
+    },
+    onError: (error: any) => {
+      toast.error(error?.message || 'Failed to reorder addons')
+    }
   })
 
-  // Update form data when user details are loaded (only for groupName)
-  React.useEffect(() => {
-    if (editUserDetails) {
-      setEditFormData(prev => ({
-        ...prev,
-        groupName: editUserDetails.groupName || editUserDetails.groups?.[0]?.name || ''
-      }))
-    }
-  }, [editUserDetails])
+  return {
+    createUserMutation,
+    updateUserMutation,
+    deleteUserMutation,
+    syncUserMutation,
+    bulkSyncMutation,
+    bulkDeleteMutation,
+    toggleUserStatusMutation,
+    wipeUserAddonsMutation,
+    deleteStremioAddonMutation,
+    reorderStremioAddonsMutation
+  }
+}
 
-  // State for Stremio validation
-  const [isValidatingStremio, setIsValidatingStremio] = useState(false)
-  const [stremioValidationError, setStremioValidationError] = useState<string | null>(null)
-  const [isStremioValid, setIsStremioValid] = useState(true)
+export default function UsersPageRefactored() {
+  const theme = useTheme()
+  const { isDark, isModern, isModernDark, isMono } = theme
+  const queryClient = useQueryClient()
+  const [mounted, setMounted] = useState(false)
+  
+  useEffect(() => { setMounted(true) }, [])
 
-  const handleConnectStremio = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (authMode === 'authkey') {
-      if (!stremioAuthKey || (!editingUser && !stremioUsername)) {
-        toast.error('Please provide auth key and username')
-        return
-      }
-      const groupToAssign = selectedGroup === 'new' ? newGroupName : selectedGroup
-      connectStremioWithAuthKeyMutation.mutate({ authKey: stremioAuthKey.trim(), username: stremioUsername, groupName: groupToAssign || undefined, userId: editingUser?.id })
-      return
-    } else {
-    if (!stremioEmail || !stremioPassword || (!editingUser && !stremioUsername)) {
-      toast.error('Please fill in all required fields')
-      return
-      }
-    if (stremioPassword.length < 4) {
-      toast.error('Password must be at least 4 characters')
-      return
-    }
-    }
-    // Handle group assignment
-    const groupToAssign = selectedGroup === 'new' ? newGroupName : selectedGroup
-    try {
-      // If requested, register a new Stremio account first
-      if (stremioRegisterNew && authMode === 'email') {
-        console.log('🔄 Starting registration process...')
-        try {
-          await registerStremioMutation.mutateAsync({ email: stremioEmail.trim(), password: stremioPassword })
-          console.log('✅ Registration completed, proceeding with connection...')
-        } catch (regError: any) {
-          console.error('❌ Registration failed:', regError)
-          // Show the specific error message from the backend
-          toast.error(regError?.response?.data?.message || regError?.message || 'Registration failed')
-          return // Stop here, don't proceed with connection
+  // Custom hooks
+  const {
+    searchTerm,
+    setSearchTerm,
+    viewMode,
+    setViewMode,
+    selectedUsers,
+    setSelectedUsers,
+    showAddModal,
+    setShowAddModal,
+    showDetailModal,
+    setShowDetailModal,
+    selectedUser,
+    setSelectedUser,
+    // Add user modal
+    stremioEmail,
+    setStremioEmail,
+    stremioPassword,
+    setStremioPassword,
+    stremioUsername,
+    setStremioUsername,
+    authMode,
+    setAuthMode,
+    selectedGroup,
+    setSelectedGroup,
+    newGroupName,
+    setNewGroupName,
+    showConnectModal,
+    setShowConnectModal,
+    stremioRegisterNew,
+    setStremioRegisterNew,
+    // Drag and drop
+    isDndActive,
+    setIsDndActive,
+    activeId,
+    setActiveId,
+    stremioAddonOrder,
+    setStremioAddonOrder,
+    // Delete confirmation
+    showDeleteConfirm,
+    setShowDeleteConfirm,
+    userToDelete,
+    setUserToDelete
+  } = useUserModals()
+
+  const { users, groups, isLoading, error, isSuccess } = useUserData()
+  const {
+    createUserMutation,
+    updateUserMutation,
+    deleteUserMutation,
+    syncUserMutation,
+    bulkSyncMutation,
+    bulkDeleteMutation,
+    toggleUserStatusMutation,
+    wipeUserAddonsMutation,
+    deleteStremioAddonMutation,
+    reorderStremioAddonsMutation
+  } = useUserMutations()
+  const { 
+    userDetailsData, 
+    stremioAddonsData, 
+    isLoadingDetails, 
+    isLoadingStremioAddons,
+    userExcludedSet,
+    userProtectedSet,
+    toggleUserExcluded,
+    toggleUserProtected,
+    handleDeleteStremioAddon
+  } = useUserDetails(selectedUser, showDetailModal, deleteStremioAddonMutation)
+
+  // Escape key handling for modals
+  useEffect(() => {
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (showConnectModal) {
+          setShowConnectModal(false)
+        } else if (showDetailModal) {
+          setShowDetailModal(false)
         }
       }
-
-      console.log('🔄 Starting connection process...')
-      connectStremioMutation.mutate({
-        email: stremioEmail,
-        password: stremioPassword,
-        username: stremioUsername,
-        groupName: groupToAssign || undefined,
-        userId: editingUser?.id || undefined, // Include user ID if connecting existing user
-      })
-    } catch (error) {
-      console.error('❌ Error in handleConnectStremio:', error)
-      toast.error('Failed to process request')
     }
+    
+    if (showConnectModal || showDetailModal) {
+      document.addEventListener('keydown', handleEscape)
+      return () => document.removeEventListener('keydown', handleEscape)
+    }
+  }, [showConnectModal, showDetailModal])
+
+  // Add modal-open class to body when modals are open
+  useEffect(() => {
+    if (showConnectModal || showDetailModal || showDeleteConfirm) {
+      document.body.classList.add('modal-open')
+    } else {
+      document.body.classList.remove('modal-open')
+    }
+    
+    // Cleanup on unmount
+    return () => {
+      document.body.classList.remove('modal-open')
+    }
+  }, [showConnectModal, showDetailModal, showDeleteConfirm])
+
+  // Drag and drop sensors
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 8,
+      },
+    }),
+    useSensor(TouchSensor, {
+      activationConstraint: {
+        delay: 200,
+        tolerance: 6,
+      },
+    })
+  )
+
+  // Drag and drop handlers
+  const handleDragStartDnd = (event: any) => {
+    const { active } = event
+    setActiveId(active.id)
+    setIsDndActive(true)
   }
 
-  const [confirmOpen, setConfirmOpen] = useState(false)
-  const [confirmConfig, setConfirmConfig] = useState<{ title: string; description: string; isDanger?: boolean; onConfirm: () => void }>({ title: '', description: '', isDanger: true, onConfirm: () => {} })
-
-  // Selection state
-  const [selectedUsers, setSelectedUsers] = useState<string[]>([])
-  
-  // Bulk delete confirmation state
-  const [bulkDeleteConfirmOpen, setBulkDeleteConfirmOpen] = useState(false)
-
-  const openConfirm = (cfg: { title: string; description: string; isDanger?: boolean; onConfirm: () => void }) => {
-    setConfirmConfig(cfg)
-    setConfirmOpen(true)
+  const handleDragCancelDnd = () => {
+    setActiveId(null)
+    setIsDndActive(false)
   }
+
+  const handleDragEndDnd = (event: any) => {
+    const { active, over } = event
+    
+    if (active.id !== over?.id && selectedUser?.id) {
+      const oldIndex = stremioAddonOrder.indexOf(active.id)
+      const newIndex = stremioAddonOrder.indexOf(over.id)
+      
+      const newOrder = [...stremioAddonOrder]
+      newOrder.splice(oldIndex, 1)
+      newOrder.splice(newIndex, 0, active.id)
+      
+      setStremioAddonOrder(newOrder)
+      
+      // Call the reorder mutation
+      reorderStremioAddonsMutation.mutate({
+          userId: selectedUser.id, 
+        orderedManifestUrls: newOrder
+      })
+    }
+    
+    setActiveId(null)
+    setIsDndActive(false)
+  }
+
+  // Helper function to map addon to ID for ordering
+  const mapIdForStremioAddon = (addon: any) => (addon.manifestUrl || addon.transportUrl || addon.url || addon.id || '').toString().trim()
+
+  // Order Stremio addons based on the current order
+  const orderStremioAddons = useCallback((addons: any[]) => {
+    if (!Array.isArray(addons) || addons.length === 0) return []
+    
+    const pos = new Map(stremioAddonOrder.map((id, i) => [id, i]))
+    const uniq: any[] = []
+    const seen = new Set()
+    
+    for (const addon of addons) {
+      const key = mapIdForStremioAddon(addon)
+      if (!seen.has(key)) { 
+        seen.add(key)
+        uniq.push(addon)
+      }
+    }
+    
+    return uniq.sort((a, b) => (pos.get(mapIdForStremioAddon(a)) ?? 1e9) - (pos.get(mapIdForStremioAddon(b)) ?? 1e9))
+  }, [stremioAddonOrder])
+
+  // Initialize Stremio addon order when data changes
+  useEffect(() => {
+    if (stremioAddonsData?.addons && stremioAddonsData.addons.length > 0) {
+      const addonIds = stremioAddonsData.addons.map((addon: any) => mapIdForStremioAddon(addon))
+      console.log('Initializing Stremio addon order:', addonIds)
+      console.log('Stremio addons data:', stremioAddonsData.addons)
+      setStremioAddonOrder(addonIds)
+    } else {
+      console.log('No Stremio addons data or empty array')
+    }
+  }, [stremioAddonsData])
+
+  // Sortable Stremio addon component
+  const SortableStremioAddon: React.FC<{ id: string; index: number; children: React.ReactNode }> = ({ id, index, children }) => {
+    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id })
+    const style = {
+      transform: CSS.Transform.toString(transform),
+      transition,
+      opacity: isDragging ? 0.5 : undefined,
+    } as React.CSSProperties
+
+    return (
+      <div ref={setNodeRef} style={style} data-addon-index={index} {...attributes} {...listeners}>
+        {children}
+      </div>
+    )
+  }
+
+  const debouncedSearchTerm = useDebounce(searchTerm, 300)
+
+  // Filter users based on search term
+  const displayUsers = useMemo(() => {
+    if (!Array.isArray(users)) return []
+    
+    const filtered = users.filter((user: any) => {
+      const searchLower = debouncedSearchTerm.toLowerCase()
+      return (
+        user.username?.toLowerCase().includes(searchLower) ||
+        user.email?.toLowerCase().includes(searchLower) ||
+        user.stremioUsername?.toLowerCase().includes(searchLower) ||
+        user.stremioEmail?.toLowerCase().includes(searchLower)
+      )
+    })
+    
+    return filtered
+  }, [users, debouncedSearchTerm])
 
   // Selection handlers
   const handleSelectAll = () => {
-    setSelectedUsers(displayUsers.map(user => user.id))
+    setSelectedUsers(displayUsers.map((user: any) => user.id))
   }
 
   const handleDeselectAll = () => {
@@ -1510,1410 +667,268 @@ export default function UsersPage() {
     )
   }
 
-  const handleBulkDelete = async () => {
-    if (selectedUsers.length === 0) {
-      toast.error('No users selected')
-      return
-    }
-
-    setBulkDeleteConfirmOpen(true)
-  }
-
-  const confirmBulkDelete = async () => {
-    setBulkDeleteConfirmOpen(false)
-    
+  const handleToggleUserStatus = (userId: string, currentStatus: boolean) => {
     try {
-      let successCount = 0
-      let errorCount = 0
-      
-      for (const userId of selectedUsers) {
-        try {
-          await usersAPI.delete(userId)
-          successCount++
-        } catch (error) {
-          console.error(`Failed to delete user ${userId}:`, error)
-          errorCount++
-        }
-      }
-
-      if (errorCount === 0) {
-        toast.success(`${selectedUsers.length} users deleted successfully`)
-      } else {
-        toast.success(`Users deleted: ${successCount} successful, ${errorCount} failed`)
-      }
-      
-      // Clear selection and refresh data
-      setSelectedUsers([])
-      queryClient.invalidateQueries({ queryKey: ['users'] })
-    } catch (e: any) {
-      const msg = e?.response?.data?.error || e?.message || 'Delete failed'
-      toast.error(msg)
+      console.log('🔄 Toggle user status called:', { userId, currentStatus })
+      const user = users?.find((u: any) => u.id === userId)
+      const userName = user?.username || user?.email || 'User'
+      console.log('🔄 Calling mutation with:', { id: userId, isActive: currentStatus, userName })
+      toggleUserStatusMutation.mutate({ id: userId, isActive: currentStatus, userName })
+      console.log('🔄 Mutation called successfully')
+    } catch (error) {
+      console.error('❌ Error in handleToggleUserStatus:', error)
     }
   }
 
-  const handleBulkSync = async () => {
-    if (selectedUsers.length === 0) {
-      toast.error('No users selected')
-      return
-    }
-
-    try {
-      let successCount = 0
-      let errorCount = 0
-      
-      for (const userId of selectedUsers) {
-        try {
-          await api.post(`/users/${userId}/sync`)
-          successCount++
-        } catch (error) {
-          console.error(`Failed to sync user ${userId}:`, error)
-          errorCount++
-        }
-      }
-
-      if (errorCount === 0) {
-        toast.success(`${selectedUsers.length} users synced successfully`)
-      } else {
-        toast.success(`Users synced: ${successCount} successful, ${errorCount} failed`)
-      }
-      
-      // Clear selection and refresh data
-      setSelectedUsers([])
-      queryClient.invalidateQueries({ queryKey: ['users'] })
-      // Invalidate sync status for all users to refresh badges
-      selectedUsers.forEach(userId => {
-        queryClient.invalidateQueries({ queryKey: ['user', userId, 'sync-status'] })
-      })
-    } catch (e: any) {
-      const msg = e?.response?.data?.error || e?.message || 'Sync failed'
-      toast.error(msg)
-    }
-  }
-
-  const handleDeleteUser = (id: string, username: string) => {
-    openConfirm({
-      title: `Delete user ${username}`,
-      description: 'This action cannot be undone.',
-      isDanger: true,
-      onConfirm: () => deleteUserMutation.mutate(id)
-    })
-  }
-
-  const getUserColorClass = (colorIndex: number | null | undefined) => {
-    const theme = isMono ? 'mono' : isModern ? 'modern' : isModernDark ? 'modern-dark' : isDark ? 'dark' : 'light'
-    return getColorBgClass(colorIndex, theme)
-  }
-
-  const handleStartEditUsername = (userId: string, currentUsername: string) => {
-    setEditingUsername(userId)
-    setTempUsername(currentUsername)
-  }
-
-  const handleSaveUsername = (userId: string, originalUsername: string) => {
-    if (tempUsername.trim()) {
-      // Only update if the username actually changed
-      if (tempUsername.trim() !== originalUsername) {
-        updateUsernameMutation.mutate({ userId, username: tempUsername.trim() })
-      } else {
-        // No change, just exit edit mode
-        setEditingUsername(null)
-        setTempUsername('')
-      }
-    } else {
-      setEditingUsername(null)
-      setTempUsername('')
-    }
-  }
-
-  const handleBlurUsername = (userId: string, originalUsername: string) => {
-    if (tempUsername.trim()) {
-      // Only update if the username actually changed
-      if (tempUsername.trim() !== originalUsername) {
-        updateUsernameMutation.mutate({ userId, username: tempUsername.trim() })
-      } else {
-        // No change, just exit edit mode
-        setEditingUsername(null)
-        setTempUsername('')
-      }
-    } else {
-      // If empty, revert to original and exit edit mode
-      setEditingUsername(null)
-      setTempUsername('')
-    }
-  }
-
-  const handleEditUser = (user: any) => {
-    // Clear form data so only placeholders show
-    setEditFormData({
-      username: '',
-      email: '',
-      password: '',
-      groupName: user.groupId || ''
-    })
-    setEditingUser(user)
-    setIsEditModalOpen(true)
-  }
-
-  const handleViewUserDetails = (user: any) => {
-    setSelectedUser(user)
-    setIsDetailModalOpen(true)
-    // Reset editing states when opening detail view
-    setEditingDetailUsername(null)
-    setTempDetailUsername('')
-    setEditingDetailGroup(false)
-    setTempDetailGroup('')
-  }
-
-  // Detailed view editing handlers
-  const handleStartEditDetailUsername = (currentUsername: string) => {
-    setEditingDetailUsername(selectedUser?.id)
-    setTempDetailUsername(currentUsername)
-  }
-
-  const handleSaveDetailUsername = (originalUsername: string) => {
-    if (tempDetailUsername.trim()) {
-      // Only update if the username actually changed
-      if (tempDetailUsername.trim() !== originalUsername) {
-        // Optimistically update the cache immediately
-        queryClient.setQueryData(['user', selectedUser.id], (oldData: any) => {
-          if (oldData) {
-            return {
-              ...oldData,
-              username: tempDetailUsername.trim()
-            }
-          }
-          return oldData
-        })
-        
-        // Also update the selectedUser object for immediate UI update
-        if (selectedUser) {
-          selectedUser.username = tempDetailUsername.trim()
-        }
-        
-        updateUsernameMutation.mutate({ 
-          userId: selectedUser.id, 
-          username: tempDetailUsername.trim() 
-        }, {
-          onSuccess: () => {
-            // Reset editing state after successful update
-            setEditingDetailUsername(null)
-            setTempDetailUsername('')
-          },
-          onError: () => {
-            // Revert optimistic update on error
-            queryClient.setQueryData(['user', selectedUser.id], (oldData: any) => {
-              if (oldData) {
-                return {
-                  ...oldData,
-                  username: originalUsername
-                }
-              }
-              return oldData
-            })
-            // Also revert the selectedUser object
-            if (selectedUser) {
-              selectedUser.username = originalUsername
-            }
-            // Keep editing state on error so user can try again
-          }
-        })
-      } else {
-        // No change, just exit edit mode
-        setEditingDetailUsername(null)
-        setTempDetailUsername('')
-      }
-    } else {
-      setEditingDetailUsername(null)
-      setTempDetailUsername('')
-    }
-  }
-
-  const handleBlurDetailUsername = (originalUsername: string) => {
-    if (tempDetailUsername.trim()) {
-      // Only update if the username actually changed
-      if (tempDetailUsername.trim() !== originalUsername) {
-        // Optimistically update the cache immediately
-        queryClient.setQueryData(['user', selectedUser.id], (oldData: any) => {
-          if (oldData) {
-            return {
-              ...oldData,
-              username: tempDetailUsername.trim()
-            }
-          }
-          return oldData
-        })
-        
-        // Also update the selectedUser object for immediate UI update
-        if (selectedUser) {
-          selectedUser.username = tempDetailUsername.trim()
-        }
-        
-        updateUsernameMutation.mutate({ 
-          userId: selectedUser.id, 
-          username: tempDetailUsername.trim() 
-        }, {
-          onSuccess: () => {
-            // Reset editing state after successful update
-            setEditingDetailUsername(null)
-            setTempDetailUsername('')
-          },
-          onError: () => {
-            // Revert optimistic update on error
-            queryClient.setQueryData(['user', selectedUser.id], (oldData: any) => {
-              if (oldData) {
-                return {
-                  ...oldData,
-                  username: originalUsername
-                }
-              }
-              return oldData
-            })
-            // Also revert the selectedUser object
-            if (selectedUser) {
-              selectedUser.username = originalUsername
-            }
-            // Keep editing state on error so user can try again
-          }
-        })
-      } else {
-        // No change, just exit edit mode
-        setEditingDetailUsername(null)
-        setTempDetailUsername('')
-      }
-    } else {
-      // If empty, revert to original and exit edit mode
-      setEditingDetailUsername(null)
-      setTempDetailUsername('')
-    }
-  }
-
-  const handleStartEditDetailGroup = (currentGroup: string) => {
-    setEditingDetailGroup(true)
-    setTempDetailGroup(currentGroup)
-  }
-
-  const handleSaveDetailGroup = () => {
-    if (tempDetailGroup.trim() !== (userDetailsData?.groupId || '')) {
-      // Update user's group
-      updateUserMutation.mutate({
-        id: selectedUser.id,
-        userData: { groupId: tempDetailGroup.trim() }
-      })
-    }
-    setEditingDetailGroup(false)
-    setTempDetailGroup('')
-  }
-
-  const handleBlurDetailGroup = () => {
-    if (tempDetailGroup.trim() !== (userDetailsData?.groupId || '')) {
-      // Update user's group
-      updateUserMutation.mutate({
-        id: selectedUser.id,
-        userData: { groupId: tempDetailGroup.trim() }
-      })
-    }
-    setEditingDetailGroup(false)
-    setTempDetailGroup('')
-  }
-
-  const handleConnectExistingUserToStremio = async (userOrId: any) => {
-    let user = userOrId
-    
-    // If only userId is passed, fetch the full user data
-    if (typeof userOrId === 'string' || (userOrId && userOrId.id && !userOrId.username)) {
-      try {
-        const response = await api.get(`/users/${userOrId.id || userOrId}`)
-        user = response.data
-      } catch (error) {
-        console.error('Failed to fetch user data:', error)
-        toast.error('Failed to load user data')
-        return
-      }
-    }
-    
-    // Set the user ID and pre-fill email, then open the connect modal
-    setEditingUser(user)
-    setStremioEmail(user.stremioEmail || user.email || '')
+  // User actions
+  const handleAddUser = () => {
     setShowConnectModal(true)
   }
 
 
-  // User-defined protected addons, persisted per user (by manifestUrl) — now from database
-  const [userProtectedSet, setUserProtectedSet] = useState<Set<string>>(new Set())
-  useEffect(() => {
-    if (userDetailsData?.protectedAddons) {
-      setUserProtectedSet(new Set(userDetailsData.protectedAddons))
-    } else {
-      setUserProtectedSet(new Set())
-    }
-  }, [userDetailsData?.protectedAddons])
+  const handleViewUser = (user: any) => {
+    setSelectedUser(user)
+    setShowDetailModal(true)
+  }
 
-  // Update global sets when userDetailsData changes
-  useEffect(() => {
-    if (userDetailsData?.id) {
-      const uid = userDetailsData.id
-      
-      // Update excluded addons
-      setGlobalUserExcludedSets(prev => {
-        const newMap = new Map(prev)
-        newMap.set(uid, userExcludedSet)
-        return newMap
+  const handleDeleteUser = (userId: string) => {
+    const user = users?.find((u: any) => u.id === userId)
+    const userName = user?.username || user?.email || 'User'
+    setUserToDelete({ id: userId, name: userName })
+    setShowDeleteConfirm(true)
+  }
+
+  const confirmDeleteUser = () => {
+    if (userToDelete) {
+      deleteUserMutation.mutate(userToDelete.id)
+      setShowDeleteConfirm(false)
+      setUserToDelete(null)
+    }
+  }
+
+  const cancelDeleteUser = () => {
+    setShowDeleteConfirm(false)
+    setUserToDelete(null)
+  }
+
+  const handleSyncUser = (userId: string) => {
+    syncUserMutation.mutate(userId)
+  }
+
+  const handleImportUser = (userId: string) => {
+    // TODO: Implement user import functionality
+    toast('Import functionality coming soon', { icon: 'ℹ️' })
+  }
+
+  const handleReloadUser = (userId: string) => {
+    // Use the existing reloadUserAddons API method
+    usersAPI.reloadUserAddons(userId)
+      .then(() => {
+        queryClient.invalidateQueries({ queryKey: ['users'] })
+        toast.success('User addons reloaded successfully')
       })
-      
-      // Update protected addons
-      setGlobalUserProtectedSets(prev => {
-        const newMap = new Map(prev)
-        newMap.set(uid, userProtectedSet)
-        return newMap
+      .catch((error: any) => {
+        toast.error(error?.message || 'Failed to reload user addons')
       })
-    }
-  }, [userDetailsData?.id, userExcludedSet, userProtectedSet])
-
-  const toggleUserProtected = (manifestUrl?: string) => {
-    if (!manifestUrl) return
-    
-    // In unsafe mode, allow toggling protection for any addon
-    if (deleteMode === 'unsafe') {
-      // No restrictions in unsafe mode
-    } else {
-      // Safe mode: check if this is a Stremio-protected addon (built-in/system)
-      const isStremioProtected = protectedAddonIds.some(id => manifestUrl.includes(id)) ||
-                                protectedManifestUrls.some(url => manifestUrl.includes(url))
-      
-      // In safe mode, only allow toggling user-protected addons, not Stremio-protected ones
-      if (isStremioProtected) {
-        toast.error('Cannot toggle protection for Stremio-protected addons in safe mode. Enable unsafe mode in settings.')
-        return
-      }
-    }
-    
-    const uid = selectedUser?.id
-    if (!uid) return
-    setUserProtectedSet((prev) => {
-      const next = new Set(prev)
-      const key = manifestUrl
-      if (next.has(key)) next.delete(key)
-      else next.add(key)
-      
-      // Update database
-      api.put(`/users/${uid}/protected-addons`, { protectedAddons: Array.from(next) }).then(() => {
-        // Update global sets for this user
-        setGlobalUserProtectedSets(prev => {
-          const newMap = new Map(prev)
-          newMap.set(uid, next)
-          return newMap
-        })
-        
-        // Invalidate queries to update sync badges
-        queryClient.invalidateQueries({ queryKey: ['user', uid] })
-        queryClient.invalidateQueries({ queryKey: ['user', uid, 'stremio-addons'] })
-      }).catch(error => console.error('Failed to update protected addons:', error))
-      
-      // Update global state for all users
-      setGlobalUserProtectedSets(prev => {
-        const newGlobal = new Map(prev)
-        newGlobal.set(uid, next)
-        return newGlobal
-      })
-      
-      // Invalidate user queries to update sync badges in general view
-      queryClient.invalidateQueries({ queryKey: ['user', uid] })
-      queryClient.invalidateQueries({ queryKey: ['users'] })
-      // Invalidate Stremio addons query to update sync status immediately
-      queryClient.invalidateQueries({ queryKey: ['user', uid, 'stremio-addons'] })
-      
-      return next
-    })
   }
 
-
-
-  // Delete Stremio addon mutation
-  const deleteStremioAddonMutation = useMutation({
-    mutationFn: async ({ userId, addonId }: { userId: string; addonId: string }) => {
-      const encodedAddonId = encodeURIComponent(addonId)
-      const unsafeMode = deleteMode === 'unsafe' ? '?unsafe=true' : ''
-      const response = await api.delete(`/users/${userId}/stremio-addons/${encodedAddonId}${unsafeMode}`)
-      return response.data
-    },
-    // Optimistic UI update to avoid stale item lingering if proxy returns 502
-    onMutate: async ({ userId, addonId }) => {
-      await queryClient.cancelQueries({ queryKey: ['user', userId, 'stremio-addons'] })
-      const prev = queryClient.getQueryData<any>(['user', userId, 'stremio-addons'])
-      if (prev && Array.isArray(prev.addons)) {
-        const next = { ...prev, addons: prev.addons.filter((a: any) => (a?.manifestUrl || a?.transportUrl || a?.url) !== addonId) }
-        queryClient.setQueryData(['user', userId, 'stremio-addons'], next)
-      }
-      // Immediately set to unsynced - any change means unsynced
-      try {
-        localStorage.setItem(`sfm_user_sync_status:${userId}`, 'unsynced')
-        console.log('Dispatching sfm:user-status event for userId:', userId, 'status: unsynced')
-        window.dispatchEvent(new CustomEvent('sfm:user-status' as any, { detail: { userId, status: 'unsynced' } }))
-      } catch {}
-      return { prev }
-    },
-    onSuccess: () => {},
-    onError: (error: any, vars, context) => {
-      // Only rollback on definitive server errors; ignore proxy/transport glitches
-      const isTransport = !error?.status || error?.status === 502
-      if (!isTransport && context?.prev) {
-        queryClient.setQueryData(['user', selectedUser?.id, 'stremio-addons'], context.prev)
-        toast.error(error?.message || 'Failed to delete addon')
-      }
-    },
-    onSettled: (data, error, variables) => {
-      // After any change, invalidate queries to trigger re-evaluation
-      console.log('Delete operation settled, invalidating queries for userId:', variables.userId)
-      queryClient.invalidateQueries({ queryKey: ['user', variables.userId, 'stremio-addons'] })
-      queryClient.invalidateQueries({ queryKey: ['user', variables.userId] })
-      // Don't dispatch checking status - let the normal sync evaluation handle it
-    },
-  })
-
-  const handleDeleteStremioAddon = (addonId: string, addonName: string) => {
-    // In unsafe mode, allow deletion of any addon
-    if (deleteMode === 'unsafe') {
-      // No restrictions in unsafe mode
-    } else {
-      // Safe mode: check if this is a protected addon
-      const isStremioProtected = protectedAddonIds.some(id => addonId.includes(id)) || 
-                                protectedManifestUrls.some(url => addonId.includes(url))
-      const isUserProtected = userProtectedSet.has(addonId)
-      const isProtected = isStremioProtected || isUserProtected
-      
-      if (isProtected) {
-        toast.error('Cannot delete protected addon in safe mode. Enable unsafe mode in settings to delete protected addons.')
-        return
-      }
-    }
-    
-    openConfirm({
-      title: 'Remove addon?',
-      description: `Remove the addon "${addonName}" from this Stremio account?`,
-      isDanger: true,
-      onConfirm: () => deleteStremioAddonMutation.mutate({
-        userId: selectedUser.id,
-        addonId: addonId
-      })
-    })
-  }
-
-  // Validate Stremio credentials when email/password changes
-  const validateStremioCredentials = async (email: string, password: string) => {
-    // If both fields are empty, user isn't changing credentials - allow update
-    if (!email && !password) {
-      setIsStremioValid(true)
-      setStremioValidationError(null)
-      return
-    }
-
-    // If only one field is provided, require both for validation
-    if (!email || !password) {
-      setIsStremioValid(false)
-      setStremioValidationError('Both email and password are required when updating Stremio credentials')
-      return
-    }
-
-    setIsValidatingStremio(true)
-    setStremioValidationError(null)
-
-    try {
-      const response = await api.post('/stremio/validate', { email, password })
-      
-      if (response.data.valid) {
-        setIsStremioValid(true)
-        setStremioValidationError(null)
-      } else {
-        setIsStremioValid(false)
-        setStremioValidationError(response.data.error || 'Invalid Stremio credentials')
-      }
-    } catch (error: any) {
-      setIsStremioValid(false)
-      setStremioValidationError(error.response?.data?.error || error.message || 'Failed to validate Stremio credentials')
-    } finally {
-      setIsValidatingStremio(false)
+  const handleBulkSync = () => {
+    if (selectedUsers.length > 0) {
+      bulkSyncMutation.mutate(selectedUsers)
     }
   }
 
-  // Check if user is changing credentials from original values
-  const originalEmail = editUserDetails?.stremioEmail || editUserDetails?.email || ''
-  const isEmailChanged = editFormData.email.trim() !== '' && editFormData.email !== originalEmail
-  const isPasswordChanged = editFormData.password.trim() !== ''
-  const isChangingCredentials = isEmailChanged || isPasswordChanged
-
-  // Debounce validation only when user is actually changing credentials
-  React.useEffect(() => {
-    if (isChangingCredentials && editFormData.email && editFormData.password) {
-      const timer = setTimeout(() => {
-        validateStremioCredentials(editFormData.email, editFormData.password)
-      }, 1000)
-      return () => clearTimeout(timer)
-    } else if (!isChangingCredentials) {
-      // Not changing credentials, so validation is not needed
-      setIsStremioValid(true)
-      setStremioValidationError(null)
-      setIsValidatingStremio(false)
-    } else if (isChangingCredentials && (!editFormData.email || !editFormData.password)) {
-      // Changing credentials but missing email or password
-      setIsStremioValid(false)
-      setStremioValidationError('Both email and password are required when updating Stremio credentials')
-      setIsValidatingStremio(false)
+  const handleBulkDelete = () => {
+    if (selectedUsers.length > 0) {
+      bulkDeleteMutation.mutate(selectedUsers)
     }
-  }, [editFormData.email, editFormData.password, isChangingCredentials, originalEmail])
-
-  const handleUpdateUser = (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!editingUser) return
-
-    // Don't allow update if Stremio credentials are invalid
-    if (!isStremioValid) {
-      toast.error('Please fix Stremio credential errors before updating')
-      return
-    }
-
-    // Clean up the data - only send non-empty values
-    const userData: any = {}
-    
-    if (editFormData.username.trim()) {
-      userData.username = editFormData.username.trim()
-    }
-    
-    if (editFormData.email.trim()) {
-      userData.email = editFormData.email.trim()
-    }
-    
-    if (editFormData.password.trim()) {
-      userData.password = editFormData.password.trim()
-    }
-    
-    // Always send groupId (even if empty) to handle group removal
-    userData.groupId = editFormData.groupName.trim()
-    
-    updateUserMutation.mutate({
-      id: editingUser.id,
-      userData
-    })
   }
 
-  const handleCloseEditModal = () => {
-    setIsEditModalOpen(false)
-    setEditingUser(null)
-    setEditFormData({ username: '', email: '', password: '', groupName: '' })
-    setIsStremioValid(true)
-    setStremioValidationError(null)
-    setIsValidatingStremio(false)
-  }
-
-  // Ensure displayUsers is always an array
-  const displayUsers = useMemo(() => {
-    return Array.isArray(filteredUsers) ? filteredUsers : []
-  }, [filteredUsers])
-
-  // Handle view mode change and persist to localStorage
+  // View mode change
   const handleViewModeChange = (mode: 'card' | 'list') => {
     setViewMode(mode)
-    if (typeof window !== 'undefined') {
       localStorage.setItem('global-view-mode', mode)
+  }
+
+  // Modal handlers
+  const handleSaveUser = (userData: any) => {
+    createUserMutation.mutate(userData)
+    setShowAddModal(false)
+  }
+
+  const handleConnectStremio = async (e: React.FormEvent) => {
+    e.preventDefault()
+    
+    if (!stremioUsername.trim() || !stremioPassword.trim()) {
+      toast.error('Please fill in all required fields')
+      return
+    }
+
+    try {
+      const userData = {
+        username: stremioUsername.trim(),
+        email: authMode === 'email' ? stremioEmail.trim() : stremioUsername.trim() + '@stremio.local'
+      }
+
+      await createUserMutation.mutateAsync(userData)
+      
+      // Reset form
+      setStremioEmail('')
+      setStremioPassword('')
+      setStremioUsername('')
+      setSelectedGroup('')
+      setNewGroupName('')
+      setShowConnectModal(false)
+      
+      toast.success('User added successfully!')
+    } catch (error) {
+      console.error('Error adding user:', error)
+      toast.error('Failed to add user')
     }
   }
 
-  // Close only the top-most modal on Escape
-  React.useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        const w = window as any
-        const stack: string[] = Array.isArray(w.__sfmModalStack) ? w.__sfmModalStack : []
-        const top = stack.length > 0 ? stack[stack.length - 1] : null
-        // Only close if this component owns the top modal
-        if (top === 'users-connect' && showConnectModal) { setShowConnectModal(false); return }
-        if (top === 'users-detail' && isDetailModalOpen) { setIsDetailModalOpen(false); return }
-        if (top === 'users-edit' && isEditModalOpen) { setIsEditModalOpen(false); return }
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [showConnectModal, isEditModalOpen, isDetailModalOpen])
+  const handleCloseModals = () => {
+    setShowAddModal(false)
+    setShowDetailModal(false)
+    setSelectedUser(null)
+  }
 
-  // Maintain a global modal stack to coordinate Escape behavior across pages
-  React.useEffect(() => {
-    const w = window as any
-    if (!Array.isArray(w.__sfmModalStack)) w.__sfmModalStack = []
-    const stack: string[] = w.__sfmModalStack
-    // Connect/Add User modal
-    if (showConnectModal && !stack.includes('users-connect')) stack.push('users-connect')
-    if (!showConnectModal && stack.includes('users-connect')) {
-      w.__sfmModalStack = stack.filter((id: string) => id !== 'users-connect')
-    }
-    // Detail modal
-    if (isDetailModalOpen && !stack.includes('users-detail')) stack.push('users-detail')
-    if (!isDetailModalOpen && stack.includes('users-detail')) {
-      w.__sfmModalStack = stack.filter((id: string) => id !== 'users-detail')
-    }
-    // Edit modal
-    if (isEditModalOpen && !stack.includes('users-edit')) stack.push('users-edit')
-    if (!isEditModalOpen && stack.includes('users-edit')) {
-      w.__sfmModalStack = stack.filter((id: string) => id !== 'users-edit')
-    }
-  }, [showConnectModal, isDetailModalOpen, isEditModalOpen])
-
-  // Local state to manage drag-and-drop addon order
-  const [addonOrder, setAddonOrder] = useState<string[]>([])
-  const draggingIdRef = React.useRef<string | null>(null)
-  const [isDragging, setIsDragging] = useState(false)
-  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
-  const justReorderedRef = React.useRef(false)
+  // Only show loading state if data is actually taking time to load
+  const [showLoading, setShowLoading] = useState(false)
   
-  // Touch drag and drop refs
-  const touchStartPos = React.useRef<{ x: number; y: number } | null>(null)
-  const touchStartIndex = React.useRef<number | null>(null)
-  const isTouchDragging = React.useRef(false)
-
-  // Create preview order that shows the dragged item in its new position
-  const previewOrder = React.useMemo(() => {
-    if (!isDragging || !draggingIdRef.current || dragOverIndex === null) return addonOrder
-    
-    const fromId = draggingIdRef.current
-    const currentIndex = addonOrder.indexOf(fromId)
-    if (currentIndex === -1 || currentIndex === dragOverIndex) return addonOrder
-    
-    const next = [...addonOrder]
-    // Move the dragged item to the target position
-    const [moved] = next.splice(currentIndex, 1)
-    next.splice(dragOverIndex, 0, moved)
-    
-    return next
-  }, [isDragging, draggingIdRef.current, dragOverIndex, addonOrder])
-
-  // Use preview order while dragging, otherwise use current order
-  const orderAddons = React.useCallback((arr: any[]) => {
-    const orderToUse = isDragging ? previewOrder : addonOrder
-    const pos = new Map(orderToUse.map((u, i) => [u, i]))
-    const mapIdForAddon = (addon: any) => (addon.manifestUrl || addon.transportUrl || addon.url || '').toString().trim()
-    return [...arr].sort((a, b) => (pos.get(mapIdForAddon(a)) ?? 1e9) - (pos.get(mapIdForAddon(b)) ?? 1e9))
-  }, [isDragging, previewOrder, addonOrder])
-
-  // Initialize/refresh local addon order whenever detail modal opens or live addons change
-  React.useEffect(() => {
-    if (!isDetailModalOpen) return
-    const liveAll = Array.isArray(stremioAddonsData?.addons) ? stremioAddonsData.addons : []
-    
-    // Preserve the original order from Stremio instead of separating protected/unprotected
-    const urls = liveAll.map((a: any) => (a.manifestUrl || a.transportUrl || a.url || '').toString().trim())
-    
-    // Only update addonOrder if it's empty, not dragging, and we haven't just reordered
-    // This prevents the UI from reverting during drag operations or immediately after reorders
-    if (addonOrder.length === 0 || (!isDragging && !justReorderedRef.current)) {
-      setAddonOrder(urls)
+  useEffect(() => {
+    if (isLoading) {
+      const timer = setTimeout(() => setShowLoading(true), 200) // 200ms delay
+      return () => clearTimeout(timer)
+    } else {
+      setShowLoading(false)
     }
-    
-    // Reset the reorder flag after a short delay
-    if (justReorderedRef.current) {
-      setTimeout(() => {
-        justReorderedRef.current = false
-      }, 1000)
-    }
-  }, [isDetailModalOpen, selectedUser?.id, stremioAddonsData, isDragging])
+  }, [isLoading])
 
-  const reorderMutation = useMutation({
-    mutationFn: async (orderedManifestUrls: string[]) => {
-      if (!selectedUser?.id) throw new Error('No user selected')
-      const response = await api.post(`/users/${selectedUser.id}/stremio-addons/reorder`, { orderedManifestUrls })
-      return response.data
-    },
-    onSuccess: () => {
-      toast.success('Addon order updated')
-      // Small delay to ensure backend has processed the change
-      setTimeout(() => {
-        if (selectedUser?.id) {
-          queryClient.invalidateQueries({ queryKey: ['user', selectedUser.id, 'stremio-addons'] })
-          queryClient.invalidateQueries({ queryKey: ['user', selectedUser.id, 'sync-status'] })
-          queryClient.invalidateQueries({ queryKey: ['users'] })
-        }
-      }, 500)
-    },
-    onError: (error: any) => {
-      toast.error(error?.message || 'Failed to update addon order')
-    }
-  })
-
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
-    useSensor(TouchSensor, { activationConstraint: { delay: 180, tolerance: 8 } })
-  )
-  const [activeId, setActiveId] = useState<string | null>(null)
-  const SortableAddon: React.FC<{ id: string; index: number; children: React.ReactNode }> = ({ id, index, children }) => {
-    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id })
-    const style = {
-      transform: CSS.Transform.toString(transform),
-      transition,
-      opacity: isDragging ? 0.5 : undefined,
-    } as React.CSSProperties
-  return (
-      <div ref={setNodeRef} style={style} data-addon-index={index} {...attributes} {...listeners}>
-        {children}
+  // Loading state
+  if (isLoading && showLoading) {
+    return (
+      <div className="p-4 sm:p-6 space-y-6 animate-in fade-in duration-200">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <LoadingSkeleton key={i} className="h-48 opacity-60" />
+          ))}
+        </div>
       </div>
     )
   }
-  const [isDndActive, setIsDndActive] = React.useState(false)
-  const handleDragStartDnd = (event: any) => {
-    setActiveId(event.active?.id || null)
-    setIsDndActive(true)
-    try { document.body.style.overflow = 'hidden' } catch {}
+
+  // Error state
+  if (error) {
+  return (
+    <div className="p-4 sm:p-6">
+        <EmptyState
+          icon="⚠️"
+          title="Failed to load users"
+          description="There was an error loading the users. Please try again."
+            />
+          </div>
+    )
   }
-  const handleDragEndDnd = (event: any) => {
-    const { active, over } = event
-    setActiveId(null)
-    setIsDndActive(false)
-    try { document.body.style.overflow = '' } catch {}
-    if (!active?.id || !over?.id || active.id === over.id) return
-    const from = addonOrder.indexOf(active.id)
-    const to = addonOrder.indexOf(over.id)
-    if (from === -1 || to === -1) return
-    const next = [...addonOrder]
-    const [moved] = next.splice(from, 1)
-    next.splice(to, 0, moved)
-    setAddonOrder(next)
-    reorderMutation.mutate(next)
+
+  // Empty state
+  if (!isLoading && Array.isArray(users) && users.length === 0) {
+  return (
+    <div className="p-4 sm:p-6">
+        <EmptyState
+          icon="👥"
+          title="No users yet"
+          description="Add your first user to get started."
+          action={{
+            label: 'Add User',
+            onClick: handleAddUser
+          }}
+        />
+              </div>
+    )
   }
 
   return (
-    <div className="p-4 sm:p-6">
-      {/* Header */}
-      <div className="mb-6 sm:mb-8">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4 gap-4">
-          <div>
-            <h1 className={`hidden sm:block text-xl sm:text-2xl font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>Users</h1>
-            <p className={`text-sm sm:text-base ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>Manage Stremio users for your group</p>
-          </div>
-          <div className="flex flex-row flex-wrap sm:flex-row gap-2 sm:gap-3 items-center">
-            {/* Desktop account button (mobile version is in the topbar) */}
-            <div className="hidden lg:block ml-1">
-              <UserMenuButton />
-            </div>
-          </div>
-        </div>
-        {/* Search and View Toggle */}
-        <div className="flex flex-row items-center gap-4">
-          {/* Selection Toggle */}
-          <button
-            onClick={() => {
-              if (selectedUsers.length === 0) {
-                // If nothing selected, select all
-                handleSelectAll()
-              } else {
-                // If items selected, deselect all
-                handleDeselectAll()
-              }
-            }}
-            className={`w-9 h-9 sm:w-10 sm:h-10 rounded-md flex items-center justify-center 
-               text-gray-500 ${isDark ? 'hover:text-gray-300' : 'hover:text-gray-700'} bg-transparent border-none outline-none focus:outline-none ring-0 focus:ring-0 shadow-none`}
-            style={{ border: 'none' }}
-            title={selectedUsers.length === 0 ? 'Select All' : 'Deselect All'}
-          >
-            {selectedUsers.length > 0 ? (
-              <CheckSquare className="w-5 h-5" />
-            ) : (
-              <Square className="w-5 h-5" />
-            )}
-          </button>
-          
-          <div className="relative flex-1">
-            <Search className={`absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 sm:w-5 sm:h-5 ${
-              isModern 
-                ? 'text-purple-500' 
-                : isModernDark
-                ? 'text-purple-400'
-                : isDark ? 'text-gray-400' : 'text-gray-500'
-            }`} />
-          <input
-              type="text"
-              placeholder="Search users..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            className={`w-full pl-9 sm:pl-10 pr-3 py-1.5 sm:py-2 border rounded-lg focus:ring-2 focus:ring-stremio-purple focus:border-transparent text-sm ${
-                isModern
-                  ? 'bg-purple-50/80 border-purple-300/50 text-purple-900 placeholder-purple-500 focus:ring-purple-500'
-                  : isModernDark
-                  ? 'bg-purple-800/30 border-purple-600/50 text-purple-100 placeholder-purple-400 focus:ring-purple-500'
-                  : isDark 
-                  ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
-                  : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
-              }`}
-            />
-          </div>
-          
-          {/* Bulk Action Buttons */}
-        <div className="flex items-center gap-1.5">
-            <button
-              onClick={() => setShowConnectModal(true)}
-            className={`w-9 h-9 sm:w-10 sm:h-10 rounded-md flex items-center justify-center text-gray-500 ${isDark ? 'hover:text-gray-300' : 'hover:text-gray-700'} bg-transparent border-none outline-none focus:outline-none ring-0 focus:ring-0 shadow-none`}
-            style={{ border: 'none' }}
-              title="Add new user"
-            >
-            <Plus className="w-5 h-5" />
-            </button>
-            <button
-              onClick={(e) => {
-                e.stopPropagation()
-                handleBulkSync()
-              }}
-              disabled={selectedUsers.length === 0}
-            className={`w-9 h-9 sm:w-10 sm:h-10 rounded-md flex items-center justify-center text-gray-500 ${isDark ? 'hover:text-gray-300' : 'hover:text-gray-700'} disabled:opacity-40 disabled:cursor-not-allowed bg-transparent border-none outline-none focus:outline-none ring-0 focus:ring-0 shadow-none`}
-            style={{ border: 'none' }}
-              title={selectedUsers.length === 0 ? 'Select users to sync' : `Sync ${selectedUsers.length} selected user${selectedUsers.length > 1 ? 's' : ''}`}
-            >
-            <RefreshCw className="w-5 h-5" />
-            </button>
-            <button
-              onClick={(e) => {
-                e.stopPropagation()
-                handleBulkDelete()
-              }}
-              disabled={selectedUsers.length === 0}
-            className={`w-9 h-9 sm:w-10 sm:h-10 rounded-md flex items-center justify-center text-gray-500 ${isDark ? 'hover:text-gray-300' : 'hover:text-gray-700'} disabled:opacity-40 disabled:cursor-not-allowed bg-transparent border-none outline-none focus:outline-none ring-0 focus:ring-0 shadow-none`}
-            style={{ border: 'none' }}
-              title={selectedUsers.length === 0 ? 'Select users to delete' : `Delete ${selectedUsers.length} selected user${selectedUsers.length > 1 ? 's' : ''}`}
-            >
-            <Trash2 className="w-5 h-5" />
-            </button>
-          </div>
-          
+    <div className="p-4 sm:p-6 space-y-6">
+      {/* Page Header */}
+      <PageHeader
+        title="Users"
+        description="Manage Stremio users for your group"
+        searchTerm={searchTerm}
+        onSearchChange={setSearchTerm}
+        searchPlaceholder="Search users..."
+        selectedCount={selectedUsers.length}
+        onSelectAll={handleSelectAll}
+        onDeselectAll={handleDeselectAll}
+        onAdd={handleAddUser}
+        onReload={handleBulkSync}
+        onDelete={handleBulkDelete}
+        viewMode={viewMode}
+        onViewModeChange={handleViewModeChange}
+        isReloading={bulkSyncMutation.isPending}
+        isReloadDisabled={selectedUsers.length === 0}
+        isDeleteDisabled={selectedUsers.length === 0}
+        mounted={mounted}
+      />
 
-          {/* View Mode Toggle */}
-          {mounted && (
-            <div className="flex items-center">
-              <div className={`flex rounded-lg border ${isMono ? 'border-white/20' : (isDark ? 'border-gray-600' : 'border-gray-300')}`}>
-                <button
-                  onClick={() => handleViewModeChange('card')}
-                  className={`flex items-center gap-2 px-2.5 py-1.5 sm:py-2 text-sm transition-colors h-9 sm:h-10 ${
-                    isMono 
-                      ? 'rounded-l-lg !border-0 !border-r-0 !rounded-r-none' 
-                      : 'rounded-l-lg border-0 border-r-0'
-                  } ${
-                    viewMode === 'card'
-                      ? (isMono
-                        ? '!bg-white/10 text-white'
-                        : (!isDark)
-                        ? 'bg-gray-100 text-gray-900'
-                        : 'bg-gray-700 text-white')
-                      : (isMono
-                        ? 'text-white/70 hover:bg-white/10'
-                        : (!isDark)
-                        ? 'text-gray-800 hover:bg-gray-100'
-                        : 'text-gray-300 hover:bg-gray-700')
-                  }`}
-                  title="Card view"
-                >
-                  <Grip className="w-4 h-4" />
-                </button>
-                <button
-                  onClick={() => handleViewModeChange('list')}
-                  className={`flex items-center gap-2 px-2.5 py-1.5 sm:py-2 text-sm transition-colors h-9 sm:h-10 ${
-                    isMono 
-                      ? 'rounded-r-lg !border-0 !border-l-0 !rounded-l-none' 
-                      : 'rounded-r-lg border-0 border-l-0'
-                  } ${
-                    viewMode === 'list'
-                      ? (isMono
-                        ? '!bg-white/10 text-white'
-                        : (!isDark)
-                        ? 'bg-gray-100 text-gray-900'
-                        : 'bg-gray-700 text-white')
-                      : (isMono
-                        ? 'text-white/70 hover:bg-white/10'
-                        : (!isDark)
-                        ? 'text-gray-800 hover:bg-gray-100'
-                        : 'text-gray-300 hover:bg-gray-700')
-                  }`}
-                  title="List view"
-                >
-                  <List className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Controls removed per request */}
-
-      {/* Loading State */}
-      {isLoading && (
-        <div className="flex items-center justify-center py-12">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 accent-border"></div>
-          <span className={`ml-3 ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>Loading users...</span>
-        </div>
-      )}
-
-      {/* Error State */}
-      {error && (
-        <div className={`text-center py-12 ${
-          isMono 
-            ? 'bg-black border border-white/20' 
-            : isDark 
-            ? 'bg-gray-800 border-gray-700' 
-            : 'bg-red-50 border-red-200'
-        } rounded-lg border`}>
-          <AlertTriangle className={`w-12 h-12 mx-auto mb-4 ${
-            isMono ? 'text-white' : 'text-red-500'
-          }`} />
-          <h3 className={`text-lg font-medium mb-2 ${
-            isMono ? 'text-white' : isDark ? 'text-white' : 'text-gray-900'
-          }`}>Unable to load users</h3>
-          <p className={`${
-            isMono ? 'text-white/70' : isDark ? 'text-gray-400' : 'text-gray-600'
-          }`}>
-            Make sure the backend server is running on port 4000
-          </p>
-          <button 
-            onClick={() => queryClient.invalidateQueries({ queryKey: ['users'] })}
-            className={`mt-4 px-4 py-2 text-white rounded-lg transition-colors ${
-              isMono
-                ? 'bg-black hover:bg-gray-800 border border-white/20'
-                : isModern
-                ? 'bg-gradient-to-br from-purple-600 via-purple-700 to-blue-800 hover:from-purple-700 hover:via-purple-800 hover:to-blue-900'
-                : isModernDark
-                ? 'bg-gradient-to-br from-purple-800 via-purple-900 to-blue-900 hover:from-purple-900 hover:via-purple-950 hover:to-indigo-900'
-                : 'bg-red-600 hover:bg-red-700'
-            }`}
-          >
-            Try Again
-          </button>
-        </div>
-      )}
-
-      {/* Users Display */}
-      {!isLoading && !error && (
-        <>
+      {/* Content */}
           {viewMode === 'card' ? (
             /* Card Grid View */
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 items-stretch">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 items-start">
           {displayUsers.map((user: any) => (
-            <div 
-              key={user.id} 
-              onClick={() => handleUserToggle(user.id)}
-              className={`rounded-lg shadow-sm border p-6 hover:shadow-md transition-shadow flex flex-col h-full relative group ${
-                isModern
-                  ? 'bg-gradient-to-br from-purple-50/90 to-blue-50/90 backdrop-blur-sm border-purple-200/60'
-                  : isModernDark
-                  ? 'bg-gradient-to-br from-purple-800/40 to-blue-800/40 backdrop-blur-sm border-purple-600/50'
-                  : isDark 
-                  ? 'bg-gray-800 border-gray-700' 
-                  : 'bg-white border-gray-200'
-              } ${!user.isActive ? 'opacity-50' : ''} cursor-pointer ${
-                selectedUsers.includes(user.id) 
-                  ? (isMono ? 'ring-2 ring-white/50 border-white/40' : 'ring-2 ring-gray-400 border-gray-400') 
-                  : ''
-              }`}>
-              <div className="flex items-start justify-between mb-4">
-                <div className="flex items-center">
-                  <div className={`w-12 h-12 rounded-full flex items-center justify-center ${
-                    isMono
-                      ? 'bg-black border border-white/20 text-white'
-                      : isModern
-                      ? 'bg-gradient-to-br from-purple-600 to-blue-800 text-white'
-                      : isModernDark
-                      ? 'bg-gradient-to-br from-purple-800 to-blue-900 text-white'
-                      : getUserColorClass(user?.colorIndex)
-                  }`}>
-                        <span className="text-white font-semibold text-lg">
-                          {user.username ? user.username.charAt(0).toUpperCase() : 
-                           user.email ? user.email.charAt(0).toUpperCase() : 'U'}
-                        </span>
-                  </div>
-                      <div className="ml-3">
-                    {editingUsername === user.id ? (
-                          <div>
-                        <input
-                          type="text"
-                          value={tempUsername}
-                          onChange={(e) => setTempUsername(e.target.value)}
-                          onBlur={() => handleBlurUsername(user.id, user.username || user.email)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              handleSaveUsername(user.id, user.username || user.email)
-                            } else if (e.key === 'Escape') {
-                              setEditingUsername(null)
-                              setTempUsername('')
-                            }
-                          }}
-                          placeholder={user.username || user.email}
-                          className={`px-2 py-1 text-sm border rounded focus:ring-2 focus:ring-stremio-purple focus:border-transparent ${
-                            isDark 
-                              ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
-                              : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
-                          }`}
-                          autoFocus
-                        />
-                            <div className="mt-1 mb-0">
-                              <UserSyncBadge 
-                                userId={user.id} 
-                                userExcludedSet={globalUserExcludedSets.get(user.id) || new Set()} 
-                                userProtectedSet={globalUserProtectedSets.get(user.id) || new Set()} 
-                                isSyncing={false}
-                                deleteMode={deleteMode}
-                              />
-                            </div>
-                      </div>
-                    ) : (
-                          <div>
-                        <h3 
-                          className={`font-medium cursor-pointer transition-colors ${
-                            isModern ? 'text-purple-800 hover:text-purple-900' : isModernDark ? 'text-purple-200 hover:text-purple-100' : (isDark ? 'text-white hover:text-gray-300' : 'text-gray-900 hover:text-gray-700')
-                          }`}
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            handleStartEditUsername(user.id, user.username || user.email)
-                          }}
-                          title="Click to edit username"
-                        >
-                          {user.username || user.email}
-                        </h3>
-                            <div className="mt-1 mb-0">
-                              <UserSyncBadge 
-                                userId={user.id} 
-                                userExcludedSet={globalUserExcludedSets.get(user.id) || new Set()} 
-                                userProtectedSet={globalUserProtectedSets.get(user.id) || new Set()} 
-                                isSyncing={false}
-                                deleteMode={deleteMode}
-                              />
-                            </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-                
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      handleToggleUserStatus(user.id, user.isActive)
-                    }}
-                    disabled={hasInvalidStremioConnection(user)}
-                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                          hasInvalidStremioConnection(user)
-                            ? 'bg-gray-400 cursor-not-allowed'
-                            : user.isActive 
-                              ? (isMono ? 'bg-white/30 border border-white/20' : (isDark ? 'bg-gray-600' : 'bg-gray-800')) 
-                              : (isMono ? 'bg-white/15 border border-white/20' : (isDark ? 'bg-gray-700' : 'bg-gray-300'))
-                        }`}
-                        aria-pressed={user.isActive}
-                        title={hasInvalidStremioConnection(user) 
-                          ? 'Cannot enable - invalid Stremio connection' 
-                          : user.isActive 
-                            ? 'Click to disable' 
-                            : 'Click to enable'}
-                  >
-                    <span
-                      className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${
-                        user.isActive 
-                          ? 'translate-x-5' 
-                          : 'translate-x-1'
-                      }`}
-                    />
-                  </button>
-                </div>
-              </div>
-
-                  <div className="grid grid-cols-2 gap-4 mb-4 items-start">
-                    <div className="flex items-center">
-                      <Puzzle className="w-4 h-4 text-gray-400 mr-2" />
-                      <div>
-                        <p className={`text-lg font-semibold ${
-                          isModern ? 'text-purple-100' : isModernDark ? 'text-purple-100' : (isDark ? 'text-white' : 'text-gray-900')
-                        }`}>
-                          {user.stremioAddonsCount || 0}
-                        </p>
-                        <p className={`text-xs ${
-                          isModern ? 'text-purple-300' : isModernDark ? 'text-purple-300' : (isDark ? 'text-gray-400' : 'text-gray-500')
-                        }`}>Addons</p>
-                </div>
-                </div>
-                    <div className="flex items-center">
-                      <Users className="w-4 h-4 text-gray-400 mr-2" />
-                      <p className={`text-lg font-semibold ${
-                        isModern ? 'text-purple-100' : isModernDark ? 'text-purple-100' : (isDark ? 'text-white' : 'text-gray-900')
-                      }`}>
-                        {user.groupName || 'No group'}
-                      </p>
-                </div>
-              </div>
-
-              <div className="flex gap-2">
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    handleViewUserDetails(user)
-                  }}
-                  className={`flex-1 flex items-center justify-center px-3 py-2 h-8 min-h-8 max-h-8 text-sm rounded transition-colors hover:font-semibold ${
-                    isModern
-                      ? 'bg-gradient-to-r from-purple-100 to-blue-100 text-purple-800 hover:from-purple-200 hover:to-blue-200'
-                      : isModernDark
-                      ? 'bg-gradient-to-r from-purple-800 to-blue-800 text-purple-100 hover:from-purple-700 hover:to-blue-700'
-                      : isMono
-                      ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                      : isDark
-                      ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  }`}
-                >
-                      <Eye className="w-4 h-4 mr-1" />
-                  View
-                </button>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    importUserAddonsMutation.mutate(user.id)
-                  }}
-                  disabled={importUserAddonsMutation.isPending}
-                  className={`flex items-center justify-center px-3 py-2 h-8 min-h-8 max-h-8 text-sm rounded transition-colors disabled:opacity-50 ${
-                    isModern
-                      ? 'bg-gradient-to-br from-purple-100 to-blue-100 text-purple-800 hover:from-purple-200 hover:to-blue-200'
-                      : isModernDark
-                      ? 'bg-gradient-to-br from-purple-800 to-blue-800 text-purple-100 hover:from-purple-700 hover:to-blue-700'
-                      : isMono
-                      ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                      : 'bg-blue-100 text-blue-700 hover:bg-blue-200'
-                  }`}
-                  title="Import user's addons to a new group"
-                >
-                  {importUserAddonsMutation.isPending ? (
-                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-current"></div>
-                  ) : (
-                    <Download className="w-4 h-4" />
-                  )}
-                </button>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    reloadUserAddonsMutation.mutate(user.id)
-                  }}
-                  disabled={reloadUserAddonsMutation.isPending && reloadUserAddonsMutation.variables === user.id}
-                  className={`flex items-center justify-center px-3 py-2 h-8 min-h-8 max-h-8 text-sm rounded transition-colors disabled:opacity-50 ${
-                    isModern
-                      ? 'bg-gradient-to-br from-green-100 to-green-200 text-green-800 hover:from-green-200 hover:to-green-300'
-                      : isModernDark
-                      ? 'bg-gradient-to-br from-green-800 to-green-900 text-green-100 hover:from-green-700 hover:to-green-800'
-                      : isMono
-                      ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                      : 'bg-green-100 text-green-700 hover:bg-green-200'
-                  }`}
-                  title="Reload user addons"
-                >
-                      <RefreshCw className={`w-4 h-4 ${reloadUserAddonsMutation.isPending && reloadUserAddonsMutation.variables === user.id ? 'animate-spin' : ''}`} />
-                </button>
-                <button 
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    handleDeleteUser(user.id, user.username)
-                  }}
-                  disabled={deleteUserMutation.isPending}
-                  className={`flex items-center justify-center px-3 py-2 h-8 min-h-8 max-h-8 text-sm rounded transition-colors disabled:opacity-50 ${
-                    isModern
-                      ? 'bg-gradient-to-br from-purple-100 to-blue-100 text-purple-800 hover:from-purple-200 hover:to-blue-200'
-                      : isModernDark
-                      ? 'bg-gradient-to-br from-purple-800 to-blue-800 text-purple-100 hover:from-purple-700 hover:to-blue-700'
-                      : isMono
-                      ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                      : 'bg-red-100 text-red-700 hover:bg-red-200'
-                  }`}
-                >
-                      <Trash2 className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
+            <EntityCard
+              key={user.id}
+              variant="user"
+              entity={{
+                ...user,
+                isActive: user.isActive
+              }}
+              isSelected={selectedUsers.includes(user.id)}
+              onSelect={handleUserToggle}
+              onToggle={handleToggleUserStatus}
+              onDelete={handleDeleteUser}
+              onView={handleViewUser}
+              onSync={handleSyncUser}
+              onImport={handleImportUser}
+              onReload={handleReloadUser}
+              userExcludedSet={new Set()}
+              userProtectedSet={new Set()}
+              isSyncing={syncUserMutation.isPending}
+            />
           ))}
         </div>
           ) : (
             /* List View */
-            <div className="space-y-3">
+        <div className="space-y-2">
               {displayUsers.map((user: any) => (
-                <div
+            <EntityCard
                   key={user.id}
-                  onClick={() => handleUserToggle(user.id)}
-                  className={`rounded-lg border p-4 hover:shadow-md transition-shadow cursor-pointer relative group ${
-                    isModern
-                      ? 'bg-gradient-to-r from-purple-50/90 to-blue-50/90 border-purple-200/50 shadow-md shadow-purple-100/20'
-                      : isModernDark
-                      ? 'bg-gradient-to-r from-purple-800/40 to-blue-800/40 border-purple-600/50 shadow-md shadow-purple-900/20'
-                      : isMono
-                      ? 'bg-black border-white/20 shadow-none'
-                      : isDark 
-                      ? 'bg-gray-800 border-gray-700' 
-                      : 'bg-white border-gray-200'
-                  } ${!user.isActive ? 'opacity-50' : ''} ${
-                    selectedUsers.includes(user.id) 
-                      ? (isMono ? 'ring-2 ring-white/50 border-white/40' : 'ring-2 ring-gray-400 border-gray-400') 
-                      : ''
-                  }`}>
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="flex items-center flex-1 min-w-0">
-                      <div className={`w-10 h-10 rounded-full flex items-center justify-center mr-3 flex-shrink-0 ${
-                        isMono ? 'bg-black border border-white/20 text-white' : getUserColorClass(user?.colorIndex)
-                      }`}>
-                        <span className="text-white font-semibold text-sm">
-                          {user.username ? user.username.charAt(0).toUpperCase() : 
-                           user.email ? user.email.charAt(0).toUpperCase() : 'U'}
-                        </span>
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2 mb-1">
-                          <h3 className={`font-semibold truncate ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                            {user.username || user.email}
-                          </h3>
-                          <UserSyncBadge 
-                            userId={user.id} 
-                            userExcludedSet={globalUserExcludedSets.get(user.id) || new Set()} 
-                            userProtectedSet={globalUserProtectedSets.get(user.id) || new Set()} 
-                            isSyncing={false}
+              variant="user"
+              entity={{
+                ...user,
+                isActive: user.isActive
+              }}
+              isSelected={selectedUsers.includes(user.id)}
+              onSelect={handleUserToggle}
+              onToggle={handleToggleUserStatus}
+              onDelete={handleDeleteUser}
+              onView={handleViewUser}
+              onSync={handleSyncUser}
+              onImport={handleImportUser}
+              onReload={handleReloadUser}
+              userExcludedSet={new Set()}
+              userProtectedSet={new Set()}
+              isSyncing={syncUserMutation.isPending}
                             isListMode={true}
-                            deleteMode={deleteMode}
-                          />
-                        </div>
-                        {/* Mobile stats */}
-                        <div className="flex min-[480px]:hidden items-center gap-3 text-sm mt-1">
-                          <div className="flex items-center gap-1">
-                            <Puzzle className="w-3 h-3 text-gray-400" />
-                            <span className={`font-medium ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                              {user.stremioAddonsCount || 0}
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-1">
-                            <Users className="w-3 h-3 text-gray-400" />
-                            <span className={`font-medium ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                              {user.groupName || 'No group'}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                    
-                    <div className="flex items-center gap-2">
-                      {/* Desktop stats */}
-                      <div className="hidden min-[480px]:flex items-center gap-4 text-sm mr-3">
-                        <div className="flex items-center gap-1">
-                          <Puzzle className="w-4 h-4 text-gray-400" />
-                          <span className={`font-medium ${isDark ? 'text-white' : 'text-gray-900'}`}>{user.stremioAddonsCount || 0}</span>
-                        </div>
-                        <div className="flex items-center gap-1">
-                          <Users className="w-4 h-4 text-gray-400" />
-                          <span className={`font-medium ${isDark ? 'text-white' : 'text-gray-900'}`}>{user.groupName || 'No group'}</span>
-                        </div>
-                      </div>
-                      
-                      {/* Enable/Disable toggle */}
-                      <button
-                        onClick={(e) => { e.stopPropagation(); handleToggleUserStatus(user.id, user.isActive) }}
-                        disabled={hasInvalidStremioConnection(user)}
-                        className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-                          hasInvalidStremioConnection(user)
-                            ? 'bg-gray-400 cursor-not-allowed'
-                            : user.isActive 
-                              ? (isMono ? 'bg-white/30 border border-white/20' : (isDark ? 'bg-gray-600' : 'bg-gray-800')) 
-                              : (isMono ? 'bg-white/15 border border-white/20' : (isDark ? 'bg-gray-700' : 'bg-gray-300'))
-                        }`}
-                        aria-pressed={user.isActive}
-                        title={hasInvalidStremioConnection(user) 
-                          ? 'Cannot enable - invalid Stremio connection' 
-                          : user.isActive 
-                            ? 'Click to disable' 
-                            : 'Click to enable'}
-                      >
-                        <span
-                          className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                            user.isActive 
-                              ? 'translate-x-4' 
-                              : 'translate-x-0.5'
-                          }`}
-                        />
-                      </button>
-                      
-                      {/* Action buttons */}
-                      <div className="flex items-center gap-1">
-                        <button
-                          onClick={(e) => { e.stopPropagation(); importUserAddonsMutation.mutate(user.id) }}
-                          disabled={importUserAddonsMutation.isPending}
-                          className={`flex items-center justify-center h-8 w-8 text-sm rounded transition-colors disabled:opacity-50 focus:outline-none ${
-                            isDark ? 'text-gray-300 hover:text-blue-400' : 'text-gray-600 hover:text-blue-600'
-                          }`}
-                          title="Import user's addons to a new group"
-                        >
-                          {importUserAddonsMutation.isPending ? (
-                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-current"></div>
-                          ) : (
-                            <Download className="w-4 h-4" />
-                          )}
-                        </button>
-                        <button
-                          onClick={(e) => { e.stopPropagation(); reloadUserAddonsMutation.mutate(user.id) }}
-                          disabled={reloadUserAddonsMutation.isPending}
-                          className={`flex items-center justify-center h-8 w-8 text-sm rounded transition-colors disabled:opacity-50 focus:outline-none ${
-                            isDark ? 'text-gray-300 hover:text-green-400' : 'text-gray-600 hover:text-green-600'
-                          }`}
-                          title="Reload user addons"
-                        >
-                          <RefreshCw className={`w-4 h-4 ${reloadUserAddonsMutation.isPending ? 'animate-spin' : ''}`} />
-                        </button>
-                        <button 
-                          onClick={(e) => { e.stopPropagation(); handleDeleteUser(user.id, user.username) }}
-                          disabled={deleteUserMutation.isPending}
-                          className={`flex items-center justify-center h-8 w-8 text-sm rounded transition-colors disabled:opacity-50 focus:outline-none ${
-                            isDark ? 'text-gray-300 hover:text-red-400' : 'text-gray-600 hover:text-red-600'
-                          }`}
-                          title="Delete user"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
-              </div>
-            </div>
+            />
           ))}
         </div>
-          )}
-        </>
       )}
 
-      {/* Empty State */}
-      {!isLoading && !error && displayUsers.length === 0 && (
-        <div className="text-center py-12">
-          <UserCircle className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-          <h3 className={`text-lg font-medium mb-2 ${isDark ? 'text-white' : 'text-gray-900'}`}>
-            {debouncedSearchTerm ? 'No users found' : 'No users yet'}
-          </h3>
-          <p className={`${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
-            {debouncedSearchTerm 
-              ? 'Try adjusting your search criteria' 
-              : 'Start by connecting your first Stremio user'
-            }
-          </p>
-          {!debouncedSearchTerm && (
-            <div className="mt-6">
-            <button
-              onClick={() => setShowConnectModal(true)}
-                className={`flex items-center justify-center px-3 py-2 sm:px-4 text-white rounded-lg transition-colors text-sm sm:text-base mx-auto ${
-                  isModern
-                    ? 'bg-gradient-to-br from-purple-600 via-purple-700 to-blue-800 hover:from-purple-700 hover:via-purple-800 hover:to-blue-900'
-                    : isModernDark
-                    ? 'bg-gradient-to-br from-purple-800 via-purple-900 to-blue-900 hover:from-purple-900 hover:via-purple-950 hover:to-indigo-900'
-                    : isMono
-                    ? 'bg-black hover:bg-gray-800'
-                    : 'accent-bg accent-text'
-                }`}
-            >
-                <Plus className="w-4 h-4 sm:w-5 sm:h-5 mr-2" />
-                <span className="hidden sm:inline">Add Your First Stremio User</span>
-                <span className="sm:hidden">Add User</span>
-            </button>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Add User Modal */}
-      {showConnectModal && (
+      {/* Add User Modal - Original Complex Implementation */}
+      {showConnectModal && createPortal(
         <div 
-          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[100]"
+          className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center p-4 z-[1000]"
           onClick={(e) => {
             if (e.target === e.currentTarget) {
               setShowConnectModal(false)
@@ -2924,9 +939,9 @@ export default function UsersPage() {
             isDark ? 'bg-gray-800' : 'bg-white'
           }`}>
             <div className="flex items-center justify-between p-6 border-b border-gray-200">
-              <h3 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                {editingUser ? `Connect ${editingUser.username || editingUser.email || 'User'} to Stremio` : 'Add New User'}
-              </h3>
+                <h3 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                  Add New User
+                </h3>
               <button
                 onClick={() => {
                   setShowConnectModal(false)
@@ -2935,13 +950,12 @@ export default function UsersPage() {
                   setStremioUsername('')
                   setSelectedGroup('')
                   setNewGroupName('')
-                  setEditingUser(null)
                 }}
                 className={`w-8 h-8 flex items-center justify-center rounded transition-colors border-0 focus:outline-none ring-0 focus:ring-0 ${
                   isMono ? 'text-white hover:text-white/80 hover:bg-white/10' : (isDark ? 'text-gray-400 hover:text-gray-300 hover:bg-gray-700' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100')
                 }`}
               >
-                ✕
+                <X className="w-4 h-4" />
               </button>
             </div>
             <form onSubmit={handleConnectStremio} className="p-6 space-y-4">
@@ -2964,25 +978,23 @@ export default function UsersPage() {
                   </button>
                 </div>
               </div>
-              {!editingUser && (
-                <div>
-                  <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
-                    Username *
-                  </label>
-                  <input
-                    type="text"
-                    value={stremioUsername}
-                    onChange={(e) => setStremioUsername(e.target.value)}
-                    placeholder="Enter username"
-                    required
-                    className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-stremio-purple focus:border-transparent ${
-                      isDark 
-                        ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
-                        : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
-                    }`}
-                  />
-                </div>
-              )}
+              <div>
+                <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
+                  Username *
+                </label>
+                <input
+                  type="text"
+                  value={stremioUsername}
+                  onChange={(e) => setStremioUsername(e.target.value)}
+                  placeholder="Enter username"
+                  required
+                  className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-stremio-purple focus:border-transparent ${
+                    isDark 
+                      ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
+                      : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
+                  }`}
+                />
+              </div>
               {authMode === 'email' ? (
                 <>
               <div>
@@ -3010,7 +1022,7 @@ export default function UsersPage() {
                   type="password"
                   value={stremioPassword}
                   onChange={(e) => setStremioPassword(e.target.value)}
-                  placeholder="Your Stremio password"
+                  placeholder="Enter your Stremio password"
                   required
                   className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-stremio-purple focus:border-transparent ${
                     isDark 
@@ -3018,6 +1030,18 @@ export default function UsersPage() {
                       : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
                   }`}
                 />
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  id="stremio-register-new"
+                  type="checkbox"
+                  checked={stremioRegisterNew}
+                  onChange={(e) => setStremioRegisterNew(e.target.checked)}
+                  className={`h-4 w-4 rounded border ${isDark ? 'border-gray-600 bg-gray-700' : 'border-gray-300'} accent-text focus:ring-0`}
+                />
+                <label htmlFor="stremio-register-new" className={`${isDark ? 'text-gray-300' : 'text-gray-700'} text-sm`}>
+                  Register new Stremio account with these credentials
+                </label>
               </div>
                 </>
               ) : (
@@ -3027,9 +1051,9 @@ export default function UsersPage() {
                   </label>
                   <input
                     type="text"
-                    value={stremioAuthKey}
-                    onChange={(e) => setStremioAuthKey(e.target.value)}
-                    placeholder="Paste your auth key"
+                    value={stremioPassword}
+                    onChange={(e) => setStremioPassword(e.target.value)}
+                    placeholder="Enter your Stremio auth key"
                     required
                     className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-stremio-purple focus:border-transparent ${
                       isDark 
@@ -3037,45 +1061,13 @@ export default function UsersPage() {
                         : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
                     }`}
                   />
-                  <div className={`mt-1 text-xs ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
-                    Go to{' '}
-                    <a href="https://web.stremio.com/" target="_blank" rel="noreferrer" className="underline accent-text">web.stremio.com</a>
-                    , open the console and paste{' '}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const snippet = 'JSON.parse(localStorage.getItem("profile")).auth.key'
-                        try { navigator.clipboard.writeText(snippet); toast.success('Snippet copied') } catch {}
-                      }}
-                      className={`underline accent-text hover:opacity-80`}
-                      title="Click to copy snippet"
-                    >
-                      this
-                    </button>
-                    .
-                  </div>
                 </div>
               )}
-              {authMode === 'email' && !editingUser && (
-                <div className="flex items-center gap-2">
-                  <input
-                    id="stremio-register-new"
-                    type="checkbox"
-                    checked={stremioRegisterNew}
-                    onChange={(e) => setStremioRegisterNew(e.target.checked)}
-                    className={`h-4 w-4 rounded border ${isDark ? 'border-gray-600 bg-gray-700' : 'border-gray-300'} accent-text focus:ring-0`}
-                  />
-                  <label htmlFor="stremio-register-new" className={`${isDark ? 'text-gray-300' : 'text-gray-700'} text-sm`}>
-                    Register new Stremio account with these credentials
-                  </label>
-                </div>
-              )}
-              {!editingUser && (
-                <>
                   <div>
                     <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
-                      Assign to Group
+                  Assign to group (optional)
                     </label>
+                <div className="space-y-2">
                     <select
                       value={selectedGroup}
                       onChange={(e) => setSelectedGroup(e.target.value)}
@@ -3085,25 +1077,19 @@ export default function UsersPage() {
                           : 'bg-white border-gray-300 text-gray-900'
                       }`}
                     >
-                      <option value="">No group</option>
-                      {groups.map((group: any) => (
-                        <option key={group.id} value={group.name}>
+                    <option value="">Select a group (optional)</option>
+                    {groups?.map((group: any) => (
+                      <option key={group.id} value={group.id}>
                           {group.name}
                         </option>
                       ))}
-                      <option value="new">+ Create new group</option>
                     </select>
-                  </div>
-                  {selectedGroup === 'new' && (
-                    <div>
-                      <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
-                        New Group Name
-                      </label>
+                  <div className="text-center text-sm text-gray-500">or</div>
                       <input
                         type="text"
                         value={newGroupName}
                         onChange={(e) => setNewGroupName(e.target.value)}
-                        placeholder="Enter group name"
+                    placeholder="Create new group"
                         className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-stremio-purple focus:border-transparent ${
                           isDark 
                             ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
@@ -3111,12 +1097,7 @@ export default function UsersPage() {
                         }`}
                       />
                     </div>
-                  )}
-                </>
-              )}
-              <p className={`text-xs ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
-                We'll securely connect to your Stremio account and sync your addons
-              </p>
+              </div>
               <div className="flex gap-3 pt-4">
                 <button
                   type="button"
@@ -3128,8 +1109,7 @@ export default function UsersPage() {
                     setSelectedGroup('')
                     setNewGroupName('')
                   }}
-                  disabled={connectStremioMutation.isPending}
-                  className={`flex-1 px-4 py-2 rounded-lg transition-colors disabled:opacity-50 ${
+                  className={`flex-1 px-4 py-2 rounded-lg transition-colors ${
                     isDark 
                       ? 'text-gray-300 bg-gray-700 hover:bg-gray-600' 
                       : 'text-gray-700 bg-gray-100 hover:bg-gray-200'
@@ -3139,16 +1119,10 @@ export default function UsersPage() {
                 </button>
                 <button
                   type="submit"
-                  disabled={connectStremioMutation.isPending}
-                  className={`flex-1 px-4 py-2 text-white rounded-lg transition-colors disabled:opacity-50 ${
-                    isModern
-                      ? 'bg-gradient-to-br from-purple-600 via-purple-700 to-blue-800 hover:from-purple-700 hover:via-purple-800 hover:to-blue-900'
-                      : isModernDark
-                      ? 'bg-gradient-to-br from-purple-800 via-purple-900 to-blue-900 hover:from-purple-900 hover:via-purple-950 hover:to-indigo-900'
-                      : 'accent-bg accent-text'
-                  }`}
+                  disabled={createUserMutation.isPending}
+                  className="flex-1 px-4 py-2 accent-bg accent-text rounded-lg transition-colors disabled:opacity-50"
                 >
-                  {connectStremioMutation.isPending ? (stremioRegisterNew ? 'Registering...' : 'Connecting...') : (stremioRegisterNew ? 'Register & Connect' : 'Connect to Stremio')}
+                  {createUserMutation.isPending ? (stremioRegisterNew ? 'Registering...' : 'Adding...') : (stremioRegisterNew ? 'Register & Connect' : 'Add User')}
                 </button>
               </div>
             </form>
@@ -3156,207 +1130,18 @@ export default function UsersPage() {
         </div>
       )}
 
-      {/* Edit User Modal */}
-      {isEditModalOpen && editingUser && (
+
+      {/* User Detail Modal - Using original complex modal */}
+      {showDetailModal && selectedUser && (
         <div 
-          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 modal-root"
+          className="fixed top-0 left-0 right-0 bottom-0 bg-black bg-opacity-75 flex items-center justify-center z-[1000] p-4 modal-root"
           onClick={(e) => {
             if (e.target === e.currentTarget) {
-              setIsEditModalOpen(false)
+              setShowDetailModal(false)
             }
           }}
         >
-          <div className={`w-full max-w-2xl max-h-[90vh] ${isDndActive ? 'overflow-hidden' : 'overflow-y-auto'} rounded-lg shadow-xl ${
-            isDark ? 'bg-gray-800' : 'bg-white'
-          }`}>
-            <div className="p-6">
-              <div className="flex items-center justify-between mb-6">
-                <h2 className={`text-xl font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                  Edit User: {editingUser.username}
-                </h2>
-                <button
-                  onClick={handleCloseEditModal}
-                  className={`w-8 h-8 flex items-center justify-center rounded transition-colors border-0 ${
-                    isDark ? 'text-gray-400 hover:text-gray-300 hover:bg-gray-700' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
-                  }`}
-                >
-                  ✕
-                </button>
-              </div>
-
-              <form onSubmit={handleUpdateUser} className="space-y-4">
-                <div>
-                  <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
-                    Username
-                  </label>
-                  <input
-                    type="text"
-                    value={editFormData.username}
-                    onChange={(e) => setEditFormData(prev => ({ ...prev, username: e.target.value }))}
-                    placeholder={editingUser?.username || editingUser?.stremioUsername || ''}
-                    className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-stremio-purple focus:border-transparent ${
-                      isDark 
-                        ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
-                        : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
-                    }`}
-                  />
-                </div>
-
-                <div>
-                  <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
-                    Email
-                  </label>
-                  <input
-                    type="email"
-                    value={editFormData.email}
-                    onChange={(e) => {
-                      setEditFormData(prev => ({ ...prev, email: e.target.value }))
-                      setIsStremioValid(true) // Reset validation when typing
-                      setStremioValidationError(null)
-                    }}
-                    placeholder={editingUser?.email || editingUser?.stremioEmail || ''}
-                    className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-stremio-purple focus:border-transparent ${
-                      !isStremioValid && (editFormData.email || editFormData.password)
-                        ? 'border-red-500 focus:ring-red-500'
-                        : isDark 
-                          ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
-                          : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
-                    }`}
-                  />
-                  {stremioValidationError && isChangingCredentials && (
-                    <p className="mt-1 text-sm text-red-600">{stremioValidationError}</p>
-                  )}
-                  {isValidatingStremio && (
-                    <p className="mt-1 text-sm text-blue-600">Validating Stremio credentials...</p>
-                  )}
-                </div>
-
-                <div>
-                  <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
-                    Password (leave empty to keep current)
-                  </label>
-                  <input
-                    type="password"
-                    value={editFormData.password}
-                    onChange={(e) => {
-                      setEditFormData(prev => ({ ...prev, password: e.target.value }))
-                      setIsStremioValid(true) // Reset validation when typing
-                      setStremioValidationError(null)
-                    }}
-
-                    className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-stremio-purple focus:border-transparent ${
-                      !isStremioValid && (editFormData.email || editFormData.password)
-                        ? 'border-red-500 focus:ring-red-500'
-                        : isDark 
-                          ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
-                          : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
-                    }`}
-                  />
-                </div>
-
-                <div>
-                  <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
-                    Group
-                  </label>
-                  <select
-                    value={editFormData.groupName}
-                    onChange={(e) => setEditFormData(prev => ({ ...prev, groupName: e.target.value }))}
-                    className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-stremio-purple focus:border-transparent ${
-                      isDark 
-                        ? 'bg-gray-700 border-gray-600 text-white' 
-                        : 'bg-white border-gray-300 text-gray-900'
-                    }`}
-                  >
-                    <option value="">No group</option>
-                    {groups.map((group: any) => (
-                      <option key={group.id} value={group.id}>
-                        {group.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* User's Addons Section */}
-                {editUserDetails && (editUserDetails as any).addons && (editUserDetails as any).addons.length > 0 && (
-                  <div>
-                    <h3 className={`text-lg font-semibold mb-3 ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                      User's Addons ({(editUserDetails as any).addons.length})
-                    </h3>
-                    <div className="max-h-48 overflow-y-auto space-y-2">
-                      {(editUserDetails as any).addons.map((addon: any, index: number) => (
-                        <div key={index} className={`p-3 rounded-lg border ${
-                          isDark ? 'bg-gray-700 border-gray-600' : 'bg-gray-50 border-gray-200'
-                        }`}>
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <h4 className={`font-medium ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                                {addon.name || addon.manifest?.name || 'Unknown Addon'}
-                              </h4>
-                              {addon.manifest?.description && (
-                                <p className={`text-xs mt-1 ${isDark ? 'text-gray-500' : 'text-gray-500'}`}>
-                                  {addon.manifest.description.length > 50 
-                                    ? `${addon.manifest.description.substring(0, 50)}...` 
-                                    : addon.manifest.description}
-                                </p>
-                              )}
-                            </div>
-                            <div className={`px-2 py-1 rounded text-xs font-medium ${
-                              isDark ? 'bg-green-900 text-green-200' : 'bg-green-100 text-green-800'
-                            }`}>
-                              Active
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                <div className="flex gap-3 pt-4">
-                  <button
-                    type="button"
-                    onClick={handleCloseEditModal}
-                    className={`flex-1 px-4 py-2 border rounded-lg transition-colors ${
-                      isDark 
-                        ? 'border-gray-600 text-gray-300 hover:bg-gray-700' 
-                        : 'border-gray-300 text-gray-700 hover:bg-gray-50'
-                    }`}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={updateUserMutation.isPending || !isStremioValid || isValidatingStremio}
-                    className={`flex-1 px-4 py-2 text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-                      isModern
-                        ? 'bg-gradient-to-br from-purple-600 via-purple-700 to-blue-800 hover:from-purple-700 hover:via-purple-800 hover:to-blue-900'
-                        : isModernDark
-                        ? 'bg-gradient-to-br from-purple-800 via-purple-900 to-blue-900 hover:from-purple-900 hover:via-purple-950 hover:to-indigo-900'
-                        : 'accent-bg accent-text'
-                    }`}
-                  >
-                    {updateUserMutation.isPending ? 'Updating...' : 
-                     isValidatingStremio ? 'Validating...' :
-                     !isStremioValid ? 'Fix Credentials First' : 'Update User'}
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* User Detail Modal */}
-      {isDetailModalOpen && selectedUser && (
-        <div 
-          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[95] p-4 modal-root"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) {
-              setIsDetailModalOpen(false)
-            }
-          }}
-        >
-          <div className={`w-full max-w-4xl max-h-[90vh] ${isDndActive ? 'overflow-hidden' : 'overflow-y-auto'} rounded-lg shadow-xl ${
+          <div className={`w-full max-w-4xl max-h-[90vh] overflow-y-auto rounded-lg shadow-xl ${
             isDark ? 'bg-gray-800' : 'bg-white'
           }`}>
             <div className="p-6">
@@ -3364,357 +1149,61 @@ export default function UsersPage() {
                 <div className="flex flex-col flex-1">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-4">
-                      <h2 
-                        contentEditable
-                        suppressContentEditableWarning
-                        className={`text-xl font-bold cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 px-2 py-1 rounded transition-colors focus:outline-none focus:ring-2 focus:ring-stremio-purple focus:bg-gray-100 dark:focus:bg-gray-700 ${isDark ? 'text-white' : 'text-gray-900'}`}
-                        onBlur={(e) => {
-                          const newValue = e.target.textContent?.trim() || '';
-                          if (newValue && newValue !== (selectedUser.username || selectedUser.email)) {
-                            handleSaveDetailUsername(newValue);
-                          }
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            e.preventDefault();
-                            const newValue = e.currentTarget.textContent?.trim() || '';
-                            if (newValue && newValue !== (selectedUser.username || selectedUser.email)) {
-                              handleSaveDetailUsername(newValue);
-                            }
-                            e.currentTarget.blur();
-                          } else if (e.key === 'Escape') {
-                            e.currentTarget.textContent = selectedUser.username || selectedUser.email;
-                            e.currentTarget.blur();
-                          }
-                        }}
-                        title="Click to edit username"
-                      >
-                        {selectedUser.username || selectedUser.email}
-                      </h2>
-                      <UserSyncBadge 
+                      <h2 className={`text-xl font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                          {selectedUser.username || selectedUser.email}
+                  </h2>
+                      <SyncBadge 
                         userId={selectedUser.id} 
-                        userExcludedSet={globalUserExcludedSets.get(selectedUser.id) || new Set()}
-                        userProtectedSet={globalUserProtectedSets.get(selectedUser.id) || new Set()}
-                        isSyncing={false}
-                        location="detailed-view"
-                        deleteMode={deleteMode}
+                        onSync={handleSyncUser}
+                        isSyncing={syncUserMutation.isPending}
                       />
-                    </div>
+                </div>
                     <div className="flex items-center gap-4">
-                      {editingDetailGroup ? (
-                        <div className="flex items-center gap-2">
-                          <Users className="w-4 h-4 text-gray-400" />
-                          <select
-                            value={tempDetailGroup}
-                            onChange={(e) => {
-                              setTempDetailGroup(e.target.value)
-                              // Immediately apply the change when a new group is selected
-                              if (e.target.value !== (userDetailsData?.groupId || '')) {
-                                updateUserMutation.mutate({
-                                  id: selectedUser.id,
-                                  userData: { groupId: e.target.value.trim() }
-                                })
-                                setEditingDetailGroup(false)
-                                setTempDetailGroup('')
-                              }
-                            }}
-                            onBlur={handleBlurDetailGroup}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') {
-                                handleSaveDetailGroup()
-                              } else if (e.key === 'Escape') {
-                                setEditingDetailGroup(false)
-                                setTempDetailGroup('')
-                              }
-                            }}
-                            className={`px-2 py-1 text-sm border rounded focus:ring-2 focus:ring-stremio-purple focus:border-transparent ${
-                              isDark 
-                                ? 'bg-gray-700 border-gray-600 text-white' 
-                                : 'bg-white border-gray-300 text-gray-900'
-                            }`}
-                            autoFocus
-                          >
-                            <option value="">No group assigned</option>
-                            {groups.map((group: any) => (
-                              <option key={group.id} value={group.id}>
-                                {group.name}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                      ) : (
-                        <div 
-                          className="flex items-center gap-2 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 px-2 py-1 rounded transition-colors"
-                          onClick={() => handleStartEditDetailGroup(userDetailsData?.groupId || '')}
-                          title="Click to change group"
-                        >
-                          <Users className="w-4 h-4 text-gray-400" />
+                      <div className="flex items-center gap-2">
+                        <Users className={`w-4 h-4 ${isDark ? 'text-gray-400' : 'text-gray-500'}`} />
                           <span className={`text-sm font-medium ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
-                            {userDetailsData?.groupName || 'No group assigned'}
+                          {selectedUser.groupName || 'No group'}
                           </span>
                         </div>
-                      )}
-                      <button
-                        onClick={() => setIsDetailModalOpen(false)}
-                        className={`w-8 h-8 flex items-center justify-center rounded transition-colors border-0 ${
-                          isDark ? 'text-gray-400 hover:text-gray-300 hover:bg-gray-700' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
-                        }`}
-                      >
-                        ✕
-                      </button>
+                <button
+                        onClick={() => setShowDetailModal(false)}
+                  className={`w-8 h-8 flex items-center justify-center rounded transition-colors border-0 ${
+                    isDark ? 'text-gray-400 hover:text-gray-300 hover:bg-gray-700' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
+                  }`}
+                >
+                        <X className="w-4 h-4" />
+                </button>
                     </div>
                   </div>
                   <p className={`text-sm mt-1 px-2 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
-                    {hideSensitive ? '••••••••@••••' : selectedUser.email}
+                    {selectedUser.email}
                   </p>
                 </div>
               </div>
 
+              {/* User's Addons Section */}
               {isLoadingDetails ? (
                 <div className="flex items-center justify-center py-8">
                   <div className="animate-spin rounded-full h-8 w-8 border-b-2 accent-border"></div>
                 </div>
               ) : userDetailsData ? (
                 <div className="space-y-6">
-
                   {/* Group Addons (from user's group) */}
-                  <div className={`p-4 rounded-lg ${isDark ? 'bg-gray-700' : 'bg-gray-50'}`}>
-                    <h3 className={`text-lg font-semibold mb-3 ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                      {userDetailsData?.groupName || 'No Group'} Addons ({userDetailsData.addons?.filter((addon: any) => addon.isEnabled !== false).length || 0})
-                    </h3>
-                    {userDetailsData.addons && userDetailsData.addons.length > 0 ? (
-                      <div className="space-y-3">
-                        {userDetailsData.addons
-                          .filter((addon: any) => addon.isEnabled !== false)
-                          .map((addon: any, index: number) => {
-                          const excluded = userExcludedSet.has(addon?.id)
-                          // Get icon from Stremio addons data if available
-                          const stremioAddon = Array.isArray(stremioAddonsData?.addons) 
-                            ? stremioAddonsData.addons.find((sa: any) => 
-                                (sa?.manifestUrl || '').toString().trim().toLowerCase() === (addon?.manifestUrl || '').toString().trim().toLowerCase()
-                              ) 
-                            : null
-                          // Debug logging - focused on the issue
-                          if (addon.name === 'AIOStreams') {
-                            debug.log('🔍 User AIOStreams Debug:', {
-                              addonName: addon.name,
-                              manifestUrl: addon?.manifestUrl,
-                              iconUrl: addon.iconUrl,
-                              finalIconUrl: addon.iconUrl || addon?.manifest?.logo || stremioAddon?.iconUrl || stremioAddon?.manifest?.logo,
-                              hasStremioData: !!stremioAddon
-                            })
-                          }
-                          
-                          const iconUrl = addon.iconUrl || addon?.manifest?.logo || stremioAddon?.iconUrl || stremioAddon?.manifest?.logo
-                          const addonName = addon.name || addon?.manifest?.name || stremioAddon?.name || stremioAddon?.manifest?.name || addon.id
-                          return (
-                          <div key={index} className={`p-3 rounded-lg border ${
-                            isDark ? 'bg-gray-600 border-gray-500' : 'bg-white border-gray-200'
-                          } ${excluded ? 'opacity-60' : ''}`}>
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-center flex-1 min-w-0">
-                                  <div className="w-10 h-10 rounded-lg flex items-center justify-center mr-3 flex-shrink-0 overflow-hidden border-0">
-                                    {iconUrl ? (
-                                      <img
-                                        src={iconUrl}
-                                        alt={`${addonName} logo`}
-                                        className="w-full h-full object-contain"
-                                        onError={(e: any) => { e.currentTarget.style.display = 'none' }}
-                                      />
-                                    ) : null}
-                                    <div className={`w-full h-full ${iconUrl ? 'hidden' : 'flex'} bg-stremio-purple items-center justify-center border-0`}>
-                                      <Puzzle className="w-5 h-5 text-white" />
-                                    </div>
-                                  </div>
-                                  <div className="min-w-0 flex-1">
-                                    <div className="flex flex-col min-[480px]:flex-row min-[480px]:items-center min-[480px]:gap-2">
-                                      <h4 className={`font-medium truncate ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                                        {addonName || 'Unnamed Addon'}
-                                      </h4>
-                                      {addon.version && (
-                                        <span className={`inline-flex items-center px-1.5 py-0.5 text-xs font-medium w-fit mt-1 min-[480px]:mt-0 accent-chip`}>
-                                          v{addon.version}
-                                        </span>
-                                      )}
-                                    </div>
-                                    {addon.description && (
-                                      <p className={`hidden sm:block text-sm mt-1 truncate ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
-                                        {addon.description}
-                                      </p>
-                                    )}
-                                  </div>
-                                </div>
-                              </div>
-                              <div className="ml-1 p-2 rounded-lg">
-                                <button
-                                  onClick={() => toggleUserExcluded(addon?.id)}
-                                  className={`flex items-center justify-center h-8 w-8 text-sm rounded transition-colors focus:outline-none ${
-                                    excluded 
-                                      ? (isDark ? 'text-red-300 hover:text-red-400' : 'text-red-600 hover:text-red-700')
-                                      : (isDark ? 'text-gray-300 hover:text-red-400' : 'text-gray-600 hover:text-red-600')
-                                  }`}
-                                  title={excluded ? 'Include for this user' : 'Exclude for this user'}
-                                >
-                                  {excluded ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                                </button>
-                              </div>
-                            </div>
-                          </div>
-                          )
-                        })}
-                      </div>
-                    ) : (
-                      <p className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
-                        No group addons assigned to this user's group.
-                      </p>
-                    )}
-                  </div>
+                  <AddonList
+                    addons={userDetailsData?.addons?.filter((addon: any) => addon.isEnabled !== false) || []}
+                    title={`${userDetailsData?.groupName || 'No Group'} Addons`}
+                    count={userDetailsData?.addons?.filter((addon: any) => addon.isEnabled !== false).length || 0}
+                    emptyMessage="No addons in this group"
+                    type="group"
+                    onExclude={toggleUserExcluded}
+                    excludedAddons={userExcludedSet}
+                  />
 
-                  {(() => {
-                    const liveAll = Array.isArray(stremioAddonsData?.addons) ? stremioAddonsData!.addons : []
-                    const groupByUrl = new Map<string, any>((userDetailsData.addons || []).map((ga: any) => [
-                      (ga?.manifestUrl || '').toString().trim().toLowerCase(), ga
-                    ]))
-                    // Use the original order from Stremio instead of separating protected/unprotected
-                    const combinedLive = liveAll
-
-                    // Initialize local order from live data when it changes
-                    // (moved to top-level useEffect to satisfy React Hooks rules)
-
-
-                    const handleDragStart = (id: string, e?: React.DragEvent) => {
-                      draggingIdRef.current = id
-                      setIsDragging(true)
-                      // Suppress default drag image to avoid layout jitter
-                      try {
-                        const img = new Image()
-                        img.src = 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs='
-                        e?.dataTransfer?.setDragImage(img, 0, 0)
-                      } catch {}
-                    }
-
-                    // Touch handlers for mobile drag and drop
-                    const handleTouchStart = (id: string, index: number, e: React.TouchEvent) => {
-                      // Don't start drag if touching a button or interactive element
-                      const target = e.target as HTMLElement
-                      if (target.tagName === 'BUTTON' || target.closest('button')) {
-                        // Don't prevent default for buttons - let them work normally
-                        return
-                      }
-                      
-                      const touch = e.touches[0]
-                      touchStartPos.current = { x: touch.clientX, y: touch.clientY }
-                      touchStartIndex.current = index
-                      isTouchDragging.current = false
-                      draggingIdRef.current = id
-                      // Do not prevent default on touchstart; let taps generate clicks on mobile
-                    }
-
-                    const handleTouchMove = (e: React.TouchEvent) => {
-                      if (!touchStartPos.current || !draggingIdRef.current) return
-                      
-                      const touch = e.touches[0]
-                      const deltaX = Math.abs(touch.clientX - touchStartPos.current.x)
-                      const deltaY = Math.abs(touch.clientY - touchStartPos.current.y)
-                      
-                      // Start dragging if moved more than 10px in any direction
-                      if (!isTouchDragging.current && (deltaX > 10 || deltaY > 10)) {
-                        isTouchDragging.current = true
-                        setIsDragging(true)
-                        // Prevent scrolling when drag starts
-                        document.body.style.overflow = 'hidden'
-                      }
-                      
-                      if (isTouchDragging.current) {
-                        // Only prevent defaults once we've actually started dragging
-                        e.preventDefault()
-                        e.stopPropagation()
-                        // Find the element under the touch point
-                        const elementBelow = document.elementFromPoint(touch.clientX, touch.clientY)
-                        if (elementBelow) {
-                          const addonElement = elementBelow.closest('[data-addon-index]')
-                          if (addonElement) {
-                            const targetIndex = parseInt(addonElement.getAttribute('data-addon-index') || '0')
-                            if (targetIndex !== touchStartIndex.current) {
-                              setDragOverIndex(targetIndex)
-                            }
-                          }
-                        }
-                      }
-                    }
-
-                    const handleTouchEnd = (e: React.TouchEvent) => {
-                      if (isTouchDragging.current && draggingIdRef.current && touchStartIndex.current !== null) {
-                        const targetIndex = dragOverIndex !== null ? dragOverIndex : touchStartIndex.current
-                        handleDrop(targetIndex)
-                      }
-                      
-                      // Reset all touch state
-                      touchStartPos.current = null
-                      touchStartIndex.current = null
-                      isTouchDragging.current = false
-                      setIsDragging(false)
-                      setDragOverIndex(null)
-                      draggingIdRef.current = null
-                      // Restore scrolling
-                      document.body.style.overflow = ''
-                      // Only suppress default if we were dragging; simple taps should click
-                      if (isTouchDragging.current) {
-                        e.preventDefault()
-                        e.stopPropagation()
-                      }
-                    }
-                    const handleDragOver = (e: React.DragEvent, targetIndex: number) => {
-                      e.preventDefault()
-                      setDragOverIndex(targetIndex)
-                    }
-                    const handleDragLeave = () => { 
-                      setDragOverIndex(null)
-                    }
-                    const handleDragEnd = () => { 
-                      draggingIdRef.current = null
-                      setIsDragging(false)
-                      setDragOverIndex(null)
-                    }
-                    const handleDrop = (targetIndex: number) => {
-                      const fromId = draggingIdRef.current
-                      if (!fromId) { 
-                        setDragOverIndex(null)
-                        setIsDragging(false)
-                        return 
-                      }
-                      
-                      // Use the preview order as the final order
-                      const currentIndex = addonOrder.indexOf(fromId)
-                      if (currentIndex === -1 || currentIndex === targetIndex) {
-                        setDragOverIndex(null)
-                        setIsDragging(false)
-                        draggingIdRef.current = null
-                        return
-                      }
-                      
-                      // The preview order already has the correct final arrangement
-                      setAddonOrder(previewOrder)
-                      setDragOverIndex(null)
-                      setIsDragging(false)
-                      draggingIdRef.current = null
-                      
-                      // Set flag to prevent UI reversion
-                      justReorderedRef.current = true
-                      
-                      reorderMutation.mutate(previewOrder)
-                    }
-
-                    const mapIdForAddon = (addon: any) => (addon.manifestUrl || addon.transportUrl || addon.url || '').toString().trim()
-
-                    return (
-                      <>
-                        {/* Stremio Account Addons (non-protected) */}
-                        <div className={`p-4 rounded-lg ${isDark ? 'bg-gray-700' : 'bg-gray-50'}`}>
-                          <div className="flex items-center justify-between mb-3">
+                  {/* Stremio Account Addons - Draggable */}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
                             <h3 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                              Stremio Account Addons ({combinedLive.length})
+                        Stremio Account Addons ({stremioAddonsData?.addons?.length || 0})
                             </h3>
                             <button
                               onClick={() => wipeUserAddonsMutation.mutate(selectedUser.id)}
@@ -3735,45 +1224,52 @@ export default function UsersPage() {
                               )}
                             </button>
                           </div>
-                          {combinedLive.length > 0 || stremioAddonsData?.needsReconnect ? (
-                            <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStartDnd} onDragEnd={handleDragEndDnd} modifiers={[restrictToVerticalAxis]}>
-                              <SortableContext items={addonOrder} strategy={verticalListSortingStrategy}>
+                    
+                    {isLoadingStremioAddons ? (
+                      <div className="text-center py-8">
+                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto"></div>
+                        <p className={`text-sm mt-2 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+                          Loading Stremio addons...
+                        </p>
+                      </div>
+                    ) : stremioAddonsData?.addons && stremioAddonsData.addons.length > 0 ? (
+                      <DndContext
+                        sensors={sensors}
+                        collisionDetection={closestCenter}
+                        onDragStart={handleDragStartDnd}
+                        onDragCancel={handleDragCancelDnd}
+                        onDragEnd={handleDragEndDnd}
+                        modifiers={[restrictToVerticalAxis]}
+                      >
+                        <SortableContext
+                          items={stremioAddonOrder}
+                          strategy={verticalListSortingStrategy}
+                        >
                             <div className="space-y-2">
-                              {orderAddons(combinedLive).map((addon: any, index: number) => {
-                                const murl = mapIdForAddon(addon)
-                                const fam = groupByUrl.get((murl || '').toString().trim().toLowerCase())
-                                const isBuiltIn = isAddonProtectedBuiltIn(addon)
-                                const isUserProt = userProtectedSet.has(murl || '')
-                                    // In unsafe mode, only show user-protected addons as protected (visually)
-                                    // In safe mode, show both Stremio-protected and user-protected as protected
-                                    const isProt = deleteMode === 'unsafe' ? isUserProt : isAddonProtected(addon)
-                                const isDragged = isDragging && draggingIdRef.current === murl
-                                    const isActive = activeId === murl
-                                
-                                // Debug: Log addon data structure
-                                if (index === 0) {
-                                  debug.log('🔍 Stremio addon data structure:', addon)
-                                  debug.log('🔍 Available icon fields:', {
-                                    iconUrl: addon?.iconUrl,
-                                    manifestLogo: addon?.manifest?.logo,
-                                    manifestIcon: addon?.manifest?.icon
-                                  })
-                                }
+                            {orderStremioAddons(stremioAddonsData.addons).map((addon: any, index: number) => {
+                              const addonId = mapIdForStremioAddon(addon)
+                              const isDragged = isDndActive && activeId === addonId
+                              const isActive = activeId === addonId
+                              const isProtected = userProtectedSet.has(addon.manifestUrl || addon.transportUrl || addon.url || addon.id)
+                              
+                              // Use the same fallback logic as the original implementation
+                              const iconUrl = addon.iconUrl || addon?.manifest?.logo
+                              const addonName = addon.name || addon?.manifest?.name || addon.id || 'Unnamed Addon'
                                 
                                 return (
-                                      <SortableAddon key={`${murl}-${index}` || `addon-${index}`} id={murl} index={index}>
+                                <SortableStremioAddon key={`${addonId}-${index}`} id={addonId} index={index}>
                                   <div
                                     className={`relative p-3 pl-8 rounded-lg border transition-all duration-200 select-none touch-none ${
                                       isDark ? 'bg-gray-600 border-gray-500' : 'bg-white border-gray-200'
-                                        } ${isDragged ? (isDark ? 'ring-2 ring-blue-500 opacity-50' : 'ring-2 ring-blue-400 opacity-50') : ''} ${isActive && isDragging ? 'opacity-0' : ''}`}
+                                    } ${isDragged ? (isDark ? 'ring-2 ring-blue-500 opacity-50' : 'ring-2 ring-blue-400 opacity-50') : ''} ${isActive && isDndActive ? 'opacity-0' : ''}`}
                                     title="Drag to reorder"
                                   >
-                                    {/* Full-height grab handle on far left, seamless */}
+                                    {/* Drag handle */}
                                     <div
-                                      className="absolute inset-y-0 left-0 w-6 flex items-center justify-center cursor-grab active:cursor-grabbing"
+                                      className="absolute inset-y-0 left-0 w-6 flex items-center justify-center cursor-grab active:cursor-grabbing hover:bg-gray-100 dark:hover:bg-gray-700 rounded-l-lg transition-colors border-r border-gray-200 dark:border-gray-600"
                                       title="Drag to reorder"
                                     >
-                                      <div className={`grid grid-cols-2 gap-0.5 ${isDark ? 'text-gray-400' : 'text-gray-400'}`}>
+                                      <div className={`grid grid-cols-2 gap-0.5 ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
                                         <span className="w-1 h-1 rounded-full bg-current block" />
                                         <span className="w-1 h-1 rounded-full bg-current block" />
                                         <span className="w-1 h-1 rounded-full bg-current block" />
@@ -3782,134 +1278,153 @@ export default function UsersPage() {
                                         <span className="w-1 h-1 rounded-full bg-current block" />
                                       </div>
                                     </div>
+                                      
                                         <div className="flex items-center justify-between gap-3">
                                           <div className="flex-1 min-w-0">
                                             <div className="flex items-center flex-1 min-w-0">
-                                              <div className={`w-10 h-10 rounded-lg flex items-center justify-center mr-3 flex-shrink-0 overflow-hidden ${
-                                                isMono ? '' : ''
-                                              }`}>
-                                                {(addon.iconUrl || addon?.manifest?.logo) ? (
-                                                  <img
-                                                    src={addon.iconUrl || addon?.manifest?.logo}
-                                                    alt={`${addon.name || addon?.manifest?.name || addon.id || 'Addon'} logo`}
+                                            <div 
+                                              className={`w-12 h-12 rounded-full flex items-center justify-center mr-3 flex-shrink-0 overflow-hidden border-0`}
+                                              onMouseDown={(e) => e.stopPropagation()}
+                                              onTouchStart={(e) => e.stopPropagation()}
+                                            >
+                                              {iconUrl ? (
+                                                <img
+                                                  src={iconUrl}
+                                                  alt={`${addonName} logo`}
                                                     className="w-full h-full object-contain"
                                                     onError={(e: any) => { e.currentTarget.style.display = 'none' }}
                                                   />
                                                 ) : null}
-                                                <div className={`w-full h-full ${(addon.iconUrl || addon?.manifest?.logo) ? 'hidden' : 'flex'} bg-stremio-purple items-center justify-center border-0`}>
+                                              <div className={`w-full h-full ${iconUrl ? 'hidden' : 'flex'} bg-stremio-purple text-white items-center justify-center border-0`}>
                                                   <Puzzle className="w-5 h-5 text-white" />
                                                 </div>
                                               </div>
                                               <div className="min-w-0 flex-1">
-                                                <div className="flex flex-col min-[480px]:flex-row min-[480px]:items-center min-[480px]:gap-2">
+                                              <div 
+                                                className="flex flex-col min-[480px]:flex-row min-[480px]:items-center min-[480px]:gap-2"
+                                                onMouseDown={(e) => e.stopPropagation()}
+                                                onTouchStart={(e) => e.stopPropagation()}
+                                              >
                                                   <h4 className={`font-medium truncate ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                                                    {fam?.name || addon.name || addon.id || 'Unnamed Addon'}
+                                                  {addonName}
                                                   </h4>
                                                   {addon.version && (
-                                                    <span className={`inline-flex items-center px-1.5 py-0.5 text-xs font-medium w-fit mt-1 min-[480px]:mt-0 accent-chip`}>
+                                                  <div 
+                                                    className={`px-2 py-1 rounded text-xs font-medium mt-1 min-[480px]:mt-0 ${
+                                                      isDark ? 'bg-gray-500 text-gray-200' : 'bg-gray-200 text-gray-700'
+                                                    }`}
+                                                    onMouseDown={(e) => e.stopPropagation()}
+                                                    onTouchStart={(e) => e.stopPropagation()}
+                                                  >
                                                       v{addon.version}
-                                                    </span>
+                                                  </div>
                                                   )}
                                                 </div>
                                                 {addon.description && (
-                                                  <p className={`hidden sm:block text-sm mt-1 truncate ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
+                                                <p 
+                                                  className={`hidden sm:block text-sm mt-1 truncate ${isDark ? 'text-gray-300' : 'text-gray-600'}`}
+                                                  onMouseDown={(e) => e.stopPropagation()}
+                                                  onTouchStart={(e) => e.stopPropagation()}
+                                                >
                                                     {addon.description}
                                                   </p>
                                                 )}
                                               </div>
                                             </div>
                                           </div>
-                                          <div className="flex items-center gap-2 ml-1">
+                                        <div className="flex items-center gap-2">
+                                          {/* Protect button */}
                                           <button
-                                            onClick={() => toggleUserProtected(murl)}
-                                              disabled={deleteMode === 'safe' && isBuiltIn}
+                                            onClick={(e) => {
+                                              e.stopPropagation()
+                                              e.preventDefault()
+                                              if (addon.manifestUrl) {
+                                                toggleUserProtected(addon.manifestUrl)
+                                              }
+                                            }}
                                             className={`flex items-center justify-center h-8 w-8 text-sm rounded transition-colors focus:outline-none ${
-                                                deleteMode === 'safe' && isBuiltIn
-                                                  ? (isDark ? 'text-gray-500 cursor-not-allowed opacity-50' : 'text-gray-400 cursor-not-allowed opacity-50')
-                                                  : isProt
-                                                  ? (isDark ? 'text-yellow-300 hover:text-yellow-400' : 'text-yellow-600 hover:text-yellow-700')
+                                              isProtected 
+                                                ? (isDark ? 'text-yellow-400' : 'text-yellow-600')
                                                 : (isDark ? 'text-gray-300 hover:text-yellow-400' : 'text-gray-600 hover:text-yellow-600')
                                             }`}
-                                              title={
-                                                deleteMode === 'safe' && isBuiltIn
-                                                  ? 'Cannot unprotect Stremio-protected addons in safe mode'
-                                                  : isProt ? 'Unprotect' : 'Protect'
-                                              }
-                                            >
-                                              {isProt ? <LockKeyhole className="w-4 h-4" /> : <Unlock className="w-4 h-4" />}
+                                            title={isProtected ? 'Unprotect addon' : 'Protect addon'}
+                                          >
+                                            {isProtected ? <LockKeyhole className="w-4 h-4" /> : <Unlock className="w-4 h-4" />}
                                           </button>
+                                          
+                                          {/* Delete button */}
                                         <button
-                                          onClick={() => handleDeleteStremioAddon(addon.manifestUrl, addon.name)}
-                                              disabled={deleteMode === 'safe' && isProt}
-                                              className={`flex items-center justify-center h-8 w-8 text-sm rounded transition-colors focus:outline-none ${
-                                                deleteMode === 'safe' && isProt
-                                                  ? (isDark ? 'text-gray-500 cursor-not-allowed opacity-50' : 'text-gray-400 cursor-not-allowed opacity-50')
-                                                  : (isDark ? 'text-gray-300 hover:text-red-400' : 'text-gray-600 hover:text-red-600')
-                                              }`}
-                                              title={
-                                                deleteMode === 'safe' && isProt
-                                                  ? 'Cannot delete protected addons in safe mode'
-                                                  : 'Remove this addon from Stremio account'
+                                            onClick={(e) => {
+                                              e.stopPropagation()
+                                              e.preventDefault()
+                                              if (addon.manifestUrl && addon.name) {
+                                                handleDeleteStremioAddon(addon.manifestUrl, addon.name)
                                               }
+                                            }}
+                                              className={`flex items-center justify-center h-8 w-8 text-sm rounded transition-colors focus:outline-none ${
+                                              isDark ? 'text-gray-300 hover:text-red-400' : 'text-gray-600 hover:text-red-600'
+                                            }`}
+                                            title="Delete addon"
                                             >
                                               <Trash2 className="w-4 h-4" />
                                         </button>
                                       </div>
                                     </div>
                                   </div>
-                                      </SortableAddon>
+                                </SortableStremioAddon>
                                 )
                               })}
                             </div>
                               </SortableContext>
                               <DragOverlay dropAnimation={null}>
                                 {activeId ? (() => {
-                                  const activeAddon = orderAddons(combinedLive).find((a: any) => mapIdForAddon(a) === activeId)
-                                  const fam = groupByUrl.get((activeId || '').toString().trim().toLowerCase()) as any
+                            const list = orderStremioAddons(stremioAddonsData.addons)
+                            const activeAddon = list.find((a: any) => mapIdForStremioAddon(a) === activeId)
+                            
+                            if (!activeAddon) return null
+                            
+                            // Use the same fallback logic as the original implementation
+                            const activeIconUrl = activeAddon.iconUrl || activeAddon?.manifest?.logo
+                            const activeAddonName = activeAddon.name || activeAddon?.manifest?.name || activeAddon.id || 'Unnamed Addon'
+                            
                                   return (
                                     <div className={`p-3 pl-8 rounded-lg border ${isDark ? 'bg-gray-600 border-gray-500' : 'bg-white border-gray-200'} shadow-xl`}> 
                                       <div className="flex items-center justify-between gap-3">
                                         <div className="flex-1 min-w-0">
                                           <div className="flex items-center flex-1 min-w-0">
-                                            <div className="w-10 h-10 rounded-lg flex items-center justify-center mr-3 flex-shrink-0 overflow-hidden border-0">
-                                              {(activeAddon?.iconUrl || activeAddon?.manifest?.logo) ? (
+                                      <div className="w-12 h-12 rounded-full flex items-center justify-center mr-3 flex-shrink-0 overflow-hidden border-0">
+                                        {activeIconUrl ? (
                                                 <img
-                                                  src={activeAddon?.iconUrl || activeAddon?.manifest?.logo}
-                                                  alt={`${activeAddon?.name || activeAddon?.manifest?.name || activeAddon?.id || 'Addon'} logo`}
+                                            src={activeIconUrl}
+                                            alt={`${activeAddonName} logo`}
                                                   className="w-full h-full object-contain"
                                                   onError={(e: any) => { e.currentTarget.style.display = 'none' }}
                                                 />
                                               ) : null}
-                                              <div className={`w-full h-full ${(activeAddon?.iconUrl || activeAddon?.manifest?.logo) ? 'hidden' : 'flex'} bg-stremio-purple items-center justify-center border-0`}>
+                                        <div className={`w-full h-full ${activeIconUrl ? 'hidden' : 'flex'} bg-stremio-purple text-white items-center justify-center border-0`}>
                                                 <Puzzle className="w-5 h-5 text-white" />
                                               </div>
                                             </div>
                                             <div className="min-w-0 flex-1">
-                                              <div className="flex items-center gap-2">
+                                        <div className="flex flex-col min-[480px]:flex-row min-[480px]:items-center min-[480px]:gap-2">
                                                 <h4 className={`font-medium truncate ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                                                  {fam?.name || activeAddon?.name || activeAddon?.id || 'Addon'}
+                                            {activeAddonName}
                                                 </h4>
-                                                {activeAddon?.version && (
-                                                  <span className={`inline-flex items-center px-2 py-1 text-xs font-medium flex-shrink-0 accent-chip`}>
+                                          {activeAddon.version && (
+                                            <div className={`px-2 py-1 rounded text-xs font-medium mt-1 min-[480px]:mt-0 ${
+                                              isDark ? 'bg-gray-500 text-gray-200' : 'bg-gray-200 text-gray-700'
+                                                  }`}>
                                                     v{activeAddon.version}
-                                                  </span>
+                                            </div>
                                                 )}
                                               </div>
-                                              {activeAddon?.description && (
-                                                <p className={`text-sm mt-1 truncate ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
+                                        {activeAddon.description && (
+                                          <p className={`hidden sm:block text-sm mt-1 truncate ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
                                                   {activeAddon.description}
                                                 </p>
                                               )}
                                             </div>
                                           </div>
-                                        </div>
-                                        <div className="flex items-center gap-2 ml-1 opacity-70">
-                                          <span className={`p-2 rounded-lg ${isDark ? 'text-gray-300' : 'text-gray-500'}`}>
-                                            <LockKeyhole className="w-4 h-4" />
-                                          </span>
-                                          <span className={`p-2 rounded-lg ${isDark ? 'text-red-400' : 'text-red-600'}`}>
-                                            <Trash2 className="w-4 h-4" />
-                                          </span>
                                         </div>
                                       </div>
                                     </div>
@@ -3918,33 +1433,14 @@ export default function UsersPage() {
                               </DragOverlay>
                             </DndContext>
                           ) : (
-                            <div className="space-y-2">
-                              {stremioAddonsData?.needsReconnect ? (
-                                <div className={`p-4 rounded-lg border ${isDark ? 'bg-red-900/20 border-red-500/30' : 'bg-red-50 border-red-200'}`}>
-                                  <div className="flex items-center gap-2">
-                                    <div className="w-2 h-2 rounded-full bg-red-500"></div>
-                                    <p className={`text-sm font-medium ${isDark ? 'text-red-300' : 'text-red-700'}`}>
-                                      Unable to fetch Stremio addons
+                      <div className="text-center py-8">
+                        <Puzzle className={`w-12 h-12 mx-auto mb-4 ${isDark ? 'text-gray-500' : 'text-gray-400'}`} />
+                        <p className={`${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+                          {stremioAddonsData?.needsReconnect ? 'Reconnection required' : 'No addons in Stremio account'}
                                     </p>
                                   </div>
-                                  <p className={`text-sm mt-1 ${isDark ? 'text-red-400' : 'text-red-600'}`}>
-                                    The user's Stremio connection is invalid. Click "Connect Stremio" to reconnect.
-                                  </p>
-                                </div>
-                              ) : (
-                                <p className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
-                                  No addons found in this user's Stremio account.
-                                </p>
                               )}
                             </div>
-                          )}
-                        </div>
-
-                        {/* Protected Stremio Addons */}
-                        {/* Removed: merged into single list above */}
-                      </>
-                    )
-                  })()}
                 </div>
               ) : (
                 <div className="text-center py-8">
@@ -3959,21 +1455,14 @@ export default function UsersPage() {
       )}
 
       <ConfirmDialog
-        open={confirmOpen}
-        title={confirmConfig.title}
-        description={confirmConfig.description}
-        isDanger={confirmConfig.isDanger}
-        onCancel={() => setConfirmOpen(false)}
-        onConfirm={() => { setConfirmOpen(false); confirmConfig.onConfirm?.() }}
-      />
-
-      <ConfirmDialog
-        open={bulkDeleteConfirmOpen}
-        title={`Delete ${selectedUsers.length} selected user${selectedUsers.length > 1 ? 's' : ''}`}
-        description="This action cannot be undone. All selected users will be permanently deleted."
+        open={showDeleteConfirm}
+        title="Delete User"
+        description={`Are you sure you want to delete "${userToDelete?.name}"? This action cannot be undone.`}
+        confirmText="Delete"
+        cancelText="Cancel"
         isDanger={true}
-        onCancel={() => setBulkDeleteConfirmOpen(false)}
-        onConfirm={confirmBulkDelete}
+        onConfirm={confirmDeleteUser}
+        onCancel={cancelDeleteUser}
       />
     </div>
   )

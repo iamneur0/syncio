@@ -4,7 +4,7 @@ import React, { createContext, useContext, useState, useEffect, ReactNode } from
 
 type Theme = 'light' | 'dark' | 'modern' | 'modern-dark' | 'mono'
 
-interface ThemeContextType {
+export interface ThemeContextType {
   theme: Theme
   toggleTheme: () => void
   setTheme: (theme: Theme) => void

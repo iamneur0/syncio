@@ -2010,21 +2010,8 @@ app.get('/api/users/:id/sync-status', async (req, res) => {
       })
     }
 
-    if (!user.isActive) {
-      // If user has stremioAuthKey but is disabled, show connect button
-      if (user.stremioAuthKey) {
-        return res.json({ 
-          isSynced: false, 
-          status: 'connect',
-          message: 'User is disabled - click to reconnect' 
-        })
-      }
-      return res.json({ 
-        isSynced: false, 
-        status: 'inactive',
-        message: 'User is inactive' 
-      })
-    }
+    // Note: Sync status is independent of user active/inactive status
+    // A disabled user can still have valid sync status
 
     // Fetch live Stremio addons for accurate sync status
     let stremioAddons = []
@@ -3129,7 +3116,7 @@ app.patch('/api/users/:id/toggle-status', async (req, res) => {
         id,
         accountId: getAccountId(req)
       },
-      data: { isActive: !isActive },
+      data: { isActive: isActive },
       include: {}
     })
     
@@ -3141,6 +3128,62 @@ app.patch('/api/users/:id/toggle-status', async (req, res) => {
   } catch (error) {
     console.error('Error toggling user status:', error)
     res.status(500).json({ error: 'Failed to toggle user status', details: error?.message })
+  }
+})
+
+// Enable user
+app.put('/api/users/:id/enable', async (req, res) => {
+  try {
+    const { id } = req.params
+    
+    console.log(`🔍 PUT /api/users/${id}/enable called`)
+    
+    // Update user status to active
+    const updatedUser = await prisma.user.update({
+      where: { 
+        id,
+        accountId: getAccountId(req)
+      },
+      data: { isActive: true },
+      include: {}
+    })
+    
+    // Remove sensitive data
+    delete updatedUser.password
+    delete updatedUser.stremioAuthKey
+    
+    res.json(updatedUser)
+  } catch (error) {
+    console.error('Error enabling user:', error)
+    res.status(500).json({ error: 'Failed to enable user', details: error?.message })
+  }
+})
+
+// Disable user
+app.put('/api/users/:id/disable', async (req, res) => {
+  try {
+    const { id } = req.params
+    
+    console.log(`🔍 PUT /api/users/${id}/disable called`)
+    
+    // Update user status to inactive
+    const updatedUser = await prisma.user.update({
+      where: { 
+        id,
+        accountId: getAccountId(req)
+      },
+      data: { isActive: false },
+      include: {}
+    })
+    
+    // Remove sensitive data
+    delete updatedUser.password
+    delete updatedUser.stremioAuthKey
+    
+    res.json(updatedUser)
+  } catch (error) {
+    console.error('Error disabling user:', error)
+    res.status(500).json({ error: 'Failed to disable user', details: error?.message })
   }
 })
 
@@ -3949,6 +3992,46 @@ app.put('/api/addons/:id/disable', async (req, res) => {
   } catch (error) {
     console.error('Error disabling addon:', error)
     return res.status(500).json({ message: 'Failed to disable addon' })
+  }
+})
+
+// Toggle addon status (enable/disable)
+app.patch('/api/addons/:id/toggle-status', async (req, res) => {
+  try {
+    const { id } = req.params
+    const { isActive } = req.body
+    
+    console.log(`🔍 PATCH /api/addons/${id}/toggle-status called with:`, { isActive })
+    
+    const existing = await prisma.addon.findUnique({ 
+      where: { 
+        id,
+        accountId: getAccountId(req)
+      }
+    })
+    if (!existing) return res.status(404).json({ message: 'Addon not found' })
+
+    const updated = await prisma.addon.update({ 
+      where: { 
+        id,
+        accountId: getAccountId(req)
+      }, 
+      data: { isActive: isActive } 
+    })
+    
+    return res.json({
+      id: updated.id,
+      name: updated.name,
+      description: updated.description,
+      url: getDecryptedManifestUrl(updated, req),
+      version: updated.version,
+      status: updated.isActive ? 'active' : 'inactive',
+      users: 0,
+      groups: 0
+    })
+  } catch (error) {
+    console.error('Error toggling addon status:', error)
+    return res.status(500).json({ message: 'Failed to toggle addon status' })
   }
 })
 
@@ -5463,7 +5546,7 @@ app.patch('/api/groups/:id/toggle-status', async (req, res) => {
     // Update group status
     const updatedGroup = await prisma.group.update({
       where: { id },
-      data: { isActive: !isActive },
+      data: { isActive: isActive },
       include: {
         addons: {
           include: {
@@ -5480,6 +5563,60 @@ app.patch('/api/groups/:id/toggle-status', async (req, res) => {
   }
 })
 
+// Enable group
+app.put('/api/groups/:id/enable', async (req, res) => {
+  try {
+    const { id } = req.params
+    
+    console.log(`🔍 PUT /api/groups/${id}/enable called`)
+    
+    // Update group status to active
+    const updatedGroup = await prisma.group.update({
+      where: { id },
+      data: { isActive: true },
+      include: {
+        addons: {
+          include: {
+            addon: true
+          }
+        }
+      }
+    })
+    
+    res.json(updatedGroup)
+  } catch (error) {
+    console.error('Error enabling group:', error)
+    res.status(500).json({ error: 'Failed to enable group', details: error?.message })
+  }
+})
+
+// Disable group
+app.put('/api/groups/:id/disable', async (req, res) => {
+  try {
+    const { id } = req.params
+    
+    console.log(`🔍 PUT /api/groups/${id}/disable called`)
+    
+    // Update group status to inactive
+    const updatedGroup = await prisma.group.update({
+      where: { id },
+      data: { isActive: false },
+      include: {
+        addons: {
+          include: {
+            addon: true
+          }
+        }
+      }
+    })
+    
+    res.json(updatedGroup)
+  } catch (error) {
+    console.error('Error disabling group:', error)
+    res.status(500).json({ error: 'Failed to disable group', details: error?.message })
+  }
+})
+
 // Helper function to get sync mode from request headers or default to normal
 function getSyncMode(req) {
   const syncMode = req?.headers?.['x-sync-mode'] || 'normal'
@@ -5489,12 +5626,7 @@ function getSyncMode(req) {
 // Reusable function to sync a single user's addons
 async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'normal', unsafeMode = false) {
   try {
-    console.log('🚀 Syncing user addons:', userId, { excludedManifestUrls })
-    // Normalize and log exclusions early
-    const localNormalize = (s) => (s || '').toString().trim().toLowerCase()
-    const rawExclArr = Array.isArray(excludedManifestUrls) ? excludedManifestUrls : []
-    const normalizedExcl = rawExclArr.map((u) => localNormalize(u))
-    console.log('🧪 Normalized exclusions:', normalizedExcl)
+    console.log('🚀 Syncing user addons:', userId)
 
     // Load user
     const user = await prisma.user.findUnique({
@@ -5504,6 +5636,7 @@ async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'nor
         stremioAuthKey: true,
         isActive: true,
         protectedAddons: true,
+        excludedAddons: true,
         accountId: true
       }
     })
@@ -5529,9 +5662,15 @@ async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'nor
       }
     })
 
-    const excludedSet = new Set(
-      Array.isArray(excludedManifestUrls) ? excludedManifestUrls.map((id) => String(id).trim()) : []
-    )
+    // Get excluded addons from user's database record (like sync status check does)
+    let excludedAddons = []
+    try {
+      excludedAddons = parseAddonIds(user.excludedAddons)
+    } catch (e) {
+      console.error('Error parsing excluded addons in sync:', e)
+    }
+    
+    const excludedSet = new Set(excludedAddons.map(id => String(id).trim()))
 
     const familyGroup = groups[0]
     // Decrypt addon fields for sync: derive the right key per account

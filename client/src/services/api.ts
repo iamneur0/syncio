@@ -64,6 +64,7 @@ export interface User {
   username: string
   status: 'active' | 'inactive'
   groups: string[]
+  isActive: boolean
 }
 
 export interface Group {
@@ -75,6 +76,7 @@ export interface Group {
   restrictions: 'none' | 'low' | 'medium' | 'high'
   colorIndex: number
   created: string
+  isActive: boolean
 }
 
 export interface Addon {
@@ -206,6 +208,18 @@ export const usersAPI = {
     const response: AxiosResponse<any> = await api.post('/users/sync-all')
     return response.data
   },
+
+  // Enable user
+  enable: async (id: string): Promise<User> => {
+    const response: AxiosResponse<User> = await api.put(`/users/${id}/enable`)
+    return response.data
+  },
+
+  // Disable user
+  disable: async (id: string): Promise<User> => {
+    const response: AxiosResponse<User> = await api.put(`/users/${id}/disable`)
+    return response.data
+  },
 }
 
 // Groups API
@@ -243,6 +257,11 @@ export const groupsAPI = {
     await api.delete(`/groups/${id}`)
   },
 
+  // Reorder addons in group
+  reorderAddons: async (id: string, orderedManifestUrls: string[]): Promise<void> => {
+    await api.post(`/groups/${id}/addons/reorder`, { orderedManifestUrls })
+  },
+
   // Search groups
   search: async (query: string, restriction?: string): Promise<Group[]> => {
     const params = new URLSearchParams()
@@ -253,13 +272,18 @@ export const groupsAPI = {
     return response.data
   },
 
-  // Reorder addons in a group
-  reorderAddons: async (groupId: string, orderedManifestUrls: string[]): Promise<any> => {
-    const response: AxiosResponse<any> = await api.post(`/groups/${groupId}/addons/reorder`, {
-      orderedManifestUrls
-    })
+  // Enable group
+  enable: async (id: string): Promise<Group> => {
+    const response: AxiosResponse<Group> = await api.put(`/groups/${id}/enable`)
     return response.data
   },
+
+  // Disable group
+  disable: async (id: string): Promise<Group> => {
+    const response: AxiosResponse<Group> = await api.put(`/groups/${id}/disable`)
+    return response.data
+  },
+
 }
 
 // Addons API
