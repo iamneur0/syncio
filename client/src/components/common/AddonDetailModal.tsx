@@ -25,6 +25,11 @@ export default function AddonDetailModal({
   isLoading = false
 }: AddonDetailModalProps) {
   const { isDark, isModern, isModernDark, isMono } = useTheme()
+  const [mounted, setMounted] = useState(false)
+
+  useEffect(() => {
+    setMounted(true)
+  }, [])
   
   // Form state
   const [editName, setEditName] = useState('')
@@ -143,6 +148,11 @@ export default function AddonDetailModal({
 
 
   if (!isOpen || !addon) return null
+
+  // Don't render until mounted
+  if (!mounted) {
+    return null
+  }
 
   return createPortal(
     <div 

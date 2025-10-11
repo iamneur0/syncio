@@ -1,4 +1,5 @@
-import React from 'react'
+import React, { useState, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 import { useTheme } from '@/contexts/ThemeContext'
 import { getBackgroundClasses, getTextClasses, getButtonClasses } from '@/utils/themeUtils'
@@ -21,8 +22,18 @@ export default function BaseModal({
   className = ''
 }: BaseModalProps) {
   const theme = useTheme()
+  const [mounted, setMounted] = useState(false)
+
+  useEffect(() => {
+    setMounted(true)
+  }, [])
   
   if (!isOpen) return null
+
+  // Don't render until mounted
+  if (!mounted) {
+    return null
+  }
   
   const sizeClasses = {
     sm: 'max-w-md',
@@ -37,9 +48,10 @@ export default function BaseModal({
     }
   }
   
-  return (
+
+  return createPortal(
     <div
-      className="fixed inset-0 z-[1000] flex items-center justify-center p-4 bg-black bg-opacity-50"
+      className="fixed inset-0 z-[1000] flex items-center justify-center p-4 bg-black bg-opacity-75"
       onClick={handleBackdropClick}
     >
       <div
@@ -65,6 +77,7 @@ export default function BaseModal({
           {children}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }

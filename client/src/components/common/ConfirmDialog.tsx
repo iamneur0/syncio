@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { AlertTriangle } from 'lucide-react'
 
@@ -23,6 +23,12 @@ export default function ConfirmDialog({
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
+  const [mounted, setMounted] = useState(false)
+
+  useEffect(() => {
+    setMounted(true)
+  }, [])
+
   React.useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
@@ -38,7 +44,13 @@ export default function ConfirmDialog({
 
   if (!open) return null
 
+  // Don't render until mounted
+  if (!mounted) {
+    return null
+  }
+
   const hasDescription = Boolean(description && description.trim().length > 0)
+
 
   return createPortal(
     <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4">

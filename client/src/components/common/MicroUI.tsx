@@ -163,3 +163,51 @@ export function EmptyHint({ children, className = '' }: { children: React.ReactN
   return <div className={`text-sm text-gray-500 dark:text-gray-400 ${className}`}>{children}</div>
 }
 
+// ToggleButton
+export function ToggleButton({
+  isActive,
+  onClick,
+  activeIcon,
+  inactiveIcon,
+  children,
+  className = '',
+  title
+}: {
+  isActive: boolean
+  onClick: () => void
+  activeIcon?: React.ReactNode
+  inactiveIcon?: React.ReactNode
+  children?: React.ReactNode
+  className?: string
+  title?: string
+}) {
+  const { isDark, isMono } = useTheme()
+  
+  const baseClasses = 'flex items-center justify-center px-3 py-2 text-sm font-medium transition-colors duration-200'
+  
+  const activeClasses = isMono
+    ? '!bg-white/10 text-white'
+    : isDark
+    ? 'bg-gray-700 text-white'
+    : 'bg-gray-100 text-gray-900'
+  
+  const inactiveClasses = isMono
+    ? 'text-white/70 hover:text-white hover:bg-white/5'
+    : isDark
+    ? 'text-gray-400 hover:text-gray-300 hover:bg-gray-700'
+    : 'text-gray-600 hover:text-gray-700 hover:bg-gray-50'
+  
+  const stateClasses = isActive ? activeClasses : inactiveClasses
+  
+  return (
+    <button
+      className={`${baseClasses} ${stateClasses} ${className}`}
+      onClick={onClick}
+      title={title}
+    >
+      {isActive ? activeIcon : inactiveIcon}
+      {children}
+    </button>
+  )
+}
+

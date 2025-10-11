@@ -5,7 +5,7 @@ import { Search, Plus, RefreshCw, Trash2, Grip, List, Square, CheckSquare } from
 import { useTheme } from '@/contexts/ThemeContext'
 import { getTextClasses } from '@/utils/themeUtils'
 import { SearchInput } from './Input'
-import { IconButton, ToggleButton } from './Button'
+import { IconButton, ToggleButton } from './MicroUI'
 import UserMenuButton from '../auth/UserMenuButton'
 
 interface PageHeaderProps {
@@ -81,10 +81,11 @@ export default function PageHeader({
       <div className="flex flex-row items-center gap-4">
         {/* Selection Toggle */}
         <IconButton
-          icon={selectedCount > 0 ? <CheckSquare className="w-5 h-5" /> : <Square className="w-5 h-5" />}
           onClick={handleSelectToggle}
           title={selectedCount === 0 ? 'Select All' : 'Deselect All'}
-        />
+        >
+          {selectedCount > 0 ? <CheckSquare className="w-5 h-5" /> : <Square className="w-5 h-5" />}
+        </IconButton>
         
         {/* Search Bar */}
         <div className="flex-1">
@@ -100,32 +101,35 @@ export default function PageHeader({
         {/* Action Buttons */}
         <div className="flex items-center gap-1.5">
           <IconButton
-            icon={<Plus className="w-5 h-5" />}
             onClick={onAdd}
             title="Add new item"
-          />
+          >
+            <Plus className="w-5 h-5" />
+          </IconButton>
           
           {onReload && (
             <IconButton
-              icon={<RefreshCw className={`w-5 h-5 ${isReloading ? 'animate-spin' : ''}`} />}
               onClick={(e) => {
                 e.stopPropagation()
                 onReload()
               }}
               disabled={isReloadDisabled}
               title={selectedCount === 0 ? 'Select items to reload' : `Reload ${selectedCount} selected item${selectedCount > 1 ? 's' : ''}`}
-            />
+            >
+              <RefreshCw className={`w-5 h-5 ${isReloading ? 'animate-spin' : ''}`} />
+            </IconButton>
           )}
           
           <IconButton
-            icon={<Trash2 className="w-5 h-5" />}
             onClick={(e) => {
               e.stopPropagation()
               onDelete()
             }}
             disabled={isDeleteDisabled}
             title={selectedCount === 0 ? 'Select items to delete' : `Delete ${selectedCount} selected item${selectedCount > 1 ? 's' : ''}`}
-          />
+          >
+            <Trash2 className="w-5 h-5" />
+          </IconButton>
         </div>
         
         {/* View Mode Toggle */}

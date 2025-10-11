@@ -42,6 +42,11 @@ export default function UserDetailModal({
   const theme = useTheme()
   const { isDark, isModern, isModernDark, isMono } = theme
   const queryClient = useQueryClient()
+  const [mounted, setMounted] = useState(false)
+
+  useEffect(() => {
+    setMounted(true)
+  }, [])
 
   // Form state
   const [editFormData, setEditFormData] = useState({
@@ -176,6 +181,11 @@ export default function UserDetailModal({
 
 
   if (!isOpen || !user) return null
+
+  // Don't render until mounted
+  if (!mounted) {
+    return null
+  }
 
   return createPortal(
     <div 
