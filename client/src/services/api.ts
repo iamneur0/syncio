@@ -259,7 +259,14 @@ export const usersAPI = {
 
   // Import user addons to a new group
   importUserAddons: async (id: string): Promise<any> => {
-    const response: AxiosResponse<any> = await api.post(`/users/${id}/import-addons`, { addons: [] })
+    // Fetch live addons from Stremio for this user first
+    const stremioResponse: AxiosResponse<any> = await api.get(`/users/${id}/stremio-addons`)
+    const addons: any[] = Array.isArray(stremioResponse.data?.addons)
+      ? stremioResponse.data.addons
+      : []
+
+    // Post the collected addons to the import endpoint
+    const response: AxiosResponse<any> = await api.post(`/users/${id}/import-addons`, { addons })
     return response.data
   },
 
