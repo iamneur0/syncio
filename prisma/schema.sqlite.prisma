@@ -59,6 +59,8 @@ model Addon {
   manifestHash    String?
   // Non-sensitive cached manifest resources for fast UI (JSON string array)
   resources      String?
+  // Non-sensitive cached manifest catalogs for fast UI (JSON array of catalog objects with id and type)
+  catalogs       String?
   
   // Relationships
   groupAddons    GroupAddon[]

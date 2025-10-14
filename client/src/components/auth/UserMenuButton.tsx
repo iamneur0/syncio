@@ -114,9 +114,7 @@ export default function UserMenuButton({ className = '' }: Props) {
 
   if (!AUTH_ENABLED || !authed) return null
 
-  const btnClasses = `h-10 px-3 rounded-lg flex items-center justify-center transition-colors focus:outline-none focus:ring-0 ${
-    isMono ? 'bg-black text-white hover:bg-white/10' : (isDark || isModernDark) ? 'bg-gray-800 text-gray-100 hover:bg-gray-700' : 'bg-gray-100 text-gray-900 hover:bg-gray-200'
-  } ${className}`
+  const btnClasses = `h-10 px-3 rounded-lg flex items-center justify-center transition-colors focus:outline-none focus:ring-0 accent-bg accent-text hover:opacity-90 ${className}`
 
   const menuClasses = `absolute right-0 mt-2 w-72 rounded-xl shadow-xl p-3 text-sm border z-[400] ${
     isMono ? 'bg-black border-white/20 text-white' : (isDark || isModernDark) ? 'bg-gray-800 border-gray-700 text-gray-100' : 'bg-white border-gray-200 text-gray-900'

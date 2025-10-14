@@ -46,20 +46,61 @@ export default function SyncBadge({
   // User sync logic
   const { data: userSyncStatus } = useQuery({
     queryKey: ['user', userId, 'sync-status', groupId || 'nogroup'],
-    queryFn: async () => userId ? usersAPI.getSyncStatus(userId, groupId) : null,
+    queryFn: async () => {
+      if (!userId) return null
+      console.log(`🔍 SyncBadge: Fetching sync status for user ${userId}${groupId ? ` in group ${groupId}` : ' (no group)'}`)
+      const result = await usersAPI.getSyncStatus(userId, groupId)
+      console.log(`🔍 SyncBadge: Sync status result for user ${userId}:`, result)
+      return result
+    },
     enabled: isSmartMode && Boolean(userId),
-    staleTime: 5_000,
+    staleTime: 0, // Always refetch to get fresh sync status
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: true, // Refetch when window regains focus
+    refetchInterval: 30000, // Refetch every 30 seconds to keep status fresh
   })
 
   // Group sync logic
   const { data: groupDetails } = useQuery({
-    queryKey: ['group', groupId, 'sync-status'],
+    queryKey: ['group', groupId, 'details'],
     queryFn: () => groupId ? groupsAPI.getById(groupId) : null,
     enabled: isSmartMode && Boolean(groupId),
     refetchOnMount: 'always',
   })
 
   const groupUsers = (groupDetails as any)?.users || []
+
+  // Get sync status for all users in the group
+  const { data: groupSyncStatus } = useQuery({
+    queryKey: ['group', groupId, 'sync-status'],
+    queryFn: async () => {
+      if (!groupId || !groupUsers || groupUsers.length === 0) {
+        return { status: 'stale', allSynced: false }
+      }
+
+      try {
+        const userSyncResults = await Promise.all(
+          groupUsers.map(async (user: any) => {
+            try {
+              const syncStatus = await usersAPI.getSyncStatus(user.id, groupId)
+              return (syncStatus as any)?.status === 'synced'
+            } catch {
+              return false
+            }
+          })
+        )
+        const allUsersSynced = userSyncResults.every(Boolean)
+        return { status: allUsersSynced ? 'synced' : 'unsynced', allSynced: allUsersSynced }
+      } catch {
+        return { status: 'unsynced', allSynced: false }
+      }
+    },
+    enabled: isSmartMode && Boolean(groupId) && groupUsers.length > 0,
+    staleTime: 0, // Always refetch to get fresh sync status
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: true, // Refetch when window regains focus
+    refetchInterval: 30000, // Refetch every 30 seconds to keep status fresh
+  })
 
   // Update smart status based on data
   React.useEffect(() => {
@@ -81,56 +122,14 @@ export default function SyncBadge({
         return
       }
 
-      // Check if group was recently synced
-      const recentSync = localStorage.getItem(`sfm_group_sync:${groupId}`)
-      const syncTime = recentSync ? parseInt(recentSync) : 0
-      const isRecentlySynced = (Date.now() - syncTime) < 5000
-
-      if (isRecentlySynced) {
-        setSmartStatus('synced')
+      // Use the React Query data for group sync status
+      if (groupSyncStatus) {
+        setSmartStatus((groupSyncStatus as any).status || 'checking')
         setIsLoading(false)
-        return
       }
-
-      // Check group sync status by checking all users
-      checkGroupSyncStatus()
     }
-  }, [userId, userSyncStatus, groupId, groupUsers, isSyncing, isSmartMode])
+  }, [userId, userSyncStatus, groupId, groupUsers, groupDetails, isSyncing, isSmartMode, groupSyncStatus])
 
-  // Helper to check group sync status
-  const checkGroupSyncStatus = React.useCallback(async () => {
-    if (!groupId || !groupUsers || groupUsers.length === 0) {
-      setSmartStatus('stale')
-      setIsLoading(false)
-      return
-    }
-
-    try {
-      setIsLoading(true)
-      setSmartStatus('checking')
-
-      const userSyncResults = await Promise.all(
-        groupUsers.map(async (user: any) => {
-          try {
-            // Use localStorage like the old GroupSyncBadge for consistency
-            const cached = localStorage.getItem(`sfm_user_sync_status:${user.id}`)
-            if (cached === 'synced') return true
-            if (cached === 'unsynced') return false
-            // Fallback: conservatively unsynced if unknown
-            return false
-          } catch {
-            return false
-          }
-        })
-      )
-      const allUsersSynced = userSyncResults.every(Boolean)
-      setSmartStatus(allUsersSynced ? 'synced' : 'unsynced')
-    } catch {
-      setSmartStatus('unsynced')
-    } finally {
-      setIsLoading(false)
-    }
-  }, [groupId, groupUsers, queryClient])
 
   // Listen for group reordering events
   React.useEffect(() => {
@@ -138,12 +137,13 @@ export default function SyncBadge({
 
     const onGroupReordered = (e: CustomEvent) => {
       if ((e as any).detail?.id === groupId) {
-        setSmartStatus('unsynced')
+        // Invalidate group sync status query to trigger refetch
+        queryClient.invalidateQueries({ queryKey: ['group', groupId, 'sync-status'] })
       }
     }
     window.addEventListener('sfm:group:reordered' as any, onGroupReordered as any)
     return () => window.removeEventListener('sfm:group:reordered' as any, onGroupReordered as any)
-  }, [groupId])
+  }, [groupId, queryClient])
 
   // Listen for user sync data changes
   React.useEffect(() => {
@@ -152,12 +152,28 @@ export default function SyncBadge({
     const onUserSyncData = (e: CustomEvent) => {
       const { userId: changedUserId } = (e as any).detail || {}
       if (groupUsers.some((u: any) => u.id === changedUserId)) {
-        checkGroupSyncStatus()
+        // Invalidate group sync status query to trigger refetch
+        queryClient.invalidateQueries({ queryKey: ['group', groupId, 'sync-status'] })
       }
     }
     window.addEventListener('sfm:user-sync-data' as any, onUserSyncData as any)
     return () => window.removeEventListener('sfm:user-sync-data' as any, onUserSyncData as any)
-  }, [groupId, groupUsers, checkGroupSyncStatus])
+  }, [groupId, groupUsers, queryClient])
+
+  // Listen for tab activation to refresh sync status
+  React.useEffect(() => {
+    const onTabActivated = (e: CustomEvent) => {
+      // Refresh sync status when switching tabs
+      if (userId) {
+        queryClient.invalidateQueries({ queryKey: ['user', userId, 'sync-status'] })
+      }
+      if (groupId) {
+        queryClient.invalidateQueries({ queryKey: ['group', groupId, 'sync-status'] })
+      }
+    }
+    window.addEventListener('sfm:tab:activated' as any, onTabActivated as any)
+    return () => window.removeEventListener('sfm:tab:activated' as any, onTabActivated as any)
+  }, [userId, groupId, queryClient])
 
   // Determine final status and click handler
   const finalStatus = isSmartMode ? smartStatus : status!
@@ -188,7 +204,7 @@ export default function SyncBadge({
         return {
           text: 'Stale',
           dotColor: 'bg-gray-400',
-          bgColor: isMono ? 'bg-black text-white' : (prefersDark ? 'bg-gray-700 text-gray-100' : 'bg-gray-600 text-gray-100')
+          bgColor: isMono ? 'bg-black text-white border border-white/20' : (prefersDark ? 'bg-gray-700 text-gray-100' : 'bg-gray-600 text-gray-100')
         }
       case 'connect':
         return {

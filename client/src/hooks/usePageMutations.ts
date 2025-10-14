@@ -63,7 +63,7 @@ export function useGroupMutations() {
   const createGroupMutation = useMutation({
     mutationFn: groupsAPI.create,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['groups'] })
+      queryClient.invalidateQueries({ queryKey: ['group'] })
       toast.success('Group created successfully')
     },
     onError: (error: any) => {
@@ -74,7 +74,9 @@ export function useGroupMutations() {
   const updateGroupMutation = useMutation({
     mutationFn: ({ id, data }: { id: string; data: any }) => groupsAPI.update(id, data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['groups'] })
+      queryClient.invalidateQueries({ queryKey: ['group'] })
+      // Also refresh all group details to update counts
+      queryClient.refetchQueries({ queryKey: ['group'] })
       toast.success('Group updated successfully')
     },
     onError: (error: any) => {
@@ -85,7 +87,9 @@ export function useGroupMutations() {
   const deleteGroupMutation = useMutation({
     mutationFn: groupsAPI.delete,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['groups'] })
+      queryClient.invalidateQueries({ queryKey: ['group'] })
+      // Also refresh all group details to update counts
+      queryClient.refetchQueries({ queryKey: ['group'] })
       toast.success('Group deleted successfully')
     },
     onError: (error: any) => {

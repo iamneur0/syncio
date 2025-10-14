@@ -13,6 +13,8 @@ export interface ThemeContextType {
   isModernDark: boolean
   isMono: boolean
   isLoading: boolean
+  hideSensitive?: boolean
+  toggleHideSensitive: () => void
 }
 
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined)
@@ -32,6 +34,7 @@ interface ThemeProviderProps {
 export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
   const [theme, setTheme] = useState<Theme>('light')
   const [isLoading, setIsLoading] = useState(false) // Start with false to prevent blocking
+  const [hideSensitive, setHideSensitive] = useState<boolean>(false)
 
   useEffect(() => {
     // Only run on client side
@@ -48,6 +51,9 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
         localStorage.setItem('theme', 'dark')
       }
       
+      // Load hide sensitive setting
+      try { setHideSensitive(localStorage.getItem('sfm_hide_sensitive') === '1') } catch {}
+
       // Apply theme to document immediately and update theme-color
       updateDocumentClass(initialTheme)
       
@@ -111,6 +117,15 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
     }
   }
 
+  const toggleHideSensitive = () => {
+    const newValue = !hideSensitive
+    setHideSensitive(newValue)
+    
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('sfm_hide_sensitive', newValue ? '1' : '0')
+    }
+  }
+
   const value: ThemeContextType = {
     theme,
     toggleTheme,
@@ -120,6 +135,8 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
     isModernDark: theme === 'modern-dark',
     isMono: theme === 'mono',
     isLoading,
+    hideSensitive,
+    toggleHideSensitive,
   }
 
   return (
