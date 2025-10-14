@@ -19,11 +19,14 @@ interface PageHeaderProps {
   onDeselectAll: () => void
   onAdd: () => void
   onReload?: () => void
+  onSync?: () => void
   onDelete: () => void
   viewMode: 'card' | 'list'
   onViewModeChange: (mode: 'card' | 'list') => void
   isReloading?: boolean
   isReloadDisabled?: boolean
+  isSyncing?: boolean
+  isSyncDisabled?: boolean
   isDeleteDisabled?: boolean
   mounted?: boolean
 }
@@ -39,11 +42,14 @@ export default function PageHeader({
   onDeselectAll,
   onAdd,
   onReload,
+  onSync,
   onDelete,
   viewMode,
   onViewModeChange,
   isReloading = false,
   isReloadDisabled = false,
+  isSyncing = false,
+  isSyncDisabled = false,
   isDeleteDisabled = false,
   mounted = true
 }: PageHeaderProps) {
@@ -101,7 +107,12 @@ export default function PageHeader({
         {/* Action Buttons */}
         <div className="flex items-center gap-1.5">
           <IconButton
-            onClick={onAdd}
+            onClick={() => {
+              console.log('Add button clicked!', { title, onAdd })
+              console.log('About to call onAdd function')
+              onAdd()
+              console.log('onAdd function called')
+            }}
             title="Add new item"
           >
             <Plus className="w-5 h-5" />
@@ -117,6 +128,19 @@ export default function PageHeader({
               title={selectedCount === 0 ? 'Select items to reload' : `Reload ${selectedCount} selected item${selectedCount > 1 ? 's' : ''}`}
             >
               <RefreshCw className={`w-5 h-5 ${isReloading ? 'animate-spin' : ''}`} />
+            </IconButton>
+          )}
+          
+          {onSync && (
+            <IconButton
+              onClick={(e) => {
+                e.stopPropagation()
+                onSync()
+              }}
+              disabled={isSyncDisabled}
+              title={selectedCount === 0 ? 'Select items to sync' : `Sync ${selectedCount} selected item${selectedCount > 1 ? 's' : ''}`}
+            >
+              <RefreshCw className={`w-5 h-5 ${isSyncing ? 'animate-spin' : ''}`} />
             </IconButton>
           )}
           

@@ -1,10 +1,17 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { useTheme } from '@/contexts/ThemeContext'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { usersAPI, groupsAPI } from '@/services/api'
+import { getColorBgClass, getColorHexValue } from '@/utils/colorMapping'
 import toast from 'react-hot-toast'
-import { VersionChip } from './'
+import { VersionChip, EntityList, SyncBadge, InlineEdit, ColorPicker } from './'
+import { useSyncStatusRefresh } from '@/hooks/useSyncStatusRefresh'
+import { Puzzle, X, Eye, EyeOff, LockKeyhole, Unlock } from 'lucide-react'
+import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors } from '@dnd-kit/core'
+import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy } from '@dnd-kit/sortable'
+import { useSortable } from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 
 interface UserDetailModalProps {
   isOpen: boolean
@@ -21,7 +28,6 @@ interface UserDetailModalProps {
     colorIndex?: number
   } | null
   onUpdate: (userData: any) => void
-  onDelete: (userId: string) => void
   onSync: (userId: string) => void
   userExcludedSet: Set<string>
   userProtectedSet: Set<string>
@@ -33,56 +39,118 @@ export default function UserDetailModal({
   onClose,
   user,
   onUpdate,
-  onDelete,
   onSync,
   userExcludedSet,
   userProtectedSet,
   isSyncing
 }: UserDetailModalProps) {
   const theme = useTheme()
-  const { isDark, isModern, isModernDark, isMono } = theme
+  const { isDark, isModern, isModernDark, isMono, hideSensitive } = theme as any
   const queryClient = useQueryClient()
   const [mounted, setMounted] = useState(false)
+  const [showColorPicker, setShowColorPicker] = useState(false)
+  const logoRef = useRef<HTMLDivElement>(null)
+  const { refreshAllSyncStatus } = useSyncStatusRefresh()
+
+  // Fetch user data using query to ensure it stays updated
+  const { data: userData, isLoading: isLoadingUser } = useQuery({
+    queryKey: ['user', user?.id, 'details'],
+    queryFn: () => usersAPI.getById(user!.id),
+    enabled: !!user?.id && isOpen,
+    initialData: user // Use prop as initial data
+  })
+
+  // Use the query data instead of the prop
+  const currentUser = userData || user
+  
+  // Local state for excluded and protected addons to ensure proper reactivity
+  const [localExcludedSet, setLocalExcludedSet] = useState<Set<string>>(new Set())
+  const [localProtectedSet, setLocalProtectedSet] = useState<Set<string>>(new Set())
+  
+  // Drag and drop state for Stremio addons
+  const [stremioAddons, setStremioAddons] = useState<any[]>([])
+
+  // Initialize local state when opening the modal or switching user
+  useEffect(() => {
+    if (user && isOpen) {
+      const excludedArray = Array.isArray(userExcludedSet) ? userExcludedSet : Array.from(userExcludedSet)
+      const protectedArray = Array.isArray(userProtectedSet) ? userProtectedSet : Array.from(userProtectedSet)
+      setLocalExcludedSet(new Set(excludedArray))
+      setLocalProtectedSet(new Set(protectedArray))
+    }
+  }, [isOpen, user?.id])
+
+  // Handle escape key
+  useEffect(() => {
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isOpen) {
+        onClose()
+      }
+    }
+
+    if (isOpen) {
+      document.addEventListener('keydown', handleEscape)
+      return () => document.removeEventListener('keydown', handleEscape)
+    }
+  }, [isOpen, onClose])
 
   useEffect(() => {
     setMounted(true)
   }, [])
 
-  // Form state
-  const [editFormData, setEditFormData] = useState({
-    username: '',
-    email: '',
-    password: '',
-    groupName: ''
-  })
-
-  // Stremio validation state
-  const [isValidatingStremio, setIsValidatingStremio] = useState(false)
-  const [stremioValidationError, setStremioValidationError] = useState<string | null>(null)
-  const [isStremioValid, setIsStremioValid] = useState(true)
-
-  // Initialize form data when user changes
-  useEffect(() => {
-    if (user) {
-      setEditFormData({
-        username: user.username || user.stremioUsername || '',
-        email: user.email || user.stremioEmail || '',
-        password: '',
-        groupName: user.groupName || user.groups?.[0]?.name || ''
-      })
-    }
-    setStremioValidationError(null)
-    setIsStremioValid(true)
-  }, [user])
+  // Drag and drop sensors
+  const sensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  )
 
   // Fetch user details
-  const { data: editUserDetails } = useQuery({
-    queryKey: ['user', user?.id],
+  const { data: userDetails, isLoading: isLoadingUserDetails } = useQuery({
+    queryKey: ['user', user?.id, 'details'],
     queryFn: () => usersAPI.getById(user!.id),
     enabled: !!user?.id,
   })
 
-  // Fetch groups
+  // Fetch Stremio addons
+  const { data: stremioAddonsData } = useQuery({
+    queryKey: ['user', user?.id, 'stremio-addons'],
+    queryFn: () => usersAPI.getStremioAddons(user!.id),
+    enabled: !!user?.id,
+  })
+
+
+  // Reset/reload Stremio account addons (same UX as other reset buttons)
+  const handleResetStremioAddons = () => {
+    if (!user) return
+    // Optimistically clear UI
+    setStremioAddons([])
+    const promise = (usersAPI.clearStremioAddons
+      ? usersAPI.clearStremioAddons(currentUser.id)
+      : usersAPI.reloadUserAddons(currentUser.id))
+      .then(() => {
+        // Refresh local list and any dependent UI
+        queryClient.invalidateQueries({ queryKey: ['user', currentUser.id, 'stremio-addons'] })
+        refreshAllSyncStatus(undefined, currentUser.id)
+        toast.success('Stremio addons cleared')
+      })
+      .catch((error) => {
+        const msg = error?.response?.data?.error || error?.message || 'Failed to clear Stremio addons'
+        toast.error(msg)
+      })
+    return promise
+  }
+
+
+  // Update Stremio addons when data changes
+  useEffect(() => {
+    if (stremioAddonsData?.addons) {
+      setStremioAddons(stremioAddonsData.addons)
+    }
+  }, [stremioAddonsData?.addons])
+
+  // Fetch groups for group selection
   const { data: groups = [] } = useQuery({
     queryKey: ['groups'],
     queryFn: groupsAPI.getAll,
@@ -93,97 +161,370 @@ export default function UserDetailModal({
     mutationFn: ({ id, userData }: { id: string; userData: any }) => 
       usersAPI.update(id, userData),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['users'] })
-      queryClient.invalidateQueries({ queryKey: ['user', user?.id] })
+      console.log('🔍 UserDetailModal: Invalidating queries after name update')
+      queryClient.invalidateQueries({ queryKey: ['user'] })
+      queryClient.invalidateQueries({ queryKey: ['user', currentUser?.id, 'details'] })
+      console.log('🔍 UserDetailModal: Queries invalidated')
       toast.success('User updated successfully')
-      onClose()
     },
     onError: (error: any) => {
-      toast.error(error?.response?.data?.message || 'Failed to update user')
+      toast.error(error.response?.data?.message || 'Failed to update user')
     }
   })
 
-  // Check if credentials are changing
-  const isChangingCredentials = editFormData.email !== (user?.email || user?.stremioEmail || '') || 
-                               editFormData.password !== ''
-
-  // Validate Stremio credentials when they change
-  useEffect(() => {
-    if (!isChangingCredentials || !editFormData.email || !editFormData.password) {
-      setIsStremioValid(true)
-      setStremioValidationError(null)
-      return
+  // Handle color change
+  const handleColorChange = (newColorIndex: number) => {
+    if (currentUser?.id) {
+      updateUserMutation.mutate({
+        id: currentUser.id,
+        userData: { colorIndex: newColorIndex }
+      })
     }
+  }
 
-    const validateCredentials = async () => {
-      setIsValidatingStremio(true)
-      setStremioValidationError(null)
-      
-      try {
-        // Simulate validation - in real app, this would call an API
-        await new Promise(resolve => setTimeout(resolve, 1000))
-        setIsStremioValid(true)
-      } catch (error) {
-        setIsStremioValid(false)
-        setStremioValidationError('Invalid Stremio credentials')
-      } finally {
-        setIsValidatingStremio(false)
+  // Handle username update
+  const handleUsernameUpdate = async (newUsername: string) => {
+    if (currentUser) {
+      await updateUserMutation.mutateAsync({
+        id: currentUser.id,
+        userData: { username: newUsername }
+      })
+    }
+  }
+
+  // Handle group change
+  const handleGroupChange = (groupId: string) => {
+    if (currentUser) {
+      updateUserMutation.mutate({
+        id: currentUser.id,
+        userData: { groupId: groupId || null }
+      }, {
+        onSuccess: () => {
+          // Invalidate caches and refresh sync status so badge updates immediately
+          queryClient.invalidateQueries({ queryKey: ['users'] })
+          queryClient.invalidateQueries({ queryKey: ['user', currentUser.id, 'details'] })
+          refreshAllSyncStatus(undefined, currentUser.id)
+        }
+      } as any)
+    }
+  }
+
+  // Handle group addon exclude
+  const handleExcludeGroupAddon = (addonId: string) => {
+    if (currentUser) {
+      const isExcluded = localExcludedSet.has(addonId)
+      const optimistic = new Set(localExcludedSet)
+      if (isExcluded) optimistic.delete(addonId); else optimistic.add(addonId)
+      // Optimistic UI
+      setLocalExcludedSet(optimistic)
+
+      const next = Array.from(optimistic)
+      usersAPI.updateExcludedAddons(currentUser.id, next)
+        .then(() => {
+          // Ensure UI reflects server state after success
+          setLocalExcludedSet(new Set(next))
+          queryClient.invalidateQueries({ queryKey: ['users'] })
+          queryClient.invalidateQueries({ queryKey: ['user', currentUser.id] })
+          refreshAllSyncStatus(undefined, currentUser.id)
+          toast.success(`Addon ${isExcluded ? 'included' : 'excluded'} successfully`)
+        })
+        .catch((error) => {
+          console.error('Error updating excluded addons:', error)
+          // Revert on error
+          const reverted = new Set(localExcludedSet)
+          if (isExcluded) reverted.add(addonId); else reverted.delete(addonId)
+          setLocalExcludedSet(reverted)
+          toast.error('Failed to update excluded addons')
+        })
+    }
+  }
+
+  // Drag and drop handlers
+  const handleDragEnd = (event: any) => {
+    const { active, over } = event
+    if (active.id !== over?.id) {
+      const reordered = arrayMove(
+        stremioAddons,
+        stremioAddons.findIndex(item => (item.manifestUrl || item.transportUrl || item.url || item.id) === active.id),
+        stremioAddons.findIndex(item => (item.manifestUrl || item.transportUrl || item.url || item.id) === over.id)
+      )
+      setStremioAddons(reordered)
+      // Persist order in backend
+      const orderedManifestUrls = (reordered || stremioAddons).map(a => a.manifestUrl || a.transportUrl || a.url || a.id).filter(Boolean)
+      if (currentUser) {
+        usersAPI.reorderStremioAddons?.(currentUser.id, orderedManifestUrls)
+          .then(() => {
+            toast.success('Stremio addons order updated')
+            refreshAllSyncStatus(undefined, currentUser.id)
+          })
+          .catch((error) => {
+            console.error('Failed to reorder Stremio addons:', error)
+            toast.error('Failed to update order')
+          })
       }
     }
-
-    const timeoutId = setTimeout(validateCredentials, 500)
-    return () => clearTimeout(timeoutId)
-  }, [editFormData.email, editFormData.password, isChangingCredentials])
-
-  const handleUpdateUser = (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!user) return
-
-    if (!isStremioValid) {
-      toast.error('Please fix Stremio credential errors before updating')
-      return
-    }
-
-    const userData: any = {}
-    
-    if (editFormData.username.trim()) {
-      userData.username = editFormData.username.trim()
-    }
-    
-    if (editFormData.email.trim()) {
-      userData.email = editFormData.email.trim()
-    }
-    
-    if (editFormData.password.trim()) {
-      userData.password = editFormData.password.trim()
-    }
-    
-    userData.groupId = editFormData.groupName.trim()
-    
-    updateUserMutation.mutate({
-      id: user.id,
-      userData
-    })
   }
 
-  const handleDelete = () => {
-    if (user) {
-      onDelete(user.id)
-      onClose()
+  // Handle Stremio addon actions
+  const handleDeleteStremioAddon = (addonId: string) => {
+    if (!currentUser) return
+    const id = currentUser.id
+    usersAPI.removeStremioAddon(id, addonId)
+      .then(() => {
+        // Remove from local list
+        setStremioAddons(prev => prev.filter(a => (a.manifestUrl || a.transportUrl || a.url || a.id) !== addonId))
+        toast.success('Addon removed from Stremio account')
+        // Refresh sync badge
+        refreshAllSyncStatus(undefined, id)
+      })
+      .catch((error) => {
+        const msg = error?.response?.data?.message || 'Failed to remove addon'
+        toast.error(msg)
+      })
+  }
+
+  // Helper function to check if an addon is a default addon
+  const isDefaultAddon = (addonId: string, addonName?: string) => {
+    const defaultAddonIds = ['com.linvo.cinemeta', 'org.stremio.local']
+    const defaultManifestUrls = [
+      'https://v3-cinemeta.strem.io/manifest.json',
+      'http://127.0.0.1:11470/local-addon/manifest.json'
+    ]
+    const defaultNames = ['Cinemeta', 'Local Files']
+    
+    return defaultAddonIds.includes(addonId) ||
+           defaultManifestUrls.includes(addonId) ||
+           (addonName && defaultNames.some(name => addonName.includes(name)))
+  }
+
+  const handleProtectStremioAddon = (addonId: string) => {
+    if (currentUser) {
+      console.log('🔍 Protecting Stremio addon:', addonId)
+      console.log('🔍 User ID:', currentUser.id)
+      console.log('🔍 Current protected set:', Array.from(localProtectedSet))
+      
+      // Use the single addon toggle endpoint
+      // addonId is the manifest URL, but we'll use it as the addon identifier
+      usersAPI.toggleProtectAddon(currentUser.id, addonId)
+        .then((response) => {
+          console.log('🔍 Protect response:', response)
+          // Update local state immediately for better UX
+          const newProtectedSet = new Set(localProtectedSet)
+          if (response.isProtected) {
+            newProtectedSet.add(addonId)
+          } else {
+            newProtectedSet.delete(addonId)
+          }
+          setLocalProtectedSet(newProtectedSet)
+          // Invalidate user queries to refresh the data
+          queryClient.invalidateQueries({ queryKey: ['users'] })
+          queryClient.invalidateQueries({ queryKey: ['user', currentUser.id] })
+          // Trigger sync status refresh for the user
+          refreshAllSyncStatus(undefined, currentUser.id)
+          toast.success(response.message)
+        })
+        .catch((error) => {
+          console.error('Error toggling protect addon:', error)
+          const errorMessage = error?.response?.data?.error || 'Failed to toggle protect addon'
+          // Revert local state on error
+          setLocalProtectedSet(new Set(userProtectedSet))
+          toast.error(errorMessage)
+        })
     }
   }
 
-  const handleSync = () => {
-    if (user) {
-      onSync(user.id)
-    }
+  // Custom GroupAddonItem component with exclude button
+  const GroupAddonItem = ({ addon, index }: { addon: any; index: number }) => {
+    const isExcluded = localExcludedSet.has(addon.id)
+    
+    return (
+      <div className={`relative rounded-lg border p-4 hover:shadow-md transition-all ${
+        isDark
+          ? 'bg-gray-600 border-gray-500 hover:bg-gray-550'
+          : 'bg-white border-gray-200 hover:bg-gray-50'
+      }`}>
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center flex-1 min-w-0">
+            <div className="logo-circle-10 mr-3 flex-shrink-0">
+              {addon.iconUrl ? (
+                <img
+                  src={addon.iconUrl}
+                  alt={addon.name || 'Addon icon'}
+                  className="logo-img-fill"
+                  onError={(e) => {
+                    e.currentTarget.style.display = 'none'
+                    const nextElement = e.currentTarget.nextElementSibling as HTMLElement
+                    if (nextElement) {
+                      nextElement.style.display = 'flex'
+                    }
+                  }}
+                />
+              ) : null}
+              <div className="w-full h-full flex items-center justify-center" style={{ display: addon.iconUrl ? 'none' : 'flex' }}>
+                <Puzzle className={`w-5 h-5 ${isDark ? 'text-gray-300' : 'text-gray-400'}`} />
+              </div>
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2 mb-1">
+                <h4 className={`font-medium truncate ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                  {addon.name || 'Unknown Addon'}
+                </h4>
+                {addon.version && (
+                  <VersionChip version={addon.version} />
+                )}
+              </div>
+              <p className={`text-sm truncate ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+                {addon.description || 'No description'}
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => handleExcludeGroupAddon(addon.id)}
+            className={`p-2 rounded-lg transition-colors ${
+              isExcluded
+                ? (isDark ? 'text-red-400 hover:bg-red-900/20' : 'text-red-600 hover:bg-red-50')
+                : (isDark ? 'text-gray-400 hover:bg-gray-700' : 'text-gray-600 hover:bg-gray-100')
+            }`}
+            title={isExcluded ? "Include addon" : "Exclude addon"}
+          >
+            {isExcluded ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+          </button>
+        </div>
+      </div>
+    )
   }
 
+  // SortableStremioAddonItem component
+  const SortableStremioAddonItem = ({ addon, index }: { addon: any; index: number }) => {
+    const addonId = addon.manifestUrl || addon.transportUrl || addon.url || addon.id
+    const isProtected = localProtectedSet.has(addonId)
+    const isDefault = isDefaultAddon(addonId, addon.name)
+    const isUnsafeMode = false // TODO: Get this from context or props when unsafe mode is implemented
+    
+    
+    const {
+      attributes,
+      listeners,
+      setNodeRef,
+      transform,
+      transition,
+      isDragging,
+    } = useSortable({ id: addonId })
 
-  if (!isOpen || !user) return null
+    const style = {
+      transform: CSS.Transform.toString(transform),
+      transition,
+    }
 
-  // Don't render until mounted
-  if (!mounted) {
+    return (
+      <div
+        ref={setNodeRef}
+        style={style}
+        className={`relative rounded-lg border p-4 hover:shadow-md transition-all cursor-grab ${
+          isDark
+            ? 'bg-gray-600 border-gray-500 hover:bg-gray-550'
+            : 'bg-white border-gray-200 hover:bg-gray-50'
+        } ${isDragging ? 'opacity-50' : ''}`}
+        {...attributes}
+        {...listeners}
+      >
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center flex-1 min-w-0">
+            <div className="logo-circle-10 mr-3 flex-shrink-0">
+              {addon.iconUrl ? (
+                <img
+                  src={addon.iconUrl}
+                  alt={addon.name || 'Addon icon'}
+                  className="logo-img-fill"
+                  onError={(e) => {
+                    e.currentTarget.style.display = 'none'
+                    const nextElement = e.currentTarget.nextElementSibling as HTMLElement
+                    if (nextElement) {
+                      nextElement.style.display = 'flex'
+                    }
+                  }}
+                />
+              ) : null}
+              <div className="w-full h-full flex items-center justify-center" style={{ display: addon.iconUrl ? 'none' : 'flex' }}>
+                <Puzzle className={`w-5 h-5 ${isDark ? 'text-gray-300' : 'text-gray-400'}`} />
+              </div>
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2 mb-1">
+                <h4 className={`font-medium truncate ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                  {addon.name || 'Unknown Addon'}
+                </h4>
+                {addon.version && (
+                  <VersionChip version={addon.version} />
+                )}
+              </div>
+              <p className={`text-sm truncate ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+                {addon.description || 'No description'}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                if (!isDefault || isUnsafeMode) {
+                  handleProtectStremioAddon(addonId)
+                }
+              }}
+              onPointerDown={(e) => {
+                e.stopPropagation()
+              }}
+              disabled={Boolean(isDefault && !isUnsafeMode)}
+              className={`p-2 rounded-lg transition-colors ${
+                isDefault && !isUnsafeMode
+                  ? (isDark ? 'text-gray-500 cursor-not-allowed' : 'text-gray-500 cursor-not-allowed')
+                  : isProtected
+                    ? (isDark ? 'text-green-400 hover:bg-green-900/20' : 'text-green-600 hover:bg-green-50')
+                    : (isDark ? 'text-gray-400 hover:bg-gray-700' : 'text-gray-600 hover:bg-gray-100')
+              }`}
+              title={
+                isDefault && !isUnsafeMode
+                  ? "Default addon - cannot be unprotected in safe mode"
+                  : isProtected
+                    ? "Unprotect addon"
+                    : "Protect addon"
+              }
+            >
+              {isProtected ? <LockKeyhole className="w-4 h-4" /> : <Unlock className="w-4 h-4" />}
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                if (!isDefault || isUnsafeMode) {
+                  handleDeleteStremioAddon(addonId)
+                }
+              }}
+              onPointerDown={(e) => {
+                e.stopPropagation()
+              }}
+              disabled={Boolean(isDefault && !isUnsafeMode)}
+              className={`p-2 rounded-lg transition-colors ${
+                isDefault && !isUnsafeMode
+                  ? (isDark ? 'text-gray-500 cursor-not-allowed' : 'text-gray-500 cursor-not-allowed')
+                  : isDark
+                    ? 'text-red-400 hover:bg-red-900/20'
+                    : 'text-red-600 hover:bg-red-50'
+              }`}
+              title={
+                isDefault && !isUnsafeMode
+                  ? "Default addon - cannot be deleted in safe mode"
+                  : "Delete addon"
+              }
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (!isOpen || !user || !mounted || typeof window === 'undefined' || !document.body) {
     return null
   }
 
@@ -196,203 +537,144 @@ export default function UserDetailModal({
         }
       }}
     >
-      <div className={`w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-lg shadow-xl ${
+      <div className={`w-full max-w-4xl max-h-[90vh] overflow-y-auto rounded-lg shadow-xl ${
         isDark ? 'bg-gray-800' : 'bg-white'
       }`}>
         <div className="p-6">
-          <div className="flex items-center justify-between mb-6">
-            <h2 className={`text-xl font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>
-              Edit User: {user.username || user.stremioUsername}
-            </h2>
-            <button
-              onClick={onClose}
-              className={`w-8 h-8 flex items-center justify-center rounded transition-colors border-0 ${
-                isDark ? 'text-gray-400 hover:text-gray-300 hover:bg-gray-700' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
-              }`}
-            >
-              ✕
-            </button>
-          </div>
-
-          <form onSubmit={handleUpdateUser} className="space-y-4">
-            <div>
-              <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
-                Username
-              </label>
-              <input
-                type="text"
-                value={editFormData.username}
-                onChange={(e) => setEditFormData(prev => ({ ...prev, username: e.target.value }))}
-                placeholder={user?.username || user?.stremioUsername || ''}
-                className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-stremio-purple focus:border-transparent ${
-                  isDark 
-                    ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
-                    : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
+          {/* Header: Logo + Name/email + Sync (left), Group selector + Close (right) */}
+          <div className="flex items-start justify-between mb-6 gap-4">
+            <div className="flex items-center gap-4 relative">
+              {/* User Logo */}
+              <div 
+                ref={logoRef}
+                onClick={() => setShowColorPicker(!showColorPicker)}
+                className={`w-16 h-16 rounded-full flex items-center justify-center flex-shrink-0 border-2 cursor-pointer transition-all hover:scale-105 ${
+                  getColorBgClass(currentUser.colorIndex || 0, isMono ? 'mono' : isDark ? 'dark' : 'light')
                 }`}
-              />
-            </div>
-
-            <div>
-              <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
-                Email
-              </label>
-              <input
-                type="email"
-                value={editFormData.email}
-                onChange={(e) => {
-                  setEditFormData(prev => ({ ...prev, email: e.target.value }))
-                  setIsStremioValid(true)
-                  setStremioValidationError(null)
-                }}
-                placeholder={user?.email || user?.stremioEmail || ''}
-                className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-stremio-purple focus:border-transparent ${
-                  !isStremioValid && (editFormData.email || editFormData.password)
-                    ? 'border-red-500 focus:ring-red-500'
-                    : isDark 
-                      ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
-                      : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
-                }`}
-              />
-              {stremioValidationError && isChangingCredentials && (
-                <p className="mt-1 text-sm text-red-600">{stremioValidationError}</p>
-              )}
-              {isValidatingStremio && (
-                <p className="mt-1 text-sm text-blue-600">Validating Stremio credentials...</p>
-              )}
-            </div>
-
-            <div>
-              <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
-                Password (leave empty to keep current)
-              </label>
-              <input
-                type="password"
-                value={editFormData.password}
-                onChange={(e) => {
-                  setEditFormData(prev => ({ ...prev, password: e.target.value }))
-                  setIsStremioValid(true)
-                  setStremioValidationError(null)
-                }}
-                className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-stremio-purple focus:border-transparent ${
-                  !isStremioValid && (editFormData.email || editFormData.password)
-                    ? 'border-red-500 focus:ring-red-500'
-                    : isDark 
-                      ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
-                      : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
-                }`}
-              />
-            </div>
-
-            <div>
-              <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
-                Group
-              </label>
-              <select
-                value={editFormData.groupName}
-                onChange={(e) => setEditFormData(prev => ({ ...prev, groupName: e.target.value }))}
-                className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-stremio-purple focus:border-transparent ${
-                  isDark 
-                    ? 'bg-gray-700 border-gray-600 text-white' 
-                    : 'bg-white border-gray-300 text-gray-900'
-                }`}
+                style={{ backgroundColor: getColorHexValue(currentUser.colorIndex || 0, isMono ? 'mono' : isDark ? 'dark' : 'light') }}
+                title="Click to change color"
               >
-                <option value="">No group</option>
-                {groups.map((group: any) => (
-                  <option key={group.id} value={group.id}>
-                    {group.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* User's Addons Section */}
-            {editUserDetails && (editUserDetails as any).addons && (editUserDetails as any).addons.length > 0 && (
-              <div>
-                <h3 className={`text-lg font-semibold mb-3 ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                  User's Addons ({(editUserDetails as any).addons.length})
-                </h3>
-                <div className="max-h-48 overflow-y-auto space-y-2">
-                  {(editUserDetails as any).addons.map((addon: any, index: number) => (
-                    <div key={index} className={`p-3 rounded-lg border ${
-                      isDark ? 'bg-gray-700 border-gray-600' : 'bg-gray-50 border-gray-200'
-                    }`}>
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <h4 className={`font-medium ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                            {addon.name || addon.manifest?.name || 'Unknown Addon'}
-                          </h4>
-                          {addon.manifest?.description && (
-                            <p className={`text-xs mt-1 ${isDark ? 'text-gray-500' : 'text-gray-500'}`}>
-                              {addon.manifest.description.length > 50 
-                                ? `${addon.manifest.description.substring(0, 50)}...` 
-                                : addon.manifest.description}
-                            </p>
-                          )}
-                        </div>
-                        <div className={`px-2 py-1 rounded text-xs font-medium ${
-                          isDark ? 'bg-green-900 text-green-200' : 'bg-green-100 text-green-800'
-                        }`}>
-                          Active
-                        </div>
-                      </div>
-                    </div>
-                  ))}
+                <span className="text-white font-semibold text-xl">
+                  {(currentUser.username || currentUser.email || 'U').charAt(0).toUpperCase()}
+                </span>
+              </div>
+              
+              {/* Color Picker */}
+          <ColorPicker
+            currentColorIndex={currentUser.colorIndex || 0}
+            onColorChange={handleColorChange}
+            isOpen={showColorPicker}
+            onClose={() => setShowColorPicker(false)}
+            triggerRef={logoRef}
+          />
+              
+              <div className="flex flex-col">
+                <div className="flex items-center gap-3">
+                  <InlineEdit
+                    value={currentUser.username || ''}
+                    onSave={handleUsernameUpdate}
+                    placeholder="Enter username..."
+                    maxLength={50}
+                  />
+                  <SyncBadge 
+                    userId={currentUser.id} 
+                    onSync={() => onSync(currentUser.id)}
+                    isSyncing={isSyncing}
+                  />
+                </div>
+                <div className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-500'} ${hideSensitive ? 'blur-sm select-none' : ''}`}>
+                  {hideSensitive ? '••••••••' : (currentUser.email || 'No email')}
                 </div>
               </div>
-            )}
-
-            <div className="flex gap-3 pt-4">
-              <button
-                type="button"
-                onClick={handleDelete}
-                className={`px-4 py-2 border rounded-lg transition-colors ${
-                  isDark 
-                    ? 'border-red-600 text-red-400 hover:bg-red-900/20' 
-                    : 'border-red-300 text-red-600 hover:bg-red-50'
+            </div>
+            <div className="flex items-center gap-2">
+              <select
+                value={userDetails?.groupId || userDetails?.groups?.[0]?.id || ''}
+                onChange={(e) => handleGroupChange(e.target.value)}
+                className={`px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-stremio-purple focus:border-transparent ${
+                  isDark ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'
                 }`}
+                title="Change group"
               >
-                Delete User
-              </button>
+                <option value="">No group</option>
+                {groups?.map((group: any) => (
+                  <option key={group.id} value={group.id}>{group.name}</option>
+                ))}
+              </select>
               <button
-                type="button"
-                onClick={handleSync}
-                disabled={isSyncing}
-                className={`px-4 py-2 border rounded-lg transition-colors disabled:opacity-50 ${
-                  isDark 
-                    ? 'border-green-600 text-green-400 hover:bg-green-900/20' 
-                    : 'border-green-300 text-green-600 hover:bg-green-50'
-                }`}
-              >
-                {isSyncing ? 'Syncing...' : 'Sync User'}
-              </button>
-              <button
-                type="button"
                 onClick={onClose}
-                className={`flex-1 px-4 py-2 border rounded-lg transition-colors ${
-                  isDark 
-                    ? 'border-gray-600 text-gray-300 hover:bg-gray-700' 
-                    : 'border-gray-300 text-gray-700 hover:bg-gray-50'
+                className={`w-8 h-8 flex items-center justify-center rounded transition-colors border-0 ${
+                  isDark ? 'text-gray-400 hover:text-gray-300 hover:bg-gray-700' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
                 }`}
+                aria-label="Close"
               >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={updateUserMutation.isPending || !isStremioValid || isValidatingStremio}
-                className={`flex-1 px-4 py-2 text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-                  isModern
-                    ? 'bg-gradient-to-br from-purple-600 via-purple-700 to-blue-800 hover:from-purple-700 hover:via-purple-800 hover:to-blue-900'
-                    : isModernDark
-                    ? 'bg-gradient-to-br from-purple-800 via-purple-900 to-blue-900 hover:from-purple-900 hover:via-purple-950 hover:to-indigo-900'
-                    : 'accent-bg accent-text'
-                }`}
-              >
-                {updateUserMutation.isPending ? 'Updating...' : 
-                 isValidatingStremio ? 'Validating...' :
-                 !isStremioValid ? 'Fix Credentials First' : 'Update User'}
+                <X className="w-4 h-4" />
               </button>
             </div>
-          </form>
+          </div>
+
+          {/* Removed legacy user info block */}
+
+          {/* Group Addons Section */}
+          <EntityList
+            title="Group Addons"
+            count={userDetails?.addons?.length || 0}
+            items={userDetails?.addons || []}
+            isLoading={isLoadingUserDetails}
+            renderItem={(addon: any, index: number) => (
+              <GroupAddonItem
+                key={addon.id || index}
+                addon={addon}
+                index={index}
+              />
+            )}
+            emptyIcon={<Puzzle className={`w-12 h-12 mx-auto mb-4 ${isDark ? 'text-gray-500' : 'text-gray-400'}`} />}
+            emptyMessage="No group addons assigned to this user"
+          />
+
+          {/* Stremio Account Addons Section */}
+          <EntityList
+            title="Stremio Account Addons"
+            count={stremioAddons?.length || 0}
+            items={stremioAddons || []}
+            isLoading={false}
+            onClear={stremioAddons && stremioAddons.length > 0 ? handleResetStremioAddons : undefined}
+            confirmReset={{
+              title: 'Reset Stremio Addons',
+              description: "This will clear all addons from this user's Stremio account. Continue?",
+              confirmText: 'Reset',
+              isDanger: true,
+            }}
+            isDraggable={true}
+            renderItem={(addon: any, index: number) => (
+              <SortableStremioAddonItem
+                key={addon.id || addon.manifestUrl || addon.transportUrl || index}
+                addon={addon}
+                index={index}
+              />
+            )}
+            emptyIcon={<Puzzle className={`w-12 h-12 mx-auto mb-4 ${isDark ? 'text-gray-500' : 'text-gray-400'}`} />}
+            emptyMessage="No Stremio addons found for this user"
+          >
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragEnd={handleDragEnd}
+            >
+              <SortableContext items={stremioAddons.map(addon => addon.manifestUrl || addon.transportUrl || addon.url || addon.id)} strategy={verticalListSortingStrategy}>
+                <div className="space-y-3">
+                  {stremioAddons.map((addon: any, index: number) => (
+                    <SortableStremioAddonItem
+                      key={addon.id || addon.manifestUrl || addon.transportUrl || index}
+                      addon={addon}
+                      index={index}
+                    />
+                  ))}
+                </div>
+              </SortableContext>
+            </DndContext>
+          </EntityList>
+
         </div>
       </div>
     </div>,

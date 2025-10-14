@@ -10,8 +10,8 @@ export interface ColorConfig {
   name: string
 }
 
-// Color palette configuration
-export const COLOR_PALETTE: ColorConfig[] = [
+// Black theme color palette (indices 0-4)
+export const BLACK_COLOR_PALETTE: ColorConfig[] = [
   {
     bgClass: 'bg-black',
     textClass: 'text-white',
@@ -46,7 +46,11 @@ export const COLOR_PALETTE: ColorConfig[] = [
     borderClass: 'border-gray-200',
     hexValue: '#d1d5db',
     name: 'Very Light Gray'
-  },
+  }
+]
+
+// Light/Dark theme color palette (indices 0-4)
+export const COLOR_PALETTE: ColorConfig[] = [
   {
     bgClass: 'bg-blue-500',
     textClass: 'text-white',
@@ -159,13 +163,43 @@ export const GRADIENT_COLORS: ColorConfig[] = [
 ]
 
 /**
- * Get color configuration by index
+ * Map old color indices (0-9) to new color indices (0-4)
  */
-export function getColorConfig(colorIndex: ColorIndex): ColorConfig {
-  if (colorIndex === null || colorIndex === undefined || colorIndex < 0 || colorIndex >= COLOR_PALETTE.length) {
-    return COLOR_PALETTE[0] // Default to black
+export function mapColorIndex(colorIndex: ColorIndex): number {
+  if (colorIndex === null || colorIndex === undefined) {
+    return 0
   }
-  return COLOR_PALETTE[colorIndex]
+  
+  // If already in new range (0-4), return as is
+  if (colorIndex >= 0 && colorIndex <= 4) {
+    return colorIndex
+  }
+  
+  // Map old range (5-9) to new range (0-4)
+  if (colorIndex >= 5 && colorIndex <= 9) {
+    return colorIndex - 5
+  }
+  
+  // Fallback for any other values
+  return 0
+}
+
+/**
+ * Get color configuration by index and theme
+ */
+export function getColorConfig(colorIndex: ColorIndex, theme?: 'light' | 'dark' | 'modern' | 'modern-dark' | 'mono'): ColorConfig {
+  const mappedIndex = mapColorIndex(colorIndex)
+  return getThemePalette(theme)[mappedIndex]
+}
+
+/**
+ * Get the appropriate color palette based on theme
+ */
+export function getThemePalette(theme?: 'light' | 'dark' | 'modern' | 'modern-dark' | 'mono'): ColorConfig[] {
+  if (theme === 'mono' || theme === 'light') {
+    return BLACK_COLOR_PALETTE
+  }
+  return COLOR_PALETTE
 }
 
 /**
@@ -182,7 +216,7 @@ export function getGradientColorConfig(colorIndex: ColorIndex): ColorConfig {
  * Get background class for a color index based on theme
  */
 export function getColorBgClass(colorIndex: ColorIndex, theme: 'light' | 'dark' | 'modern' | 'modern-dark' | 'mono'): string {
-  const config = getColorConfig(colorIndex)
+  const config = getColorConfig(colorIndex, theme)
   
   // For modern themes, use gradients
   if (theme === 'modern' || theme === 'modern-dark') {
@@ -196,32 +230,32 @@ export function getColorBgClass(colorIndex: ColorIndex, theme: 'light' | 'dark' 
 /**
  * Get text class for a color index
  */
-export function getColorTextClass(colorIndex: ColorIndex): string {
-  const config = getColorConfig(colorIndex)
+export function getColorTextClass(colorIndex: ColorIndex, theme?: 'light' | 'dark' | 'modern' | 'modern-dark' | 'mono'): string {
+  const config = getColorConfig(colorIndex, theme)
   return config.textClass
 }
 
 /**
  * Get border class for a color index
  */
-export function getColorBorderClass(colorIndex: ColorIndex): string {
-  const config = getColorConfig(colorIndex)
+export function getColorBorderClass(colorIndex: ColorIndex, theme?: 'light' | 'dark' | 'modern' | 'modern-dark' | 'mono'): string {
+  const config = getColorConfig(colorIndex, theme)
   return config.borderClass
 }
 
 /**
  * Get hex value for a color index
  */
-export function getColorHexValue(colorIndex: ColorIndex): string {
-  const config = getColorConfig(colorIndex)
+export function getColorHexValue(colorIndex: ColorIndex, theme?: 'light' | 'dark' | 'modern' | 'modern-dark' | 'mono'): string {
+  const config = getColorConfig(colorIndex, theme)
   return config.hexValue
 }
 
 /**
  * Get color name for a color index
  */
-export function getColorName(colorIndex: ColorIndex): string {
-  const config = getColorConfig(colorIndex)
+export function getColorName(colorIndex: ColorIndex, theme?: 'light' | 'dark' | 'modern' | 'modern-dark' | 'mono'): string {
+  const config = getColorConfig(colorIndex, theme)
   return config.name
 }
 
@@ -246,10 +280,10 @@ export function getColorValue(tailwindClass: string): string {
 }
 
 /**
- * Get all available colors for selection UI
+ * Get all available colors for selection UI based on theme
  */
-export function getAllColors(): ColorConfig[] {
-  return COLOR_PALETTE
+export function getAllColors(theme?: 'light' | 'dark' | 'modern' | 'modern-dark' | 'mono'): ColorConfig[] {
+  return getThemePalette(theme)
 }
 
 /**
@@ -268,6 +302,6 @@ export function getColorOptions(theme: 'light' | 'dark' | 'modern' | 'modern-dar
     return GRADIENT_COLORS
   }
   
-  // For other themes, use regular colors
-  return COLOR_PALETTE
+  // For other themes, use theme-appropriate colors
+  return getThemePalette(theme)
 }

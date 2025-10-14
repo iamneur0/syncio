@@ -124,13 +124,21 @@ export function TruncateText({ children, className = '' }: { children: React.Rea
 
 // IconButton (micro)
 export function IconButton({ onClick, title, disabled = false, className = '', children }: { onClick: (e: React.MouseEvent) => void; title?: string; disabled?: boolean; className?: string; children: React.ReactNode }) {
+  const { isDark, isMono } = useTheme()
+  
+  const textColor = isMono
+    ? 'text-white/80'
+    : isDark
+    ? 'text-gray-300'
+    : 'text-gray-600'
+  
   return (
     <button
       type="button"
       title={title}
       disabled={disabled}
       onClick={(e) => { e.stopPropagation(); onClick(e) }}
-      className={`inline-flex h-8 w-8 items-center justify-center rounded hover:bg-gray-100 dark:hover:bg-white/10 disabled:opacity-50 ${className}`}
+      className={`inline-flex h-8 w-8 items-center justify-center rounded border-0 outline-none focus:outline-none focus:ring-0 hover:bg-gray-100 dark:hover:bg-white/10 disabled:opacity-50 ${textColor} ${className}`}
     >
       {children}
     </button>

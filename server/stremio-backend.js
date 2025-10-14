@@ -65,28 +65,6 @@ let users = [];
 let addons = [];
 let groups = [];
 
-// Load data on startup
-async function loadData() {
-  try {
-    users = await readJSONFile(USERS_FILE, []);
-    addons = await readJSONFile(ADDONS_FILE, [
-      {
-        id: '1',
-        name: 'Torrentio',
-        description: 'Provides torrent streams from various sources',
-        url: 'https://torrentio.stremio.com/configure',
-        category: 'Movies & TV',
-        status: 'active',
-        users: 0,
-        groups: 0
-      }
-    ]);
-    groups = await readJSONFile(GROUPS_FILE, []);
-    console.log(`📁 Loaded ${users.length} users, ${addons.length} addons, ${groups.length} groups`);
-  } catch (error) {
-    console.error('Failed to load data:', error);
-  }
-}
 
 // Save data helpers
 async function saveUsers() {
@@ -420,7 +398,6 @@ app.use('*', (req, res) => {
 // Initialize and start server
 async function startServer() {
   await ensureDataDir();
-  await loadData();
   
   app.listen(PORT, () => {
     console.log(`🚀 Syncio backend running on port ${PORT}`);

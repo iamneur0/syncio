@@ -1,8 +1,5 @@
 // Reusable components exports
 export { default as BaseModal } from './BaseModal'
-export { default as AddonModal } from './AddonModal'
-export { default as UserModal } from './UserModal'
-export { default as GroupModal } from './GroupModal'
 
 // UI Enhancement Components
 export { default as LoadingSkeleton } from './LoadingSkeleton'
@@ -10,21 +7,8 @@ export { default as EmptyState } from './EmptyState'
 export { 
   ToggleSwitch,
   VersionChip,
-  StatPill,
-  Badge,
-  StatusDot,
-  Divider,
-  SectionLabel,
-  MutedText,
-  InlineCode,
-  Kbd,
-  TruncateText,
   IconButton,
-  ToggleButton,
-  Spinner,
-  CountBubble,
-  LabelValue,
-  EmptyHint
+  ToggleButton
 } from './MicroUI'
 
 export { default as EntityCard } from './EntityCard'
@@ -33,4 +17,18 @@ export { default as EntityCard } from './EntityCard'
 export { default as PageHeader } from './PageHeader'
 export { default as SyncBadge } from './SyncBadge'
 export { default as ConfirmDialog } from './ConfirmDialog'
-export { default as AddonList } from './AddonList'
+export { default as GroupAddModal } from './GroupAddModal'
+export { default as AddonAddModal } from './AddonAddModal'
+export { default as UserAddModal } from './UserAddModal'
+export { default as UserSelectModal } from './UserSelectModal'
+export { default as AddonSelectModal } from './AddonSelectModal'
+export { default as InlineEdit } from './InlineEdit'
+export { default as ColorPicker } from './ColorPicker'
+export { default as EntityList } from './EntityList'
+export { default as MemberItem } from './MemberItem'
+export { default as AddonItem } from './AddonItem'
+export { default as UserDetailModal } from './UserDetailModal'
+export { default as ResourceItem } from './ResourceItem'
+export { default as CatalogItem } from './CatalogItem'
+export { default as GenericEntityPage, createEntityPageConfig, type EntityPageConfig } from './GenericEntityPage'
+// export { default as DiscoveryCard } from './DiscoveryCard'

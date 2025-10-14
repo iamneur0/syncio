@@ -2,6 +2,33 @@
 @tailwind components;
 @tailwind utilities;
 
+@layer components {
+  /* Unified logo containers */
+  .logo-circle-12 {
+    @apply w-12 h-12 rounded-full flex items-center justify-center overflow-hidden border-0;
+  }
+  .logo-circle-10 {
+    @apply w-10 h-10 rounded-full flex items-center justify-center overflow-hidden border-0;
+  }
+  .logo-img {
+    @apply w-full h-full object-contain;
+    min-width: 80%;
+    min-height: 80%;
+    max-width: 100%;
+    max-height: 100%;
+  }
+  
+  /* EntityList logos should fill the entire container */
+  .logo-img-fill {
+    @apply w-full h-full object-cover;
+    object-position: center;
+    transform: scale(1.5);
+    margin: -25%;
+    background: transparent;
+    border-radius: 50%;
+  }
+}
+
 /* Prevent theme flash on page load - set default background */
 html, body, #__next, :root {
   background-color: transparent; /* allow theme to control actual color */
@@ -245,8 +272,8 @@ body.theme-loaded {
     @apply bg-black text-white border border-white/20 hover:bg-white/10 active:bg-white/20 focus:outline-none focus:ring-0 rounded-lg;
   }
 
-  /* Force all generic buttons to mono style */
-  .mono button {
+  /* Force generic buttons (not specifically styled) to mono style */
+  .mono button:not([class*="bg-"]):not([class*="text-"]) {
     @apply bg-black text-white border border-white/20 hover:bg-white/10 active:bg-white/20 focus:outline-none focus:ring-0 rounded-lg;
   }
 
@@ -422,6 +449,16 @@ body.theme-loaded {
   .mono .sidebar-gradient img,
   .mono .sidebar-gradient * {
     @apply border-0;
+  }
+
+  /* Remove borders from IconButton in mono theme */
+  .mono button[class*="inline-flex h-8 w-8"] {
+    @apply border-0 outline-none ring-0 shadow-none;
+  }
+
+  /* Override general button styling for modal cancel buttons in mono theme */
+  .mono .fixed button[class*="px-4"][class*="py-2"]:not([class*="accent-bg"]):not([class*="bg-"]) {
+    @apply bg-transparent border-0 text-gray-300 hover:text-white hover:bg-gray-700;
   }
 
   /* Remove focus outline/rectangle from all sidebar buttons in mono */

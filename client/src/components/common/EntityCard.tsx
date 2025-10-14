@@ -1,7 +1,7 @@
 import React from 'react'
 import { User as UserIcon, Users as GroupIcon, Puzzle as AddonIcon, Eye, Edit, Trash2, Copy, Download, RefreshCw, Puzzle } from 'lucide-react'
 import { useTheme } from '@/contexts/ThemeContext'
-import { getColorBgClass, getColorTextClass, getColorBorderClass } from '@/utils/colorMapping'
+import { getColorBgClass, getColorTextClass, getColorBorderClass, getColorHexValue } from '@/utils/colorMapping'
 import SyncBadge from './SyncBadge'
 import { ToggleSwitch, VersionChip } from './MicroUI'
 
@@ -142,7 +142,7 @@ export default function EntityCard({
     isMono ? 'mono' : isModern ? 'modern' : isModernDark ? 'modern-dark' : isDark ? 'dark' : 'light'
   )
   
-  const iconBorder = getColorBorderClass(entity.colorIndex)
+  const iconBorder = getColorBorderClass(entity.colorIndex, isMono ? 'mono' : isDark ? 'dark' : 'light')
 
   // Get display name and subtitle
   const displayName = variant === 'user' 
@@ -189,14 +189,14 @@ export default function EntityCard({
   ) : 0
 
   const groupMembersCount = variant === 'group' ? (
-    Array.isArray((entity as any).members) ? (entity as any).members.length :
     typeof (entity as any).members === 'number' ? (entity as any).members :
+    Array.isArray((entity as any).members) ? (entity as any).members.length :
     typeof (entity as any).membersCount === 'number' ? (entity as any).membersCount : 0
   ) : 0
 
   const groupAddonsCount = variant === 'group' ? (
-    Array.isArray((entity as any).addons) ? (entity as any).addons.length :
     typeof (entity as any).addons === 'number' ? (entity as any).addons :
+    Array.isArray((entity as any).addons) ? (entity as any).addons.length :
     typeof (entity as any).addonsCount === 'number' ? (entity as any).addonsCount : 0
   ) : 0
 
@@ -204,27 +204,27 @@ export default function EntityCard({
     <div 
       onClick={handleCardClick}
       className={isListMode ? 
-        `rounded-lg border p-4 hover:shadow-md transition-shadow flex items-center justify-between relative group ${
+        `rounded-lg border p-4 hover:shadow-md transition-all flex items-center justify-between relative group ${
           isModern
             ? 'bg-gradient-to-r from-purple-50/90 to-blue-50/90 backdrop-blur-sm border-purple-200/60'
             : isModernDark
             ? 'bg-gradient-to-r from-purple-800/40 to-blue-800/40 backdrop-blur-sm border-purple-600/50'
             : isDark 
-            ? 'bg-gray-800 border-gray-700' 
-            : 'bg-white border-gray-200'
+            ? 'bg-gray-800 border-gray-700 hover:bg-gray-750' 
+            : 'bg-white border-gray-200 hover:bg-gray-50'
         } ${!entity.isActive ? 'opacity-50' : ''} cursor-pointer ${
           isSelected 
             ? (isMono ? 'ring-2 ring-white/50 border-white/40' : 'ring-2 ring-gray-400 border-gray-400') 
             : ''
         }` :
-        `rounded-lg shadow-sm border p-6 hover:shadow-md transition-shadow flex flex-col h-full relative group ${
+        `rounded-lg shadow-sm border p-6 hover:shadow-md transition-all flex flex-col h-full relative group ${
           isModern
             ? 'bg-gradient-to-br from-purple-50/90 to-blue-50/90 backdrop-blur-sm border-purple-200/60'
             : isModernDark
             ? 'bg-gradient-to-br from-purple-800/40 to-blue-800/40 backdrop-blur-sm border-purple-600/50'
             : isDark 
-            ? 'bg-gray-800 border-gray-700' 
-            : 'bg-white border-gray-200'
+            ? 'bg-gray-800 border-gray-700 hover:bg-gray-750' 
+            : 'bg-white border-gray-200 hover:bg-gray-50'
         } ${!entity.isActive ? 'opacity-50' : ''} cursor-pointer ${
           isSelected 
             ? (isMono ? 'ring-2 ring-white/50 border-white/40' : 'ring-2 ring-gray-400 border-gray-400') 
@@ -236,22 +236,25 @@ export default function EntityCard({
         // List mode layout
         <div className="flex items-center justify-between w-full">
           <div className="flex items-center gap-4">
-            <div className={`w-12 h-12 rounded-full flex items-center justify-center ${
-              variant === 'addon' && (entity as any).iconUrl 
-                ? 'border-0' 
-                : isMono
-                ? 'bg-black border border-white/20 text-white'
-                : isModern
-                ? 'bg-gradient-to-br from-purple-600 to-blue-800 text-white'
-                : isModernDark
-                ? 'bg-gradient-to-br from-purple-800 to-blue-900 text-white'
-                : `${iconBg} border ${iconBorder} text-white`
-            }`}>
+            <div 
+              className={`logo-circle-12 ${
+                variant === 'addon' && (entity as any).iconUrl 
+                  ? 'border-0' 
+                  : isMono
+                  ? `${iconBg} border ${iconBorder} text-white`
+                  : isModern
+                  ? 'bg-gradient-to-br from-purple-600 to-blue-800 text-white'
+                  : isModernDark
+                  ? 'bg-gradient-to-br from-purple-800 to-blue-900 text-white'
+                  : `${iconBg} border ${iconBorder} text-white`
+              }`}
+              style={{ backgroundColor: getColorHexValue(entity.colorIndex, isMono ? 'mono' : isDark ? 'dark' : 'light') }}
+            >
               {variant === 'addon' && (entity as any).iconUrl ? (
                 <img 
                   src={(entity as any).iconUrl} 
                   alt={entity.name}
-                  className="w-full h-full object-contain"
+                  className="logo-img-fill"
                   onError={(e) => {
                     const target = e.currentTarget as HTMLImageElement
                     const nextElement = target.nextElementSibling as HTMLElement
@@ -377,6 +380,17 @@ export default function EntityCard({
                 </button>
               )}
               
+                {variant === 'group' && onReload && (
+                  <button
+                    onClick={handleReload}
+                    disabled={isReloading}
+                    className={`p-2 rounded transition-colors ${isDark ? 'hover:bg-gray-700 text-gray-300' : 'hover:bg-gray-100 text-gray-600'} ${isReloading ? 'opacity-50' : ''}`}
+                    title="Reload group addons"
+                  >
+                    <RefreshCw className={`w-4 h-4 ${isReloading ? 'animate-spin' : ''}`} />
+                  </button>
+                )}
+              
               {variant === 'user' && onImport && (
                 <button
                   onClick={handleImport}
@@ -400,6 +414,16 @@ export default function EntityCard({
                   title="Reload user addons"
                 >
                   <RefreshCw className={`w-4 h-4 ${isReloading ? 'animate-spin' : ''}`} />
+                </button>
+              )}
+              
+              {variant === 'addon' && onClone && (
+                <button
+                  onClick={handleClone}
+                  className={`p-2 rounded transition-colors ${isDark ? 'hover:bg-gray-700 text-gray-300' : 'hover:bg-gray-100 text-gray-600'}`}
+                  title="Clone addon"
+                >
+                  <Copy className="w-4 h-4" />
                 </button>
               )}
               
@@ -429,22 +453,25 @@ export default function EntityCard({
         <div className="flex flex-col h-full">
           <div className="flex items-start justify-between mb-4">
         <div className="flex items-center">
-          <div className={`w-12 h-12 rounded-full flex items-center justify-center ${
-            variant === 'addon' && (entity as any).iconUrl 
-              ? 'border-0' 
-              : isMono
-              ? 'bg-black border border-white/20 text-white'
-              : isModern
-              ? 'bg-gradient-to-br from-purple-600 to-blue-800 text-white'
-              : isModernDark
-              ? 'bg-gradient-to-br from-purple-800 to-blue-900 text-white'
-              : `${iconBg} border ${iconBorder} text-white`
-          }`}>
+          <div 
+            className={`logo-circle-12 ${
+              variant === 'addon' && (entity as any).iconUrl 
+                ? 'border-0' 
+                : isMono
+                ? `${iconBg} border ${iconBorder} text-white`
+                : isModern
+                ? 'bg-gradient-to-br from-purple-600 to-blue-800 text-white'
+                : isModernDark
+                ? 'bg-gradient-to-br from-purple-800 to-blue-900 text-white'
+                : `${iconBg} border ${iconBorder} text-white`
+            }`}
+            style={{ backgroundColor: getColorHexValue(entity.colorIndex, isMono ? 'mono' : isDark ? 'dark' : 'light') }}
+          >
             {variant === 'addon' && (entity as any).iconUrl ? (
               <img 
                 src={(entity as any).iconUrl} 
                 alt={entity.name}
-                className="w-full h-full rounded object-contain"
+                className="logo-img-fill"
                 onError={(e) => {
                   // Fallback to letter if image fails to load
                   const target = e.currentTarget as HTMLImageElement
@@ -526,7 +553,7 @@ export default function EntityCard({
                 </p>
                 <p className={`text-xs ${
                   isModern ? 'text-purple-300' : isModernDark ? 'text-purple-300' : (isDark ? 'text-gray-400' : 'text-gray-500')
-                }`}>Addons</p>
+                }`}>{(entity as any).addons === 1 ? 'Addon' : 'Addons'}</p>
               </div>
             </div>
             <div className="flex items-center">
@@ -539,7 +566,7 @@ export default function EntityCard({
                 </p>
                 <p className={`text-xs ${
                   isModern ? 'text-purple-300' : isModernDark ? 'text-purple-300' : (isDark ? 'text-gray-400' : 'text-gray-500')
-                }`}>Members</p>
+                }`}>{(entity as any).members === 1 ? 'Member' : 'Members'}</p>
               </div>
             </div>
           </>
@@ -556,7 +583,7 @@ export default function EntityCard({
                 </p>
                 <p className={`text-xs ${
                   isModern ? 'text-purple-300' : isModernDark ? 'text-purple-300' : (isDark ? 'text-gray-400' : 'text-gray-500')
-                }`}>Addons</p>
+                }`}>{(entity as any).stremioAddonsCount === 1 ? 'Addon' : 'Addons'}</p>
               </div>
             </div>
             <div className="flex items-center">
@@ -581,7 +608,7 @@ export default function EntityCard({
                 }`}>{addonUsersCount}</p>
                 <p className={`text-xs ${
                   isModern ? 'text-purple-300' : isModernDark ? 'text-purple-300' : (isDark ? 'text-gray-400' : 'text-gray-500')
-                }`}>Users</p>
+                }`}>{addonUsersCount === 1 ? 'User' : 'Users'}</p>
               </div>
             </div>
             <div className="flex items-center">
@@ -592,7 +619,7 @@ export default function EntityCard({
                 }`}>{addonGroupsCount}</p>
                 <p className={`text-xs ${
                   isModern ? 'text-purple-300' : isModernDark ? 'text-purple-300' : (isDark ? 'text-gray-400' : 'text-gray-500')
-                }`}>Groups</p>
+                }`}>{addonGroupsCount === 1 ? 'Group' : 'Groups'}</p>
               </div>
             </div>
           </>
@@ -603,17 +630,7 @@ export default function EntityCard({
         {onView && (
           <button
             onClick={handleView}
-            className={`flex-1 flex items-center justify-center px-3 py-2 h-8 min-h-8 max-h-8 text-sm rounded transition-colors hover:font-semibold ${
-              isModern
-                ? 'bg-gradient-to-r from-purple-100 to-blue-100 text-purple-800 hover:from-purple-200 hover:to-blue-200'
-                : isModernDark
-                ? 'bg-gradient-to-r from-purple-800 to-blue-800 text-purple-100 hover:from-purple-700 hover:to-blue-700'
-                : isMono
-                ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                : isDark
-                ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-            }`}
+            className="flex-1 flex items-center justify-center px-3 py-2 h-8 min-h-8 max-h-8 text-sm rounded transition-colors hover:font-semibold accent-bg accent-text hover:opacity-90"
           >
             <Eye className="w-4 h-4 mr-1" />
             View
@@ -624,15 +641,7 @@ export default function EntityCard({
           <button
             onClick={handleImport}
             disabled={isImporting}
-            className={`flex items-center justify-center px-3 py-2 h-8 min-h-8 max-h-8 text-sm rounded transition-colors disabled:opacity-50 ${
-              isModern
-                ? 'bg-gradient-to-br from-purple-100 to-blue-100 text-purple-800 hover:from-purple-200 hover:to-blue-200'
-                : isModernDark
-                ? 'bg-gradient-to-br from-purple-800 to-blue-800 text-purple-100 hover:from-purple-700 hover:to-blue-700'
-                : isMono
-                ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                : 'bg-blue-100 text-blue-700 hover:bg-blue-200'
-            }`}
+            className="flex items-center justify-center px-3 py-2 h-8 min-h-8 max-h-8 text-sm rounded transition-colors disabled:opacity-50 accent-bg accent-text hover:opacity-90"
             title="Import user's addons to a new group"
           >
             {isImporting ? (
@@ -647,72 +656,50 @@ export default function EntityCard({
           <button
             onClick={handleReload}
             disabled={isReloading}
-            className={`flex items-center justify-center px-3 py-2 h-8 min-h-8 max-h-8 text-sm rounded transition-colors disabled:opacity-50 ${
-              isModern
-                ? 'bg-gradient-to-br from-green-100 to-green-200 text-green-800 hover:from-green-200 hover:to-green-300'
-                : isModernDark
-                ? 'bg-gradient-to-br from-green-800 to-green-900 text-green-100 hover:from-green-700 hover:to-green-800'
-                : isMono
-                ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                : 'bg-green-100 text-green-700 hover:bg-green-200'
-            }`}
+            className="flex items-center justify-center px-3 py-2 h-8 min-h-8 max-h-8 text-sm rounded transition-colors disabled:opacity-50 accent-bg accent-text hover:opacity-90"
             title="Reload user addons"
           >
             <RefreshCw className={`w-4 h-4 ${isReloading ? 'animate-spin' : ''}`} />
           </button>
         )}
         
-        {variant === 'group' && onSync && (
-          <button
-            onClick={handleSync}
-            disabled={isSyncing}
-            className={`flex items-center justify-center px-3 py-2 h-8 min-h-8 max-h-8 text-sm rounded transition-colors disabled:opacity-50 ${
-              isModern
-                ? 'bg-gradient-to-br from-green-100 to-green-200 text-green-800 hover:from-green-200 hover:to-green-300'
-                : isModernDark
-                ? 'bg-gradient-to-br from-green-800 to-green-900 text-green-100 hover:from-green-700 hover:to-green-800'
-                : isMono
-                ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                : 'bg-green-100 text-green-700 hover:bg-green-200'
-            }`}
-            title="Sync all users in this group"
-          >
-            <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} />
-          </button>
-        )}
-        
         {variant === 'group' && onClone && (
           <button
             onClick={handleClone}
-            className={`flex items-center justify-center px-3 py-2 h-8 min-h-8 max-h-8 text-sm rounded transition-colors ${
-              isModern
-                ? 'bg-gradient-to-br from-purple-100 to-blue-100 text-purple-800 hover:from-purple-200 hover:to-blue-200'
-                : isModernDark
-                ? 'bg-gradient-to-br from-purple-800 to-blue-800 text-purple-100 hover:from-purple-700 hover:to-blue-700'
-                : isMono
-                ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                : 'bg-blue-100 text-blue-700 hover:bg-blue-200'
-            }`}
+            className="flex items-center justify-center px-3 py-2 h-8 min-h-8 max-h-8 text-sm rounded transition-colors accent-bg accent-text hover:opacity-90"
             title="Clone this group"
           >
             <Copy className="w-4 h-4" />
           </button>
         )}
         
+        {variant === 'group' && onReload && (
+          <button
+            onClick={handleReload}
+            disabled={isReloading}
+            className="flex items-center justify-center px-3 py-2 h-8 min-h-8 max-h-8 text-sm rounded transition-colors disabled:opacity-50 accent-bg accent-text hover:opacity-90"
+            title="Reload group addons"
+          >
+            <RefreshCw className={`w-4 h-4 ${isReloading ? 'animate-spin' : ''}`} />
+          </button>
+        )}
+        
+        
+        {variant === 'addon' && onClone && (
+          <button
+            onClick={handleClone}
+            className="flex items-center justify-center px-3 py-2 h-8 min-h-8 max-h-8 text-sm rounded transition-colors accent-bg accent-text hover:opacity-90"
+            title="Clone addon"
+          >
+            <Copy className="w-4 h-4" />
+          </button>
+        )}
         
         {variant === 'addon' && onReload && (
           <button
             onClick={handleReload}
             disabled={isReloading}
-            className={`flex items-center justify-center px-3 py-2 h-8 min-h-8 max-h-8 text-sm rounded transition-colors disabled:opacity-50 ${
-              isModern
-                ? 'bg-gradient-to-br from-green-100 to-green-200 text-green-800 hover:from-green-200 hover:to-green-300'
-                : isModernDark
-                ? 'bg-gradient-to-br from-green-800 to-green-900 text-green-100 hover:from-green-700 hover:to-green-800'
-                : isMono
-                ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                : 'bg-green-100 text-green-700 hover:bg-green-200'
-            }`}
+            className="flex items-center justify-center px-3 py-2 h-8 min-h-8 max-h-8 text-sm rounded transition-colors disabled:opacity-50 accent-bg accent-text hover:opacity-90"
             title="Reload addon"
           >
             <RefreshCw className={`w-4 h-4 ${isReloading ? 'animate-spin' : ''}`} />
@@ -722,15 +709,7 @@ export default function EntityCard({
         <button 
           onClick={handleDelete}
           disabled={false}
-          className={`flex items-center justify-center px-3 py-2 h-8 min-h-8 max-h-8 text-sm rounded transition-colors disabled:opacity-50 ${
-            isModern
-              ? 'bg-gradient-to-br from-purple-100 to-blue-100 text-purple-800 hover:from-purple-200 hover:to-blue-200'
-              : isModernDark
-              ? 'bg-gradient-to-br from-purple-800 to-blue-800 text-purple-100 hover:from-purple-700 hover:to-blue-700'
-              : isMono
-              ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              : 'bg-red-100 text-red-700 hover:bg-red-200'
-          }`}
+          className="flex items-center justify-center px-3 py-2 h-8 min-h-8 max-h-8 text-sm rounded transition-colors disabled:opacity-50 accent-bg accent-text hover:opacity-90"
         >
           <Trash2 className="w-4 h-4" />
         </button>

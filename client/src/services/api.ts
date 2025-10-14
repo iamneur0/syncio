@@ -93,7 +93,10 @@ export interface Addon {
 
 export interface CreateUserData {
   email: string
-  username: string
+  password: string
+  username?: string
+  groupName?: string
+  colorIndex?: number
 }
 
 export interface CreateGroupData {
@@ -173,14 +176,23 @@ export const usersAPI = {
     return response.data
   },
 
-  // Create new user
+  // Create new user (via Stremio connect endpoint)
   create: async (userData: CreateUserData): Promise<User> => {
-    const response: AxiosResponse<User> = await api.post('/users', userData)
-    return response.data
+    // The backend expects: { email, password, username?, groupName?, colorIndex? }
+    const payload: any = {
+      email: userData.email,
+      password: userData.password,
+      username: userData.username,
+      groupName: userData.groupName,
+      colorIndex: userData.colorIndex,
+    }
+    const response: AxiosResponse<any> = await api.post('/stremio/connect', payload)
+    // Normalize response to User shape when possible
+    return response.data?.user || response.data
   },
 
   // Update user
-  update: async (id: string, userData: { email?: string; password?: string; groupName?: string }): Promise<User> => {
+  update: async (id: string, userData: { username?: string; email?: string; password?: string; groupName?: string; groupId?: string }): Promise<User> => {
     const response: AxiosResponse<User> = await api.put(`/users/${id}`, userData)
     // Handle axios response wrapper
     if (response.data && typeof response.data === 'object' && (response.data as any).data) {
@@ -218,6 +230,54 @@ export const usersAPI = {
   // Disable user
   disable: async (id: string): Promise<User> => {
     const response: AxiosResponse<User> = await api.put(`/users/${id}/disable`)
+    return response.data
+  },
+
+  // Get Stremio addons for user
+  getStremioAddons: async (id: string): Promise<any> => {
+    const response: AxiosResponse<any> = await api.get(`/users/${id}/stremio-addons`)
+    return response.data
+  },
+
+  // Remove a Stremio addon from user's account
+  removeStremioAddon: async (id: string, addonId: string, unsafe: boolean = false): Promise<any> => {
+    const response: AxiosResponse<any> = await api.delete(`/users/${id}/stremio-addons/${encodeURIComponent(addonId)}${unsafe ? '?unsafe=true' : ''}`)
+    return response.data
+  },
+
+  // Clear all Stremio addons from a user's account
+  clearStremioAddons: async (id: string): Promise<any> => {
+    const response: AxiosResponse<any> = await api.post(`/users/${id}/stremio-addons/clear`)
+    return response.data
+  },
+
+  // Reorder Stremio addons for a user
+  reorderStremioAddons: async (id: string, orderedManifestUrls: string[]): Promise<any> => {
+    const response: AxiosResponse<any> = await api.post(`/users/${id}/stremio-addons/reorder`, { orderedManifestUrls })
+    return response.data
+  },
+
+  // Import user addons to a new group
+  importUserAddons: async (id: string): Promise<any> => {
+    const response: AxiosResponse<any> = await api.post(`/users/${id}/import-addons`, { addons: [] })
+    return response.data
+  },
+
+  // Update user excluded addons
+  updateExcludedAddons: async (id: string, excludedAddons: string[]): Promise<any> => {
+    const response: AxiosResponse<any> = await api.put(`/users/${id}/excluded-addons`, { excludedAddons })
+    return response.data
+  },
+
+  // Update user protected addons
+  updateProtectedAddons: async (id: string, protectedAddons: string[]): Promise<any> => {
+    const response: AxiosResponse<any> = await api.put(`/users/${id}/protected-addons`, { protectedAddons })
+    return response.data
+  },
+
+  // Toggle protect status for a single addon
+  toggleProtectAddon: async (id: string, addonId: string, unsafe: boolean = false): Promise<any> => {
+    const response: AxiosResponse<any> = await api.post(`/users/${id}/protect-addon?unsafe=${unsafe}`, { addonId })
     return response.data
   },
 }
@@ -284,6 +344,44 @@ export const groupsAPI = {
     return response.data
   },
 
+  // Add member to group
+  addMember: async (groupId: string, userId: string): Promise<void> => {
+    await api.post(`/groups/${groupId}/members/${userId}`)
+  },
+
+  // Remove member from group
+  removeMember: async (groupId: string, userId: string): Promise<void> => {
+    await api.delete(`/groups/${groupId}/members/${userId}`)
+  },
+
+  // Add addon to group
+  addAddon: async (groupId: string, addonId: string): Promise<void> => {
+    await api.post(`/groups/${groupId}/addons/${addonId}`)
+  },
+
+  // Remove addon from group
+  removeAddon: async (groupId: string, addonId: string): Promise<void> => {
+    await api.delete(`/groups/${groupId}/addons/${addonId}`)
+  },
+
+  // Sync group
+  sync: async (id: string, excludedManifestUrls: string[] = []): Promise<any> => {
+    const response: AxiosResponse<any> = await api.post(`/groups/${id}/sync`, { excludedManifestUrls })
+    return response.data
+  },
+
+  // Reload group addons
+  reloadGroupAddons: async (id: string): Promise<any> => {
+    const response: AxiosResponse<any> = await api.post(`/groups/${id}/reload-addons`)
+    return response.data
+  },
+
+  // Clone group
+  clone: async (id: string): Promise<Group> => {
+    const response: AxiosResponse<{ group: Group }> = await api.post('/groups/clone', { originalGroupId: id })
+    return response.data.group
+  },
+
 }
 
 // Addons API
@@ -340,6 +438,12 @@ export const addonsAPI = {
     return response.data.addon
   },
 
+  // Clone addon
+  clone: async (id: string): Promise<Addon> => {
+    const response: AxiosResponse<{ addon: Addon }> = await api.post(`/addons/${id}/clone`)
+    return response.data.addon
+  },
+
   // Search addons
   search: async (query: string, tag?: string): Promise<Addon[]> => {
     const params = new URLSearchParams()
@@ -378,6 +482,10 @@ export const publicAuthAPI = {
   },
   me: async (): Promise<any> => {
     const res: AxiosResponse<any> = await api.get('/public-auth/me')
+    return res.data
+  },
+  generateUuid: async (): Promise<{ success: boolean; uuid: string; message?: string }> => {
+    const res: AxiosResponse<{ success: boolean; uuid: string; message?: string }> = await api.get('/public-auth/generate-uuid')
     return res.data
   },
   logout: async (): Promise<void> => {

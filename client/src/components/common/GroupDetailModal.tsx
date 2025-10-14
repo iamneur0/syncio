@@ -1,11 +1,17 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { useTheme } from '@/contexts/ThemeContext'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { groupsAPI, usersAPI, addonsAPI } from '@/services/api'
+import { useSyncStatusRefresh } from '@/hooks/useSyncStatusRefresh'
+import { getColorBgClass, getColorHexValue } from '@/utils/colorMapping'
 import toast from 'react-hot-toast'
-import { VersionChip, SyncBadge } from './'
-import { Users, Puzzle, Plus, Edit, Trash2, Copy, Eye } from 'lucide-react'
+import { VersionChip, SyncBadge, EntityList, MemberItem, AddonItem, UserSelectModal, AddonSelectModal, InlineEdit, ColorPicker } from './'
+import { Users, Puzzle, Plus } from 'lucide-react'
+import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors } from '@dnd-kit/core'
+import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy } from '@dnd-kit/sortable'
+import { useSortable } from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 
 interface GroupDetailModalProps {
   isOpen: boolean
@@ -19,58 +25,74 @@ interface GroupDetailModalProps {
     members?: number
     addons?: number
   } | null
-  onUpdate: (groupData: any) => void
-  onDelete: (groupId: string) => void
-  onClone: (group: any) => void
-  onSync: (groupId: string) => void
-  isSyncing: boolean
 }
 
 export default function GroupDetailModal({
   isOpen,
   onClose,
-  group,
-  onUpdate,
-  onDelete,
-  onClone,
-  onSync,
-  isSyncing
+  group
 }: GroupDetailModalProps) {
   const theme = useTheme()
   const { isDark, isModern, isModernDark, isMono } = theme
   const [mounted, setMounted] = useState(false)
+  const [addons, setAddons] = useState<any[]>([])
+  const [refreshKey, setRefreshKey] = useState(0)
+  const [showUserSelectModal, setShowUserSelectModal] = useState(false)
+  const [showAddonSelectModal, setShowAddonSelectModal] = useState(false)
+  const [showColorPicker, setShowColorPicker] = useState(false)
+  const logoRef = useRef<HTMLDivElement>(null)
+
+  // Handle escape key
+  useEffect(() => {
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isOpen) {
+        onClose()
+      }
+    }
+
+    if (isOpen) {
+      document.addEventListener('keydown', handleEscape)
+      return () => document.removeEventListener('keydown', handleEscape)
+    }
+  }, [isOpen, onClose])
 
   useEffect(() => {
     setMounted(true)
   }, [])
+
   const queryClient = useQueryClient()
+  const { refreshAllSyncStatus } = useSyncStatusRefresh()
 
-  // Form state
-  const [editFormData, setEditFormData] = useState({
-    name: '',
-    description: '',
-    isActive: true,
-    colorIndex: 0
-  })
-
-  // Initialize form data when group changes
-  useEffect(() => {
-    if (group) {
-      setEditFormData({
-        name: group.name || '',
-        description: group.description || '',
-        isActive: group.isActive ?? true,
-        colorIndex: group.colorIndex ?? 0
-      })
-    }
-  }, [group])
+  // Drag and drop sensors
+  const sensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  )
 
   // Fetch group details
   const { data: groupDetails, isLoading: isLoadingGroupDetails } = useQuery({
     queryKey: ['group', group?.id, 'details'],
     queryFn: () => groupsAPI.getById(group!.id),
-    enabled: !!group?.id,
+    enabled: !!group?.id && isOpen,
+    initialData: group // Use prop as initial data
   })
+
+  // Use the query data instead of the prop
+  const currentGroup = groupDetails || group
+
+  // Force refresh when group data changes
+  useEffect(() => {
+    setRefreshKey(prev => prev + 1)
+  }, [groupDetails?.users?.length, groupDetails?.addons?.length])
+
+  // Update addons when group details change
+  useEffect(() => {
+    if (groupDetails?.addons) {
+      setAddons(groupDetails.addons)
+    }
+  }, [groupDetails?.addons])
 
   // Fetch users and addons
   const { data: users = [] } = useQuery({
@@ -78,74 +100,252 @@ export default function GroupDetailModal({
     queryFn: usersAPI.getAll,
   })
 
-  const { data: addons = [] } = useQuery({
+  const { data: allAddons = [] } = useQuery({
     queryKey: ['addons'],
     queryFn: addonsAPI.getAll,
   })
 
   // Update group mutation
   const updateGroupMutation = useMutation({
-    mutationFn: ({ id, groupData }: { id: string; groupData: any }) => 
-      groupsAPI.update(id, groupData),
+    mutationFn: ({ groupId, groupData }: { groupId: string; groupData: any }) => 
+      groupsAPI.update(groupId, groupData),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['groups'] })
-      queryClient.invalidateQueries({ queryKey: ['group', group?.id, 'details'] })
+      console.log('🔍 GroupDetailModal: Invalidating queries after name update')
+      queryClient.invalidateQueries({ queryKey: ['group'] })
+      queryClient.invalidateQueries({ queryKey: ['group', currentGroup?.id, 'details'] })
+      queryClient.invalidateQueries({ queryKey: ['group'] })
+      // Also refresh all group details to update counts
+      queryClient.refetchQueries({ queryKey: ['group'] })
+      console.log('🔍 GroupDetailModal: Queries invalidated')
       toast.success('Group updated successfully')
-      onClose()
     },
     onError: (error: any) => {
       toast.error(error?.response?.data?.message || 'Failed to update group')
     }
   })
 
-  const handleUpdateGroup = (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!group) return
-
-    const groupData: any = {}
-    
-    if (editFormData.name.trim()) {
-      groupData.name = editFormData.name.trim()
+  // Handle color change
+  const handleColorChange = (newColorIndex: number) => {
+    if (currentGroup?.id) {
+      updateGroupMutation.mutate({
+        groupId: currentGroup.id,
+        groupData: { colorIndex: newColorIndex }
+      })
     }
-    
-    if (editFormData.description.trim()) {
-      groupData.description = editFormData.description.trim()
-    }
-    
-    groupData.isActive = editFormData.isActive
-    groupData.colorIndex = editFormData.colorIndex
-    
-    updateGroupMutation.mutate({
-      id: group.id,
-      groupData
-    })
   }
 
-  const handleDelete = () => {
+  // Handle group name update
+  const handleGroupNameUpdate = async (newName: string) => {
+    if (currentGroup) {
+      await updateGroupMutation.mutateAsync({
+        groupId: currentGroup.id,
+        groupData: { name: newName }
+      })
+    }
+  }
+
+  // Remove member from group mutation
+  const removeMemberMutation = useMutation({
+    mutationFn: ({ groupId, userId }: { groupId: string; userId: string }) => 
+      groupsAPI.removeMember(groupId, userId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['group'] })
+      queryClient.invalidateQueries({ queryKey: ['group', group?.id, 'details'] })
+      queryClient.invalidateQueries({ queryKey: ['users'] })
+      // Also refresh all group details to update member counts
+      queryClient.refetchQueries({ queryKey: ['group'] })
+      // Trigger sync status refresh
+      refreshAllSyncStatus(group?.id)
+      toast.success('Member removed from group')
+    },
+    onError: (error: any) => {
+      toast.error(error?.response?.data?.message || 'Failed to remove member from group')
+    }
+  })
+
+  const handleRemoveMember = (userId: string) => {
     if (group) {
-      onDelete(group.id)
-      onClose()
+      removeMemberMutation.mutate({
+        groupId: group.id,
+        userId
+      })
     }
   }
 
-  const handleClone = () => {
+  // Reorder addons mutation
+  const reorderAddonsMutation = useMutation({
+    mutationFn: ({ groupId, orderedManifestUrls }: { groupId: string; orderedManifestUrls: string[] }) => 
+      groupsAPI.reorderAddons(groupId, orderedManifestUrls),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['group'] })
+      queryClient.invalidateQueries({ queryKey: ['group', group?.id, 'details'] })
+      // Also refresh all group details to update counts
+      queryClient.refetchQueries({ queryKey: ['group'] })
+      // Trigger sync status refresh
+      refreshAllSyncStatus(group?.id)
+      toast.success('Addon order updated')
+    },
+    onError: (error: any) => {
+      toast.error(error?.response?.data?.message || 'Failed to update addon order')
+    }
+  })
+
+  // Drag and drop handlers
+  const handleDragEnd = (event: any) => {
+    const { active, over } = event
+
+    if (active.id !== over.id) {
+      const newAddons = arrayMove(addons, addons.findIndex((item) => item.id === active.id), addons.findIndex((item) => item.id === over.id))
+      setAddons(newAddons)
+      
+      // Update backend with new order
+      if (group) {
+        const orderedManifestUrls = newAddons.map(addon => addon.manifestUrl || addon.url).filter(Boolean)
+        reorderAddonsMutation.mutate({
+          groupId: group.id,
+          orderedManifestUrls
+        })
+      }
+    }
+  }
+
+  // Remove addon from group mutation
+  const removeAddonMutation = useMutation({
+    mutationFn: ({ groupId, addonId }: { groupId: string; addonId: string }) => 
+      groupsAPI.removeAddon(groupId, addonId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['group'] })
+      queryClient.invalidateQueries({ queryKey: ['group', group?.id, 'details'] })
+      queryClient.invalidateQueries({ queryKey: ['addons'] })
+      // Also refresh all group details to update addon counts
+      queryClient.refetchQueries({ queryKey: ['group'] })
+      // Trigger sync status refresh
+      refreshAllSyncStatus(group?.id)
+      toast.success('Addon removed from group')
+    },
+    onError: (error: any) => {
+      toast.error(error?.response?.data?.message || 'Failed to remove addon from group')
+    }
+  })
+
+  // Add member to group mutation
+  const addMemberMutation = useMutation({
+    mutationFn: ({ groupId, userId }: { groupId: string; userId: string }) => 
+      groupsAPI.addMember(groupId, userId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['group'] })
+      queryClient.invalidateQueries({ queryKey: ['group', group?.id, 'details'] })
+      queryClient.invalidateQueries({ queryKey: ['users'] })
+      // Also refresh all group details to update member counts
+      queryClient.refetchQueries({ queryKey: ['group'] })
+      toast.success('Member added to group')
+    },
+    onError: (error: any) => {
+      toast.error(error?.response?.data?.message || 'Failed to add member to group')
+    }
+  })
+
+  // Add addon to group mutation
+  const addAddonMutation = useMutation({
+    mutationFn: ({ groupId, addonId }: { groupId: string; addonId: string }) => 
+      groupsAPI.addAddon(groupId, addonId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['group'] })
+      queryClient.invalidateQueries({ queryKey: ['group', group?.id, 'details'] })
+      queryClient.invalidateQueries({ queryKey: ['addons'] })
+      // Also refresh all group details to update addon counts
+      queryClient.refetchQueries({ queryKey: ['group'] })
+      toast.success('Addon added to group')
+    },
+    onError: (error: any) => {
+      toast.error(error?.response?.data?.message || 'Failed to add addon to group')
+    }
+  })
+
+  // Helper function to trigger sync status refresh
+  const triggerSyncStatusRefresh = () => {
+    if (group?.id) {
+      refreshAllSyncStatus(group.id)
+    }
+  }
+
+  const handleRemoveAddon = (addonId: string) => {
     if (group) {
-      onClone(group)
-      onClose()
+      removeAddonMutation.mutate({
+        groupId: group.id,
+        addonId
+      })
     }
   }
 
-  const handleSync = () => {
+  const handleSelectUser = async (user: any) => {
     if (group) {
-      onSync(group.id)
+      try {
+        await groupsAPI.addMember(group.id, user.id)
+        // Invalidate all group-related queries to update member counts
+        queryClient.invalidateQueries({ queryKey: ['group'] })
+        queryClient.invalidateQueries({ queryKey: ['group', group.id, 'details'] })
+        queryClient.invalidateQueries({ queryKey: ['users'] })
+        // Also refresh all group details to update member counts
+        queryClient.refetchQueries({ queryKey: ['group'] })
+        toast.success(`Added ${user.username || user.email} to group`)
+      } catch (error: any) {
+        toast.error(error?.response?.data?.message || `Failed to add ${user.username || user.email} to group`)
+      }
     }
   }
 
+  const handleSelectAddon = async (addon: any) => {
+    if (group) {
+      try {
+        await groupsAPI.addAddon(group.id, addon.id)
+        // Invalidate all group-related queries to update addon counts
+        queryClient.invalidateQueries({ queryKey: ['group'] })
+        queryClient.invalidateQueries({ queryKey: ['group', group.id, 'details'] })
+        queryClient.invalidateQueries({ queryKey: ['addons'] })
+        // Also refresh all group details to update addon counts
+        queryClient.refetchQueries({ queryKey: ['group'] })
+        toast.success(`Added ${addon.name} to group`)
+      } catch (error: any) {
+        toast.error(error?.response?.data?.message || `Failed to add ${addon.name} to group`)
+      }
+    }
+  }
+
+  // Sortable Addon Item Component
+  const SortableAddonItem = ({ addon, onRemove }: { addon: any; onRemove: (id: string) => void }) => {
+    const {
+      attributes,
+      listeners,
+      setNodeRef,
+      transform,
+      transition,
+      isDragging,
+    } = useSortable({ id: addon.id })
+
+    const style = {
+      transform: CSS.Transform.toString(transform),
+      transition,
+      opacity: isDragging ? 0.5 : 1,
+    }
+
+    return (
+      <div ref={setNodeRef} style={style}>
+        <AddonItem
+          addon={addon}
+          onRemove={onRemove}
+          isDraggable={true}
+          dragProps={attributes}
+          dragListeners={listeners}
+        />
+      </div>
+    )
+  }
 
   if (!isOpen || !group) return null
 
   // Don't render until mounted
-  if (!mounted) {
+  if (!mounted || typeof window === 'undefined' || !document.body) {
     return null
   }
 
@@ -165,14 +365,54 @@ export default function GroupDetailModal({
           <div className="flex items-center justify-between mb-6">
             <div className="flex flex-col flex-1">
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                  <h2 className={`text-xl font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                    {group.name}
-                  </h2>
+                <div className="flex items-center gap-4 relative">
+                  {/* Group Logo */}
+                  <div 
+                    ref={logoRef}
+                    onClick={() => setShowColorPicker(!showColorPicker)}
+                    className={`w-16 h-16 rounded-full flex items-center justify-center flex-shrink-0 border-2 cursor-pointer transition-all hover:scale-105 ${
+                      getColorBgClass(currentGroup.colorIndex || 0, isMono ? 'mono' : isDark ? 'dark' : 'light')
+                    }`}
+                    style={{ backgroundColor: getColorHexValue(currentGroup.colorIndex || 0, isMono ? 'mono' : isDark ? 'dark' : 'light') }}
+                    title="Click to change color"
+                  >
+                    <span className="text-white font-semibold text-xl">
+                      {currentGroup.name.charAt(0).toUpperCase()}
+                    </span>
+                  </div>
+                  
+                  {/* Color Picker */}
+          <ColorPicker
+            currentColorIndex={currentGroup.colorIndex || 0}
+            onColorChange={handleColorChange}
+            isOpen={showColorPicker}
+            onClose={() => setShowColorPicker(false)}
+            triggerRef={logoRef}
+          />
+                  
+                  <InlineEdit
+                    value={currentGroup.name}
+                    onSave={handleGroupNameUpdate}
+                    placeholder="Enter group name..."
+                    maxLength={50}
+                  />
                   <SyncBadge 
+                    key={`group-sync-${group.id}-${refreshKey}`}
                     groupId={group.id} 
-                    onSync={handleSync}
-                    isSyncing={isSyncing}
+                    onSync={async () => {
+                      try {
+                        await groupsAPI.sync(group.id)
+                        queryClient.invalidateQueries({ queryKey: ['group'] })
+                        queryClient.invalidateQueries({ queryKey: ['group', group.id, 'details'] })
+                        queryClient.invalidateQueries({ queryKey: ['users'] })
+                        // Trigger sync status refresh
+                        refreshAllSyncStatus(group.id)
+                        toast.success('Group sync completed')
+                      } catch (error: any) {
+                        toast.error(error?.response?.data?.message || 'Failed to sync group')
+                      }
+                    }}
+                    isSyncing={false}
                   />
                 </div>
                 <div className="flex items-center gap-4">
@@ -209,227 +449,118 @@ export default function GroupDetailModal({
           </div>
 
           {/* Group Members */}
-          <div className={`p-4 rounded-lg mb-6 ${isDark ? 'bg-gray-700' : 'bg-gray-50'}`}>
-            <div className="flex items-center justify-between mb-3">
-              <h3 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                Members ({groupDetails?.users?.length || 0})
-              </h3>
-            </div>
-            {isLoadingGroupDetails ? (
-              <div className="flex items-center justify-center py-8">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 accent-border"></div>
-              </div>
-            ) : groupDetails?.users && groupDetails.users.length > 0 ? (
-              <div className="space-y-3">
-                {groupDetails.users.map((member: any, index: number) => (
-                  <div
-                    key={member.id || index}
-                    className={`relative rounded-lg border p-4 hover:shadow-md transition-all ${
-                      isDark 
-                        ? 'bg-gray-600 border-gray-500 hover:bg-gray-550' 
-                        : 'bg-white border-gray-200 hover:bg-gray-50'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="flex items-center flex-1 min-w-0">
-                        <div className={`w-10 h-10 rounded-full flex items-center justify-center mr-3 flex-shrink-0 ${
-                          isMono ? 'bg-black border border-white/20 text-white' : 'bg-gray-500 text-white'
-                        }`}>
-                          <span className="text-white font-semibold text-sm">
-                            {member.username ? member.username.charAt(0).toUpperCase() : 
-                             member.email ? member.email.charAt(0).toUpperCase() : 'U'}
-                          </span>
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <h4 className={`font-medium truncate ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                            {member.username || member.email}
-                          </h4>
-                          <p className={`text-sm truncate ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
-                            {member.email || 'No email'}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="text-center py-8">
-                <Users className={`w-12 h-12 mx-auto mb-4 ${isDark ? 'text-gray-500' : 'text-gray-400'}`} />
-                <p className={`${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
-                  No members in this group
-                </p>
-              </div>
+          <EntityList
+            title="Members"
+            count={groupDetails?.users?.length || 0}
+            items={groupDetails?.users || []}
+            isLoading={isLoadingGroupDetails}
+            onClear={() => {
+              groupDetails?.users?.forEach((member: any) => {
+                handleRemoveMember(member.id)
+              })
+            }}
+            confirmReset={{
+              title: 'Reset Group Members',
+              description: 'Remove all members from this group? This cannot be undone.',
+              confirmText: 'Reset',
+              isDanger: true,
+            }}
+            actionButton={{
+              icon: <Plus className="w-4 h-4" />,
+              onClick: () => setShowUserSelectModal(true),
+              tooltip: 'Add member to group'
+            }}
+            renderItem={(member: any, index: number) => (
+              <MemberItem
+                key={member.id || index}
+                member={member}
+                groupId={group.id}
+                onRemove={handleRemoveMember}
+                onSync={async (userId: string, groupId: string) => {
+                  try {
+                    await usersAPI.sync(userId, groupId)
+                    queryClient.invalidateQueries({ queryKey: ['users'] })
+                    queryClient.invalidateQueries({ queryKey: ['group', groupId, 'details'] })
+                    refreshAllSyncStatus(groupId, userId)
+                    toast.success(`Synced ${member.username || member.email}`)
+                  } catch (error: any) {
+                    toast.error(error?.response?.data?.message || `Failed to sync ${member.username || member.email}`)
+                  }
+                }}
+              />
             )}
-          </div>
+            emptyIcon={<Users className={`w-12 h-12 mx-auto mb-4 ${isDark ? 'text-gray-500' : 'text-gray-400'}`} />}
+            emptyMessage="No members in this group"
+          />
 
           {/* Group Addons */}
-          <div className={`p-4 rounded-lg mb-6 ${isDark ? 'bg-gray-700' : 'bg-gray-50'}`}>
-            <div className="flex items-center justify-between mb-3">
-              <h3 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                Addons ({groupDetails?.addons?.length || 0})
-              </h3>
-            </div>
-            {isLoadingGroupDetails ? (
-              <div className="flex items-center justify-center py-8">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 accent-border"></div>
-              </div>
-            ) : groupDetails?.addons && groupDetails.addons.length > 0 ? (
-              <div className="space-y-3">
-                {groupDetails.addons.map((addon: any, index: number) => (
-                  <div
-                    key={addon.id || index}
-                    className={`relative rounded-lg border p-4 hover:shadow-md transition-all ${
-                      isDark 
-                        ? 'bg-gray-600 border-gray-500 hover:bg-gray-550' 
-                        : 'bg-white border-gray-200 hover:bg-gray-50'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="flex items-center flex-1 min-w-0">
-                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center mr-3 flex-shrink-0 ${
-                          isMono ? 'bg-black border border-white/20 text-white' : 'bg-gray-500 text-white'
-                        }`}>
-                          <Puzzle className="w-5 h-5 text-white" />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-2 mb-1">
-                            <h4 className={`font-medium truncate ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                              {addon.name || 'Unknown Addon'}
-                            </h4>
-                            {addon.version && (
-                              <VersionChip version={addon.version} />
-                            )}
-                          </div>
-                          <p className={`text-sm truncate ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
-                            {addon.description || 'No description'}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="text-center py-8">
-                <Puzzle className={`w-12 h-12 mx-auto mb-4 ${isDark ? 'text-gray-500' : 'text-gray-400'}`} />
-                <p className={`${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
-                  No addons in this group
-                </p>
-              </div>
-            )}
-          </div>
+          <EntityList
+            title="Addons"
+            count={groupDetails?.addons?.length || 0}
+            items={addons}
+            isLoading={isLoadingGroupDetails}
+            onClear={() => {
+              addons.forEach((addon: any) => {
+                handleRemoveAddon(addon.id)
+              })
+            }}
+            confirmReset={{
+              title: 'Reset Group Addons',
+              description: 'Remove all addons from this group? This cannot be undone.',
+              confirmText: 'Reset',
+              isDanger: true,
+            }}
+            actionButton={{
+              icon: <Plus className="w-4 h-4" />,
+              onClick: () => setShowAddonSelectModal(true),
+              tooltip: 'Add addon to group'
+            }}
+            isDraggable={true}
+            emptyIcon={<Puzzle className={`w-12 h-12 mx-auto mb-4 ${isDark ? 'text-gray-500' : 'text-gray-400'}`} />}
+            emptyMessage="No addons in this group"
+          >
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragEnd={handleDragEnd}
+            >
+              <SortableContext items={addons.map(addon => addon.id)} strategy={verticalListSortingStrategy}>
+                <div className="space-y-3">
+                  {addons.map((addon: any, index: number) => (
+                    <SortableAddonItem
+                      key={addon.id || index}
+                      addon={addon}
+                      onRemove={handleRemoveAddon}
+                    />
+                  ))}
+                </div>
+              </SortableContext>
+            </DndContext>
+          </EntityList>
 
-          {/* Edit Form */}
-          <form onSubmit={handleUpdateGroup} className="space-y-4">
-            <div>
-              <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
-                Group Name
-              </label>
-              <input
-                type="text"
-                value={editFormData.name}
-                onChange={(e) => setEditFormData(prev => ({ ...prev, name: e.target.value }))}
-                className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-stremio-purple focus:border-transparent ${
-                  isDark 
-                    ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
-                    : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
-                }`}
-              />
-            </div>
-
-            <div>
-              <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
-                Description
-              </label>
-              <textarea
-                value={editFormData.description}
-                onChange={(e) => setEditFormData(prev => ({ ...prev, description: e.target.value }))}
-                className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-stremio-purple focus:border-transparent ${
-                  isDark 
-                    ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
-                    : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
-                }`}
-                rows={3}
-              />
-            </div>
-
-            <div className="flex items-center">
-              <input
-                type="checkbox"
-                id="isActive"
-                checked={editFormData.isActive}
-                onChange={(e) => setEditFormData(prev => ({ ...prev, isActive: e.target.checked }))}
-                className="mr-3 rounded"
-              />
-              <label htmlFor="isActive" className={isDark ? 'text-gray-300' : 'text-gray-700'}>
-                Active
-              </label>
-            </div>
-
-            <div className="flex gap-3 pt-4">
-              <button
-                type="button"
-                onClick={handleDelete}
-                className={`px-4 py-2 border rounded-lg transition-colors ${
-                  isDark 
-                    ? 'border-red-600 text-red-400 hover:bg-red-900/20' 
-                    : 'border-red-300 text-red-600 hover:bg-red-50'
-                }`}
-              >
-                Delete Group
-              </button>
-              <button
-                type="button"
-                onClick={handleClone}
-                className={`px-4 py-2 border rounded-lg transition-colors ${
-                  isDark 
-                    ? 'border-blue-600 text-blue-400 hover:bg-blue-900/20' 
-                    : 'border-blue-300 text-blue-600 hover:bg-blue-50'
-                }`}
-              >
-                Clone Group
-              </button>
-              <button
-                type="button"
-                onClick={handleSync}
-                disabled={isSyncing}
-                className={`px-4 py-2 border rounded-lg transition-colors disabled:opacity-50 ${
-                  isDark 
-                    ? 'border-green-600 text-green-400 hover:bg-green-900/20' 
-                    : 'border-green-300 text-green-600 hover:bg-green-50'
-                }`}
-              >
-                {isSyncing ? 'Syncing...' : 'Sync Group'}
-              </button>
-              <button
-                type="button"
-                onClick={onClose}
-                className={`flex-1 px-4 py-2 border rounded-lg transition-colors ${
-                  isDark 
-                    ? 'border-gray-600 text-gray-300 hover:bg-gray-700' 
-                    : 'border-gray-300 text-gray-700 hover:bg-gray-50'
-                }`}
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={updateGroupMutation.isPending}
-                className={`flex-1 px-4 py-2 text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-                  isModern
-                    ? 'bg-gradient-to-br from-purple-600 via-purple-700 to-blue-800 hover:from-purple-700 hover:via-purple-800 hover:to-blue-900'
-                    : isModernDark
-                    ? 'bg-gradient-to-br from-purple-800 via-purple-900 to-blue-900 hover:from-purple-900 hover:via-purple-950 hover:to-indigo-900'
-                    : 'accent-bg accent-text'
-                }`}
-              >
-                {updateGroupMutation.isPending ? 'Updating...' : 'Update Group'}
-              </button>
-            </div>
-          </form>
         </div>
       </div>
+
+      {/* Modals */}
+      {showUserSelectModal && (
+        <UserSelectModal
+          isOpen={showUserSelectModal}
+          onClose={() => setShowUserSelectModal(false)}
+          onSelectUser={handleSelectUser}
+          groupId={group?.id || ''}
+          excludeUserIds={groupDetails?.users?.map((u: any) => u.id) || []}
+        />
+      )}
+
+      {showAddonSelectModal && (
+        <AddonSelectModal
+          isOpen={showAddonSelectModal}
+          onClose={() => setShowAddonSelectModal(false)}
+          onSelectAddon={handleSelectAddon}
+          groupId={group?.id || ''}
+          excludeAddonIds={addons.map((a: any) => a.id)}
+        />
+      )}
     </div>,
     document.body
   )

@@ -10,9 +10,8 @@ import ConfirmDialog from '@/components/common/ConfirmDialog'
 import api from '@/services/api'
 
 export default function SettingsPage() {
-  const { isDark, isModern, isModernDark, theme, setTheme } = useTheme()
+  const { isDark, isModern, isModernDark, theme, setTheme, hideSensitive, toggleHideSensitive } = useTheme()
   const appVersion = (process.env.NEXT_PUBLIC_APP_VERSION as string) || 'dev'
-  const [hideSensitive, setHideSensitive] = React.useState<boolean>(false)
   const [syncMode, setSyncMode] = React.useState<'normal' | 'advanced'>('normal')
   const [deleteMode, setDeleteMode] = React.useState<'safe' | 'unsafe'>('safe')
   const [importFile, setImportFile] = React.useState<File | null>(null)
@@ -35,9 +34,6 @@ export default function SettingsPage() {
   }
 
   React.useEffect(() => {
-    const saved = localStorage.getItem('sfm_hide_sensitive')
-    setHideSensitive(saved === '1')
-    
     const savedSyncMode = localStorage.getItem('sfm_sync_mode')
     setSyncMode(savedSyncMode === 'advanced' ? 'advanced' : 'normal')
     
@@ -54,12 +50,6 @@ export default function SettingsPage() {
     }
   }, [])
 
-  const onToggle = (next: boolean) => {
-    setHideSensitive(next)
-    localStorage.setItem('sfm_hide_sensitive', next ? '1' : '0')
-    // notify other tabs/components if needed
-    window.dispatchEvent(new CustomEvent('sfm:settings:changed'))
-  }
 
   const onSyncModeChange = (mode: 'normal' | 'advanced') => {
     setSyncMode(mode)
@@ -540,7 +530,7 @@ export default function SettingsPage() {
             <div className={`${isDark ? 'text-gray-400' : 'text-gray-500'} text-sm`}>Mask username and email in user details.</div>
           </div>
           <button
-            onClick={() => onToggle(!hideSensitive)}
+            onClick={toggleHideSensitive}
             className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
               hideSensitive
                 ? (theme === 'mono' ? 'bg-white/30 border border-white/20' : (isDark ? 'bg-gray-600' : 'bg-gray-800'))
@@ -804,13 +794,13 @@ export default function SettingsPage() {
         <div className="mt-4 flex gap-4 flex-wrap">
           <button
             onClick={() => setShowAddonImport(v => !v)}
-            className={`${isDark ? 'bg-gray-700 hover:bg-gray-600 text-white' : 'bg-gray-100 hover:bg-gray-200 text-gray-900'} flex items-center px-4 py-2 rounded-lg transition-colors`}
+            className="accent-bg accent-text hover:opacity-90 flex items-center px-4 py-2 rounded-lg transition-colors"
           >
             <Upload className="w-5 h-5 mr-2" /> Import Addons
           </button>
           <button
             onClick={exportAddons}
-            className={`${isDark ? 'bg-gray-700 hover:bg-gray-600 text-white' : 'bg-gray-100 hover:bg-gray-200 text-gray-900'} flex items-center px-4 py-2 rounded-lg transition-colors`}
+            className="accent-bg accent-text hover:opacity-90 flex items-center px-4 py-2 rounded-lg transition-colors"
           >
             <Download className="w-5 h-5 mr-2" /> Export Addons
           </button>
@@ -878,11 +868,11 @@ export default function SettingsPage() {
         <div className="mt-4 flex gap-4 flex-wrap">
           <button
             onClick={() => setShowConfigImport(v => !v)}
-            className={`${isDark ? 'bg-gray-700 hover:bg-gray-600 text-white' : 'bg-gray-100 hover:bg-gray-200 text-gray-900'} flex items-center px-4 py-2 rounded-lg transition-colors`}
+            className="accent-bg accent-text hover:opacity-90 flex items-center px-4 py-2 rounded-lg transition-colors"
           >
             <Upload className="w-5 h-5 mr-2" /> Import Configuration
           </button>
-          <button onClick={exportConfig} className={`flex items-center px-4 py-2 rounded-lg transition-colors ${isDark ? 'bg-gray-700 hover:bg-gray-600 text-white' : 'bg-gray-100 hover:bg-gray-200 text-gray-900'}`}>
+          <button onClick={exportConfig} className="accent-bg accent-text hover:opacity-90 flex items-center px-4 py-2 rounded-lg transition-colors">
             <Download className="w-5 h-5 mr-2" /> Export Configuration
           </button>
         </div>

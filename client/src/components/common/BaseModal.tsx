@@ -27,6 +27,20 @@ export default function BaseModal({
   useEffect(() => {
     setMounted(true)
   }, [])
+
+  // Handle escape key
+  useEffect(() => {
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isOpen) {
+        onClose()
+      }
+    }
+
+    if (isOpen) {
+      document.addEventListener('keydown', handleEscape)
+      return () => document.removeEventListener('keydown', handleEscape)
+    }
+  }, [isOpen, onClose])
   
   if (!isOpen) return null
 
@@ -48,6 +62,10 @@ export default function BaseModal({
     }
   }
   
+
+  if (!mounted || typeof window === 'undefined' || !document.body) {
+    return null
+  }
 
   return createPortal(
     <div
