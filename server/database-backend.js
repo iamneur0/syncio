@@ -7460,62 +7460,9 @@ app.post('/api/users/:id/import-addons', async (req, res) => {
     })
     if (!user) return res.status(404).json({ message: 'User not found' })
 
-    // Check if import group already exists (regardless of membership)
+    // We'll create/attach to the import group only if at least one addon is newly imported
     const groupName = `${user.username} Imports`
-    let group = await prisma.group.findFirst({
-      where: {
-        name: groupName
-      }
-    })
-
-    if (!group) {
-      // Create a new group named "{username} Imports"
-      group = await prisma.group.create({
-        data: {
-          name: groupName,
-          description: `Imported addons from ${user.username}`,
-          colorIndex: 0, // Default color
-          isActive: true,
-          accountId: getAccountId(req)
-        }
-      })
-      debug.log(`✅ Created import group: ${groupName}`)
-    } else {
-      debug.log(`ℹ️ Using existing import group: ${groupName}`)
-    }
-
-    // Ensure user is a member of the group ONLY if they have no group assigned yet
-    // If the user already belongs to any group, do not auto-attach to the import group
-    const allGroups = await prisma.group.findMany({
-        where: {
-        accountId: getAccountId(req)
-      },
-      select: { id: true, userIds: true }
-    })
-    
-    // Check if user is already in any group
-    let userInAnyGroup = false
-    for (const g of allGroups) {
-      if (g.userIds) {
-        try {
-          const userIds = JSON.parse(g.userIds)
-          if (Array.isArray(userIds) && userIds.includes(userId)) {
-            userInAnyGroup = true
-            break
-          }
-        } catch (e) {
-          console.error('Error parsing group userIds:', e)
-        }
-      }
-    }
-    
-    if (!userInAnyGroup) {
-      // Assign user to group (ensures user is only in one group)
-      await assignUserToGroup(userId, group.id, req)
-        debug.log(`✅ Added user to import group (user had no previous groups)`)
-    } else {
-      debug.log(`ℹ️ Skipped adding user to import group (user already has a group)`)
-    }
+    let group = null
 
     // Process each addon
     const processedAddons = []
@@ -7607,7 +7554,7 @@ app.post('/api/users/:id/import-addons', async (req, res) => {
         }
 
         if (addon) {
-          // Skip creation; will proceed to group attach below
+          // Skip creation; will consider group attach later
         } else {
           // Create addon directly in DB using explicit fields to separate originalManifest vs manifest
           try {
@@ -7655,9 +7602,73 @@ app.post('/api/users/:id/import-addons', async (req, res) => {
           }
         }
       }
+      // Attachment deferred until we decide to create/use a group
+    }
 
-      // Attach to group directly in DB (no internal HTTP)
-      console.log(`➕ Ensuring addon ${addon.name} is attached to import group`)
+    console.log(`🎉 Import completed! Processed ${processedAddons.length} addons out of ${addons.length} total addons`)
+    console.log(`📋 Processed addons:`, processedAddons.map(a => `${a.name} (${a.id})`))
+    console.log(`📊 Newly imported: ${newlyImportedAddons.length}, Already existing: ${existingAddons.length}`)
+
+    // If nothing new was imported, do NOT create a group or attach anything
+    if (newlyImportedAddons.length === 0) {
+      const message = existingAddons.length > 0
+        ? `All ${existingAddons.length} addons already existed. No group created.`
+        : `No addons were processed. No group created.`
+      return res.json({
+        message,
+        addonCount: processedAddons.length,
+        newlyImported: newlyImportedAddons.length,
+        existing: existingAddons.length
+      })
+    }
+
+    // Ensure import group exists now that we know we have imports
+    group = await prisma.group.findFirst({
+      where: { name: groupName }
+    })
+    if (!group) {
+      group = await prisma.group.create({
+        data: {
+          name: groupName,
+          description: `Imported addons from ${user.username}`,
+          colorIndex: 0,
+          isActive: true,
+          accountId: getAccountId(req)
+        }
+      })
+      debug.log(`✅ Created import group: ${groupName}`)
+    } else {
+      debug.log(`ℹ️ Using existing import group: ${groupName}`)
+    }
+
+    // Ensure user membership only if they have no group assigned yet
+    const allGroups = await prisma.group.findMany({
+      where: { accountId: getAccountId(req) },
+      select: { id: true, userIds: true }
+    })
+    let userInAnyGroup = false
+    for (const g of allGroups) {
+      if (g.userIds) {
+        try {
+          const userIds = JSON.parse(g.userIds)
+          if (Array.isArray(userIds) && userIds.includes(userId)) {
+            userInAnyGroup = true
+            break
+          }
+        } catch (e) {
+          console.error('Error parsing group userIds:', e)
+        }
+      }
+    }
+    if (!userInAnyGroup) {
+      await assignUserToGroup(userId, group.id, req)
+      debug.log(`✅ Added user to import group (user had no previous groups)`)
+    } else {
+      debug.log(`ℹ️ Skipped adding user to import group (user already has a group)`)
+    }
+
+    // Attach all processed addons (existing and newly created) to the import group
+    for (const addon of processedAddons) {
       try {
         await prisma.groupAddon.upsert({
           where: { groupId_addonId: { groupId: group.id, addonId: addon.id } },
@@ -7665,25 +7676,14 @@ app.post('/api/users/:id/import-addons', async (req, res) => {
           create: { groupId: group.id, addonId: addon.id, isEnabled: true }
         })
         console.log(`✅ Attached ${addon.name} to import group in DB`)
-        } catch (error) {
+      } catch (error) {
         console.error(`❌ DB attach error for ${addon.name}:`, error?.message || error)
       }
     }
 
-    console.log(`🎉 Import completed! Processed ${processedAddons.length} addons out of ${addons.length} total addons`)
-    console.log(`📋 Processed addons:`, processedAddons.map(a => `${a.name} (${a.id})`))
-    console.log(`📊 Newly imported: ${newlyImportedAddons.length}, Already existing: ${existingAddons.length}`)
-    
-    let message = ''
-    if (newlyImportedAddons.length > 0 && existingAddons.length > 0) {
-      message = `Successfully imported ${newlyImportedAddons.length} addons to group "${groupName}" (${existingAddons.length} already existed)`
-    } else if (newlyImportedAddons.length > 0) {
-      message = `Successfully imported ${newlyImportedAddons.length} addons to group "${groupName}"`
-    } else if (existingAddons.length > 0) {
-      message = `All ${existingAddons.length} addons already existed in group "${groupName}"`
-    } else {
-      message = `No addons were processed`
-    }
+    const message = existingAddons.length > 0
+      ? `Successfully imported ${newlyImportedAddons.length} addons to group "${groupName}" (${existingAddons.length} already existed)`
+      : `Successfully imported ${newlyImportedAddons.length} addons to group "${groupName}"`
 
     res.json({
       message,

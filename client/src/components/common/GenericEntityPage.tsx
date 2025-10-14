@@ -260,13 +260,17 @@ export default function GenericEntityPage({ config }: GenericEntityPageProps) {
 
   const importMutation = useMutation({
     mutationFn: (id: string) => finalConfig.api.import!(id),
-    onSuccess: (_, id) => {
+    onSuccess: (result: any, id) => {
       queryClient.invalidateQueries({ queryKey: [finalConfig.entityType] })
       // Trigger sync status refresh for users (importing affects user addons)
       if (finalConfig.entityType === 'user') {
         refreshAllSyncStatus(undefined, id)
       }
-      toast.success(`${finalConfig.title.slice(0, -1)} imported successfully`)
+      if (result && typeof result === 'object') {
+        toast.success(result.message || `${finalConfig.title.slice(0, -1)} imported successfully`)
+      } else {
+        toast.success(`${finalConfig.title.slice(0, -1)} imported successfully`)
+      }
     },
     onError: (error: any) => {
       const message = error?.response?.data?.error || error?.message || `Failed to import ${finalConfig.entityType}`
