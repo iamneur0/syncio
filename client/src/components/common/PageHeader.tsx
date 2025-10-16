@@ -6,7 +6,7 @@ import { useTheme } from '@/contexts/ThemeContext'
 import { getTextClasses } from '@/utils/themeUtils'
 import { SearchInput } from './Input'
 import { IconButton, ToggleButton } from './MicroUI'
-import UserMenuButton from '../auth/UserMenuButton'
+import AccountMenuButton from '../auth/AccountMenuButton'
 
 interface PageHeaderProps {
   title: string
@@ -78,7 +78,7 @@ export default function PageHeader({
         <div className="flex items-center gap-2">
           {/* Desktop account button */}
           <div className="hidden lg:block ml-1">
-            <UserMenuButton />
+            <AccountMenuButton />
           </div>
         </div>
       </div>

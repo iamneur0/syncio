@@ -63,9 +63,18 @@ export default function SyncBadge({
   // Group sync logic
   const { data: groupDetails } = useQuery({
     queryKey: ['group', groupId, 'details'],
-    queryFn: () => groupId ? groupsAPI.getById(groupId) : null,
+    queryFn: async () => {
+      if (!groupId) return null
+      try {
+        return await groupsAPI.getById(groupId)
+      } catch {
+        // Treat missing/404 group as null so we don't throw or keep retrying
+        return null
+      }
+    },
     enabled: isSmartMode && Boolean(groupId),
     refetchOnMount: 'always',
+    retry: false,
   })
 
   const groupUsers = (groupDetails as any)?.users || []
@@ -106,6 +115,40 @@ export default function SyncBadge({
   React.useEffect(() => {
     if (!isSmartMode) return
 
+    const onUserDeleted = (e: CustomEvent) => {
+      const deletedId = (e as any).detail?.userId
+      if (deletedId && userId === deletedId) {
+        // Stop showing/polling for this user
+        setSmartStatus('stale')
+        setIsLoading(false)
+      }
+    }
+    window.addEventListener('sfm:user:deleted' as any, onUserDeleted as any)
+
+    const onGroupReordered = (e: CustomEvent) => {
+      const id = (e as any).detail?.id
+      if (groupId && id === groupId) {
+        // Do not change current display; just refetch fresh status
+        try { queryClient.invalidateQueries({ queryKey: ['group', groupId, 'sync-status'] }) } catch {}
+        try { queryClient.refetchQueries({ queryKey: ['group', groupId, 'sync-status'], exact: true }) } catch {}
+        if (userId) {
+          try { queryClient.invalidateQueries({ queryKey: ['user', userId, 'sync-status'] }) } catch {}
+          try { queryClient.refetchQueries({ queryKey: ['user', userId, 'sync-status'], exact: true }) } catch {}
+        }
+      }
+    }
+    window.addEventListener('sfm:group:reordered' as any, onGroupReordered as any)
+
+    const onUserSyncData = (e: CustomEvent) => {
+      const changedUserId = (e as any).detail?.userId
+      if (userId && changedUserId === userId) {
+        // Just refetch this user's status; keep current display until result arrives
+        try { queryClient.invalidateQueries({ queryKey: ['user', userId, 'sync-status'] }) } catch {}
+        try { queryClient.refetchQueries({ queryKey: ['user', userId, 'sync-status'], exact: true }) } catch {}
+      }
+    }
+    window.addEventListener('sfm:user-sync-data' as any, onUserSyncData as any)
+
     if (userId && userSyncStatus) {
       setSmartStatus((userSyncStatus as any).status || 'checking')
       setIsLoading(false)
@@ -127,6 +170,11 @@ export default function SyncBadge({
         setSmartStatus((groupSyncStatus as any).status || 'checking')
         setIsLoading(false)
       }
+    }
+    return () => {
+      window.removeEventListener('sfm:user:deleted' as any, onUserDeleted as any)
+      window.removeEventListener('sfm:group:reordered' as any, onGroupReordered as any)
+      window.removeEventListener('sfm:user-sync-data' as any, onUserSyncData as any)
     }
   }, [userId, userSyncStatus, groupId, groupUsers, groupDetails, isSyncing, isSmartMode, groupSyncStatus])
 
@@ -177,8 +225,9 @@ export default function SyncBadge({
 
   // Determine final status and click handler
   const finalStatus = isSmartMode ? smartStatus : status!
+  // Make badge actionable whenever an onSync handler is provided in smart mode
   const finalIsClickable = isSmartMode 
-    ? (finalStatus === 'unsynced' && !!onSync)
+    ? !!onSync
     : isClickable
   const finalOnClick = isSmartMode && onSync
     ? () => onSync(userId || groupId!)

@@ -55,13 +55,13 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
   if (!AUTH_ENABLED) return <>{children}</>
   
   if (!authed) {
-    return <LoginForm />
+    return <LoginForm setAuthed={setAuthed} />
   }
   
   return <>{children}</>
 }
 
-function LoginForm() {
+function LoginForm({ setAuthed }: { setAuthed: (authed: boolean) => void }) {
   const { isDark, isMono } = useTheme()
   const [uuid, setUuid] = useState('')
   const [password, setPassword] = useState('')
@@ -88,7 +88,7 @@ function LoginForm() {
         response = await publicAuthAPI.login({ uuid: uuid.trim(), password })
       }
       
-      if (response.success || response.message) {
+      if (response.message) {
         // Trigger auth change event
         window.dispatchEvent(new CustomEvent('sfm:auth:changed', { detail: { authed: true } }))
         // Also update local state immediately
@@ -156,10 +156,10 @@ function LoginForm() {
                 required
                 value={uuid}
                 onChange={(e) => setUuid(e.target.value)}
-                className={`block w-full pl-10 pr-3 py-2 border rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-offset-2 sm:text-sm ${
+                className={`block w-full pl-10 pr-3 py-2 border rounded-md shadow-sm placeholder-gray-400 focus:outline-none sm:text-sm ${
                   isDark 
-                    ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400 focus:ring-purple-500 focus:border-purple-500' 
-                    : 'border-gray-300 text-gray-900 placeholder-gray-400 focus:ring-purple-500 focus:border-purple-500'
+                    ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
+                    : 'border-gray-300 text-gray-900 placeholder-gray-400'
                 }`}
                 placeholder="Enter your account UUID"
               />
@@ -186,10 +186,10 @@ function LoginForm() {
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className={`block w-full pl-10 pr-10 py-2 border rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-offset-2 sm:text-sm ${
+                className={`block w-full pl-10 pr-10 py-2 border rounded-md shadow-sm placeholder-gray-400 focus:outline-none sm:text-sm ${
                   isDark 
-                    ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400 focus:ring-purple-500 focus:border-purple-500' 
-                    : 'border-gray-300 text-gray-900 placeholder-gray-400 focus:ring-purple-500 focus:border-purple-500'
+                    ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
+                    : 'border-gray-300 text-gray-900 placeholder-gray-400'
                 }`}
                 placeholder="Enter your password"
               />
@@ -225,7 +225,7 @@ function LoginForm() {
             <button
               type="submit"
               disabled={isLoading}
-              className={`group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 ${
+              className={`group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white focus:outline-none ${
                 isLoading
                   ? 'bg-gray-400 cursor-not-allowed'
                   : 'bg-purple-600 hover:bg-purple-700'

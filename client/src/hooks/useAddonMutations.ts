@@ -11,7 +11,7 @@ export default function useAddonMutations(queryClient: any) {
       toast.success('Addon created successfully')
     },
     onError: (error: any) => {
-      const message = error?.response?.data?.error || error?.message || 'Failed to create addon'
+      const message = error?.response?.data?.message || error?.response?.data?.error || error?.message || 'Failed to create addon'
       toast.error(message)
     }
   })
@@ -55,24 +55,13 @@ export default function useAddonMutations(queryClient: any) {
     }
   })
 
-  // Reload all addons mutation
-  const reloadAllMutation = useMutation({
-    mutationFn: () => addonsAPI.reloadAll(),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['addons'] })
-      toast.success('All addons reloaded successfully')
-    },
-    onError: (error: any) => {
-      const message = error?.response?.data?.error || error?.message || 'Failed to reload addons'
-      toast.error(message)
-    }
-  })
+  // Note: Bulk reload all addons is not supported by the API
+  // Individual addon reload is available via reloadMutation
 
   return {
     createAddonMutation,
     deleteAddonMutation,
     updateAddonMutation,
-    reloadAddonMutation,
-    reloadAllMutation
+    reloadAddonMutation
   }
 }

@@ -44,8 +44,9 @@ if echo "$DATABASE_URL" | grep -q '^file:'; then
   }
 fi
 
-echo "📊 Generating Prisma client..."
-npx prisma generate --schema "$PRISMA_SCHEMA_PATH"
+echo "📊 Prisma client already generated in Docker build..."
+# Skip Prisma generation since it's already done in the Docker build stage
+# npx prisma generate --schema "$PRISMA_SCHEMA_PATH"
 
 echo "📊 Applying Prisma schema..."
 if [ "$INSTANCE" = "public" ]; then
@@ -53,14 +54,14 @@ if [ "$INSTANCE" = "public" ]; then
   npx prisma migrate deploy --schema "$PRISMA_SCHEMA_PATH" || true
 else
   echo "➡️ Skipping migrate deploy for SQLite (private)"
-  # Clean up any migration conflicts for SQLite
+  # Clean up any migration conflicts for SQLite (ignore permission errors)
   if [ -f "prisma/migration_lock.toml" ]; then
     echo "➡️ Cleaning up migration lock for SQLite"
-    rm -f prisma/migration_lock.toml
+    rm -f prisma/migration_lock.toml 2>/dev/null || echo "⚠️ Could not remove migration lock (permission denied)"
   fi
   if [ -d "prisma/migrations" ]; then
     echo "➡️ Cleaning up migrations directory for SQLite"
-    rm -rf prisma/migrations
+    rm -rf prisma/migrations 2>/dev/null || echo "⚠️ Could not remove migrations directory (permission denied)"
   fi
 fi
 echo "➡️ Ensuring schema is applied (db push)"
@@ -80,7 +81,7 @@ FRONTEND_PID=$!
 sleep 2
 
 echo "🔧 Starting backend server on port ${BACKEND_PORT:-4000}..."
-cd /app && HOST=0.0.0.0 PORT=${BACKEND_PORT:-4000} AUTH_ENABLED=${AUTH_ENABLED} DATABASE_URL=${DATABASE_URL} node server/database-backend.js &
+cd /app && HOST=0.0.0.0 PORT=${BACKEND_PORT:-4000} AUTH_ENABLED=${AUTH_ENABLED} DATABASE_URL=${DATABASE_URL} node server/index.js &
 BACKEND_PID=$!
 
 cleanup() {
@@ -94,5 +95,3 @@ cleanup() {
 trap cleanup SIGTERM SIGINT
 
 wait $BACKEND_PID $FRONTEND_PID
-
-

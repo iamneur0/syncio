@@ -192,15 +192,15 @@ export function getInputClasses(theme: ThemeContextType, hasError = false) {
   const themeVariant = getThemeVariant(theme)
   const { isMono } = theme
   
-  const baseClasses = 'w-full px-3 py-2 rounded border focus:ring-2 focus:border-transparent'
-  const errorClasses = hasError ? 'border-red-500 focus:ring-red-500' : ''
+  const baseClasses = 'w-full px-3 py-2 rounded border focus:outline-none'
+  const errorClasses = hasError ? 'border-red-500' : ''
   
   const themeClasses = {
-    light: 'bg-white border-gray-300 text-gray-900 placeholder-gray-500 focus:ring-purple-500',
-    dark: 'bg-gray-700 border-gray-600 text-white placeholder-gray-400 focus:ring-purple-500',
-    modern: 'bg-purple-50/80 border-purple-300/50 text-purple-900 placeholder-purple-500 focus:ring-purple-500',
-    'modern-dark': 'bg-purple-800/30 border-purple-600/50 text-purple-100 placeholder-purple-400 focus:ring-purple-500',
-    mono: 'bg-gray-700 border-gray-600 text-white placeholder-gray-400 focus:ring-purple-500'
+    light: 'bg-white border-gray-300 text-gray-900 placeholder-gray-500',
+    dark: 'bg-gray-700 border-gray-600 text-white placeholder-gray-400',
+    modern: 'bg-purple-50/80 border-purple-300/50 text-purple-900 placeholder-purple-500',
+    'modern-dark': 'bg-purple-800/30 border-purple-600/50 text-purple-100 placeholder-purple-400',
+    mono: 'bg-gray-700 border-gray-600 text-white placeholder-gray-400'
   }
   
   return `${baseClasses} ${themeClasses[themeVariant]} ${errorClasses}`.trim()

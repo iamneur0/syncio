@@ -1,8 +1,10 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 import { useTheme } from '@/contexts/ThemeContext'
 import { getColorBgClass, getColorHexValue } from '@/utils/colorMapping'
+import { addonsAPI } from '@/services/api'
+import { VersionChip } from './MicroUI'
 
 interface AddonAddModalProps {
   isOpen: boolean
@@ -36,7 +38,9 @@ export default function AddonAddModal({
   const [addonUrl, setAddonUrl] = useState('')
   const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>([])
   const [urlError, setUrlError] = useState<string>('')
+  const [nameError, setNameError] = useState<string>('')
   const [isLoadingManifest, setIsLoadingManifest] = useState(false)
+  const [isCheckingName, setIsCheckingName] = useState(false)
   const [manifestData, setManifestData] = useState<any>(null)
 
   useEffect(() => {
@@ -65,7 +69,7 @@ export default function AddonAddModal({
       return
     }
 
-    const urlPattern = /^https?:\/\/.+\.json$/
+    const urlPattern = /^@?(https?|stremio):\/\/.+\.json$/
     if (!urlPattern.test(addonUrl.trim())) {
       setUrlError('URL must be a valid JSON manifest URL')
       setManifestData(null)
@@ -78,7 +82,14 @@ export default function AddonAddModal({
     const loadManifest = async () => {
       try {
         setIsLoadingManifest(true)
-        const response = await fetch(addonUrl)
+        
+        // Convert stremio:// URLs to https:// for fetching
+        let fetchUrl = addonUrl.trim()
+        if (fetchUrl.startsWith('stremio://')) {
+          fetchUrl = fetchUrl.replace(/^stremio:\/\//, 'https://')
+        }
+        
+        const response = await fetch(fetchUrl)
         if (!response.ok) {
           throw new Error('Failed to fetch manifest')
         }
@@ -97,7 +108,47 @@ export default function AddonAddModal({
 
     const timeoutId = setTimeout(loadManifest, 500)
     return () => clearTimeout(timeoutId)
-  }, [addonUrl, addonName])
+  }, [addonUrl])
+
+  // Validate addon name for duplicates
+  useEffect(() => {
+    if (!addonName.trim()) {
+      setNameError('')
+      return
+    }
+
+    const checkNameAvailability = async () => {
+      try {
+        setIsCheckingName(true)
+        setNameError('')
+        
+        // Get all existing addons
+        const existingAddons = await addonsAPI.getAll()
+        const duplicateAddon = existingAddons.find(addon => 
+          addon.name.toLowerCase().trim() === addonName.toLowerCase().trim()
+        )
+        
+        if (duplicateAddon) {
+          setNameError(`An addon named "${duplicateAddon.name}" already exists`)
+        }
+      } catch (error) {
+        console.error('Error checking addon name:', error)
+        // Don't show error to user for validation checks
+      } finally {
+        setIsCheckingName(false)
+      }
+    }
+
+    const timeoutId = setTimeout(checkNameAvailability, 300)
+    return () => clearTimeout(timeoutId)
+  }, [addonName])
+
+  // Memoize version tag to prevent unnecessary re-renders
+  const versionTag = useMemo(() => {
+    if (!manifestData?.version) return null
+    
+    return <VersionChip version={manifestData.version} size="sm" />
+  }, [manifestData?.version])
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -106,7 +157,7 @@ export default function AddonAddModal({
       return
     }
 
-    if (urlError) {
+    if (urlError || nameError) {
       return
     }
 
@@ -128,8 +179,10 @@ export default function AddonAddModal({
     setAddonUrl('')
     setSelectedGroupIds([])
     setIsLoadingManifest(false)
+    setIsCheckingName(false)
     setManifestData(null)
     setUrlError('')
+    setNameError('')
     onClose()
   }
 
@@ -172,18 +225,23 @@ export default function AddonAddModal({
                 onChange={(e) => setAddonName(e.target.value)}
                 placeholder="Cinemeta"
                 required
-                className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-stremio-purple focus:border-transparent ${
+                className={`w-full px-3 py-2 border rounded-lg focus:outline-none ${
+                  nameError 
+                    ? 'border-red-500' 
+                    : ''
+                } ${
                   isDark 
                     ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
                     : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
                 }`}
               />
-              {manifestData?.version && (
-                <span className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium whitespace-nowrap ${
-                  isDark ? 'bg-blue-500 text-blue-100' : 'bg-blue-100 text-blue-800'
-                }`}>v{manifestData.version}</span>
-              )}
+              {versionTag}
             </div>
+            {nameError && (
+              <p className="text-xs mt-1 text-red-500">
+                {nameError}
+              </p>
+            )}
           </div>
           <div>
             <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
@@ -195,7 +253,7 @@ export default function AddonAddModal({
               onChange={(e) => setAddonUrl(e.target.value)}
               placeholder="https://v3-cinemeta.strem.io/manifest.json"
               required
-              className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-stremio-purple focus:border-transparent ${
+              className={`w-full px-3 py-2 border rounded-lg focus:outline-none ${
                 isDark 
                   ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
                   : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
@@ -216,10 +274,12 @@ export default function AddonAddModal({
                 return (
                   <div 
                     key={group.id}
-                    className={`flex items-center justify-between p-3 rounded-lg border transition-colors cursor-pointer ${
+                    className={`flex items-center justify-between p-3 rounded-lg cursor-pointer ${
+                      isDark ? 'bg-gray-600 hover:bg-gray-550' : 'bg-white hover:bg-gray-50'
+                    } border ${
                       active
-                        ? (isDark ? 'bg-gray-600 border-gray-300' : 'bg-white border-gray-300')
-                        : (isDark ? 'bg-gray-700 border-gray-600 hover:bg-gray-600' : 'bg-white border-gray-200 hover:bg-gray-50')
+                        ? (isMono ? 'ring-2 ring-white/50 border-white/40' : 'ring-2 ring-gray-400 border-gray-400')
+                        : 'border-transparent'
                     }`}
                     onClick={() => {
                       setSelectedGroupIds(prev => active ? prev.filter(id => id !== group.id) : [...prev, group.id])
@@ -262,7 +322,7 @@ export default function AddonAddModal({
             </button>
             <button
               type="submit"
-              disabled={isCreating || !!urlError || isLoadingManifest || !manifestData}
+              disabled={isCreating || !!urlError || !!nameError || isLoadingManifest || isCheckingName || !manifestData}
               className="flex-1 px-4 py-2 accent-bg accent-text rounded-lg transition-colors disabled:opacity-50"
             >
               {isCreating ? 'Adding...' : isLoadingManifest ? 'Loading manifest...' : 'Add Addon'}

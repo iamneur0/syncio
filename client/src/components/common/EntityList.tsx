@@ -32,6 +32,8 @@ interface EntityListProps {
     onClick: () => void
     tooltip: string
   }
+  // Optional custom right-side header content (e.g., selectors)
+  headerRight?: React.ReactNode
   showSyncBadge?: boolean
   syncBadgeProps?: {
     userId?: string
@@ -68,6 +70,7 @@ export default function EntityList({
   children,
   buttons = [],
   actionButton,
+  headerRight,
   showSyncBadge = false,
   syncBadgeProps,
   layout = 'vertical',
@@ -129,6 +132,7 @@ export default function EntityList({
           </h3>
         )}
         <div className="flex items-center gap-2">
+          {headerRight}
           {actionButton && (
             <button
               onClick={actionButton.onClick}
@@ -172,7 +176,7 @@ export default function EntityList({
               if (buttons.length > 0) {
                 return (
                   <div
-                    key={item.id || item.manifestUrl || item.transportUrl || index}
+                    key={`${item.id || item.manifestUrl || item.transportUrl || index}::${index}`}
                     className={`relative rounded-lg border p-4 hover:shadow-md transition-all ${
                       isDark
                         ? 'bg-gray-600 border-gray-500 hover:bg-gray-550'
@@ -217,7 +221,7 @@ export default function EntityList({
 
               return (
                 <div
-                  key={item.id || item.manifestUrl || item.transportUrl || index}
+                  key={`${item.id || item.manifestUrl || item.transportUrl || index}::${index}`}
                   className={`${wrapperClass} rounded-lg`}
                   onClick={(e) => e.stopPropagation()}
                 >

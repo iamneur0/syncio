@@ -1,8 +1,11 @@
-version: '3.8'
-
 services:
   syncio:
-    image: ghcr.io/iamneur0/syncio:latest
+    # image: ghcr.io/iamneur0/syncio:private
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        INSTANCE: private
     container_name: syncio
     restart: unless-stopped
     user: "${UID:-1000}:${GID:-1000}"
@@ -10,7 +13,7 @@ services:
       JWT_SECRET: ${JWT_SECRET:-jwt-secret-key}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:-encryption-key}
       REDIS_URL: redis://syncio_redis:6379
-      # DATABASE_URL: file:/app/data/sqlite.db
+      DATABASE_URL: file:/app/data/sqlite.db
     ports:
       - "3000:3000"
       - "4000:4000"

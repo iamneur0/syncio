@@ -76,7 +76,7 @@ model Addon {
 model GroupAddon {
   id        String   @id @default(cuid())
   isEnabled Boolean  @default(true)
-  settings  String?
+  position  Int?
   groupId   String
   group     Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
   addonId   String

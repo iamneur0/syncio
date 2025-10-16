@@ -5,7 +5,7 @@ import { useTheme } from '@/contexts/ThemeContext'
 import { useMutation } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import { Upload, RotateCcw, Sun, Moon, Sparkles, User, Users, Download, Trash2, RefreshCcw, SunMoon } from 'lucide-react'
-import UserMenuButton from '@/components/auth/UserMenuButton'
+import AccountMenuButton from '@/components/auth/AccountMenuButton'
 import ConfirmDialog from '@/components/common/ConfirmDialog'
 import api from '@/services/api'
 
@@ -21,6 +21,12 @@ export default function SettingsPage() {
   const [showConfigImport, setShowConfigImport] = React.useState<boolean>(false)
   const [configText, setConfigText] = React.useState<string>('')
   const [backupDays, setBackupDays] = React.useState<number>(0)
+  const [isDraggingFiles, setIsDraggingFiles] = React.useState<boolean>(false)
+  const [isDraggingAddonsOver, setIsDraggingAddonsOver] = React.useState<boolean>(false)
+  const [isDraggingConfigOver, setIsDraggingConfigOver] = React.useState<boolean>(false)
+  const addonsDragDepth = React.useRef<number>(0)
+  const configDragDepth = React.useRef<number>(0)
+  const containerRef = React.useRef<HTMLDivElement | null>(null)
   
   // Account management confirmation modals
   const [confirmOpen, setConfirmOpen] = React.useState(false)
@@ -39,6 +45,63 @@ export default function SettingsPage() {
     
     const savedDeleteMode = localStorage.getItem('sfm_delete_mode')
     setDeleteMode(savedDeleteMode === 'unsafe' ? 'unsafe' : 'safe')
+  }, [])
+
+  // Global file-drag detection to hint buttons
+  React.useEffect(() => {
+    let dragCounter = 0
+    let resetTimer: any = null
+    const isFileDrag = (e: DragEvent) => {
+      const dt = e.dataTransfer
+      if (!dt) return false
+      // Cross-browser checks (Chrome/Firefox/Safari)
+      if (dt.files && dt.files.length > 0) return true
+      const types = dt.types ? Array.from(dt.types) : []
+      return types.includes('Files') || types.includes('public.file-url') || types.includes('text/uri-list')
+    }
+    const scheduleReset = () => {
+      if (resetTimer) clearTimeout(resetTimer)
+      resetTimer = setTimeout(() => setIsDraggingFiles(false), 150)
+    }
+    const onDragOverCap = (e: DragEvent) => {
+      if (isFileDrag(e)) {
+        e.preventDefault()
+        setIsDraggingFiles(true)
+        scheduleReset()
+      }
+    }
+    const onDragEnterCap = (e: DragEvent) => {
+      if (isFileDrag(e)) {
+        dragCounter++
+        setIsDraggingFiles(true)
+      }
+    }
+    const onDragLeaveCap = (e: DragEvent) => {
+      if (isFileDrag(e)) {
+        dragCounter = Math.max(0, dragCounter - 1)
+        if (dragCounter === 0) setIsDraggingFiles(false)
+      }
+    }
+    const onDropCap = (e: DragEvent) => {
+      if (isFileDrag(e)) {
+        e.preventDefault()
+      }
+      dragCounter = 0
+      setIsDraggingFiles(false)
+    }
+    const el = containerRef.current || document.body
+    // Attach on a stable container to ensure capture works consistently
+    el.addEventListener('dragover', onDragOverCap, true)
+    el.addEventListener('dragenter', onDragEnterCap, true)
+    el.addEventListener('dragleave', onDragLeaveCap, true)
+    el.addEventListener('drop', onDropCap, true)
+    return () => {
+      el.removeEventListener('dragover', onDragOverCap, true)
+      el.removeEventListener('dragenter', onDragEnterCap, true)
+      el.removeEventListener('dragleave', onDragLeaveCap, true)
+      el.removeEventListener('drop', onDropCap, true)
+      if (resetTimer) clearTimeout(resetTimer)
+    }
   }, [])
 
   // Load backup frequency (only in private mode)
@@ -131,6 +194,57 @@ export default function SettingsPage() {
   const onDragOver = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault()
   }
+
+  // Button-level drag & drop (addons)
+  const onButtonDragOver = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+  }
+  const onDropAddonsButton = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const file = (e as React.DragEvent<any>).dataTransfer?.files?.[0]
+    if (file) {
+      importAddonsMutation.mutate({ file, mode: 'file' })
+    }
+    addonsDragDepth.current = 0
+    setIsDraggingAddonsOver(false)
+  }
+
+  // Button-level drag & drop (configuration)
+  const onDropConfigButton = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const file = (e as React.DragEvent<any>).dataTransfer?.files?.[0]
+    if (file) {
+      const formData = new FormData()
+      formData.append('file', file)
+      setConfigImporting(true)
+      api.post('/public-auth/config-import', formData, { headers: { 'Content-Type': 'multipart/form-data' } })
+        .then((resp) => {
+          const addons = resp.data?.addons || resp.data?.created || resp.data?.imported || {}
+          const users = resp.data?.users || {}
+          const groups = resp.data?.groups || {}
+          const totalAddons = (addons.created || 0) + (addons.reused || 0)
+          const messageParts: string[] = []
+          if (totalAddons > 0) messageParts.push(`${totalAddons} addons`)
+          if (users.created > 0) messageParts.push(`${users.created} users`)
+          if (groups.created > 0) messageParts.push(`${groups.created} groups`)
+          toast.success(`Configuration imported${messageParts.length ? `:\n${messageParts.join('\n')}` : ''}`)
+        })
+        .catch((err) => {
+          const msg = err?.response?.data?.message || err?.message || 'Import configuration failed'
+          toast.error(msg)
+        })
+        .finally(() => setConfigImporting(false))
+    }
+    configDragDepth.current = 0
+    setIsDraggingConfigOver(false)
+  }
+  const onButtonDragEnterAddons = (e: React.DragEvent) => { e.preventDefault(); e.stopPropagation(); addonsDragDepth.current += 1; setIsDraggingAddonsOver(true) }
+  const onButtonDragLeaveAddons = (e: React.DragEvent) => { e.preventDefault(); e.stopPropagation(); addonsDragDepth.current = Math.max(0, addonsDragDepth.current - 1); if (addonsDragDepth.current === 0) setIsDraggingAddonsOver(false) }
+  const onButtonDragEnterConfig = (e: React.DragEvent) => { e.preventDefault(); e.stopPropagation(); configDragDepth.current += 1; setIsDraggingConfigOver(true) }
+  const onButtonDragLeaveConfig = (e: React.DragEvent) => { e.preventDefault(); e.stopPropagation(); configDragDepth.current = Math.max(0, configDragDepth.current - 1); if (configDragDepth.current === 0) setIsDraggingConfigOver(false) }
 
   const exportAddons = async () => {
     try {
@@ -339,8 +453,7 @@ export default function SettingsPage() {
             toast.success(`Addons deleted: ${successCount} successful, ${errorCount} failed`)
           }
           
-          // Refresh the page to update the UI
-          window.location.reload()
+          // Stay on settings page; UI will naturally update on next navigation
         } catch (e: any) {
           const msg = e?.response?.data?.error || e?.message || 'Delete failed'
           toast.error(msg)
@@ -385,8 +498,7 @@ export default function SettingsPage() {
             toast.success(`Users deleted: ${successCount} successful, ${errorCount} failed`)
           }
           
-          // Refresh the page to update the UI
-          window.location.reload()
+          // Stay on settings page; UI will naturally update on next navigation
         } catch (e: any) {
           const msg = e?.response?.data?.error || e?.message || 'Delete failed'
           toast.error(msg)
@@ -431,8 +543,7 @@ export default function SettingsPage() {
             toast.success(`Groups deleted: ${successCount} successful, ${errorCount} failed`)
           }
           
-          // Refresh the page to update the UI
-          window.location.reload()
+          // Stay on settings page; UI will naturally update on next navigation
         } catch (e: any) {
           const msg = e?.response?.data?.error || e?.message || 'Delete failed'
           toast.error(msg)
@@ -477,8 +588,7 @@ export default function SettingsPage() {
             toast.success(`User addons cleared for ${successCount} users, ${errorCount} failed`)
           }
           
-          // Refresh the page to update the UI
-          window.location.reload()
+          // Stay on settings page; UI will naturally update on next navigation
         } catch (e: any) {
           const msg = e?.response?.data?.error || e?.message || 'Clear failed'
           toast.error(msg)
@@ -488,7 +598,7 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="p-4 sm:p-6">
+    <div ref={containerRef} className="p-4 sm:p-6">
       {/* Header */}
       <div className="mb-6 sm:mb-8">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4 gap-4">
@@ -511,7 +621,7 @@ export default function SettingsPage() {
           <div className="flex items-center gap-2">
             {/* Desktop account button */}
             <div className="hidden lg:block ml-1">
-              <UserMenuButton />
+              <AccountMenuButton />
             </div>
           </div>
         </div>
@@ -793,10 +903,20 @@ export default function SettingsPage() {
         </p>
         <div className="mt-4 flex gap-4 flex-wrap">
           <button
-            onClick={() => setShowAddonImport(v => !v)}
-            className="accent-bg accent-text hover:opacity-90 flex items-center px-4 py-2 rounded-lg transition-colors"
+            onClick={handleUploadClick}
+            onDragOver={onButtonDragOver}
+            onDrop={onDropAddonsButton}
+            onDragEnter={onButtonDragEnterAddons}
+            onDragLeave={onButtonDragLeaveAddons}
+            className={`accent-bg accent-text hover:opacity-90 flex items-center px-4 py-2 rounded-lg transition-colors border-2 ${
+              isDraggingAddonsOver ? `border-dashed ${isDark ? 'border-gray-400' : 'border-gray-600'}` : 'border-transparent'
+            }`}
           >
-            <Upload className="w-5 h-5 mr-2" /> Import Addons
+            <Upload className="w-5 h-5 mr-2" />
+            <span className="relative inline-block">
+              <span className={isDraggingAddonsOver ? 'opacity-0' : 'opacity-100'}>Import Addons</span>
+              <span className={`absolute left-0 top-0 ${isDraggingAddonsOver ? 'opacity-100' : 'opacity-0'}`}>Drag Addons</span>
+            </span>
           </button>
           <button
             onClick={exportAddons}
@@ -806,48 +926,7 @@ export default function SettingsPage() {
           </button>
         </div>
 
-        {showAddonImport && (
-          <div
-            onDrop={onDropImport}
-            onDragOver={onDragOver}
-            className={`mt-4 p-4 border-2 border-dashed rounded-lg ${isDark ? 'border-gray-600 bg-gray-800/60' : 'border-gray-300 bg-gray-50'}`}
-          >
-            <div className={`${isDark ? 'text-gray-200' : 'text-gray-800'} mb-2 font-medium`}>
-              Drop a .json file here, or paste JSON below, then click Import
-            </div>
-            {/* Hidden file input for manual selection if desired */}
-            <div className="mb-3">
-              <button onClick={handleUploadClick} className={`${isDark ? 'bg-gray-700 hover:bg-gray-600 text-white' : 'bg-gray-100 hover:bg-gray-200 text-gray-900'} px-3 py-1 rounded`}>
-                Choose File
-              </button>
-            </div>
-            <textarea
-              value={importText}
-              onChange={(e) => setImportText(e.target.value)}
-              placeholder="Paste your JSON content here..."
-              rows={8}
-              className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-stremio-purple focus:border-transparent ${
-                isDark 
-                  ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
-                  : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
-              }`}
-            />
-            <div className="mt-3">
-              <button
-                onClick={handleImport}
-                disabled={!importText.trim() || importAddonsMutation.isPending}
-                className={`${isDark ? 'bg-gray-700 hover:bg-gray-600 text-white' : 'bg-gray-100 hover:bg-gray-200 text-gray-900'} flex items-center px-4 py-2 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed`}
-              >
-                {importAddonsMutation.isPending ? (
-                  <RotateCcw className="w-5 h-5 mr-2 animate-spin" />
-                ) : (
-                  <Upload className="w-5 h-5 mr-2" />
-                )}
-                {importAddonsMutation.isPending ? 'Importing...' : 'Import'}
-              </button>
-            </div>
-          </div>
-        )}
+        {/* Drag-and-drop and text import removed per request */}
 
         {/* Hidden file input */}
         <input
@@ -867,54 +946,28 @@ export default function SettingsPage() {
         <p className={`text-sm mt-1 ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>Export full configuration or reset-and-import a configuration file/JSON.</p>
         <div className="mt-4 flex gap-4 flex-wrap">
           <button
-            onClick={() => setShowConfigImport(v => !v)}
-            className="accent-bg accent-text hover:opacity-90 flex items-center px-4 py-2 rounded-lg transition-colors"
+            onClick={() => (document.getElementById('import-config-file') as HTMLInputElement)?.click()}
+            onDragOver={onButtonDragOver}
+            onDrop={onDropConfigButton}
+            onDragEnter={onButtonDragEnterConfig}
+            onDragLeave={onButtonDragLeaveConfig}
+            className={`accent-bg accent-text hover:opacity-90 flex items-center px-4 py-2 rounded-lg transition-colors border-2 ${
+              isDraggingConfigOver ? `border-dashed ${isDark ? 'border-gray-400' : 'border-gray-600'}` : 'border-transparent'
+            }`}
           >
-            <Upload className="w-5 h-5 mr-2" /> Import Configuration
+            <Upload className="w-5 h-5 mr-2" />
+            <span className="relative inline-block">
+              <span className={isDraggingConfigOver ? 'opacity-0' : 'opacity-100'}>Import Configuration</span>
+              <span className={`absolute left-0 top-0 ${isDraggingConfigOver ? 'opacity-100' : 'opacity-0'}`}>Drag Configuration</span>
+            </span>
           </button>
           <button onClick={exportConfig} className="accent-bg accent-text hover:opacity-90 flex items-center px-4 py-2 rounded-lg transition-colors">
             <Download className="w-5 h-5 mr-2" /> Export Configuration
           </button>
         </div>
 
-        {showConfigImport && (
-          <div
-            onDrop={onDropConfig}
-            onDragOver={(e) => e.preventDefault()}
-            className={`mt-4 p-4 border-2 border-dashed rounded-lg ${isDark ? 'border-gray-600 bg-gray-800/60' : 'border-gray-300 bg-gray-50'}`}
-          >
-            <div className={`${isDark ? 'text-gray-200' : 'text-gray-800'} mb-2 font-medium`}>
-              Drop a .json file here, or paste JSON below, then click Import
-            </div>
-            <div className="mb-3">
-              <button onClick={() => (document.getElementById('import-config-file') as HTMLInputElement)?.click()} className={`${isDark ? 'bg-gray-700 hover:bg-gray-600 text-white' : 'bg-gray-100 hover:bg-gray-200 text-gray-900'} px-3 py-1 rounded`}>
-                Choose File
-              </button>
-              <input id="import-config-file" type="file" accept=".json" onChange={handleConfigFileChange} className="hidden" />
-            </div>
-            <textarea
-              value={configText}
-              onChange={(e) => setConfigText(e.target.value)}
-              placeholder="Paste your configuration JSON here..."
-              rows={8}
-              className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-stremio-purple focus:border-transparent ${
-                isDark 
-                  ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
-                  : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
-              }`}
-            />
-            <div className="mt-3">
-              <button
-                onClick={importConfiguration}
-                disabled={!configText.trim() && !(document.getElementById('import-config-file') as HTMLInputElement)?.files?.length || configImporting}
-                className={`${isDark ? 'bg-gray-700 hover:bg-gray-600 text-white' : 'bg-gray-100 hover:bg-gray-200 text-gray-900'} flex items-center px-4 py-2 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed`}
-              >
-                {configImporting ? <RotateCcw className="w-5 h-5 mr-2 animate-spin" /> : <Upload className="w-5 h-5 mr-2" />}
-                {configImporting ? 'Importing...' : 'Import'}
-              </button>
-            </div>
-          </div>
-        )}
+        {/* Hidden file input for configuration import */}
+        <input id="import-config-file" type="file" accept=".json" onChange={handleConfigFileChange} className="hidden" />
       </div>
 
       {/* Account Management */}

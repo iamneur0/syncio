@@ -1,88 +1,209 @@
 <div align="center">
-  
-  # 🎬 Syncio - Stremio Group Management System
+
+<img src="./client/public/logo-white.png" width="144"/>
+  <h1 align="center">Syncio</h1>
+
   
   *Streamline your Stremio addon and user management across different groups*
+
+</div>
+
+  <div align="center">
+
+  [![Discord](https://img.shields.io/discord/1225024298490662974?logo=discord&logoColor=f5f5f5&color=blue)](https://discord.gg/88dwGw9P)
+  [![Docker](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fghcr-badge.elias.eu.org%2Fapi%2Fiamneur0%2Fsyncio%2Fsyncio&query=%24.downloadCount&logo=github&label=pulls&color=blue)](https://github.com/iamneur0/syncio/pkgs/container/syncio)
+  ![Stars](https://img.shields.io/github/stars/iamneur0/syncio?style=flat-round&logo=stars)
+  ![GitHub Release](https://img.shields.io/github/v/release/iamneur0/syncio)
+
+![Syncio Addons Page](./doc/AddonsPage.png)
+
+
 </div>
 
 ## ✨ What Syncio Does
 
-Syncio helps you manage Stremio addons across your organization by:
+Syncio is a comprehensive management system for Stremio addons and users, designed for organizations that need to manage multiple Stremio accounts efficiently. It provides:
 
-- 🏢 **Create Groups** - Organize users into groups
-- 🔌 **Managing Addons** - Install, configure, and update Stremio addons for specific groups or individual users
-- 👥 **User Management** - Add members, and control access to different addons
-- 🔄 **Sync Management** - Keep addons synchronized across all users' Stremio accounts
-
-
-
-
+- 🏢 **Group Management** - Organize users into groups with custom colors and descriptions
+- 🔌 **Addon Management** - Install, configure, update, and manage Stremio addons
+- 👥 **User Management** - Add users, manage their Stremio accounts, and control access
+- 🔄 **Smart Sync** - Keep addons synchronized across all users' Stremio accounts
+- 🛡️ **Protected Addons** - Mark critical addons as protected to prevent accidental removal
+- 📊 **Resource Filtering** - Select specific resources (movies, series, etc.) from addons
+- 🎨 **Modern UI** - Beautiful, responsive interface with multiple themes
+- 🔐 **Authentication** - Secure user authentication and account management
+- 📤 **Import/Export** - Backup and restore your entire configuration
 
 ## 🚀 Quick Start with Docker Compose
 
-The easiest way to run Syncio is using Docker Compose. You can find the complete configuration at [docker-compose.yml](https://github.com/iamneur0/syncio/blob/main/docker-compose.yml).
+The easiest way to run Syncio is using Docker Compose. You can find the complete compose files at [private](https://github.com/iamneur0/syncio/blob/main/docker-compose.private.yml) and [public](https://github.com/iamneur0/syncio/blob/main/docker-compose.public.yml).
 
 ### 📋 Setup Instructions
+
 ```bash
-# 1. Create .env file from template
+# 1. Clone the repository
+git clone https://github.com/iamneur0/syncio.git
+cd syncio
+
+# 2. Create .env file from template
 cp env.example .env
 
-# 2. Edit .env with your configuration
+# 3. Edit .env with your configuration
 nano .env
 
-# 3. Start all services
+# 4. Start all services
 docker compose up -d
 
-# 4. View logs (optional)
+# 5. View logs (optional)
 docker-compose logs -f
 
-# 5. Stop services (when needed)
+# 6. Stop services (when needed)
 docker-compose down
 ```
 
 The application will be available at `http://localhost:3000`.
 
-
-### ⚙️ Environment Variables
+## ⚙️ Environment Variables
 
 Create a `.env` file in your project root with the following variables:
 
 ```bash
+# Database Configuration
+DATABASE_URL="file:./prisma/sqlite.db"  # For private instances
+# DATABASE_URL="postgresql://user:pass@localhost:5432/syncio"  # For public instances
+
 # Redis Configuration
-REDIS_URL=
+REDIS_URL="redis://localhost:6379"
 
 # Application Secrets (REQUIRED - Generate secure keys)
 JWT_SECRET=your-jwt-secret-key-here
 ENCRYPTION_KEY=your-encryption-key-here
 
-# Debug Logging (Optional)
-DEBUG=false
-NEXT_PUBLIC_DEBUG=false
-
 # User/Group IDs for Docker (Optional - defaults to 1000:1000)
-# Run 'id' command to get your UID and GID
 UID=1000
 GID=1000
 ```
 
 ### 🔑 Generating Secure Keys
+
 ```bash
-# Generate JWT secret
+# Generate JWT secret (32+ characters)
 openssl rand -base64 32
 
-# Generate encryption key
+# Generate encryption key (32+ characters)
 openssl rand -hex 16
 ```
 
-### 🐛 Debug Logging
 
-To enable verbose debug logging for troubleshooting:
+## 📱 Screenshots
+
+### Dashboard
+![Dashboard](https://via.placeholder.com/800x400/1f2937/ffffff?text=Syncio+Dashboard)
+
+### Group Management
+![Groups](https://via.placeholder.com/800x400/1f2937/ffffff?text=Group+Management)
+
+### Addon Management
+![Addons](https://via.placeholder.com/800x400/1f2937/ffffff?text=Addon+Management)
+
+## 🛠️ Development
+
+### Prerequisites
+- Node.js 18+ 
+- Docker & Docker Compose
+- Git
+
+### Local Development
 
 ```bash
-# Enable server-side debug logging
+# 1. Clone and install dependencies
+git clone https://github.com/iamneur0/syncio.git
+cd syncio
+npm install
+cd client && npm install && cd ..
+
+# 2. Set up environment
+cp env.example .env
+# Edit .env with your configuration
+
+# 3. Start development servers
+npm run dev  # Private instance
+# or
+npm run dev:public  # Public instance with auth
+```
+
+## 🐳 Docker Deployment
+
+### Public Instance (With Authentication)
+```bash
+# Uses PostgreSQL database
+docker compose -f docker-compose.public.yml up -d
+```
+
+### Private Instance (No Authentication)
+```bash
+# Uses SQLite database
+docker compose -f docker-compose.private.yml up -d
+```
+
+## 🔧 Configuration
+
+### Instance Types
+
+**Private Instance**
+- No authentication required
+- Single-account access
+- SQLite database
+- Perfect for personal use
+
+**Public Instance**
+- JWT authentication
+- Multi-user support
+- PostgreSQL database
+- Perfect for organizations
+
+## 🐛 Troubleshooting
+
+### Common Issues
+
+**Permission Issues:**
+```bash
+# Check your UID/GID
+id
+
+# Update .env with correct values
+echo "UID=$(id -u)" >> .env
+echo "GID=$(id -g)" >> .env
+
+# Fix ownership
+sudo chown -R $(id -u):$(id -g) ./data
+```
+
+**Database Issues:**
+```bash
+# Reset database (WARNING: deletes all data)
+docker-compose down
+docker volume rm syncio_syncio_data
+docker-compose up -d
+```
+
+**Port Conflicts:**
+```bash
+# Check what's using port 3000
+lsof -i :3000
+
+# Kill the process or change port in docker-compose.yml
+```
+
+### Debug Logging
+
+Enable debug logging for troubleshooting:
+
+```bash
+# Server-side debug logging
 DEBUG=true
 
-# Enable client-side debug logging  
+# Client-side debug logging
 NEXT_PUBLIC_DEBUG=true
 ```
 
@@ -93,58 +214,22 @@ Debug logging includes:
 - 👤 User status changes
 - 🗄️ Database operations
 
-**Note:** Debug logging is disabled by default to reduce noise in production.
 
-### 🔐 User Permissions (Docker)
+## 🤝 Contributing
 
-**Option 1: Automatic (Recommended)**
-Set your user ID and group ID in the `.env` file:
+### Development Workflow
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Add tests if applicable
+5. Submit a pull request
 
-```bash
-# Get your UID and GID
-id
+## 📄 License
 
-# Set them in .env file
-echo "UID=1000" >> .env
-echo "GID=1000" >> .env
-```
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-**Option 2: Manual Fix**
-If you prefer to handle permissions manually:
+---
 
-```bash
-# Fix ownership of the data directory
-sudo chown -R $(id -u):$(id -g) /path/to/your/syncio/data
-
-# Then set UID/GID to match your user
-echo "UID=$(id -u)" >> .env
-echo "GID=$(id -g)" >> .env
-```
-
-This ensures the container runs with the same permissions as your host user, preventing SQLite permission errors.
-
-### 🛠️ Troubleshooting
-
-**Permission Issues:**
-```bash
-# If you get SQLite permission errors, check your UID/GID
-id
-
-# Update .env with correct values
-nano .env
-
-# Fix ownership of data directory
-sudo chown -R $(id -u):$(id -g) ./syncio/data
-
-# Recreate containers
-docker-compose down
-docker-compose up -d
-```
-
-**Database Issues:**
-```bash
-# Reset database (WARNING: deletes all data)
-docker-compose down
-docker volume rm syncio_syncio_data
-docker-compose up -d
-```
+<div align="center">
+  Made with ❤️ by neur0
+</div>

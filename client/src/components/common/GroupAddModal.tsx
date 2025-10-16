@@ -108,7 +108,7 @@ export default function GroupAddModal({
               placeholder="Group name"
               value={groupName}
               onChange={(e) => setGroupName(e.target.value)}
-              className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-stremio-purple focus:border-transparent ${
+              className={`w-full px-3 py-2 border rounded-lg focus:outline-none ${
                 isDark 
                   ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
                   : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
@@ -122,7 +122,7 @@ export default function GroupAddModal({
               rows={3}
               value={groupDescription}
               onChange={(e) => setGroupDescription(e.target.value)}
-              className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-stremio-purple focus:border-transparent ${
+              className={`w-full px-3 py-2 border rounded-lg focus:outline-none ${
                 isDark 
                   ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
                   : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'

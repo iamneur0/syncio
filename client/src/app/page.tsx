@@ -16,6 +16,7 @@ import AddonsPage from '@/components/pages/AddonsPage'
 import UsersPage from '@/components/pages/UsersPage'
 import GroupsPage from '@/components/pages/GroupsPage'
 import SettingsPage from '@/components/pages/SettingsPage'
+import AccountMenuButton from '@/components/auth/AccountMenuButton'
 
 const navigation = [
   { name: 'Addons', icon: Puzzle, id: 'addons' },
@@ -195,7 +196,25 @@ export default function HomePage() {
           }`}>
             {navigation.find(item => item.id === activeTab)?.name}
           </h1>
-          <div className="w-6 h-6" />
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                // Trigger the UserMenuButton click programmatically
+                const userMenuButton = document.querySelector('[data-user-menu-button]') as HTMLButtonElement
+                if (userMenuButton) {
+                  userMenuButton.click()
+                }
+              }}
+              className={isDark ? 'text-gray-400 hover:text-gray-200' : 'text-gray-500 hover:text-gray-700'}
+              title="Account"
+            >
+              <User className="w-6 h-6" />
+            </button>
+            {/* Hidden AccountMenuButton for the menu functionality */}
+            <div className="hidden">
+              <AccountMenuButton data-user-menu-button />
+            </div>
+          </div>
         </div>
 
         {/* Page content */}
