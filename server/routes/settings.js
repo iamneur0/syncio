@@ -1,0 +1,59 @@
+const express = require('express');
+const fs = require('fs');
+const path = require('path');
+
+module.exports = ({ prisma, AUTH_ENABLED }) => {
+  const router = express.Router();
+
+  // Backup settings endpoints - only available in private mode
+  if (!AUTH_ENABLED) {
+    // Use centralized backup utilities
+    const { 
+      ensureBackupDir, 
+      readBackupFrequencyDays, 
+      writeBackupFrequencyDays, 
+      performBackupOnce, 
+      clearBackupSchedule, 
+      scheduleBackups 
+    } = require('../utils/backup');
+    
+    let backupTimer = null
+
+    // Initialize backup schedule on startup
+    scheduleBackups(readBackupFrequencyDays())
+
+    // Get backup frequency setting
+    router.get('/backup-frequency', async (req, res) => {
+      try {
+        return res.json({ days: readBackupFrequencyDays() })
+      } catch {
+        return res.status(500).json({ message: 'Failed to read backup frequency' })
+      }
+    })
+
+    // Update backup frequency setting
+    router.put('/backup-frequency', async (req, res) => {
+      try {
+        const days = Number(req.body?.days || 0)
+        if (!Number.isFinite(days) || days < 0) return res.status(400).json({ message: 'Invalid days' })
+        writeBackupFrequencyDays(days)
+        scheduleBackups(days)
+        return res.json({ message: 'Backup frequency updated', days })
+      } catch {
+        return res.status(500).json({ message: 'Failed to update backup frequency' })
+      }
+    })
+
+    // Manual backup trigger
+    router.post('/backup-now', async (req, res) => {
+      try {
+        await performBackupOnce()
+        return res.json({ message: 'Backup started' })
+      } catch {
+        return res.status(500).json({ message: 'Failed to start backup' })
+      }
+    })
+  }
+
+  return router;
+};

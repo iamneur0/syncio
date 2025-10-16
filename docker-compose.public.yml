@@ -8,6 +8,8 @@ services:
       JWT_SECRET: 'dev-secret'
       ENCRYPTION_KEY: 'dev-encryption-key-32-chars-long'
       REDIS_URL: 'redis://redis:6379'
+      DEBUG: 'false'
+      NEXT_PUBLIC_DEBUG: 'false'
     depends_on:
       - db
       - redis
