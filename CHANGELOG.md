@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.1.0](https://github.com/iamneur0/syncio/compare/v0.0.18...v0.1.0) (2025-10-16)
+
+
+### Features
+
+* added more account management options, category full deletion ([0b0ce45](https://github.com/iamneur0/syncio/commit/0b0ce45b92bacb8f06f730d5e9e175cd83d286cb))
+* addon selection and UI buttons reworked ([10a9087](https://github.com/iamneur0/syncio/commit/10a908740787f02c29ef1535c31cfe26e5ebd874))
+* backend rework ([953fb44](https://github.com/iamneur0/syncio/commit/953fb44fca62dc8680d564f236db205f1fc510d4))
+* backend rewrite with sync optimisations ([b018f4c](https://github.com/iamneur0/syncio/commit/b018f4c2476d7db227878fcaf5ab1e37b5d165a6))
+* disable automatic backup feature in public mode ([b3366a2](https://github.com/iamneur0/syncio/commit/b3366a20b3bf07f555b47c014c5c82f4f7c69f89))
+* finished UI + fixed group toggle ([e4d3ab8](https://github.com/iamneur0/syncio/commit/e4d3ab82deb44a1025772bca476ece74eb9b5731))
+* improved UI ([3f755ba](https://github.com/iamneur0/syncio/commit/3f755ba95c9f6aa675ceb7eb5c029c7a03bf6e05))
+* repair feature + diverse QoL ([bbba9ed](https://github.com/iamneur0/syncio/commit/bbba9ed9ee41769fb110b29777ea4bea9498a31c))
+* selection to user and group tabs ([4626429](https://github.com/iamneur0/syncio/commit/46264293b086fb2c8957a04d483ceff707597c23))
+* UI fully reworked with better sync process ([ad5e139](https://github.com/iamneur0/syncio/commit/ad5e139aefa01cd318ce4a918f5f7d03a90eb664))
+* UI Refactor ([fea5ed4](https://github.com/iamneur0/syncio/commit/fea5ed469aff2b252fc25c480b341c5dcf4c8885))
+
+
+### Bug Fixes
+
+* added Modal unification with createPortal ([0510b81](https://github.com/iamneur0/syncio/commit/0510b811f7abe2dae8ba83c9f68c0e2e4d3c2bce))
+* user imports, no more empty groups created, better messaging ([2c572ee](https://github.com/iamneur0/syncio/commit/2c572eeb9dde0aa3419c84d56de621d1600320cd))
+
+
+### Miscellaneous Chores
+
+* release 0.1.0 ([bd6362b](https://github.com/iamneur0/syncio/commit/bd6362bb39d30a7cfc25016d7e80bf45b7e231c2))
+
 ## [0.0.18](https://github.com/iamneur0/syncio/compare/v0.0.17...v0.0.18) (2025-10-08)
 
 
