@@ -17,18 +17,13 @@ export const useSyncStatusRefresh = () => {
   }
 
   const refreshUserSyncStatus = (userId?: string) => {
-    queryClient.invalidateQueries({ queryKey: ['user'] })
+    // Remove the specific user's sync-status query entirely if provided (prevents 404s after deletion)
     if (userId) {
-      queryClient.invalidateQueries({ queryKey: ['user', userId, 'sync-status'] })
+      try { queryClient.removeQueries({ queryKey: ['user', userId, 'sync-status'], exact: true }) } catch {}
     }
-    // Also invalidate all user sync status queries to refresh group sync status
-    queryClient.invalidateQueries({ queryKey: ['user'], predicate: (query) => 
-      query.queryKey.includes('sync-status')
-    })
-    // Force refetch of all sync status queries
-    queryClient.refetchQueries({ queryKey: ['user'], predicate: (query) => 
-      query.queryKey.includes('sync-status')
-    })
+    // Invalidate general user lists to refresh UI where needed
+    queryClient.invalidateQueries({ queryKey: ['user'] })
+    // Avoid forcing a refetch of every sync-status query; let mounted components drive refetch
   }
 
   const refreshAllSyncStatus = (groupId?: string, userId?: string) => {

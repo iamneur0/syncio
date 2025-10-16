@@ -127,3 +127,4 @@ prisma/schema.prisma
 backup/
 data/
 nodemon.json
+syncio/

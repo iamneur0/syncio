@@ -21,16 +21,16 @@ interface BaseEntity {
   syncStatus?: any
   // addon
   version?: string
-  users?: Array<{ id: string; name: string }>
   manifestUrl?: string
   // For group/user cards, these are direct counts
-  members?: Array<{ id: string; name: string }>
+  users?: Array<{ id: string; name: string }>
   addons?: Array<{ id: string; name: string }>
   groups?: Array<{ id: string; name: string; colorIndex?: number }>
   hasStremioConnection?: boolean
   // User specific
   stremioAddonsCount?: number
   groupName?: string
+  groupId?: string
 }
 
 interface EntityCardProps {
@@ -188,10 +188,10 @@ export default function EntityCard({
     typeof (entity as any).groupsCount === 'number' ? (entity as any).groupsCount : 0
   ) : 0
 
-  const groupMembersCount = variant === 'group' ? (
-    typeof (entity as any).members === 'number' ? (entity as any).members :
-    Array.isArray((entity as any).members) ? (entity as any).members.length :
-    typeof (entity as any).membersCount === 'number' ? (entity as any).membersCount : 0
+  const groupUsersCount = variant === 'group' ? (
+    typeof (entity as any).users === 'number' ? (entity as any).users :
+    Array.isArray((entity as any).users) ? (entity as any).users.length :
+    typeof (entity as any).usersCount === 'number' ? (entity as any).usersCount : 0
   ) : 0
 
   const groupAddonsCount = variant === 'group' ? (
@@ -234,8 +234,8 @@ export default function EntityCard({
     >
       {isListMode ? (
         // List mode layout
-        <div className="flex items-center justify-between w-full">
-          <div className="flex items-center gap-4">
+        <div className="w-full flex flex-row items-center justify-between gap-3">
+          <div className="flex items-center gap-4 min-w-0 flex-1">
             <div 
               className={`logo-circle-12 ${
                 variant === 'addon' && (entity as any).iconUrl 
@@ -269,7 +269,7 @@ export default function EntityCard({
             </div>
             
             <div className="flex-1 min-w-0 overflow-hidden">
-              <div className="flex items-center gap-2 mb-1">
+              <div className="flex items-center gap-2 mb-1 flex-wrap">
                 <h3 className={`font-medium truncate ${isDark ? 'text-white' : 'text-gray-900'}`}>
                   {displayName}
                 </h3>
@@ -280,6 +280,7 @@ export default function EntityCard({
                 {variant === 'user' && userExcludedSet && userProtectedSet && onSync && (
                   <SyncBadge
                     userId={entity.id}
+                    groupId={(entity as any).groupId}
                     onSync={onSync}
                     isSyncing={isSyncing || false}
                     userExcludedSet={userExcludedSet}
@@ -296,14 +297,56 @@ export default function EntityCard({
                   />
                 )}
               </div>
-              <p className={`text-sm truncate ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
+              <p className={`text-sm ${isDark ? 'text-gray-300' : 'text-gray-600'} truncate` }>
                 {subtitle}
               </p>
+
+              {/* Stats under name on < md screens */}
+              <div className="mt-2 flex items-center gap-3 md:hidden">
+                {variant === 'addon' && (
+                  <div className="flex items-center gap-1 text-xs text-gray-500">
+                    <UserIcon className="w-4 h-4" />
+                    <span>{addonUsersCount}</span>
+                  </div>
+                )}
+                {variant === 'addon' && (
+                  <div className="flex items-center gap-1 text-xs text-gray-500">
+                    <GroupIcon className="w-4 h-4" />
+                    <span>{addonGroupsCount}</span>
+                  </div>
+                )}
+                {variant === 'user' && (
+                  <div className="flex items-center gap-1 text-xs text-gray-500">
+                    <Puzzle className="w-4 h-4" />
+                    <span>{(entity as any).stremioAddonsCount || 0}</span>
+                  </div>
+                )}
+                {variant === 'user' && (
+                  <div className="flex items-center gap-1 text-xs text-gray-500">
+                    <GroupIcon className="w-4 h-4" />
+                    <span>{(entity as any).groupName || ((entity as any).groups && (entity as any).groups.length > 0) ? ((entity as any).groupName || (entity as any).groups[0].name) : 'No Group'}</span>
+                  </div>
+                )}
+                {variant === 'group' && (
+                  <div className="flex items-center gap-1 text-xs text-gray-500">
+                    <AddonIcon className="w-4 h-4" />
+                    <span>{groupAddonsCount}</span>
+                  </div>
+                )}
+                {variant === 'group' && (
+                  <div className="flex items-center gap-1 text-xs text-gray-500">
+                    <UserIcon className="w-4 h-4" />
+                    <span>{groupUsersCount}</span>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
           
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-3">
+          {/* Right column: stats (desktop) + toggle + actions */}
+          <div className="flex items-center gap-3 flex-shrink-0">
+            {/* Desktop stats on >= md; on < md they appear under the name */}
+            <div className="hidden md:flex items-center gap-3">
               {/* Stats for list mode - always show like card mode */}
               {variant === 'addon' && (
                 <div className="flex items-center gap-1 text-xs text-gray-500">
@@ -338,18 +381,20 @@ export default function EntityCard({
               {variant === 'group' && (
                 <div className="flex items-center gap-1 text-xs text-gray-500">
                   <UserIcon className="w-4 h-4" />
-                  <span>{groupMembersCount}</span>
+                  <span>{groupUsersCount}</span>
                 </div>
               )}
             </div>
             
+            {/* Toggle is always visible; does not wrap into the button grid */}
             <ToggleSwitch
               checked={entity.isActive}
               onChange={() => handleToggle({} as React.MouseEvent)}
               size="sm"
             />
             
-            <div className="flex items-center gap-1">
+            {/* Actions: inline until < sm, stack 2x2 only on extra-small */}
+            <div className="grid grid-cols-2 gap-1 xs:grid-cols-2 sm:flex sm:items-center sm:gap-1 flex-shrink-0 [@media(min-width:640px)]:grid-cols-1">
               {onView && (
                 <button
                   onClick={handleView}
@@ -493,6 +538,16 @@ export default function EntityCard({
             }`}>
               {displayName}
             </h3>
+            {/* Inline Sync Badge for groups next to name */}
+            {variant === 'group' && onSync && (
+              <div className="mt-1 mb-0">
+                <SyncBadge
+                  groupId={entity.id}
+                  onSync={onSync}
+                  isSyncing={isSyncing || false}
+                />
+              </div>
+            )}
             <p className={`text-sm ${
               isModern ? 'text-purple-600' : 
               isModernDark ? 'text-purple-300' : 
@@ -506,7 +561,7 @@ export default function EntityCard({
                 <VersionChip version={(entity as any).version} size="sm" />
               </div>
             )}
-            {/* Sync Badge for users and groups */}
+            {/* Sync Badge for users */}
             {variant === 'user' && userExcludedSet && userProtectedSet && onSync && (
               <div className="mt-1 mb-0">
                 <SyncBadge
@@ -515,15 +570,6 @@ export default function EntityCard({
                   isSyncing={isSyncing || false}
                   userExcludedSet={userExcludedSet}
                   userProtectedSet={userProtectedSet}
-                />
-              </div>
-            )}
-            {variant === 'group' && onSync && (
-              <div className="mt-1 mb-0">
-                <SyncBadge
-                  groupId={entity.id}
-                  onSync={onSync}
-                  isSyncing={isSyncing || false}
                 />
               </div>
             )}
@@ -562,11 +608,11 @@ export default function EntityCard({
                 <p className={`text-lg font-semibold ${
                   isModern ? 'text-purple-100' : isModernDark ? 'text-purple-100' : (isDark ? 'text-white' : 'text-gray-900')
                 }`}>
-                  {(entity as any).members || 0}
+                  {(entity as any).users || 0}
                 </p>
                 <p className={`text-xs ${
                   isModern ? 'text-purple-300' : isModernDark ? 'text-purple-300' : (isDark ? 'text-gray-400' : 'text-gray-500')
-                }`}>{(entity as any).members === 1 ? 'Member' : 'Members'}</p>
+                }`}>{(entity as any).users === 1 ? 'User' : 'Users'}</p>
               </div>
             </div>
           </>

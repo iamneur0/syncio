@@ -97,6 +97,7 @@ export default function GenericEntityPage({ config }: GenericEntityPageProps) {
   const [syncingEntities, setSyncingEntities] = useState<Set<string>>(new Set())
   const [reloadingEntities, setReloadingEntities] = useState<Set<string>>(new Set())
   const [importingEntities, setImportingEntities] = useState<Set<string>>(new Set())
+  const [deletingEntities, setDeletingEntities] = useState<Set<string>>(new Set())
 
   // Create config with proper setShowAddModal function
   const finalConfig = {
@@ -169,8 +170,19 @@ export default function GenericEntityPage({ config }: GenericEntityPageProps) {
 
   const deleteMutation = useMutation({
     mutationFn: ({ id, name }: { id: string; name: string }) => finalConfig.api.delete(id),
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
+      // Invalidate the main list
       queryClient.invalidateQueries({ queryKey: [finalConfig.entityType] })
+      // Stop any lingering sync-status polling for this specific user
+      if (finalConfig.entityType === 'user' && variables?.id) {
+        try {
+          // Remove and cancel the polling query entirely
+          queryClient.removeQueries({ queryKey: ['user', variables.id, 'sync-status'], exact: true })
+        } catch {}
+        try {
+          window.dispatchEvent(new CustomEvent('sfm:user:deleted', { detail: { userId: variables.id } } as any))
+        } catch {}
+      }
       toast.success(`${finalConfig.title.slice(0, -1)} deleted successfully`)
       setShowDeleteConfirm(false)
       setEntityToDelete(null)
@@ -362,6 +374,7 @@ export default function GenericEntityPage({ config }: GenericEntityPageProps) {
 
   const handleConfirmDelete = () => {
     if (entityToDelete) {
+      setDeletingEntities(prev => { const next = new Set(prev); next.add(entityToDelete.id); return next })
       deleteMutation.mutate({ id: entityToDelete.id, name: entityToDelete.name })
     }
   }
@@ -373,9 +386,8 @@ export default function GenericEntityPage({ config }: GenericEntityPageProps) {
 
   const handleConfirmBulkDelete = async () => {
     try {
-      await Promise.all(
-        selectedEntities.map(id => finalConfig.api.delete(id))
-      )
+      setDeletingEntities(prev => { const next = new Set(prev); selectedEntities.forEach(id => next.add(id)); return next })
+      await Promise.all(selectedEntities.map(id => finalConfig.api.delete(id)))
       
       queryClient.invalidateQueries({ queryKey: [finalConfig.entityType] })
       setSelectedEntities([])
@@ -387,31 +399,40 @@ export default function GenericEntityPage({ config }: GenericEntityPageProps) {
     }
   }
 
-  const handleSync = (id: string) => {
+  const handleSync = async (id: string) => {
     if (finalConfig.api.sync) {
       setSyncingEntities(prev => new Set(prev).add(id))
-      finalConfig.api.sync(id)
-        .then(() => {
-          toast.success(`${finalConfig.title.slice(0, -1)} synced successfully`)
-          queryClient.invalidateQueries({ queryKey: [finalConfig.entityType] })
-          // Refresh sync badges
-          if (finalConfig.entityType === 'user') {
-            refreshAllSyncStatus(undefined, id)
-          } else if (finalConfig.entityType === 'group') {
-            refreshAllSyncStatus(id)
-          }
+      try {
+        // Sync the group or user itself
+        await finalConfig.api.sync(id)
+        // If syncing a group from the listing, cascade to all users to match modal behavior
+        if (finalConfig.entityType === 'group') {
+          try {
+            const groupDetails = await groupsAPI.getById(id as any)
+            const usersInGroup = Array.isArray(groupDetails?.users) ? groupDetails.users : []
+            if (usersInGroup.length > 0) {
+              await Promise.all(usersInGroup.map((u: any) => usersAPI.sync(u.id)))
+            }
+          } catch {}
+        }
+        toast.success(`${finalConfig.title.slice(0, -1)} synced successfully`)
+        queryClient.invalidateQueries({ queryKey: [finalConfig.entityType] })
+        // Refresh sync badges
+        if (finalConfig.entityType === 'user') {
+          refreshAllSyncStatus(undefined, id)
+        } else if (finalConfig.entityType === 'group') {
+          refreshAllSyncStatus(id)
+        }
+      } catch (error: any) {
+        const message = error?.response?.data?.message || error?.message || `Failed to sync ${finalConfig.entityType}`
+        toast.error(message)
+      } finally {
+        setSyncingEntities(prev => {
+          const next = new Set(prev)
+          next.delete(id)
+          return next
         })
-        .catch((error: any) => {
-          const message = error?.response?.data?.message || error?.message || `Failed to sync ${finalConfig.entityType}`
-          toast.error(message)
-        })
-        .finally(() => {
-          setSyncingEntities(prev => {
-            const next = new Set(prev)
-            next.delete(id)
-            return next
-          })
-        })
+      }
     }
   }
 
@@ -453,29 +474,25 @@ export default function GenericEntityPage({ config }: GenericEntityPageProps) {
   // Check if empty state
   const isEmpty = !isLoading && Array.isArray(entities) && entities.length === 0
 
-  // Loading state
-  if (isLoading) {
-    return (
-      <div className="space-y-6 animate-in fade-in duration-200">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {Array.from({ length: 3 }).map((_, i) => (
-            <LoadingSkeleton key={i} className="h-48 opacity-60" />
-          ))}
-        </div>
+  // Loading state - show header but skeleton for content
+  const renderLoadingContent = () => (
+    <div className="space-y-6 animate-in fade-in duration-200">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {Array.from({ length: 3 }).map((_, i) => (
+          <LoadingSkeleton key={i} className="h-48 opacity-60" />
+        ))}
       </div>
-    )
-  }
+    </div>
+  )
 
-  // Error state
-  if (error) {
-    return (
-      <EmptyState
-        icon={finalConfig.icon}
-        title={`Failed to load ${finalConfig.entityType}s`}
-        description={`There was an error loading the ${finalConfig.entityType}s. Please try again.`}
-      />
-    )
-  }
+  // Error state - show header but error for content
+  const renderErrorContent = () => (
+    <EmptyState
+      icon={finalConfig.icon}
+      title={`Failed to load ${finalConfig.entityType}s`}
+      description={`There was an error loading the ${finalConfig.entityType}s. Please try again.`}
+    />
+  )
 
   return (
     <>
@@ -503,7 +520,11 @@ export default function GenericEntityPage({ config }: GenericEntityPageProps) {
           mounted={mounted}
         />
 
-        {isEmpty ? (
+        {isLoading ? (
+          renderLoadingContent()
+        ) : error ? (
+          renderErrorContent()
+        ) : isEmpty ? (
           <EmptyState
             icon={finalConfig.icon}
             title={finalConfig.emptyStateTitle}
@@ -525,7 +546,7 @@ export default function GenericEntityPage({ config }: GenericEntityPageProps) {
                 onToggle={finalConfig.api.enable && finalConfig.api.disable ? handleToggleEntityStatus : () => {}}
                 onDelete={(id) => handleDeleteEntity(id, finalConfig.getEntityName?.(entity) || entity.name)}
                 onView={handleViewEntity}
-                onSync={finalConfig.api.sync ? handleSync : undefined}
+                onSync={finalConfig.api.sync && !deletingEntities.has(finalConfig.getEntityId?.(entity) || entity.id) ? handleSync : undefined}
                 onClone={finalConfig.api.clone ? handleClone : undefined}
                 onImport={finalConfig.api.import ? handleImport : undefined}
                 onReload={finalConfig.api.reload ? handleReload : undefined}
@@ -557,7 +578,7 @@ export default function GenericEntityPage({ config }: GenericEntityPageProps) {
                 onToggle={finalConfig.api.enable && finalConfig.api.disable ? handleToggleEntityStatus : () => {}}
                 onDelete={(id) => handleDeleteEntity(id, finalConfig.getEntityName?.(entity) || entity.name)}
                 onView={handleViewEntity}
-                onSync={finalConfig.api.sync ? handleSync : undefined}
+                onSync={finalConfig.api.sync && !deletingEntities.has(finalConfig.getEntityId?.(entity) || entity.id) ? handleSync : undefined}
                 onClone={finalConfig.api.clone ? handleClone : undefined}
                 onImport={finalConfig.api.import ? handleImport : undefined}
                 onReload={finalConfig.api.reload ? handleReload : undefined}

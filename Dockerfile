@@ -42,7 +42,8 @@ ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 ENV INSTANCE=$INSTANCE
 
 # Build Next.js frontend with derived NEXT_PUBLIC_AUTH_ENABLED
-RUN cd client && \
+RUN --mount=type=cache,target=/app/client/.next/cache \
+    cd client && \
     NEXT_PUBLIC_AUTH_ENABLED=$( [ "$INSTANCE" = "public" ] && echo true || echo false ) \
     NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL \
     npm run build

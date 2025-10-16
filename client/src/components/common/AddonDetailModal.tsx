@@ -121,12 +121,12 @@ export default function AddonDetailModal({
       }
       // Initialize resources selection from addon like the old page did
       try {
-        const stored = Array.isArray(currentAddon.resources) ? currentAddon.resources : []
+        const stored = Array.isArray(currentAddon.resources) ? currentAddon.resources : null
         const detailManifest: any = currentAddon.originalManifest || currentAddon.manifest
         const fallback = Array.isArray(detailManifest?.resources) ? detailManifest.resources : []
-        console.log('🔍 Resources initialization:', { stored, fallback, final: stored.length > 0 ? stored : fallback })
-        // Use stored resources if available, otherwise use manifest resources
-        setEditResources(stored.length > 0 ? stored : fallback)
+        console.log('🔍 Resources initialization:', { stored, fallback, final: stored !== null ? stored : fallback })
+        // Use stored resources if explicitly set (including empty array), otherwise use manifest resources
+        setEditResources(stored !== null ? stored : fallback)
       } catch (e) { 
         console.log('🔍 Error initializing resources:', e)
         setEditResources([]) 
@@ -134,7 +134,7 @@ export default function AddonDetailModal({
 
       // Initialize catalogs selection from addon
       try {
-        let stored = []
+        let stored = null
         if (Array.isArray(currentAddon.catalogs)) {
           // If addon.catalogs is already parsed objects, use them
           if (currentAddon.catalogs.length > 0 && typeof currentAddon.catalogs[0] === 'object') {
@@ -151,9 +151,9 @@ export default function AddonDetailModal({
         
         const detailManifest: any = currentAddon.originalManifest || currentAddon.manifest
         const fallback = Array.isArray(detailManifest?.catalogs) ? detailManifest.catalogs : []
-        console.log('🔍 Catalogs initialization:', { stored, fallback, final: stored.length > 0 ? stored : fallback })
-        // Use stored catalogs if available, otherwise use manifest catalogs
-        setEditCatalogs(stored.length > 0 ? stored : fallback)
+        console.log('🔍 Catalogs initialization:', { stored, fallback, final: stored !== null ? stored : fallback })
+        // Use stored catalogs if explicitly set (including empty array), otherwise use manifest catalogs
+        setEditCatalogs(stored !== null ? stored : fallback)
       } catch (e) { 
         console.log('🔍 Error initializing catalogs:', e)
         setEditCatalogs([]) 
@@ -257,10 +257,20 @@ export default function AddonDetailModal({
         }
       }}
     >
-      <div className={`w-full max-w-4xl max-h-[90vh] overflow-y-auto rounded-lg shadow-xl ${
+      <div className={`relative w-full max-w-4xl max-h-[90vh] overflow-y-auto rounded-lg shadow-xl ${
         isDark ? 'bg-gray-800' : 'bg-white'
       }`}>
-        <div className="p-6">
+        {/* Fixed close button in top-right */}
+        <button
+          onClick={onClose}
+          className={`absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded transition-colors border-0 ${
+            isDark ? 'text-gray-400 hover:text-gray-300 hover:bg-gray-700' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
+          }`}
+          aria-label="Close"
+        >
+          <X className="w-4 h-4" />
+        </button>
+        <div className="p-6 pt-12">
           {/* Header */}
           <div className="flex items-center justify-between mb-6">
             <div className="flex items-center gap-4">
@@ -300,14 +310,7 @@ export default function AddonDetailModal({
                 )}
               </div>
             </div>
-            <button
-              onClick={onClose}
-              className={`w-8 h-8 flex items-center justify-center rounded transition-colors border-0 ${
-                isDark ? 'text-gray-400 hover:text-gray-300 hover:bg-gray-700' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
-              }`}
-            >
-              <X className="w-4 h-4" />
-            </button>
+            <div className="w-8 h-8" />
           </div>
 
           {/* URL */}
@@ -413,8 +416,8 @@ export default function AddonDetailModal({
                     </div>
                   </div>
                 )}
-                emptyIcon={<Puzzle className={`w-8 h-8 ${isDark ? 'text-gray-400' : 'text-gray-500'}`} />}
-                emptyMessage="No groups available"
+                emptyIcon={null}
+                emptyMessage="No groups available. Go to Groups to create your first group."
               />
             )
           })()}

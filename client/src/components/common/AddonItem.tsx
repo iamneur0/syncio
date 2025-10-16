@@ -50,18 +50,19 @@ export default function AddonItem({
                 className="logo-img-fill"
                 onError={(e) => {
                   e.currentTarget.style.display = 'none'
-                  e.currentTarget.nextElementSibling.style.display = 'block'
+                  const nextSibling = e.currentTarget.nextElementSibling as HTMLElement
+                  if (nextSibling) {
+                    nextSibling.style.display = 'block'
+                  }
                 }}
               />
             ) : null}
-            <div className={`logo-circle-10 ${
-              isMono ? 'bg-black text-white' : 'bg-gray-500 text-white'
-            }`} style={{ display: addon.iconUrl ? 'none' : 'flex' }}>
-              <Puzzle className="w-5 h-5 text-white" />
+            <div className="w-full h-full flex items-center justify-center" style={{ display: addon.iconUrl ? 'none' : 'flex' }}>
+              <Puzzle className={`w-5 h-5 ${isDark ? 'text-gray-300' : 'text-gray-400'}`} />
             </div>
           </div>
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2 mb-1">
+            <div className="flex items-center gap-2 mb-1 flex-wrap">
               <h4 className={`font-medium truncate ${isDark ? 'text-white' : 'text-gray-900'}`}>
                 {addon.name || 'Unknown Addon'}
               </h4>
@@ -69,7 +70,7 @@ export default function AddonItem({
                 <VersionChip version={addon.version} />
               )}
             </div>
-            <p className={`text-sm truncate ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+            <p className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-500'} truncate`}>
               {addon.description || 'No description'}
             </p>
           </div>

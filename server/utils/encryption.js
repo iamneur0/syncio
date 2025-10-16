@@ -159,6 +159,64 @@ function splitOnce(buf, delim) {
   return [buf.subarray(0, idx), buf.subarray(idx + delim.length)]
 }
 
+// Additional encryption functions
+function selectKeyForRequest(req) {
+  const { getAccountId } = require('./helpers');
+  const accountId = getAccountId(req);
+  if (!accountId) return getServerKey();
+  const dek = getAccountDek(accountId);
+  return dek || getServerKey();
+}
+
+function encrypt(text, req) {
+  const key = selectKeyForRequest(req);
+  return aesGcmEncrypt(key, text);
+}
+
+function decrypt(text, req) {
+  const key = selectKeyForRequest(req);
+  return aesGcmDecrypt(key, text);
+}
+
+function getAccountHmacKey(req) {
+  const { getAccountId } = require('./helpers');
+  const accountId = getAccountId(req);
+  if (!accountId) return getServerKey();
+  const dek = getAccountDek(accountId);
+  return dek || getServerKey();
+}
+
+function encryptIf(value, req) {
+  if (value == null) return null;
+  return encrypt(typeof value === 'string' ? value : JSON.stringify(value), req);
+}
+
+function decryptIf(value, req) {
+  if (value == null) return null;
+  try {
+    return decrypt(value, req);
+  } catch {
+    return value;
+  }
+}
+
+function getDecryptedManifestUrl(addon, req) {
+  if (!addon || !addon.manifestUrl) return null;
+  try {
+    return decrypt(addon.manifestUrl, req);
+  } catch {
+    return null;
+  }
+}
+
+function decryptWithFallback(payload, req) {
+  try {
+    return decrypt(payload, req);
+  } catch {
+    return String(payload);
+  }
+}
+
 module.exports = {
   getServerKey,
   aesGcmEncrypt,
@@ -168,7 +226,15 @@ module.exports = {
   deriveDek,
   setAccountDek,
   getAccountDek,
-  clearAccountDek
+  clearAccountDek,
+  selectKeyForRequest,
+  encrypt,
+  decrypt,
+  getAccountHmacKey,
+  encryptIf,
+  decryptIf,
+  getDecryptedManifestUrl,
+  decryptWithFallback
 }
 
 

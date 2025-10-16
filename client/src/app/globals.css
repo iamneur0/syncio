@@ -710,12 +710,12 @@ body.theme-loaded {
 
   /* Modern theme input styles */
   .modern .input {
-    @apply border-purple-300/50 focus:ring-purple-500 focus:border-purple-500 bg-purple-50/80;
+    @apply border-purple-300/50 focus:outline-none bg-purple-50/80;
   }
 
   /* Modern Dark theme input styles */
   .modern-dark .input {
-    @apply border-purple-600/50 focus:ring-purple-500 focus:border-purple-500 bg-purple-800/30;
+    @apply border-purple-600/50 focus:outline-none bg-purple-800/30;
   }
 
   /* Modern theme scrollbar */

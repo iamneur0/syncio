@@ -114,7 +114,8 @@ export function useAddonMutations() {
       toast.success('Addon created successfully')
     },
     onError: (error: any) => {
-      toast.error(error.response?.data?.message || 'Failed to create addon')
+      const message = error?.response?.data?.message || error?.response?.data?.error || error?.message || 'Failed to create addon'
+      toast.error(message)
     }
   })
 

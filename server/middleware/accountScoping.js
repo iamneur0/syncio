@@ -75,10 +75,16 @@ function overrideGlobalPrisma(prismaInstance, accountId) {
  */
 function createAccountScopingMiddleware(prismaInstance) {
   return function accountScopingMiddleware(req, res, next) {
-    // Skip if no accountId (should not happen if auth middleware is working)
+    // Skip if no accountId and auth is disabled
     if (!req.appAccountId) {
-      console.error('🚨 Account scoping middleware called without appAccountId!')
-      return res.status(401).json({ error: 'Authentication required' })
+      // If auth is disabled, use default account ID
+      const AUTH_ENABLED = String(process.env.AUTH_ENABLED || 'false').toLowerCase() === 'true'
+      if (!AUTH_ENABLED) {
+        req.appAccountId = 'default'
+      } else {
+        console.error('🚨 Account scoping middleware called without appAccountId!')
+        return res.status(401).json({ error: 'Authentication required' })
+      }
     }
     
     // Override global prisma instance with account-scoped version
@@ -87,7 +93,7 @@ function createAccountScopingMiddleware(prismaInstance) {
     // Store restore function on request for cleanup
     req._restorePrisma = restorePrisma
     
-    console.log(`🔒 Account scoping applied for account: ${req.appAccountId}`)
+    // console.log(`🔒 Account scoping applied for account: ${req.appAccountId}`)
     next()
   }
 }

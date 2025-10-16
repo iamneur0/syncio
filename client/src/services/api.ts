@@ -71,7 +71,7 @@ export interface Group {
   id: string
   name: string
   description: string
-  members: number
+  users: number
   addons: number
   restrictions: 'none' | 'low' | 'medium' | 'high'
   colorIndex: number
@@ -324,9 +324,20 @@ export const groupsAPI = {
     await api.delete(`/groups/${id}`)
   },
 
-  // Reorder addons in group
+  // Reorder addons in group (try alias first for compatibility, then canonical path)
   reorderAddons: async (id: string, orderedManifestUrls: string[]): Promise<void> => {
-    await api.post(`/groups/${id}/addons/reorder`, { orderedManifestUrls })
+    try {
+      await api.post(`/groups/${id}/reorder-addons`, { orderedManifestUrls })
+    } catch (e: any) {
+      // Fallback to canonical route
+      await api.post(`/groups/${id}/addons/reorder`, { orderedManifestUrls })
+    }
+  },
+
+  // Get aggregated group sync status (includes per-user statuses)
+  getSyncStatus: async (id: string): Promise<{ groupStatus: string; userStatuses: Array<{ userId: string; status: string }> }> => {
+    const res: AxiosResponse<any> = await api.get(`/groups/${id}/sync-status`)
+    return res.data
   },
 
   // Search groups
@@ -351,14 +362,14 @@ export const groupsAPI = {
     return response.data
   },
 
-  // Add member to group
-  addMember: async (groupId: string, userId: string): Promise<void> => {
-    await api.post(`/groups/${groupId}/members/${userId}`)
+  // Add user to group
+  addUser: async (groupId: string, userId: string): Promise<void> => {
+    await api.post(`/groups/${groupId}/users/${userId}`)
   },
 
-  // Remove member from group
-  removeMember: async (groupId: string, userId: string): Promise<void> => {
-    await api.delete(`/groups/${groupId}/members/${userId}`)
+  // Remove user from group
+  removeUser: async (groupId: string, userId: string): Promise<void> => {
+    await api.delete(`/groups/${groupId}/users/${userId}`)
   },
 
   // Add addon to group

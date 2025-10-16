@@ -89,10 +89,10 @@ export default function ConfirmDialog({
             <button
               autoFocus
               onClick={onCancel}
-              className={`px-3 py-2 text-sm rounded-lg border-0 focus:outline-none focus:ring-2 focus:ring-offset-2 ${
+              className={`px-3 py-2 text-sm rounded-lg border-0 focus:outline-none focus:ring-0 ${
                 isDark 
-                  ? 'text-gray-300 hover:text-white hover:bg-gray-700 focus:ring-gray-500' 
-                  : 'text-gray-700 hover:text-gray-900 hover:bg-gray-100 focus:ring-gray-400'
+                  ? 'text-gray-300 hover:text-white hover:bg-gray-700' 
+                  : 'text-gray-700 hover:text-gray-900 hover:bg-gray-100'
               }`}
             >
               {cancelText}

@@ -72,7 +72,7 @@ export default function Input({
       )}
       
       {helperText && !error && (
-        <p className={`mt-1 text-sm ${getTextClasses(theme, 'tertiary')}`}>
+        <p className={`mt-1 text-sm ${getTextClasses(theme, 'muted')}`}>
           {helperText}
         </p>
       )}

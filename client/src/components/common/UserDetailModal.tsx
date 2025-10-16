@@ -9,6 +9,7 @@ import { VersionChip, EntityList, SyncBadge, InlineEdit, ColorPicker } from './'
 import { useSyncStatusRefresh } from '@/hooks/useSyncStatusRefresh'
 import { Puzzle, X, Eye, EyeOff, LockKeyhole, Unlock } from 'lucide-react'
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors } from '@dnd-kit/core'
+import { restrictToParentElement } from '@dnd-kit/modifiers'
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
@@ -112,6 +113,7 @@ export default function UserDetailModal({
     queryFn: () => usersAPI.getById(user!.id),
     enabled: !!user?.id,
   })
+
 
   // Fetch Stremio addons
   const { data: stremioAddonsData } = useQuery({
@@ -420,7 +422,7 @@ export default function UserDetailModal({
       <div
         ref={setNodeRef}
         style={style}
-        className={`relative rounded-lg border p-4 hover:shadow-md transition-all cursor-grab ${
+        className={`relative rounded-lg border p-4 hover:shadow-md transition-all cursor-grab active:cursor-grabbing select-none touch-none ${
           isDark
             ? 'bg-gray-600 border-gray-500 hover:bg-gray-550'
             : 'bg-white border-gray-200 hover:bg-gray-50'
@@ -530,19 +532,29 @@ export default function UserDetailModal({
 
   return createPortal(
     <div 
-      className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-[1000] p-4"
+      className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-[1000] p-4 overflow-x-hidden"
       onClick={(e) => {
         if (e.target === e.currentTarget) {
           onClose()
         }
       }}
     >
-      <div className={`w-full max-w-4xl max-h-[90vh] overflow-y-auto rounded-lg shadow-xl ${
+      <div className={`relative w-full max-w-4xl max-h-[90vh] overflow-y-auto overflow-x-hidden rounded-lg shadow-xl ${
         isDark ? 'bg-gray-800' : 'bg-white'
       }`}>
-        <div className="p-6">
+        {/* Fixed close button in top-right */}
+        <button
+          onClick={onClose}
+          className={`absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded transition-colors border-0 ${
+            isDark ? 'text-gray-400 hover:text-gray-300 hover:bg-gray-700' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
+          }`}
+          aria-label="Close"
+        >
+          <X className="w-4 h-4" />
+        </button>
+        <div className="p-6 pt-12">
           {/* Header: Logo + Name/email + Sync (left), Group selector + Close (right) */}
-          <div className="flex items-start justify-between mb-6 gap-4">
+          <div className="flex flex-wrap items-start justify-between mb-6 gap-4">
             <div className="flex items-center gap-4 relative">
               {/* User Logo */}
               <div 
@@ -587,11 +599,22 @@ export default function UserDetailModal({
                 </div>
               </div>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2"></div>
+          </div>
+
+          {/* Removed legacy user info block */}
+
+          {/* Group Addons Section */}
+          <EntityList
+            title="Group Addons"
+          count={userDetails?.addons?.length || 0}
+          items={userDetails?.addons || []}
+            isLoading={isLoadingUserDetails}
+            headerRight={(
               <select
                 value={userDetails?.groupId || userDetails?.groups?.[0]?.id || ''}
                 onChange={(e) => handleGroupChange(e.target.value)}
-                className={`px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-stremio-purple focus:border-transparent ${
+                className={`px-3 py-2 border rounded-lg text-sm focus:outline-none ${
                   isDark ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'
                 }`}
                 title="Change group"
@@ -601,26 +624,7 @@ export default function UserDetailModal({
                   <option key={group.id} value={group.id}>{group.name}</option>
                 ))}
               </select>
-              <button
-                onClick={onClose}
-                className={`w-8 h-8 flex items-center justify-center rounded transition-colors border-0 ${
-                  isDark ? 'text-gray-400 hover:text-gray-300 hover:bg-gray-700' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
-                }`}
-                aria-label="Close"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
-
-          {/* Removed legacy user info block */}
-
-          {/* Group Addons Section */}
-          <EntityList
-            title="Group Addons"
-            count={userDetails?.addons?.length || 0}
-            items={userDetails?.addons || []}
-            isLoading={isLoadingUserDetails}
+            )}
             renderItem={(addon: any, index: number) => (
               <GroupAddonItem
                 key={addon.id || index}
@@ -659,6 +663,7 @@ export default function UserDetailModal({
             <DndContext
               sensors={sensors}
               collisionDetection={closestCenter}
+              modifiers={[restrictToParentElement]}
               onDragEnd={handleDragEnd}
             >
               <SortableContext items={stremioAddons.map(addon => addon.manifestUrl || addon.transportUrl || addon.url || addon.id)} strategy={verticalListSortingStrategy}>

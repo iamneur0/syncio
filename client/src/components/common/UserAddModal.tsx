@@ -162,7 +162,7 @@ export default function UserAddModal({
               onChange={(e) => setStremioUsername(e.target.value)}
               placeholder="Enter username"
               required
-              className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-stremio-purple focus:border-transparent ${
+              className={`w-full px-3 py-2 border rounded-lg focus:outline-none ${
                 isDark 
                   ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
                   : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
@@ -181,7 +181,7 @@ export default function UserAddModal({
               onChange={(e) => setStremioEmail(e.target.value)}
               placeholder="your@stremio-email.com"
               required
-              className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-stremio-purple focus:border-transparent ${
+              className={`w-full px-3 py-2 border rounded-lg focus:outline-none ${
                 isDark 
                   ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
                   : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
@@ -198,7 +198,7 @@ export default function UserAddModal({
               onChange={(e) => setStremioPassword(e.target.value)}
               placeholder="Enter your Stremio password"
               required
-              className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-stremio-purple focus:border-transparent ${
+              className={`w-full px-3 py-2 border rounded-lg focus:outline-none ${
                 isDark 
                   ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
                   : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
@@ -229,7 +229,7 @@ export default function UserAddModal({
                 onChange={(e) => setStremioPassword(e.target.value)}
                 placeholder="Enter your Stremio auth key"
                 required
-                className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-stremio-purple focus:border-transparent ${
+                className={`w-full px-3 py-2 border rounded-lg focus:outline-none ${
                   isDark 
                     ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
                     : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
@@ -245,7 +245,7 @@ export default function UserAddModal({
                 <select
                   value={selectedGroup}
                   onChange={(e) => setSelectedGroup(e.target.value)}
-                  className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-stremio-purple focus:border-transparent ${
+                  className={`w-full px-3 py-2 border rounded-lg focus:outline-none ${
                     isDark 
                       ? 'bg-gray-700 border-gray-600 text-white' 
                       : 'bg-white border-gray-300 text-gray-900'
@@ -264,7 +264,7 @@ export default function UserAddModal({
                     value={newGroupName}
                     onChange={(e) => setNewGroupName(e.target.value)}
                 placeholder="Create new group"
-                    className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-stremio-purple focus:border-transparent ${
+                    className={`w-full px-3 py-2 border rounded-lg focus:outline-none ${
                       isDark 
                         ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
                         : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'

@@ -109,7 +109,10 @@ export default function AddonSelectModal({
               className="logo-img-fill"
               onError={(e) => {
                 e.currentTarget.style.display = 'none'
-                e.currentTarget.nextElementSibling.style.display = 'flex'
+                const nextSibling = e.currentTarget.nextElementSibling as HTMLElement
+                if (nextSibling) {
+                  nextSibling.style.display = 'flex'
+                }
               }}
             />
           ) : null}
@@ -168,7 +171,7 @@ export default function AddonSelectModal({
               placeholder="Search addons..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className={`w-full pl-10 pr-4 py-2 border rounded-lg focus:ring-2 focus:ring-gray-500 focus:border-transparent ${
+              className={`w-full pl-10 pr-4 py-2 border rounded-lg focus:outline-none ${
                 isDark 
                   ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
                   : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
@@ -184,7 +187,7 @@ export default function AddonSelectModal({
               items={filteredAddons}
               isLoading={isLoading}
               renderItem={renderAddonItem}
-              emptyIcon={<Puzzle className={`w-12 h-12 ${isDark ? 'text-gray-500' : 'text-gray-400'}`} />}
+              emptyIcon={<Puzzle className={`w-12 h-12 mx-auto mb-4 ${isDark ? 'text-gray-500' : 'text-gray-400'}`} />}
               emptyMessage={searchTerm ? 'No addons found matching your search' : 'No addons available to add'}
               getIsSelected={(addon) => selectedAddonIds.includes(addon.id)}
               onClearSelection={() => setSelectedAddonIds([])}
