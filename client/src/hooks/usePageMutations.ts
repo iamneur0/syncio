@@ -39,7 +39,8 @@ export function useUserMutations() {
   })
 
   const syncUserMutation = useMutation({
-    mutationFn: usersAPI.sync,
+    mutationFn: (id: string) => usersAPI.sync(id),
+    // mutationFn: usersAPI.sync,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['users'] })
       toast.success('User synced successfully')

@@ -5,6 +5,7 @@ import { useTheme } from '@/contexts/ThemeContext'
 import { useQuery } from '@tanstack/react-query'
 import { addonsAPI } from '@/services/api'
 import EntityList from './EntityList'
+import AddonIcon from './AddonIcon'
 
 interface AddonSelectModalProps {
   isOpen: boolean
@@ -101,27 +102,7 @@ export default function AddonSelectModal({
       onClick={() => handleItemClick(addon.id)}
     >
       <div className="flex items-center gap-3">
-        <div className="logo-circle-10 flex-shrink-0">
-          {addon.iconUrl ? (
-            <img 
-              src={addon.iconUrl} 
-              alt={addon.name || 'Addon icon'} 
-              className="logo-img-fill"
-              onError={(e) => {
-                e.currentTarget.style.display = 'none'
-                const nextSibling = e.currentTarget.nextElementSibling as HTMLElement
-                if (nextSibling) {
-                  nextSibling.style.display = 'flex'
-                }
-              }}
-            />
-          ) : null}
-          <div className={`logo-circle-10 ${
-            isMono ? 'bg-black text-white' : 'bg-gray-500 text-white'
-          }`} style={{ display: addon.iconUrl ? 'none' : 'flex' }}>
-            <Puzzle className="w-5 h-5 text-white" />
-          </div>
-        </div>
+        <AddonIcon name={addon.name || 'Addon'} iconUrl={addon.iconUrl} size="10" className="flex-shrink-0" />
         <div className="flex-1 min-w-0">
           <h4 className={`font-medium truncate ${isDark ? 'text-white' : 'text-gray-900'}`}>
             {addon.name || 'Unknown Addon'}

@@ -6,6 +6,7 @@ import { usersAPI, groupsAPI } from '@/services/api'
 import { getColorBgClass, getColorHexValue } from '@/utils/colorMapping'
 import toast from 'react-hot-toast'
 import { VersionChip, EntityList, SyncBadge, InlineEdit, ColorPicker } from './'
+import AddonIcon from './AddonIcon'
 import { useSyncStatusRefresh } from '@/hooks/useSyncStatusRefresh'
 import { Puzzle, X, Eye, EyeOff, LockKeyhole, Unlock } from 'lucide-react'
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors } from '@dnd-kit/core'
@@ -52,6 +53,8 @@ export default function UserDetailModal({
   const [showColorPicker, setShowColorPicker] = useState(false)
   const logoRef = useRef<HTMLDivElement>(null)
   const { refreshAllSyncStatus } = useSyncStatusRefresh()
+  // Reflect Settings "Delete mode" (safe/unsafe)
+  const [isUnsafeMode, setIsUnsafeMode] = useState(false)
 
   // Fetch user data using query to ensure it stays updated
   const { data: userData, isLoading: isLoadingUser } = useQuery({
@@ -98,6 +101,14 @@ export default function UserDetailModal({
   useEffect(() => {
     setMounted(true)
   }, [])
+
+  // Read delete mode from localStorage (set in SettingsPage)
+  useEffect(() => {
+    try {
+      const mode = localStorage.getItem('sfm_delete_mode')
+      setIsUnsafeMode(mode === 'unsafe')
+    } catch {}
+  }, [isOpen])
 
   // Drag and drop sensors
   const sensors = useSensors(
@@ -271,7 +282,7 @@ export default function UserDetailModal({
   const handleDeleteStremioAddon = (addonId: string) => {
     if (!currentUser) return
     const id = currentUser.id
-    usersAPI.removeStremioAddon(id, addonId)
+    usersAPI.removeStremioAddon(id, addonId, isUnsafeMode)
       .then(() => {
         // Remove from local list
         setStremioAddons(prev => prev.filter(a => (a.manifestUrl || a.transportUrl || a.url || a.id) !== addonId))
@@ -307,7 +318,7 @@ export default function UserDetailModal({
       
       // Use the single addon toggle endpoint
       // addonId is the manifest URL, but we'll use it as the addon identifier
-      usersAPI.toggleProtectAddon(currentUser.id, addonId)
+      usersAPI.toggleProtectAddon(currentUser.id, addonId, isUnsafeMode)
         .then((response) => {
           console.log('🔍 Protect response:', response)
           // Update local state immediately for better UX
@@ -347,25 +358,7 @@ export default function UserDetailModal({
       }`}>
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center flex-1 min-w-0">
-            <div className="logo-circle-10 mr-3 flex-shrink-0">
-              {addon.iconUrl ? (
-                <img
-                  src={addon.iconUrl}
-                  alt={addon.name || 'Addon icon'}
-                  className="logo-img-fill"
-                  onError={(e) => {
-                    e.currentTarget.style.display = 'none'
-                    const nextElement = e.currentTarget.nextElementSibling as HTMLElement
-                    if (nextElement) {
-                      nextElement.style.display = 'flex'
-                    }
-                  }}
-                />
-              ) : null}
-              <div className="w-full h-full flex items-center justify-center" style={{ display: addon.iconUrl ? 'none' : 'flex' }}>
-                <Puzzle className={`w-5 h-5 ${isDark ? 'text-gray-300' : 'text-gray-400'}`} />
-              </div>
-            </div>
+            <AddonIcon name={addon.name || 'Addon'} iconUrl={addon.iconUrl} size="10" className="mr-3 flex-shrink-0" />
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2 mb-1">
                 <h4 className={`font-medium truncate ${isDark ? 'text-white' : 'text-gray-900'}`}>
@@ -384,8 +377,8 @@ export default function UserDetailModal({
             onClick={() => handleExcludeGroupAddon(addon.id)}
             className={`p-2 rounded-lg transition-colors ${
               isExcluded
-                ? (isDark ? 'text-red-400 hover:bg-red-900/20' : 'text-red-600 hover:bg-red-50')
-                : (isDark ? 'text-gray-400 hover:bg-gray-700' : 'text-gray-600 hover:bg-gray-100')
+                ? ((isMono || isDark) ? 'text-red-400 hover:bg-red-900/20' : 'text-red-600 hover:bg-red-50')
+                : ((isMono || isDark) ? 'text-gray-400 hover:bg-gray-700' : 'text-gray-600 hover:bg-gray-100')
             }`}
             title={isExcluded ? "Include addon" : "Exclude addon"}
           >
@@ -401,7 +394,8 @@ export default function UserDetailModal({
     const addonId = addon.manifestUrl || addon.transportUrl || addon.url || addon.id
     const isProtected = localProtectedSet.has(addonId)
     const isDefault = isDefaultAddon(addonId, addon.name)
-    const isUnsafeMode = false // TODO: Get this from context or props when unsafe mode is implemented
+    // Use global setting reflected in modal state
+    const unsafe = isUnsafeMode
     
     
     const {
@@ -432,25 +426,7 @@ export default function UserDetailModal({
       >
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center flex-1 min-w-0">
-            <div className="logo-circle-10 mr-3 flex-shrink-0">
-              {addon.iconUrl ? (
-                <img
-                  src={addon.iconUrl}
-                  alt={addon.name || 'Addon icon'}
-                  className="logo-img-fill"
-                  onError={(e) => {
-                    e.currentTarget.style.display = 'none'
-                    const nextElement = e.currentTarget.nextElementSibling as HTMLElement
-                    if (nextElement) {
-                      nextElement.style.display = 'flex'
-                    }
-                  }}
-                />
-              ) : null}
-              <div className="w-full h-full flex items-center justify-center" style={{ display: addon.iconUrl ? 'none' : 'flex' }}>
-                <Puzzle className={`w-5 h-5 ${isDark ? 'text-gray-300' : 'text-gray-400'}`} />
-              </div>
-            </div>
+            <AddonIcon name={addon.name || 'Addon'} iconUrl={addon.iconUrl} size="10" className="mr-3 flex-shrink-0" />
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2 mb-1">
                 <h4 className={`font-medium truncate ${isDark ? 'text-white' : 'text-gray-900'}`}>
@@ -469,23 +445,23 @@ export default function UserDetailModal({
             <button
               onClick={(e) => {
                 e.stopPropagation()
-                if (!isDefault || isUnsafeMode) {
+                if (!isDefault || unsafe) {
                   handleProtectStremioAddon(addonId)
                 }
               }}
               onPointerDown={(e) => {
                 e.stopPropagation()
               }}
-              disabled={Boolean(isDefault && !isUnsafeMode)}
+              disabled={Boolean(isDefault && !unsafe)}
               className={`p-2 rounded-lg transition-colors ${
-                isDefault && !isUnsafeMode
-                  ? (isDark ? 'text-gray-500 cursor-not-allowed' : 'text-gray-500 cursor-not-allowed')
+                isDefault && !unsafe
+                  ? ((isMono || isDark) ? 'text-gray-500 cursor-not-allowed' : 'text-gray-500 cursor-not-allowed')
                   : isProtected
-                    ? (isDark ? 'text-green-400 hover:bg-green-900/20' : 'text-green-600 hover:bg-green-50')
-                    : (isDark ? 'text-gray-400 hover:bg-gray-700' : 'text-gray-600 hover:bg-gray-100')
+                    ? ((isMono || isDark) ? 'text-green-400 hover:bg-green-900/20' : 'text-green-600 hover:bg-green-50')
+                    : ((isMono || isDark) ? 'text-gray-400 hover:bg-gray-700' : 'text-gray-600 hover:bg-gray-100')
               }`}
               title={
-                isDefault && !isUnsafeMode
+                isDefault && !unsafe
                   ? "Default addon - cannot be unprotected in safe mode"
                   : isProtected
                     ? "Unprotect addon"
@@ -497,23 +473,21 @@ export default function UserDetailModal({
             <button
               onClick={(e) => {
                 e.stopPropagation()
-                if (!isDefault || isUnsafeMode) {
+                if (!isDefault || unsafe) {
                   handleDeleteStremioAddon(addonId)
                 }
               }}
               onPointerDown={(e) => {
                 e.stopPropagation()
               }}
-              disabled={Boolean(isDefault && !isUnsafeMode)}
+              disabled={Boolean(isDefault && !unsafe)}
               className={`p-2 rounded-lg transition-colors ${
-                isDefault && !isUnsafeMode
-                  ? (isDark ? 'text-gray-500 cursor-not-allowed' : 'text-gray-500 cursor-not-allowed')
-                  : isDark
-                    ? 'text-red-400 hover:bg-red-900/20'
-                    : 'text-red-600 hover:bg-red-50'
+                isDefault && !unsafe
+                  ? ((isMono || isDark) ? 'text-gray-500 cursor-not-allowed' : 'text-gray-500 cursor-not-allowed')
+                  : ((isMono || isDark) ? 'text-red-400 hover:bg-red-900/20' : 'text-red-600 hover:bg-red-50')
               }`}
               title={
-                isDefault && !isUnsafeMode
+                isDefault && !unsafe
                   ? "Default addon - cannot be deleted in safe mode"
                   : "Delete addon"
               }

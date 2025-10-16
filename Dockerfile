@@ -22,6 +22,9 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/client/node_modules ./client/node_modules
 COPY . .
 
+# Set build-time variables first
+ARG INSTANCE
+
 # Generate Prisma client with correct engine
 ENV PRISMA_CLI_BINARY_TARGETS="linux-musl-openssl-3.0.x,linux-musl-arm64-openssl-3.0.x"
 RUN rm -rf node_modules/.prisma node_modules/@prisma/client/runtime/libquery_engine-*.so.node 2>/dev/null || true
@@ -34,10 +37,7 @@ RUN if [ "$INSTANCE" = "public" ]; then \
 # Use the main schema file for generation
 RUN npx prisma generate --schema=prisma/schema.prisma
 
-# Set build-time variables
-# Use relative API path so the browser hits same origin; auth UI derived from INSTANCE
-ARG NEXT_PUBLIC_API_URL=/api
-ARG INSTANCE=private
+# Set environment variables
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 ENV INSTANCE=$INSTANCE
 

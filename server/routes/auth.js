@@ -141,7 +141,7 @@ router.get('/me', authenticateToken, async (req, res, next) => {
         _count: {
           select: {
             ownedGroups: true,
-            memberships: true,
+            userships: true,
           },
         },
       },

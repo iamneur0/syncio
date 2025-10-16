@@ -1,7 +1,8 @@
 import React from 'react'
-import { User as UserIcon, Users as GroupIcon, Puzzle as AddonIcon, Eye, Edit, Trash2, Copy, Download, RefreshCw, Puzzle } from 'lucide-react'
+import { User as UserIcon, Users as GroupIcon, Eye, Edit, Trash2, Copy, Download, RefreshCw, Puzzle } from 'lucide-react'
 import { useTheme } from '@/contexts/ThemeContext'
 import { getColorBgClass, getColorTextClass, getColorBorderClass, getColorHexValue } from '@/utils/colorMapping'
+import AddonIcon from './AddonIcon'
 import SyncBadge from './SyncBadge'
 import { ToggleSwitch, VersionChip } from './MicroUI'
 
@@ -191,7 +192,9 @@ export default function EntityCard({
   const groupUsersCount = variant === 'group' ? (
     typeof (entity as any).users === 'number' ? (entity as any).users :
     Array.isArray((entity as any).users) ? (entity as any).users.length :
-    typeof (entity as any).usersCount === 'number' ? (entity as any).usersCount : 0
+    typeof (entity as any).usersCount === 'number' ? (entity as any).usersCount :
+    // Fallback to backend 'users' field from /api/groups
+    typeof (entity as any).users === 'number' ? (entity as any).users : 0
   ) : 0
 
   const groupAddonsCount = variant === 'group' ? (
@@ -236,11 +239,32 @@ export default function EntityCard({
         // List mode layout
         <div className="w-full flex flex-row items-center justify-between gap-3">
           <div className="flex items-center gap-4 min-w-0 flex-1">
+            {variant === 'addon' ? (
+              <AddonIcon name={entity.name} iconUrl={(entity as any).iconUrl} size="12" />
+            ) : (
+              <div 
+                className={`logo-circle-12 ${
+                  isMono
+                    ? `${iconBg} border ${iconBorder} text-white`
+                    : isModern
+                    ? 'bg-gradient-to-br from-purple-600 to-blue-800 text-white'
+                    : isModernDark
+                    ? 'bg-gradient-to-br from-purple-800 to-blue-900 text-white'
+                    : `${iconBg} border ${iconBorder} text-white`
+                }`}
+                style={{ backgroundColor: getColorHexValue(entity.colorIndex, isMono ? 'mono' : isDark ? 'dark' : 'light') }}
+              >
+                <span className="text-white font-semibold text-lg">
+                  {getAvatarText()}
+                </span>
+              </div>
+            )}
+          {variant === 'addon' ? (
+            <AddonIcon name={entity.name} iconUrl={(entity as any).iconUrl} size="12" />
+          ) : (
             <div 
               className={`logo-circle-12 ${
-                variant === 'addon' && (entity as any).iconUrl 
-                  ? 'border-0' 
-                  : isMono
+                isMono
                   ? `${iconBg} border ${iconBorder} text-white`
                   : isModern
                   ? 'bg-gradient-to-br from-purple-600 to-blue-800 text-white'
@@ -250,23 +274,11 @@ export default function EntityCard({
               }`}
               style={{ backgroundColor: getColorHexValue(entity.colorIndex, isMono ? 'mono' : isDark ? 'dark' : 'light') }}
             >
-              {variant === 'addon' && (entity as any).iconUrl ? (
-                <img 
-                  src={(entity as any).iconUrl} 
-                  alt={entity.name}
-                  className="logo-img-fill"
-                  onError={(e) => {
-                    const target = e.currentTarget as HTMLImageElement
-                    const nextElement = target.nextElementSibling as HTMLElement
-                    target.style.display = 'none'
-                    if (nextElement) nextElement.style.display = 'block'
-                  }}
-                />
-              ) : null}
-              <span className={`text-white font-semibold text-lg ${variant === 'addon' && (entity as any).iconUrl ? 'hidden' : ''}`}>
+              <span className="text-white font-semibold text-lg">
                 {getAvatarText()}
               </span>
             </div>
+          )}
             
             <div className="flex-1 min-w-0 overflow-hidden">
               <div className="flex items-center gap-2 mb-1 flex-wrap">
@@ -329,7 +341,7 @@ export default function EntityCard({
                 )}
                 {variant === 'group' && (
                   <div className="flex items-center gap-1 text-xs text-gray-500">
-                    <AddonIcon className="w-4 h-4" />
+                    <AddonIcon name="Addon" className="w-4 h-4" />
                     <span>{groupAddonsCount}</span>
                   </div>
                 )}
@@ -374,7 +386,7 @@ export default function EntityCard({
               )}
               {variant === 'group' && (
                 <div className="flex items-center gap-1 text-xs text-gray-500">
-                  <AddonIcon className="w-4 h-4" />
+                  <AddonIcon name="Addon" className="w-4 h-4" />
                   <span>{groupAddonsCount}</span>
                 </div>
               )}
@@ -497,11 +509,13 @@ export default function EntityCard({
         // Card mode layout
         <div className="flex flex-col h-full">
           <div className="flex items-start justify-between mb-4">
-        <div className="flex items-center">
+        <div className="flex items-center min-w-0 flex-1">
           <div 
             className={`logo-circle-12 ${
-              variant === 'addon' && (entity as any).iconUrl 
-                ? 'border-0' 
+              variant === 'addon' && (entity as any).iconUrl
+                ? `border-0 ${(!isDark && !isMono && !isModern && !isModernDark) ? 'accent-bg' : ''}`
+                : variant === 'addon'
+                ? 'accent-bg accent-text'
                 : isMono
                 ? `${iconBg} border ${iconBorder} text-white`
                 : isModern
@@ -510,13 +524,13 @@ export default function EntityCard({
                 ? 'bg-gradient-to-br from-purple-800 to-blue-900 text-white'
                 : `${iconBg} border ${iconBorder} text-white`
             }`}
-            style={{ backgroundColor: getColorHexValue(entity.colorIndex, isMono ? 'mono' : isDark ? 'dark' : 'light') }}
+            style={{ backgroundColor: (variant === 'addon' && (entity as any).iconUrl && (isDark || isMono || isModern || isModernDark)) ? 'transparent' : undefined }}
           >
             {variant === 'addon' && (entity as any).iconUrl ? (
               <img 
                 src={(entity as any).iconUrl} 
                 alt={entity.name}
-                className="logo-img-fill"
+                className="logo-img"
                 onError={(e) => {
                   // Fallback to letter if image fails to load
                   const target = e.currentTarget as HTMLImageElement
@@ -530,12 +544,12 @@ export default function EntityCard({
               {getAvatarText()}
             </span>
           </div>
-          <div className="ml-3">
+          <div className="ml-3 min-w-0">
             <h3 className={`font-medium cursor-pointer transition-colors ${
               isModern ? 'text-purple-800 hover:text-purple-900' : 
               isModernDark ? 'text-purple-200 hover:text-purple-100' : 
               (isDark ? 'text-white hover:text-gray-300' : 'text-gray-900 hover:text-gray-700')
-            }`}>
+            } truncate`} title={displayName}>
               {displayName}
             </h3>
             {/* Inline Sync Badge for groups next to name */}
@@ -576,7 +590,7 @@ export default function EntityCard({
           </div>
         </div>
         
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-shrink-0 ml-3">
           <ToggleSwitch
             checked={!!entity.isActive}
             onChange={() => handleToggle({} as React.MouseEvent)}
@@ -608,11 +622,11 @@ export default function EntityCard({
                 <p className={`text-lg font-semibold ${
                   isModern ? 'text-purple-100' : isModernDark ? 'text-purple-100' : (isDark ? 'text-white' : 'text-gray-900')
                 }`}>
-                  {(entity as any).users || 0}
+                  {groupUsersCount}
                 </p>
                 <p className={`text-xs ${
                   isModern ? 'text-purple-300' : isModernDark ? 'text-purple-300' : (isDark ? 'text-gray-400' : 'text-gray-500')
-                }`}>{(entity as any).users === 1 ? 'User' : 'Users'}</p>
+                }`}>{groupUsersCount === 1 ? 'User' : 'Users'}</p>
               </div>
             </div>
           </>

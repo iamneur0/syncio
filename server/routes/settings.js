@@ -1,8 +1,9 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
+const { decrypt } = require('../utils/encryption')
 
-module.exports = ({ prisma, AUTH_ENABLED }) => {
+module.exports = ({ prisma, AUTH_ENABLED, getAccountDek, getDecryptedManifestUrl }) => {
   const router = express.Router();
 
   // Backup settings endpoints - only available in private mode
@@ -54,6 +55,30 @@ module.exports = ({ prisma, AUTH_ENABLED }) => {
       }
     })
   }
+
+  // Repair addons metadata (fill missing stremioAddonId and iconUrl from manifest)
+  // Scopes to current account when AUTH is enabled
+  router.post('/repair-addons', async (req, res) => {
+    try {
+      const whereScope = AUTH_ENABLED && req.appAccountId ? { accountId: req.appAccountId } : {}
+      const addons = await prisma.addon.findMany({ where: whereScope })
+      const { repairAddonsList } = require('../utils/repair')
+      const result = await repairAddonsList({
+        prisma,
+        AUTH_ENABLED,
+        getAccountDek,
+        getDecryptedManifestUrl,
+        filterManifestByResources: require('../utils/stremio').filterManifestByResources,
+        filterManifestByCatalogs: require('../utils/stremio').filterManifestByCatalogs,
+        manifestHash: require('../utils/stremio').manifestHash,
+        encrypt: require('../utils/encryption').encrypt
+      }, req, addons)
+
+      return res.json({ message: 'Repair completed', ...result })
+    } catch (e) {
+      return res.status(500).json({ message: 'Failed to repair addons', error: e?.message })
+    }
+  })
 
   return router;
 };

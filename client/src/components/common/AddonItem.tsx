@@ -1,6 +1,7 @@
 import React from 'react'
 import { useTheme } from '@/contexts/ThemeContext'
 import { VersionChip } from './'
+import AddonIcon from './AddonIcon'
 import { Puzzle, X } from 'lucide-react'
 
 interface AddonItemProps {
@@ -42,25 +43,7 @@ export default function AddonItem({
     <div {...containerProps}>
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center flex-1 min-w-0">
-          <div className="logo-circle-10 mr-3 flex-shrink-0">
-            {addon.iconUrl ? (
-              <img 
-                src={addon.iconUrl} 
-                alt={addon.name || 'Addon icon'} 
-                className="logo-img-fill"
-                onError={(e) => {
-                  e.currentTarget.style.display = 'none'
-                  const nextSibling = e.currentTarget.nextElementSibling as HTMLElement
-                  if (nextSibling) {
-                    nextSibling.style.display = 'block'
-                  }
-                }}
-              />
-            ) : null}
-            <div className="w-full h-full flex items-center justify-center" style={{ display: addon.iconUrl ? 'none' : 'flex' }}>
-              <Puzzle className={`w-5 h-5 ${isDark ? 'text-gray-300' : 'text-gray-400'}`} />
-            </div>
-          </div>
+          <AddonIcon name={addon.name || 'Addon'} iconUrl={addon.iconUrl} size="10" className="mr-3 flex-shrink-0" />
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 mb-1 flex-wrap">
               <h4 className={`font-medium truncate ${isDark ? 'text-white' : 'text-gray-900'}`}>

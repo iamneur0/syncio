@@ -56,7 +56,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
         id: group.id,
         name: group.name,
         description: group.description,
-          members: activeMemberCount,
+          users: activeMemberCount,
           addons: uniqActiveAddonIds.size,
         restrictions: 'none', // TODO: Implement restrictions logic
         isActive: group.isActive,
@@ -105,7 +105,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
         id: newGroup.id,
         name: newGroup.name,
         description: newGroup.description,
-        members: 0,
+        users: 0,
         addons: 0,
         restrictions: 'none',
         isActive: newGroup.isActive,
@@ -171,7 +171,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
           id: clonedGroup.id,
           name: clonedGroup.name,
           description: clonedGroup.description,
-          members: 0,
+          users: 0,
           addons: originalGroup.addons?.length || 0,
           restrictions: 'none',
           isActive: clonedGroup.isActive,
@@ -265,7 +265,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
         id: group.id,
         name: group.name,
         description: group.description,
-        members: 0,
+        users: 0,
         addons: 0,
         restrictions: 'none',
         isActive: group.isActive,
@@ -296,7 +296,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
       
       // Find users that belong to this group (SQLite approach) - only active users
       const userIds = group.userIds ? JSON.parse(group.userIds) : []
-      const users = await prisma.user.findMany({
+      const dbUsers = await prisma.user.findMany({
         where: {
           id: { in: userIds },
           isActive: true,
@@ -311,7 +311,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
         }
       })
 
-      const memberUsers = users.map((user) => ({
+      const users = dbUsers.map((user) => ({
           id: user.id, 
           username: user.username, 
           email: user.email,
@@ -324,7 +324,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
         id: group.id,
         name: group.name,
         description: group.description,
-        users: memberUsers,
+        users: users,
         addons: filteredAddonsSorted,
         restrictions: 'none',
         isActive: group.isActive,
@@ -337,7 +337,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
     }
   });
 
-  // Update group fields and membership/addons
+  // Update group fields and usership/addons
   router.put('/:id', async (req, res) => {
     const { id } = req.params
     const { name, description, userIds, addonIds, colorIndex } = req.body
@@ -377,7 +377,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
         data: updateData
       })
 
-      // Sync members only if userIds is explicitly provided (SQLite approach)
+      // Sync users only if userIds is explicitly provided (SQLite approach)
       if (userIds !== undefined) {
         const desiredUserIds = Array.isArray(userIds) ? userIds : []
         
@@ -448,7 +448,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
         }),
       ])
 
-      return res.json({ message: 'Group deleted and members/addons detached' })
+      return res.json({ message: 'Group deleted and users/addons detached' })
     } catch (error) {
       console.error('Error deleting group:', error)
       if (error.code === 'P2025') {
@@ -458,8 +458,8 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
     }
   });
 
-  // Remove member from group
-  router.delete('/:groupId/members/:userId', async (req, res) => {
+  // Remove user from group
+  router.delete('/:groupId/users/:userId', async (req, res) => {
     try {
       const { groupId, userId } = req.params
       
@@ -483,25 +483,25 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
         data: { userIds: JSON.stringify(updatedUserIds) }
       })
 
-      res.json({ message: 'Member removed from group successfully' })
+      res.json({ message: 'User removed from group successfully' })
     } catch (error) {
-      console.error('Error removing member from group:', error)
-      res.status(500).json({ message: 'Failed to remove member from group', error: error?.message })
+      console.error('Error removing user from group:', error)
+      res.status(500).json({ message: 'Failed to remove user from group', error: error?.message })
     }
   });
 
-  // Add member to group
-  router.post('/:groupId/members/:userId', async (req, res) => {
+  // Add user to group
+  router.post('/:groupId/users/:userId', async (req, res) => {
     try {
       const { groupId, userId } = req.params
       
       // Use the assignUserToGroup function to handle the assignment
       await assignUserToGroup(userId, groupId, req)
       
-      res.json({ message: 'Member added to group successfully' })
+      res.json({ message: 'User added to group successfully' })
     } catch (error) {
-      console.error('Error adding member to group:', error)
-      res.status(500).json({ message: 'Failed to add member to group', error: error?.message })
+      console.error('Error adding user to group:', error)
+      res.status(500).json({ message: 'Failed to add user to group', error: error?.message })
     }
   });
 
@@ -707,7 +707,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
     }
   });
 
-  // Group sync-status: aggregate member statuses via shared getUserSyncStatus
+  // Group sync-status: aggregate user statuses via shared getUserSyncStatus
   router.get('/:id/sync-status', async (req, res) => {
     try {
       const { id } = req.params
@@ -742,7 +742,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
     }
   })
 
-  // Reorder addons in group (by manifest URL order) and sync members
+  // Reorder addons in group (by manifest URL order) and sync users
   router.post('/:id/addons/reorder', async (req, res) => {
     try {
       const { id: groupId } = req.params
@@ -790,7 +790,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
         console.warn('Order persistence failed (position):', e?.message)
       }
 
-      // Optional: trigger sync for all active members of this group
+      // Optional: trigger sync for all active users of this group
       try {
         const userIds = Array.isArray(group.userIds) ? group.userIds : JSON.parse(group.userIds || '[]')
         if (Array.isArray(userIds) && userIds.length > 0) {
@@ -869,8 +869,8 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
     return res.json({ ok: true })
   })
 
-  // Update member's excluded addons
-  router.put('/:groupId/members/:userId/excluded-addons', async (req, res) => {
+  // Update user's excluded addons
+  router.put('/:groupId/users/:userId/excluded-addons', async (req, res) => {
     try {
       const { groupId, userId } = req.params
       const { excludedAddons } = req.body

@@ -2091,7 +2091,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
         debug.log(`ℹ️ Using existing import group: ${groupName}`)
       }
 
-      // Ensure user membership only if they have no group assigned yet
+      // Ensure user usership only if they have no group assigned yet
       const allGroups = await prisma.group.findMany({
         where: { accountId: getAccountId(req) },
         select: { id: true, userIds: true }
