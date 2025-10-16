@@ -12,7 +12,7 @@
 
   [![Discord](https://img.shields.io/discord/1225024298490662974?logo=discord&logoColor=f5f5f5&color=blue)](https://discord.gg/88dwGw9P)
   [![Docker](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fghcr-badge.elias.eu.org%2Fapi%2Fiamneur0%2Fsyncio%2Fsyncio&query=%24.downloadCount&logo=github&label=pulls&color=blue)](https://github.com/iamneur0/syncio/pkgs/container/syncio)
-  ![Stars](https://img.shields.io/github/stars/iamneur0/syncio?style=flat-round&logo=stars)
+  ![Stars](https://img.shields.io/github/stars/iamneur0/syncio?style=flat-round&logo=github)
   ![GitHub Release](https://img.shields.io/github/v/release/iamneur0/syncio)
 
 ![Syncio Addons Page](./doc/AddonsPage.png)
@@ -97,14 +97,14 @@ openssl rand -hex 16
 
 ## 📱 Screenshots
 
-### Dashboard
-![Dashboard](https://via.placeholder.com/800x400/1f2937/ffffff?text=Syncio+Dashboard)
+### Login Page
+![LoginPage](./doc/LoginPage.png)
 
-### Group Management
-![Groups](https://via.placeholder.com/800x400/1f2937/ffffff?text=Group+Management)
+### Group View
+![GroupView](./doc/GroupView.png)
 
-### Addon Management
-![Addons](https://via.placeholder.com/800x400/1f2937/ffffff?text=Addon+Management)
+### User View
+![UserView](./doc/UserView.png)
 
 ## 🛠️ Development
 
