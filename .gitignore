@@ -128,3 +128,4 @@ backup/
 data/
 nodemon.json
 syncio/
+docker-compose.yml

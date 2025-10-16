@@ -372,7 +372,7 @@ app.post('/api/groups', async (req, res) => {
     id: String(groups.length + 1),
     name,
     description: description || '',
-    members: 0,
+    users: 0,
     addons: 0,
     restrictions: restrictions || 'none',
     color: color || 'blue',

@@ -970,6 +970,31 @@ export default function SettingsPage() {
         <input id="import-config-file" type="file" accept=".json" onChange={handleConfigFileChange} className="hidden" />
       </div>
 
+      {/* Maintenance */}
+      <div className={`p-4 rounded-lg border mt-6 ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
+        <h2 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>Maintenance</h2>
+        <p className={`text-sm mt-1 ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
+          Repair addons by filling missing fields from their manifests.
+        </p>
+        <div className="mt-4 flex gap-4 flex-wrap">
+          <button
+            onClick={async () => {
+              try {
+                const res = await api.post('/settings/repair-addons')
+                const inspected = res.data?.inspected ?? 0
+                const updated = res.data?.updated ?? 0
+                toast.success(`Repaired ${updated} of ${inspected} addons`)
+              } catch (e: any) {
+                toast.error(e?.response?.data?.message || 'Failed to repair addons')
+              }
+            }}
+            className="accent-bg accent-text hover:opacity-90 flex items-center px-4 py-2 rounded-lg transition-colors"
+          >
+            <RotateCcw className="w-5 h-5 mr-2" /> Repair Addons
+          </button>
+        </div>
+      </div>
+
       {/* Account Management */}
       <div className={`p-4 rounded-lg border mt-6 ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
         <h2 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>Account Management</h2>

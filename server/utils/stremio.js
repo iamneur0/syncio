@@ -90,21 +90,53 @@ function filterDefaultAddons(addons, unsafeMode = false) {
  * Build addon DB data consistently
  */
 function buildAddonDbData(req, params) {
-  const { encrypt, manifestUrlHmac, manifestHash, manifestHmac, getAccountId } = require('./encryption')
-  const { name, description, sanitizedUrl, manifestObj, iconUrl, version, stremioAddonId, isActive = true } = params
+  const { encrypt } = require('./encryption')
+  const { manifestUrlHmac, manifestHash, manifestHmac } = require('./hashing')
+  const { getAccountId } = require('./helpers')
+  const {
+    name,
+    description,
+    sanitizedUrl,
+    manifestObj,            // full/original manifest
+    filteredManifest,       // filtered manifest to persist as current (optional)
+    iconUrl,
+    version,
+    stremioAddonId,
+    isActive = true,
+    resources: resourcesInput,   // optional explicit resources array (names)
+    catalogs: catalogsInput      // optional explicit catalogs array ({type,id})
+  } = params
   const urlPlain = String(sanitizedUrl || '').trim()
   const encUrl = encrypt(urlPlain, req)
-  const encManifest = manifestObj ? encrypt(JSON.stringify(manifestObj), req) : null
+  const encOriginal = manifestObj ? encrypt(JSON.stringify(manifestObj), req) : null
+  const manifestToPersist = filteredManifest || manifestObj || null
+  const encFiltered = manifestToPersist ? encrypt(JSON.stringify(manifestToPersist), req) : null
   // Prefer per-account HMAC for stored manifestUrlHash; legacy/global is only for fallback reads
   const urlHmac = manifestUrlHmac(req, urlPlain)
-  const mHash = manifestObj ? manifestHash(manifestObj) : null
-  const mHmac = manifestObj ? manifestHmac(req, manifestObj) : null
+  const mHash = manifestToPersist ? manifestHash(manifestToPersist) : (manifestObj ? manifestHash(manifestObj) : null)
+  const mHmac = manifestToPersist ? manifestHmac(req, manifestToPersist) : (manifestObj ? manifestHmac(req, manifestObj) : null)
 
   const resources = (() => {
     try {
-      const src = Array.isArray(manifestObj?.resources) ? manifestObj.resources : []
+      if (Array.isArray(resourcesInput)) {
+        const names = resourcesInput.map(r => (typeof r === 'string' ? r : (r && (r.name || r.type)))).filter(Boolean)
+        return names.length ? JSON.stringify(names) : null
+      }
+      const src = Array.isArray(manifestToPersist?.resources) ? manifestToPersist.resources : Array.isArray(manifestObj?.resources) ? manifestObj.resources : []
       const names = src.map(r => (typeof r === 'string' ? r : (r && (r.name || r.type)))).filter(Boolean)
       return names.length ? JSON.stringify(names) : null
+    } catch { return null }
+  })()
+
+  const catalogs = (() => {
+    try {
+      if (Array.isArray(catalogsInput)) {
+        const compact = catalogsInput.map(c => ({ type: c.type, id: c.id })).filter(c => c.type && c.id)
+        return compact.length ? JSON.stringify(compact) : null
+      }
+      const src = Array.isArray(manifestToPersist?.catalogs) ? manifestToPersist.catalogs : Array.isArray(manifestObj?.catalogs) ? manifestObj.catalogs : []
+      const compact = src.map(c => ({ type: c.type, id: c.id })).filter(c => c.type && c.id)
+      return compact.length ? JSON.stringify(compact) : null
     } catch { return null }
   })()
 
@@ -113,14 +145,15 @@ function buildAddonDbData(req, params) {
     description: description || (manifestObj?.description || ''),
     manifestUrl: encUrl,
     manifestUrlHash: urlHmac,
-    manifestHash: mHash,      // new content hash (unkeyed)
+    manifestHash: mHash,      // content hash of filtered/original
     version: version || manifestObj?.version || null,
     iconUrl: iconUrl || manifestObj?.logo || null,
     stremioAddonId: stremioAddonId || manifestObj?.id || null,
     isActive,
-    originalManifest: encManifest,
-    manifest: encManifest,
+    originalManifest: encOriginal,
+    manifest: encFiltered,
     resources,
+    catalogs,
     accountId: getAccountId(req)
   }
 }

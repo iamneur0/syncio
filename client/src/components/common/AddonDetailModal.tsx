@@ -3,7 +3,7 @@
 
 import React, { useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'
-import { Puzzle, X, BookOpen, Clapperboard, Tv, Library, Zap, Clipboard, ClipboardList } from 'lucide-react'
+import { Puzzle, X, BookOpen, Clapperboard, Tv, Library, Zap, Clipboard, ClipboardList, Users } from 'lucide-react'
 import { useTheme } from '@/contexts/ThemeContext'
 import { getColorBgClass, getColorTextClass, getColorBorderClass, getColorHexValue } from '@/utils/colorMapping'
 import { VersionChip, EntityList, InlineEdit } from './'
@@ -416,8 +416,8 @@ export default function AddonDetailModal({
                     </div>
                   </div>
                 )}
-                emptyIcon={null}
-                emptyMessage="No groups available. Go to Groups to create your first group."
+                emptyIcon={<Users className={`w-12 h-12 mx-auto mb-4 ${isDark ? 'text-gray-500' : 'text-gray-400'}`} />}
+                emptyMessage="No groups associated with this addon"
               />
             )
           })()}
@@ -473,7 +473,7 @@ export default function AddonDetailModal({
                   />
                 )}
                 emptyMessage="No resources available for this addon"
-                emptyIcon={<Puzzle className="w-8 h-8" />}
+                emptyIcon={<Puzzle className={`w-12 h-12 mx-auto mb-4 ${isDark ? 'text-gray-500' : 'text-gray-400'}`} />}
               />
             )
           })()}

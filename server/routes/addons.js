@@ -241,18 +241,20 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
       // Use provided manifest data if available, otherwise fetch it
       let manifestData = providedManifestData
       if (!manifestData) {
-      try {
-        console.log(`🔍 Fetching manifest for new addon: ${sanitizedUrl}`)
-        const resp = await fetch(sanitizedUrl)
-        if (!resp.ok) {
+        try {
+          console.log(`🔍 Fetching manifest for new addon: ${sanitizedUrl}`)
+          const resp = await fetch(sanitizedUrl)
+          if (!resp.ok) {
+            return res.status(400).json({ message: 'Failed to fetch addon manifest. The add-on URL may be incorrect.' })
+          }
+          manifestData = await resp.json()
+          console.log(`✅ Fetched manifest:`, manifestData?.name, manifestData?.version)
+        } catch (e) {
           return res.status(400).json({ message: 'Failed to fetch addon manifest. The add-on URL may be incorrect.' })
         }
-        manifestData = await resp.json()
-        console.log(`✅ Fetched manifest:`, manifestData?.name, manifestData?.version)
-      } catch (e) {
-        return res.status(400).json({ message: 'Failed to fetch addon manifest. The add-on URL may be incorrect.' })
-        }
       }
+
+      // Note: we build dbData after we compute filtered/resources/catalogs further below
 
       if (existingByName) {
         if (existingByName.isActive) {
@@ -366,25 +368,24 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
         } catch { return [] }
       })()
 
-      // Create new addon
-      const newAddon = await prisma.addon.create({
-        data: {
-          name: (name && name.trim()) ? name.trim() : (manifestData?.name || 'Unknown'),
-          description: description || manifestData?.description || '',
-          manifestUrl: encrypt(sanitizedUrl, req),
-          manifestUrlHash: manifestHash(sanitizedUrl),
-          version: manifestData?.version || null,
-          iconUrl: manifestData?.logo || null,
-          stremioAddonId: manifestData?.id || null,
-          originalManifest: encrypt(JSON.stringify(manifestData), req),
-          manifest: encrypt(JSON.stringify(filtered), req),
-          manifestHash: manifestHash(filtered),
-          resources: JSON.stringify(simplifiedResources), // Just names: ["stream", "catalog"]
-          catalogs: JSON.stringify(simplifiedCatalogs),   // Just (type,id) pairs: [{"type":"movie","id":"123"}]
-          isActive: true,
-          accountId: getAccountId(req)
-        }
-      });
+      // Centralize DB data build (consistent with repair and elsewhere)
+      const { buildAddonDbData } = require('../utils/stremio')
+      const dbData = buildAddonDbData(req, {
+        name: (name && name.trim()) ? name.trim() : (manifestData?.name || 'Unknown'),
+        description,
+        sanitizedUrl,
+        manifestObj: manifestData,
+        filteredManifest: filtered,
+        iconUrl: manifestData?.logo,
+        version: manifestData?.version,
+        stremioAddonId: manifestData?.id,
+        isActive: true,
+        resources: simplifiedResources,
+        catalogs: simplifiedCatalogs
+      })
+
+      // Create new addon using centralized builder
+      const newAddon = await prisma.addon.create({ data: dbData })
 
       // Handle group assignments for new addon
       let assignedGroups = [];
@@ -659,7 +660,7 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
 
       // Calculate total users across all groups that have this addon (only from current account)
       const totalUsers = filteredGroupAddons.reduce((sum, groupAddon) => {
-        return sum + (groupAddon.group._count.members || 0)
+        return sum + (groupAddon.group._count.users || 0)
       }, 0)
 
       const transformedAddon = {
