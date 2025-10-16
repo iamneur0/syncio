@@ -5,9 +5,11 @@ services:
     environment:
       JWT_SECRET: 'temp-jwt-secret-key'
       ENCRYPTION_KEY: 'temp-encryption-key-32-chars-long'
+      DEBUG: 'false'
+      NEXT_PUBLIC_DEBUG: 'false'
     user: "1001:1001"
-    volumes:
-      - ./data:/app/data
+    # volumes:
+      # - ./data:/app/data
     ports:
       - "3000:3000"
       - "4000:4000"
