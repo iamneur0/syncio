@@ -1,7 +1,7 @@
 version: '3.9'
 services:
   syncio:
-    image: ghcr.io/iamneur0/syncio:public
+    image: ghcr.io/iamneur0/syncio:private
     environment:
       JWT_SECRET: 'temp-jwt-secret-key'
       ENCRYPTION_KEY: 'temp-encryption-key-32-chars-long'
