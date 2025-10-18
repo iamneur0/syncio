@@ -1,5 +1,26 @@
 // Sync utilities: factories for user and group sync-status helpers
 
+/**
+ * Fetch addons from Stremio for a user
+ */
+async function fetchUserStremioAddons(user, req, { decrypt, StremioAPIClient }) {
+  if (!user.stremioAuthKey) {
+    return { success: false, addons: [], error: 'User not connected to Stremio' }
+  }
+
+  try {
+    const authKeyPlain = decrypt(user.stremioAuthKey, req)
+    const apiClient = new StremioAPIClient({ endpoint: 'https://api.strem.io', authKey: authKeyPlain })
+    const collection = await apiClient.request('addonCollectionGet', {})
+    const rawAddons = collection?.addons || collection || {}
+    const stremioAddons = Array.isArray(rawAddons) ? rawAddons : (typeof rawAddons === 'object' ? Object.values(rawAddons) : [])
+    
+    return { success: true, addons: stremioAddons, error: null }
+  } catch (error) {
+    return { success: false, addons: [], error: error.message || 'Failed to fetch Stremio addons' }
+  }
+}
+
 function createGetUserSyncStatus({ prisma, getAccountId, decrypt, parseAddonIds, parseProtectedAddons, getDecryptedManifestUrl, canonicalizeManifestUrl, StremioAPIClient }) {
   const normalizeUrl = (u) => {
     try {
@@ -17,15 +38,9 @@ function createGetUserSyncStatus({ prisma, getAccountId, decrypt, parseAddonIds,
     if (!user) return { status: 'error', isSynced: false, message: 'User not found' }
     if (!user.stremioAuthKey) return { isSynced: false, status: 'connect', message: 'User not connected to Stremio' }
 
-    let stremioAddons = []
-    try {
-      const authKeyPlain = decrypt(user.stremioAuthKey, req)
-      const apiClient = new StremioAPIClient({ endpoint: 'https://api.strem.io', authKey: authKeyPlain })
-      const collection = await apiClient.request('addonCollectionGet', {})
-      const rawAddons = collection?.addons || collection || {}
-      stremioAddons = Array.isArray(rawAddons) ? rawAddons : (typeof rawAddons === 'object' ? Object.values(rawAddons) : [])
-    } catch (error) {
-      return { isSynced: false, status: 'error', message: 'Failed to fetch Stremio addons' }
+    const { success, addons: stremioAddons, error } = await fetchUserStremioAddons(user, req, { decrypt, StremioAPIClient })
+    if (!success) {
+      return { isSynced: false, status: 'error', message: error }
     }
 
     const groupWhere = { accountId: getAccountId(req), userIds: { contains: user.id } }
@@ -140,6 +155,7 @@ function createGetGroupSyncStatus(deps) {
 }
 
 module.exports = {
+  fetchUserStremioAddons,
   createGetUserSyncStatus,
   createGetGroupSyncStatus,
 }
