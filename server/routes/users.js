@@ -502,6 +502,93 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
     }
   });
 
+  // Get user's desired addons (group addons + protected addons)
+  router.get('/:id/desired-addons', async (req, res) => {
+    try {
+      const { id } = req.params
+      console.log('🔍 Fetching desired addons for user:', id)
+      
+      // Fetch the user
+      const user = await prisma.user.findUnique({
+        where: { 
+          id,
+          accountId: getAccountId(req)
+        },
+        select: { 
+          id: true,
+          stremioAuthKey: true,
+          excludedAddons: true,
+          protectedAddons: true
+        }
+      })
+
+      if (!user) {
+        return res.status(404).json({ message: 'User not found' })
+      }
+
+      // Import the getDesiredAddons function
+      const { getDesiredAddons } = require('../utils/sync')
+      
+      // Call getDesiredAddons with all required dependencies
+      const result = await getDesiredAddons(user, req, {
+        prisma,
+        getAccountId,
+        decrypt,
+        parseAddonIds,
+        parseProtectedAddons,
+        canonicalizeManifestUrl,
+        StremioAPIClient
+      })
+
+      if (!result.success) {
+        return res.status(500).json({ message: result.error })
+      }
+
+      console.log('📦 Desired addons:', result.addons.length)
+      res.json({ addons: result.addons })
+    } catch (error) {
+      console.error('❌ Error fetching desired addons:', error)
+      res.status(500).json({ message: 'Failed to fetch desired addons', error: error?.message })
+    }
+  });
+
+  // Get user's group addons
+  router.get('/:id/group-addons', async (req, res) => {
+    try {
+      const { id } = req.params
+      console.log('🔍 Fetching group addons for user:', id)
+      
+      // Get user's groups
+      const groups = await prisma.group.findMany({
+        where: {
+          accountId: getAccountId(req),
+          userIds: {
+            contains: id
+          }
+        }
+      })
+
+      if (groups.length === 0) {
+        return res.json({ addons: [] })
+      }
+
+      // Use the primary group (first one)
+      const primaryGroup = groups[0]
+      
+      // Import the getGroupAddons function
+      const { getGroupAddons } = require('../utils/helpers')
+      
+      // Get group addons with proper ordering and decryption
+      const groupAddons = await getGroupAddons(prisma, primaryGroup.id, req)
+
+      console.log('📦 Group addons:', groupAddons.length)
+      res.json({ addons: groupAddons })
+    } catch (error) {
+      console.error('❌ Error fetching group addons:', error)
+      res.status(500).json({ message: 'Failed to fetch group addons', error: error?.message })
+    }
+  });
+
   // Update excluded addons
   router.put('/:id/excluded-addons', async (req, res) => {
     try {
