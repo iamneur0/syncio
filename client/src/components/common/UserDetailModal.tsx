@@ -8,7 +8,7 @@ import toast from 'react-hot-toast'
 import { VersionChip, EntityList, SyncBadge, InlineEdit, ColorPicker } from './'
 import AddonIcon from './AddonIcon'
 import { useSyncStatusRefresh } from '@/hooks/useSyncStatusRefresh'
-import { Puzzle, X, Eye, EyeOff, LockKeyhole, Unlock } from 'lucide-react'
+import { Puzzle, X, Eye, EyeOff, LockKeyhole, Unlock, Bug, Copy } from 'lucide-react'
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors } from '@dnd-kit/core'
 import { restrictToParentElement } from '@dnd-kit/modifiers'
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy } from '@dnd-kit/sortable'
@@ -73,6 +73,12 @@ export default function UserDetailModal({
   
   // Drag and drop state for Stremio addons
   const [stremioAddons, setStremioAddons] = useState<any[]>([])
+  
+  // Debug modal state
+  const [showCurrentModal, setShowCurrentModal] = useState(false)
+  const [showDesiredModal, setShowDesiredModal] = useState(false)
+  const [currentAddonsData, setCurrentAddonsData] = useState<any[]>([])
+  const [desiredAddonsData, setDesiredAddonsData] = useState<any[]>([])
 
   // Initialize local state when opening the modal or switching user
   useEffect(() => {
@@ -133,6 +139,22 @@ export default function UserDetailModal({
     enabled: !!user?.id,
   })
 
+
+  // Debug mode check
+  const isDebugMode = process.env.NEXT_PUBLIC_DEBUG === 'true' || process.env.NEXT_PUBLIC_DEBUG === '1'
+
+  // Debug function to show raw Stremio addons
+  const handleDebugStremioAddons = () => {
+    // Use the raw API data instead of the local state
+    setCurrentAddonsData(stremioAddonsData || [])
+    setShowCurrentModal(true)
+  }
+
+  // Debug function to show desired addons
+  const handleDebugDesiredAddons = () => {
+    setDesiredAddonsData(userDetails?.addons || [])
+    setShowDesiredModal(true)
+  }
 
   // Reset/reload Stremio account addons (same UX as other reset buttons)
   const handleResetStremioAddons = () => {
@@ -616,13 +638,35 @@ export default function UserDetailModal({
             count={stremioAddons?.length || 0}
             items={stremioAddons || []}
             isLoading={false}
-            onClear={stremioAddons && stremioAddons.length > 0 ? handleResetStremioAddons : undefined}
+            onClear={handleResetStremioAddons}
             confirmReset={{
               title: 'Reset Stremio Addons',
               description: "This will clear all addons from this user's Stremio account. Continue?",
               confirmText: 'Reset',
               isDanger: true,
             }}
+            headerRight={
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleDebugStremioAddons}
+                  className={`px-3 py-1 text-sm rounded transition-colors ${
+                    isDark ? 'text-gray-300 hover:text-white hover:bg-gray-600' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+                  }`}
+                  title="Show current Stremio addons"
+                >
+                  Current
+                </button>
+                <button
+                  onClick={handleDebugDesiredAddons}
+                  className={`px-3 py-1 text-sm rounded transition-colors ${
+                    isDark ? 'text-gray-300 hover:text-white hover:bg-gray-600' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+                  }`}
+                  title="Show desired addons from groups"
+                >
+                  Desired
+                </button>
+              </div>
+            }
             isDraggable={true}
             renderItem={(addon: any, index: number) => (
               <SortableStremioAddonItem
@@ -656,6 +700,98 @@ export default function UserDetailModal({
 
         </div>
       </div>
+
+      {/* Current Addons Debug Modal */}
+      {showCurrentModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className={`rounded-lg p-6 max-w-2xl max-h-[80vh] overflow-y-auto ${isDark ? 'bg-gray-800' : 'bg-white'}`}>
+            <div className="flex justify-between items-center mb-4">
+              <h3 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                Current Stremio Addons ({currentAddonsData.length})
+              </h3>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(JSON.stringify(currentAddonsData, null, 2))
+                    toast.success('JSON copied to clipboard')
+                  }}
+                  className={`p-2 rounded-lg transition-colors ${
+                    isDark ? 'text-gray-400 hover:bg-gray-700' : 'text-gray-600 hover:bg-gray-100'
+                  }`}
+                  title="Copy JSON to clipboard"
+                >
+                  <Copy className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => setShowCurrentModal(false)}
+                  className={`p-2 rounded-lg transition-colors ${
+                    isDark ? 'text-gray-400 hover:bg-gray-700' : 'text-gray-600 hover:bg-gray-100'
+                  }`}
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+            <div className="space-y-2">
+              {currentAddonsData.length === 0 ? (
+                <p className={`${isDark ? 'text-gray-400' : 'text-gray-600'}`}>No addons found</p>
+              ) : (
+                <div className="relative">
+                  <pre className={`p-4 rounded-lg border text-xs overflow-auto max-h-96 ${isDark ? 'bg-gray-900 border-gray-600 text-gray-300' : 'bg-gray-100 border-gray-200 text-gray-800'}`}>
+                    {JSON.stringify(currentAddonsData, null, 2)}
+                  </pre>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Desired Addons Debug Modal */}
+      {showDesiredModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className={`rounded-lg p-6 max-w-2xl max-h-[80vh] overflow-y-auto ${isDark ? 'bg-gray-800' : 'bg-white'}`}>
+            <div className="flex justify-between items-center mb-4">
+              <h3 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                Desired Addons from Groups ({desiredAddonsData.length})
+              </h3>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(JSON.stringify(desiredAddonsData, null, 2))
+                    toast.success('JSON copied to clipboard')
+                  }}
+                  className={`p-2 rounded-lg transition-colors ${
+                    isDark ? 'text-gray-400 hover:bg-gray-700' : 'text-gray-600 hover:bg-gray-100'
+                  }`}
+                  title="Copy JSON to clipboard"
+                >
+                  <Copy className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => setShowDesiredModal(false)}
+                  className={`p-2 rounded-lg transition-colors ${
+                    isDark ? 'text-gray-400 hover:bg-gray-700' : 'text-gray-600 hover:bg-gray-100'
+                  }`}
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+            <div className="space-y-2">
+              {desiredAddonsData.length === 0 ? (
+                <p className={`${isDark ? 'text-gray-400' : 'text-gray-600'}`}>No addons found</p>
+              ) : (
+                <div className="relative">
+                  <pre className={`p-4 rounded-lg border text-xs overflow-auto max-h-96 ${isDark ? 'bg-gray-900 border-gray-600 text-gray-300' : 'bg-gray-100 border-gray-200 text-gray-800'}`}>
+                    {JSON.stringify(desiredAddonsData, null, 2)}
+                  </pre>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>,
     document.body
   )
