@@ -546,26 +546,31 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
         return res.status(400).json({ message: 'Addon already in this group' })
       }
 
-      // Get the next available position for this group
-      const maxPosition = await prisma.groupAddon.aggregate({
-        where: { 
-          groupId: groupId,
-          position: { not: null }
-        },
-        _max: { position: true }
-      })
-      const nextPosition = (maxPosition._max.position ?? -1) + 1
-      console.log(`🔢 Adding addon to group ${groupId}: maxPosition=${maxPosition._max.position}, nextPosition=${nextPosition}`)
+      // Add addon to group at the top (position 0) and shift existing addons down
+      await prisma.$transaction(async (tx) => {
+        // Increment position of all existing addons in this group
+        await tx.groupAddon.updateMany({
+          where: { 
+            groupId: groupId,
+            position: { not: null }
+          },
+          data: {
+            position: { increment: 1 }
+          }
+        })
 
-      // Add addon to group
-      await prisma.groupAddon.create({
-        data: {
-          groupId: groupId,
-          addonId: addonId,
-          isEnabled: true,
-          position: nextPosition
-        }
+        // Add new addon at position 0 (top)
+        await tx.groupAddon.create({
+          data: {
+            groupId: groupId,
+            addonId: addonId,
+            isEnabled: true,
+            position: 0
+          }
+        })
       })
+      
+      console.log(`🔢 Added addon to group ${groupId} at position 0 (top)`)
 
       res.json({ message: 'Addon added to group successfully' })
     } catch (error) {
