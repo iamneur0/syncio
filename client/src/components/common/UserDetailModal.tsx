@@ -77,8 +77,10 @@ export default function UserDetailModal({
   // Debug modal state
   const [showCurrentModal, setShowCurrentModal] = useState(false)
   const [showDesiredModal, setShowDesiredModal] = useState(false)
+  const [showGroupAddonsModal, setShowGroupAddonsModal] = useState(false)
   const [currentAddonsData, setCurrentAddonsData] = useState<any[]>([])
   const [desiredAddonsData, setDesiredAddonsData] = useState<any[]>([])
+  const [groupAddonsData, setGroupAddonsData] = useState<any[]>([])
 
   // Initialize local state when opening the modal or switching user
   useEffect(() => {
@@ -145,15 +147,34 @@ export default function UserDetailModal({
 
   // Debug function to show raw Stremio addons
   const handleDebugStremioAddons = () => {
-    // Use the raw API data instead of the local state
-    setCurrentAddonsData(stremioAddonsData || [])
+    // Extract just the addons array from the API response
+    const addonsArray = stremioAddonsData?.addons || stremioAddonsData || []
+    setCurrentAddonsData(addonsArray)
     setShowCurrentModal(true)
   }
 
   // Debug function to show desired addons
-  const handleDebugDesiredAddons = () => {
-    setDesiredAddonsData(userDetails?.addons || [])
-    setShowDesiredModal(true)
+  const handleDebugDesiredAddons = async () => {
+    try {
+      const response = await usersAPI.getDesiredAddons(user!.id)
+      setDesiredAddonsData(response.addons || [])
+      setShowDesiredModal(true)
+    } catch (error) {
+      console.error('Failed to fetch desired addons:', error)
+      toast.error('Failed to fetch desired addons')
+    }
+  }
+
+  // Debug function to show group addons
+  const handleDebugGroupAddons = async () => {
+    try {
+      const response = await usersAPI.getGroupAddons(user!.id)
+      setGroupAddonsData(response.addons || [])
+      setShowGroupAddonsModal(true)
+    } catch (error) {
+      console.error('Failed to fetch group addons:', error)
+      toast.error('Failed to fetch group addons')
+    }
   }
 
   // Reset/reload Stremio account addons (same UX as other reset buttons)
@@ -607,19 +628,30 @@ export default function UserDetailModal({
           items={userDetails?.addons || []}
             isLoading={isLoadingUserDetails}
             headerRight={(
-              <select
-                value={userDetails?.groupId || userDetails?.groups?.[0]?.id || ''}
-                onChange={(e) => handleGroupChange(e.target.value)}
-                className={`px-3 py-2 border rounded-lg text-sm focus:outline-none ${
-                  isDark ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'
-                }`}
-                title="Change group"
-              >
-                <option value="">No group</option>
-                {groups?.map((group: any) => (
-                  <option key={group.id} value={group.id}>{group.name}</option>
-                ))}
-              </select>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleDebugGroupAddons}
+                  className={`px-3 py-1 text-sm rounded transition-colors ${
+                    isDark ? 'text-gray-300 hover:text-white hover:bg-gray-600' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+                  }`}
+                  title="Show current group addons"
+                >
+                  Current
+                </button>
+                <select
+                  value={userDetails?.groupId || userDetails?.groups?.[0]?.id || ''}
+                  onChange={(e) => handleGroupChange(e.target.value)}
+                  className={`px-3 py-2 border rounded-lg text-sm focus:outline-none ${
+                    isDark ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'
+                  }`}
+                  title="Change group"
+                >
+                  <option value="">No group</option>
+                  {groups?.map((group: any) => (
+                    <option key={group.id} value={group.id}>{group.name}</option>
+                  ))}
+                </select>
+              </div>
             )}
             renderItem={(addon: any, index: number) => (
               <GroupAddonItem
@@ -661,9 +693,9 @@ export default function UserDetailModal({
                   className={`px-3 py-1 text-sm rounded transition-colors ${
                     isDark ? 'text-gray-300 hover:text-white hover:bg-gray-600' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
                   }`}
-                  title="Show desired addons from groups"
+                  title="Show desired addons (group addons + protected addons)"
                 >
-                  Desired
+                  Desired 2
                 </button>
               </div>
             }
@@ -785,6 +817,52 @@ export default function UserDetailModal({
                 <div className="relative">
                   <pre className={`p-4 rounded-lg border text-xs overflow-auto max-h-96 ${isDark ? 'bg-gray-900 border-gray-600 text-gray-300' : 'bg-gray-100 border-gray-200 text-gray-800'}`}>
                     {JSON.stringify(desiredAddonsData, null, 2)}
+                  </pre>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Group Addons Debug Modal */}
+      {showGroupAddonsModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className={`rounded-lg p-6 max-w-2xl max-h-[80vh] overflow-y-auto ${isDark ? 'bg-gray-800' : 'bg-white'}`}>
+            <div className="flex justify-between items-center mb-4">
+              <h3 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                Group Addons ({groupAddonsData.length})
+              </h3>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(JSON.stringify(groupAddonsData, null, 2))
+                    toast.success('JSON copied to clipboard')
+                  }}
+                  className={`p-2 rounded-lg transition-colors ${
+                    isDark ? 'text-gray-400 hover:bg-gray-700' : 'text-gray-600 hover:bg-gray-100'
+                  }`}
+                  title="Copy JSON to clipboard"
+                >
+                  <Copy className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => setShowGroupAddonsModal(false)}
+                  className={`p-2 rounded-lg transition-colors ${
+                    isDark ? 'text-gray-400 hover:bg-gray-700' : 'text-gray-600 hover:bg-gray-100'
+                  }`}
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+            <div className="space-y-2">
+              {groupAddonsData.length === 0 ? (
+                <p className={`${isDark ? 'text-gray-400' : 'text-gray-600'}`}>No addons found</p>
+              ) : (
+                <div className="relative">
+                  <pre className={`p-4 rounded-lg border text-xs overflow-auto max-h-96 ${isDark ? 'bg-gray-900 border-gray-600 text-gray-300' : 'bg-gray-100 border-gray-200 text-gray-800'}`}>
+                    {JSON.stringify(groupAddonsData, null, 2)}
                   </pre>
                 </div>
               )}
