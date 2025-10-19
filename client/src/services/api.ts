@@ -305,6 +305,18 @@ export const usersAPI = {
     const response: AxiosResponse<any> = await api.post(`/users/${id}/protect-addon?unsafe=${unsafe}`, { addonId })
     return response.data
   },
+
+  // Reconnect user with new Stremio credentials
+  reconnectStremio: async (userData: { username: string; email: string; password: string }): Promise<any> => {
+    console.log('🔍 usersAPI.reconnectStremio: Sending data to /stremio/connect:', { 
+      email: userData.email, 
+      username: userData.username, 
+      passwordLength: userData.password.length 
+    })
+    const response: AxiosResponse<any> = await api.post('/stremio/connect', userData)
+    console.log('🔍 usersAPI.reconnectStremio: Response received:', response.data)
+    return response.data
+  },
 }
 
 // Groups API

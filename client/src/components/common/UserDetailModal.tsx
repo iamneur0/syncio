@@ -390,7 +390,7 @@ export default function UserDetailModal({
     // Support both legacy shape (plain manifest) and new shape ({ transportUrl, transportName, manifest })
     const manifest = addon?.manifest || addon
     const addonId = manifest?.id || addon?.id
-    const name = addon?.transportName || manifest?.name || 'Unknown'
+    const name = manifest?.name || addon?.transportName || 'Unknown'
     const version = manifest?.version
     const description = manifest?.description || ''
     const iconUrl = addon?.iconUrl || manifest?.logo || manifest?.icon || null
@@ -439,7 +439,7 @@ export default function UserDetailModal({
   const SortableStremioAddonItem = ({ addon, index }: { addon: any; index: number }) => {
     // Handle getUserAddons format: { transportUrl, transportName, manifest: { name, version, description, logo } }
     const addonId = addon.transportUrl || addon.manifestUrl || addon.url || addon.id
-    const addonName = addon.transportName || addon.manifest?.name || addon.name || 'Unknown Addon'
+    const addonName = addon.manifest?.name || addon.transportName || addon.name || 'Unknown Addon'
     const addonVersion = addon.manifest?.version || addon.version
     const addonDescription = addon.manifest?.description || addon.description || 'No description'
     const addonIconUrl = addon.manifest?.logo || addon.manifest?.icon || addon.iconUrl

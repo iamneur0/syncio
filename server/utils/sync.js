@@ -190,6 +190,16 @@ function createGetUserSyncStatus({ prisma, getAccountId, decrypt, parseAddonIds,
     // Get user's current Stremio addons
     const { success: userAddonsSuccess, addons: userAddonsResponse, error: userAddonsError } = await getUserAddons(user, req, { decrypt, StremioAPIClient })
     if (!userAddonsSuccess) {
+      // If the error is related to authentication, treat it as "connect" status
+      if (userAddonsError && (
+        userAddonsError.includes('Unsupported state or unable to authenticate') ||
+        userAddonsError.includes('authentication') ||
+        userAddonsError.includes('auth') ||
+        userAddonsError.includes('invalid') ||
+        userAddonsError.includes('corrupted')
+      )) {
+        return { isSynced: false, status: 'connect', message: 'Stremio connection invalid - please reconnect' }
+      }
       return { isSynced: false, status: 'error', message: userAddonsError }
     }
     
