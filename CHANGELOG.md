@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.2.0](https://github.com/iamneur0/syncio/compare/v0.1.0...v0.2.0) (2025-10-19)
+
+
+### Features
+
+* kiss sync and sync check process ([3189b53](https://github.com/iamneur0/syncio/commit/3189b5371dacdb8e615719c904a2c2d8d8ee6d02))
+* made cards responsive and now adapting to window size ([062dfa6](https://github.com/iamneur0/syncio/commit/062dfa6f99b85cfd66420a9e9f3a10a13861ab43))
+* manifest view from user page ([f96ae9d](https://github.com/iamneur0/syncio/commit/f96ae9da3d27ca9376190fa4dd7270883a92266f))
+
+
+### Bug Fixes
+
+* desired addons better compute ([45b0e08](https://github.com/iamneur0/syncio/commit/45b0e088d009be179bcdd2d8fc37e317462f7362))
+* group addon add at the bottom instead of the top ([61667a8](https://github.com/iamneur0/syncio/commit/61667a8f1effb6ef93f4b1d66149c032ccaf9229))
+* removed debugging logs in prod ([7ff167b](https://github.com/iamneur0/syncio/commit/7ff167b5fcbb982ea8c9abba344f74176bce3f94))
+* UI and responsiveness ([27efafd](https://github.com/iamneur0/syncio/commit/27efafd43b4f1145d04717bb6ee6ec7f1dadb62e))
+
 ## [0.1.0](https://github.com/iamneur0/syncio/compare/v0.0.18...v0.1.0) (2025-10-16)
 
 
