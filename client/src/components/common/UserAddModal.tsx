@@ -18,6 +18,14 @@ interface UserAddModalProps {
   }) => void
   isCreating: boolean
   groups?: any[]
+  // For editing existing users
+  editingUser?: {
+    id: string
+    username: string
+    email: string
+    groupId?: string
+    colorIndex: number
+  }
 }
 
 export default function UserAddModal({ 
@@ -25,8 +33,10 @@ export default function UserAddModal({
   onClose, 
   onAddUser, 
   isCreating,
-  groups = []
+  groups = [],
+  editingUser
 }: UserAddModalProps) {
+  console.log('🔍 UserAddModal rendered with editingUser:', editingUser)
   const { isDark, isMono } = useTheme()
   const [mounted, setMounted] = useState(false)
   const [stremioEmail, setStremioEmail] = useState('')
@@ -43,6 +53,44 @@ export default function UserAddModal({
     setMounted(true)
   }, [])
 
+  // Populate form when editing a user
+  useEffect(() => {
+    console.log('🔍 UserAddModal useEffect - editingUser:', editingUser)
+    if (editingUser) {
+      console.log('🔍 Setting form fields with editingUser data:', {
+        username: editingUser.username,
+        email: editingUser.email
+      })
+      setStremioUsername(editingUser.username || '')
+      setStremioEmail(editingUser.email || '')
+      setSelectedGroup(editingUser.groupId || '')
+      setColorIndex(editingUser.colorIndex || 0)
+      setColorIndexRef(editingUser.colorIndex || 0)
+      setAuthMode('authkey') // Default to authkey mode for reconnection
+      setStremioRegisterNew(false) // Hide register option for reconnection
+      
+      // Debug: Log the state after setting
+      setTimeout(() => {
+        console.log('🔍 State after setting:', {
+          stremioUsername,
+          stremioEmail,
+          authMode
+        })
+      }, 100)
+    } else {
+      // Reset form when not editing
+      setStremioEmail('')
+      setStremioPassword('')
+      setStremioUsername('')
+      setAuthMode('email')
+      setSelectedGroup('')
+      setNewGroupName('')
+      setStremioRegisterNew(false)
+      setColorIndex(0)
+      setColorIndexRef(0)
+    }
+  }, [editingUser])
+
   // Close on Escape
   useEffect(() => {
     if (!isOpen) return
@@ -58,8 +106,9 @@ export default function UserAddModal({
   }, [isOpen])
 
   // Reset form fields whenever the modal is opened, to avoid stale values on reopen
+  // But only if we're not editing a user (editingUser is null)
   useEffect(() => {
-    if (isOpen) {
+    if (isOpen && !editingUser) {
       setStremioEmail('')
       setStremioPassword('')
       setStremioUsername('')
@@ -68,12 +117,28 @@ export default function UserAddModal({
       setStremioRegisterNew(false)
       setAuthMode('email')
     }
-  }, [isOpen])
+  }, [isOpen, editingUser])
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     
+    console.log('🔍 UserAddModal handleSubmit called')
+    console.log('🔍 editingUser:', editingUser)
+    console.log('🔍 form data:', {
+      stremioUsername: stremioUsername.trim(),
+      stremioEmail: stremioEmail.trim(),
+      stremioPassword: stremioPassword.trim(),
+      authMode,
+      selectedGroup,
+      newGroupName: newGroupName.trim()
+    })
+    console.log('🔍 Password field value:', stremioPassword)
+    console.log('🔍 Password field length:', stremioPassword.length)
+    
     if (!stremioUsername.trim() || !stremioPassword.trim()) {
+      console.log('🔍 Validation failed: missing username or password')
+      console.log('🔍 Username:', stremioUsername.trim())
+      console.log('🔍 Password:', stremioPassword.trim())
       return
     }
 
@@ -81,14 +146,24 @@ export default function UserAddModal({
     const selectedGroupName = selectedGroup ? (groups.find((g: any) => g.id === selectedGroup)?.name || undefined) : undefined
     const finalGroupName = (newGroupName.trim() || selectedGroupName) || undefined
 
-    // Single call including groupName so backend assigns user to group
-    ;(onAddUser as any)({
+    const submitData = {
       username: stremioUsername.trim(),
       email: authMode === 'email' ? stremioEmail.trim() : stremioUsername.trim() + '@stremio.local',
       password: stremioPassword.trim(),
       groupName: finalGroupName,
       colorIndex: colorIndexRef,
-    })
+    }
+
+    console.log('🔍 Calling onAddUser with data:', submitData)
+    console.log('🔍 onAddUser function:', typeof onAddUser)
+    
+    // Single call including groupName so backend assigns user to group
+    try {
+      ;(onAddUser as any)(submitData)
+      console.log('🔍 onAddUser called successfully')
+    } catch (error) {
+      console.error('🔍 Error calling onAddUser:', error)
+    }
   }
 
   const handleClose = () => {
@@ -121,7 +196,7 @@ export default function UserAddModal({
       }`}>
         <div className="flex items-center justify-between p-6 border-b border-gray-200">
           <h3 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>
-            Add New User
+            {editingUser ? `Reconnect ${editingUser.username || editingUser.email || 'User'}` : 'Add New User'}
           </h3>
           <button
             onClick={handleClose}
@@ -162,10 +237,13 @@ export default function UserAddModal({
               onChange={(e) => setStremioUsername(e.target.value)}
               placeholder="Enter username"
               required
+              readOnly={!!editingUser}
               className={`w-full px-3 py-2 border rounded-lg focus:outline-none ${
-                isDark 
-                  ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
-                  : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
+                editingUser 
+                  ? (isDark ? 'bg-gray-800 border-gray-600 text-gray-400 cursor-not-allowed' : 'bg-gray-100 text-gray-500 cursor-not-allowed')
+                  : isDark 
+                    ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
+                    : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
               }`}
             />
           </div>
@@ -181,10 +259,13 @@ export default function UserAddModal({
               onChange={(e) => setStremioEmail(e.target.value)}
               placeholder="your@stremio-email.com"
               required
+              readOnly={!!editingUser}
               className={`w-full px-3 py-2 border rounded-lg focus:outline-none ${
-                isDark 
-                  ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
-                  : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
+                editingUser 
+                  ? (isDark ? 'bg-gray-800 border-gray-600 text-gray-400 cursor-not-allowed' : 'bg-gray-100 text-gray-500 cursor-not-allowed')
+                  : isDark 
+                    ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
+                    : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
               }`}
             />
           </div>
@@ -205,18 +286,20 @@ export default function UserAddModal({
               }`}
             />
           </div>
-          <div className="flex items-center gap-2">
-            <input
-              id="stremio-register-new"
-              type="checkbox"
-              checked={stremioRegisterNew}
-              onChange={(e) => setStremioRegisterNew(e.target.checked)}
-              className={`h-4 w-4 rounded border ${isDark ? 'border-gray-600 bg-gray-700' : 'border-gray-300'} accent-text focus:ring-0`}
-            />
-            <label htmlFor="stremio-register-new" className={`${isDark ? 'text-gray-300' : 'text-gray-700'} text-sm`}>
-              Register new Stremio account with these credentials
-            </label>
-          </div>
+          {!editingUser && (
+            <div className="flex items-center gap-2">
+              <input
+                id="stremio-register-new"
+                type="checkbox"
+                checked={stremioRegisterNew}
+                onChange={(e) => setStremioRegisterNew(e.target.checked)}
+                className={`h-4 w-4 rounded border ${isDark ? 'border-gray-600 bg-gray-700' : 'border-gray-300'} accent-text focus:ring-0`}
+              />
+              <label htmlFor="stremio-register-new" className={`${isDark ? 'text-gray-300' : 'text-gray-700'} text-sm`}>
+                Register new Stremio account with these credentials
+              </label>
+            </div>
+          )}
             </>
           ) : (
             <div>
@@ -237,76 +320,80 @@ export default function UserAddModal({
               />
             </div>
           )}
-            <div>
-              <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
-            Assign to group (optional)
-              </label>
-            <div className="space-y-2">
-                <select
-                  value={selectedGroup}
-                  onChange={(e) => setSelectedGroup(e.target.value)}
-                  className={`w-full px-3 py-2 border rounded-lg focus:outline-none ${
-                    isDark 
-                      ? 'bg-gray-700 border-gray-600 text-white' 
-                      : 'bg-white border-gray-300 text-gray-900'
-                  }`}
-                >
-                <option value="">Select a group (optional)</option>
-                {groups?.map((group: any) => (
-                  <option key={group.id} value={group.id}>
-                      {group.name}
-                    </option>
-                  ))}
-                </select>
-              <div className="text-center text-sm text-gray-500">or</div>
-                  <input
-                    type="text"
-                    value={newGroupName}
-                    onChange={(e) => setNewGroupName(e.target.value)}
-                placeholder="Create new group"
+            {!editingUser && (
+              <div>
+                <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
+              Assign to group (optional)
+                </label>
+              <div className="space-y-2">
+                  <select
+                    value={selectedGroup}
+                    onChange={(e) => setSelectedGroup(e.target.value)}
                     className={`w-full px-3 py-2 border rounded-lg focus:outline-none ${
                       isDark 
-                        ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
-                        : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
+                        ? 'bg-gray-700 border-gray-600 text-white' 
+                        : 'bg-white border-gray-300 text-gray-900'
                     }`}
-                  />
-                </div>
-            </div>
+                  >
+                  <option value="">Select a group (optional)</option>
+                  {groups?.map((group: any) => (
+                    <option key={group.id} value={group.id}>
+                        {group.name}
+                      </option>
+                    ))}
+                  </select>
+                <div className="text-center text-sm text-gray-500">or</div>
+                    <input
+                      type="text"
+                      value={newGroupName}
+                      onChange={(e) => setNewGroupName(e.target.value)}
+                  placeholder="Create new group"
+                      className={`w-full px-3 py-2 border rounded-lg focus:outline-none ${
+                        isDark 
+                          ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
+                          : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
+                      }`}
+                    />
+                  </div>
+              </div>
+            )}
             
             {/* Color Selection */}
-            <div>
-              <label className={`block text-sm font-medium mb-2 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
-                User Color
-              </label>
-            <div className="grid grid-cols-5 gap-2">
-              {getThemePalette(isMono ? 'mono' : isDark ? 'dark' : 'light').map((colorOption, index) => {
-                const actualColorIndex = index
-                return (
-                  <button
-                    key={index}
-                    type="button"
-                    onClick={() => {
-                      setColorIndex(actualColorIndex)
-                      setColorIndexRef(actualColorIndex)
-                    }}
-                    aria-pressed={colorIndex === actualColorIndex}
-                    className={`relative w-8 h-8 rounded-full border-2 transition ${colorIndex === actualColorIndex ? 'border-white ring-2 ring-offset-2 ring-stremio-purple' : 'border-gray-300'}`}
-                    style={{
-                      backgroundColor: colorOption.hexValue
-                    }}
-                  >
-                    {colorIndex === actualColorIndex && (
-                      <span className="absolute inset-0 flex items-center justify-center">
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="white" className="w-4 h-4">
-                          <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                        </svg>
-                      </span>
-                    )}
-                  </button>
-                )
-              })}
-            </div>
-            </div>
+            {!editingUser && (
+              <div>
+                <label className={`block text-sm font-medium mb-2 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
+                  User Color
+                </label>
+              <div className="grid grid-cols-5 gap-2">
+                {getThemePalette(isMono ? 'mono' : isDark ? 'dark' : 'light').map((colorOption, index) => {
+                  const actualColorIndex = index
+                  return (
+                    <button
+                      key={index}
+                      type="button"
+                      onClick={() => {
+                        setColorIndex(actualColorIndex)
+                        setColorIndexRef(actualColorIndex)
+                      }}
+                      aria-pressed={colorIndex === actualColorIndex}
+                      className={`relative w-8 h-8 rounded-full border-2 transition ${colorIndex === actualColorIndex ? 'border-white ring-2 ring-offset-2 ring-stremio-purple' : 'border-gray-300'}`}
+                      style={{
+                        backgroundColor: colorOption.hexValue
+                      }}
+                    >
+                      {colorIndex === actualColorIndex && (
+                        <span className="absolute inset-0 flex items-center justify-center">
+                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="white" className="w-4 h-4">
+                            <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                          </svg>
+                        </span>
+                      )}
+                    </button>
+                  )
+                })}
+              </div>
+              </div>
+            )}
             
             <div className="flex gap-3 pt-4">
               <button
@@ -323,9 +410,10 @@ export default function UserAddModal({
               <button
                 type="submit"
                 disabled={isCreating}
+                onClick={() => console.log('🔍 Reconnect button clicked')}
                 className="flex-1 px-4 py-2 accent-bg accent-text rounded-lg transition-colors disabled:opacity-50"
               >
-                {isCreating ? (stremioRegisterNew ? 'Registering...' : 'Adding...') : (stremioRegisterNew ? 'Register & Connect' : 'Add User')}
+                {isCreating ? (stremioRegisterNew ? 'Registering...' : (editingUser ? 'Reconnecting...' : 'Adding...')) : (stremioRegisterNew ? 'Register & Connect' : (editingUser ? 'Reconnect User' : 'Add User'))}
               </button>
             </div>
         </form>

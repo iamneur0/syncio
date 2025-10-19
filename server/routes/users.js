@@ -412,6 +412,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
       })
 
       const result = await getUserSyncStatus(id, { groupId, unsafe }, req)
+      console.log('🔍 Sync status result for user', id, ':', result)
       return res.json(result)
     } catch (error) {
       console.error('Error getting sync status:', error)
@@ -456,6 +457,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
       })
 
       if (!result.success) {
+        console.error('❌ getUserAddons failed:', result.error)
         return res.status(500).json({ message: 'Failed to fetch Stremio addons', error: result.error })
       }
 

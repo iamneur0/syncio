@@ -90,6 +90,7 @@ export default function GenericEntityPage({ config }: GenericEntityPageProps) {
   const [showAddModal, setShowAddModal] = useState(false)
   const [showDetailModal, setShowDetailModal] = useState(false)
   const [selectedEntity, setSelectedEntity] = useState<any>(null)
+  const [editingUser, setEditingUser] = useState<any>(null)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [entityToDelete, setEntityToDelete] = useState<{ id: string; name: string } | null>(null)
   const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false)
@@ -401,6 +402,35 @@ export default function GenericEntityPage({ config }: GenericEntityPageProps) {
 
   const handleSync = async (id: string) => {
     if (finalConfig.api.sync) {
+      // For users, check if they need to reconnect first
+      if (finalConfig.entityType === 'user') {
+        try {
+          const syncStatus = await usersAPI.getSyncStatus(id)
+          console.log('🔍 Sync status for user', id, ':', syncStatus)
+          if (syncStatus?.status === 'connect') {
+            // User needs to reconnect - use the user data from the entities list instead of fetching
+            const user = entities?.find((u: any) => u.id === id)
+            console.log('🔍 Found user in entities list:', user)
+            if (user) {
+              const editingUserData = {
+                id: user.id,
+                username: user.username || user.email,
+                email: user.email,
+                groupId: user.groups?.[0]?.id,
+                colorIndex: user.colorIndex || 0
+              }
+              console.log('🔍 Setting editing user data:', editingUserData)
+              setEditingUser(editingUserData)
+              setShowAddModal(true)
+              return
+            }
+          }
+        } catch (error) {
+          // If we can't get sync status, try to sync anyway
+          console.warn('Could not check sync status, attempting sync:', error)
+        }
+      }
+
       setSyncingEntities(prev => new Set(prev).add(id))
       try {
         // Sync the group or user itself
@@ -603,14 +633,52 @@ export default function GenericEntityPage({ config }: GenericEntityPageProps) {
       {mounted && typeof window !== 'undefined' && document.body && createPortal(
         <finalConfig.addModal
           isOpen={showAddModal}
-          onClose={() => setShowAddModal(false)}
+          editingUser={editingUser}
+          onClose={() => {
+            setShowAddModal(false)
+            setEditingUser(null)
+          }}
           onAdd={(data: any) => createMutation.mutate(data)}
-          onAddUser={(data: any) => createMutation.mutate(data)}
+          onAddUser={async (data: any) => {
+            console.log('🔍 onAddUser called with data:', data)
+            console.log('🔍 editingUser:', editingUser)
+            if (editingUser) {
+              // Reconnect existing user with new Stremio credentials
+              try {
+                const reconnectData = {
+                  username: editingUser.username,
+                  email: editingUser.email,
+                  password: data.password
+                }
+                console.log('🔍 Calling usersAPI.reconnectStremio with:', reconnectData)
+                const result = await usersAPI.reconnectStremio(reconnectData)
+                console.log('🔍 Reconnect successful, result:', result)
+                queryClient.invalidateQueries({ queryKey: [finalConfig.entityType] })
+                toast.success('User reconnected successfully')
+                setEditingUser(null)
+                setShowAddModal(false)
+              } catch (error: any) {
+                console.error('🔍 Reconnect error:', error)
+                console.error('🔍 Error details:', {
+                  message: error?.message,
+                  response: error?.response?.data,
+                  status: error?.response?.status
+                })
+                const message = error?.response?.data?.message || error?.message || 'Failed to reconnect user'
+                toast.error(message)
+              }
+            } else {
+              // Create new user
+              console.log('🔍 Creating new user (not reconnecting)')
+              createMutation.mutate(data)
+            }
+          }}
           onAddAddon={(data: any) => createMutation.mutate(data)}
           onCreateGroup={(data: any) => createMutation.mutate(data)}
           isCreating={createMutation.isPending}
           groups={groups || []}
           users={users || []}
+          editingUser={editingUser}
         />,
         document.body
       )}

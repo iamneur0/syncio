@@ -7,7 +7,7 @@ import { usersAPI, groupsAPI } from '@/services/api'
 
 interface SyncBadgeProps {
   // Simple mode - just show status
-  status?: 'synced' | 'unsynced' | 'stale' | 'connect' | 'syncing' | 'checking'
+  status?: 'synced' | 'unsynced' | 'stale' | 'connect' | 'syncing' | 'checking' | 'error'
   isClickable?: boolean
   onClick?: () => void
   title?: string
@@ -35,16 +35,18 @@ export default function SyncBadge({
   userExcludedSet,
   userProtectedSet
 }: SyncBadgeProps) {
+  console.log('🔍 SyncBadge rendered with props:', { userId, groupId, status, onClick })
+  
   const { isDark, isMono } = useTheme()
   const queryClient = useQueryClient()
-  const [smartStatus, setSmartStatus] = React.useState<'synced' | 'unsynced' | 'stale' | 'connect' | 'syncing' | 'checking'>('checking')
+  const [smartStatus, setSmartStatus] = React.useState<'synced' | 'unsynced' | 'stale' | 'connect' | 'syncing' | 'checking' | 'error'>('checking')
   const [isLoading, setIsLoading] = React.useState(true)
 
   // Smart mode: auto-detect sync status
   const isSmartMode = !status && Boolean(userId || groupId)
 
   // User sync logic
-  const { data: userSyncStatus } = useQuery({
+  const { data: userSyncStatus, isLoading: userSyncLoading, error: userSyncError } = useQuery({
     queryKey: ['user', userId, 'sync-status', groupId || 'nogroup'],
     queryFn: async () => {
       if (!userId) return null
@@ -58,6 +60,17 @@ export default function SyncBadge({
     refetchOnMount: 'always',
     refetchOnWindowFocus: true, // Refetch when window regains focus
     refetchInterval: 30000, // Refetch every 30 seconds to keep status fresh
+  })
+
+  // Debug logging for query state
+  console.log('🔍 SyncBadge Debug:', {
+    userId,
+    groupId,
+    isSmartMode,
+    userSyncLoading,
+    userSyncError,
+    userSyncStatus,
+    enabled: isSmartMode && Boolean(userId)
   })
 
   // Group sync logic
@@ -150,7 +163,28 @@ export default function SyncBadge({
     window.addEventListener('sfm:user-sync-data' as any, onUserSyncData as any)
 
     if (userId && userSyncStatus) {
-      setSmartStatus((userSyncStatus as any).status || 'checking')
+      const status = (userSyncStatus as any).status
+      console.log('🔍 SyncBadge - userSyncStatus:', userSyncStatus)
+      console.log('🔍 SyncBadge - status:', status)
+      // If status is 'error' but it's an authentication error, show 'connect' instead
+      if (status === 'error') {
+        const message = (userSyncStatus as any).message || ''
+        console.log('🔍 SyncBadge - error message:', message)
+        if (message.includes('Stremio connection invalid') || 
+            message.includes('authentication') || 
+            message.includes('auth') || 
+            message.includes('invalid') || 
+            message.includes('corrupted')) {
+          console.log('🔍 SyncBadge - setting status to connect')
+          setSmartStatus('connect')
+        } else {
+          console.log('🔍 SyncBadge - setting status to error')
+          setSmartStatus('error')
+        }
+      } else {
+        console.log('🔍 SyncBadge - setting status to:', status)
+        setSmartStatus(status || 'checking')
+      }
       setIsLoading(false)
     } else if (groupId) {
       if (!groupUsers || groupUsers.length === 0) {
@@ -257,7 +291,7 @@ export default function SyncBadge({
         }
       case 'connect':
         return {
-          text: 'Connect Stremio',
+          text: 'Reconnect',
           dotColor: 'bg-purple-200',
           bgColor: 'bg-stremio-purple text-white'
         }
@@ -272,6 +306,12 @@ export default function SyncBadge({
           text: 'Checking',
           dotColor: 'bg-gray-400',
           bgColor: isMono ? 'bg-black text-white border border-white/20' : (prefersDark ? 'bg-gray-700 text-gray-300' : 'bg-gray-200 text-gray-600')
+        }
+      case 'error':
+        return {
+          text: 'Error',
+          dotColor: 'bg-red-500',
+          bgColor: isMono ? 'bg-black text-white border border-white/20' : (prefersDark ? 'bg-red-900 text-red-300' : 'bg-red-100 text-red-800')
         }
       default:
         return {
