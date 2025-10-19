@@ -251,6 +251,12 @@ export const usersAPI = {
     return response.data
   },
 
+  // Get user addons (raw Stremio API response)
+  getUserAddons: async (id: string): Promise<any> => {
+    const response: AxiosResponse<any> = await api.get(`/users/${id}/user-addons`)
+    return response.data
+  },
+
   // Remove a Stremio addon from user's account
   removeStremioAddon: async (id: string, addonId: string, unsafe: boolean = false): Promise<any> => {
     const response: AxiosResponse<any> = await api.delete(`/users/${id}/stremio-addons/${encodeURIComponent(addonId)}${unsafe ? '?unsafe=true' : ''}`)

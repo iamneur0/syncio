@@ -12,10 +12,23 @@ async function getUserAddons(user, req, { decrypt, StremioAPIClient }) {
     const authKeyPlain = decrypt(user.stremioAuthKey, req)
     const apiClient = new StremioAPIClient({ endpoint: 'https://api.strem.io', authKey: authKeyPlain })
     const collection = await apiClient.request('addonCollectionGet', {})
-    const rawAddons = collection?.addons || collection || {}
-    const stremioAddons = Array.isArray(rawAddons) ? rawAddons : (typeof rawAddons === 'object' ? Object.values(rawAddons) : [])
-    
-    return { success: true, addons: stremioAddons, error: null }
+
+    // Return the API response but strip manifest.manifestUrl from each addon
+    const sanitized = collection && Array.isArray(collection.addons)
+      ? {
+          ...collection,
+          addons: collection.addons.map((addon) => {
+            const manifest = addon?.manifest
+            if (manifest && typeof manifest === 'object') {
+              const { manifestUrl, ...restManifest } = manifest
+              return { ...addon, manifest: restManifest }
+            }
+            return addon
+          })
+        }
+      : collection
+
+    return { success: true, addons: sanitized, error: null }
   } catch (error) {
     return { success: false, addons: [], error: error.message || 'Failed to fetch Stremio addons' }
   }
@@ -44,13 +57,17 @@ async function getDesiredAddons(user, req, { prisma, getAccountId, decrypt, pars
     })
 
     const { getGroupAddons } = require('../utils/helpers')
+    // groupAddons are returned in collection shape: { transportUrl, transportName, manifest }
     const groupAddons = groups.length > 0 ? await getGroupAddons(prisma, groups[0].id, req) : []
 
     // Get user's Stremio addons
-    const { success, addons: userAddons, error } = await getUserAddons(user, req, { decrypt, StremioAPIClient })
+    const { success, addons: userAddonsResponse, error } = await getUserAddons(user, req, { decrypt, StremioAPIClient })
     if (!success) {
       return { success: false, addons: [], error }
     }
+    
+    // Extract the addons array from the complete response (collection shape)
+    const userAddons = userAddonsResponse?.addons || userAddonsResponse || []
 
     // Parse excluded and protected addons
     const excludedAddons = parseAddonIds(user.excludedAddons)
@@ -73,55 +90,80 @@ async function getDesiredAddons(user, req, { prisma, getAccountId, decrypt, pars
     ]
     const protectedUrlSet = new Set(allProtectedUrls)
 
-    // Create desired addons list
-    const desiredAddons = []
-    const addedUrls = new Set()
+    // Helper function to check if an addon is protected
+    const isProtected = (addon) => {
+      const addonUrl = normalizeUrl(addon.transportUrl || addon.manifestUrl || addon?.manifest?.manifestUrl)
+      return addonUrl && protectedUrlSet.has(addonUrl)
+    }
 
-    // 1. Add group addons (excluding only excluded ones)
+    // Parse excluded addons
     const excludedSet = new Set((excludedAddons || []).map(id => String(id).trim()))
-    
-    for (const groupAddon of groupAddons) {
-      const addonUrl = normalizeUrl(groupAddon.manifestUrl)
-      if (!excludedSet.has(groupAddon.id)) {
-        desiredAddons.push(groupAddon)
-        addedUrls.add(addonUrl)
-      }
-    }
 
-    // 2. Add protected addons from Stremio account (preserving their position)
-    for (const userAddon of userAddons) {
-      const addonUrl = normalizeUrl(userAddon.transportUrl || userAddon.manifestUrl)
-      if (addonUrl && protectedUrlSet.has(addonUrl) && !addedUrls.has(addonUrl)) {
-        // Convert Stremio addon format to match group addon format
-        const desiredAddon = {
-          id: userAddon.id || addonUrl,
-          name: userAddon.name || userAddon.title || 'Unknown',
-          manifestUrl: addonUrl,
-          description: userAddon.description || '',
-          version: userAddon.version || null,
-          iconUrl: userAddon.icon || null,
-          stremioAddonId: userAddon.id || null,
-          // Add position info to maintain order
-          _originalPosition: userAddons.indexOf(userAddon)
-        }
-        desiredAddons.push(desiredAddon)
-        addedUrls.add(addonUrl)
-      }
-    }
-
-    // Sort by original position to maintain Stremio order for protected addons
-    desiredAddons.sort((a, b) => {
-      if (a._originalPosition !== undefined && b._originalPosition !== undefined) {
-        return a._originalPosition - b._originalPosition
-      }
-      if (a._originalPosition !== undefined) return -1
-      if (b._originalPosition !== undefined) return 1
-      return 0
+    // 1) Remove excluded addons from groupAddons
+    const groupAddonsFiltered = groupAddons.filter(groupAddon => {
+      const manifestId = groupAddon?.manifest?.id
+      return !(manifestId && excludedSet.has(manifestId))
     })
 
-    // Remove position info before returning
-    const finalDesiredAddons = desiredAddons.map(({ _originalPosition, ...addon }) => addon)
+    // 2) Keep only protected addons from userAddons
+    const protectedUserAddons = (userAddons || []).filter(addon => isProtected(addon))
 
+    // Build a protected URL set from userAddons (normalized)
+    const protectedUserUrlSet = new Set(
+      protectedUserAddons
+        .map(a => normalizeUrl(a.transportUrl || a.manifestUrl))
+        .filter(Boolean)
+    )
+
+    // 3) If an addon is protected and also present in groupAddons, remove it from groupAddons (compare by URL)
+    const nonProtectedGroupAddons = groupAddonsFiltered.filter(groupAddon => {
+      const url = normalizeUrl(groupAddon.transportUrl || groupAddon.manifestUrl || groupAddon?.manifest?.manifestUrl)
+      return url && !protectedUserUrlSet.has(url)
+    })
+
+    // Build locked positions map for protected addons from current Stremio account
+    // IMPORTANT: positions must be taken from the FULL userAddons list, not the filtered protected subset
+    const lockedByUrl = new Map()
+    for (let i = 0; i < userAddons.length; i++) {
+      const cur = userAddons[i]
+      if (!isProtected(cur)) continue
+      const url = normalizeUrl(cur.transportUrl || cur.manifestUrl)
+      if (url) {
+        lockedByUrl.set(url, i)
+      }
+    }
+
+    // Start with an array sized to current addons length
+    const finalLength = userAddons.length
+    const finalDesiredCollection = new Array(finalLength).fill(null)
+
+    // Place protected addons at their original positions
+    for (const addon of protectedUserAddons) {
+      const url = normalizeUrl(addon.transportUrl || addon.manifestUrl)
+      if (url && lockedByUrl.has(url)) {
+        const pos = lockedByUrl.get(url)
+        if (pos < finalLength) {
+          finalDesiredCollection[pos] = addon
+        }
+      }
+    }
+
+    // Fill remaining positions with non-protected group addons
+    let groupAddonIndex = 0
+    for (let i = 0; i < finalLength && groupAddonIndex < nonProtectedGroupAddons.length; i++) {
+      if (finalDesiredCollection[i] === null) {
+        finalDesiredCollection[i] = nonProtectedGroupAddons[groupAddonIndex++]
+      }
+    }
+
+    // Add any remaining group addons at the end
+    while (groupAddonIndex < nonProtectedGroupAddons.length) {
+      finalDesiredCollection.push(nonProtectedGroupAddons[groupAddonIndex++])
+    }
+
+    // Remove nulls and return
+    const finalDesiredAddons = finalDesiredCollection.filter(Boolean)
+    
     return { success: true, addons: finalDesiredAddons, error: null }
   } catch (error) {
     return { success: false, addons: [], error: error.message || 'Failed to get desired addons' }
@@ -145,96 +187,39 @@ function createGetUserSyncStatus({ prisma, getAccountId, decrypt, parseAddonIds,
     if (!user) return { status: 'error', isSynced: false, message: 'User not found' }
     if (!user.stremioAuthKey) return { isSynced: false, status: 'connect', message: 'User not connected to Stremio' }
 
-    const { success, addons: stremioAddons, error } = await getUserAddons(user, req, { decrypt, StremioAPIClient })
-    if (!success) {
-      return { isSynced: false, status: 'error', message: error }
+    // Get user's current Stremio addons
+    const { success: userAddonsSuccess, addons: userAddonsResponse, error: userAddonsError } = await getUserAddons(user, req, { decrypt, StremioAPIClient })
+    if (!userAddonsSuccess) {
+      return { isSynced: false, status: 'error', message: userAddonsError }
     }
-
-    const groupWhere = { accountId: getAccountId(req), userIds: { contains: user.id } }
-    if (groupId) groupWhere.id = groupId
-    const groups = await prisma.group.findMany({
-      where: groupWhere,
-      include: { addons: { where: { addon: { accountId: getAccountId(req) } }, include: { addon: true } } }
-    })
-    if (!groups || groups.length === 0) {
-      return { isSynced: false, status: 'stale', message: 'User has no group assigned', stremioAddonsCount: stremioAddons.length, groupAddonsCount: 0 }
-    }
-
-    const excludedAddons = parseAddonIds(user.excludedAddons)
-    const protectedAddons = parseProtectedAddons(user.protectedAddons, req)
     
-    // Include default addons as protected addons (they should never be removed)
-    const { defaultAddons } = require('../utils/config')
-    const defaultProtectedUrls = defaultAddons.manifestUrls.map(normalizeUrl)
-    const allProtectedUrls = [
-      ...(Array.isArray(protectedAddons) ? protectedAddons : []).filter(Boolean).map(normalizeUrl),
-      ...defaultProtectedUrls
-    ]
-    const protectedUrlSet = new Set(allProtectedUrls)
+    // Extract the addons array from the complete response
+    const userAddons = userAddonsResponse?.addons || userAddonsResponse || []
 
-    try {
-      for (const group of groups) {
-        const sorted = [...(group.addons || [])]
-          .sort((a, b) => ((a?.position ?? 0) - (b?.position ?? 0)))
-          .filter(ga => ga.addon && ga.addon.isActive !== false)
-        console.log(`📦 Group ${group.name || group.id} addons (by position):`)
-        if (sorted.length === 0) {
-          console.log('  [empty]')
-        } else {
-          sorted.forEach((ga, idx) => {
-            let url = null
-            try { url = getDecryptedManifestUrl(ga.addon, req) } catch {}
-            const isProt = url ? protectedUrlSet.has(normalizeUrl(url)) : false
-            console.log(`  ${idx + 1} - ${ga.addon.name}${isProt ? ' (protected)' : ''}`)
-          })
-        }
-      }
-    } catch {}
-
-    // Use shared helper to ensure identical ordering and decryption
-    const { getGroupAddons } = require('../utils/helpers')
-    const groupedLists = await Promise.all(groups.map(g => getGroupAddons(prisma, g.id, req)))
-    const groupAddons = groupedLists.flat()
-
-    const excludedSet = new Set((excludedAddons || []).map(id => String(id).trim()))
-    const filteredExpectedAddons = groupAddons.filter(addon => !excludedSet.has(addon.id))
-
-    try {
-      const desiredLines = filteredExpectedAddons.map((a, idx) => {
-        const isProt = protectedUrlSet.has(normalizeUrl(a.manifestUrl))
-        return `${idx + 1} - ${a.name}${isProt ? ' (protected)' : ''}`
-      })
-      console.log('📊 Desired collection (order):')
-      if (desiredLines.length > 0) desiredLines.forEach(l => console.log(l)); else console.log('[empty]')
-    } catch {}
-
-    const stremioAddonUrls = new Set(stremioAddons.map(a => a.transportUrl || a.manifestUrl).filter(Boolean).map(normalizeUrl))
-    const expectedAddonUrls = new Set(filteredExpectedAddons.map(a => a.manifestUrl).filter(Boolean).map(normalizeUrl))
-
-    const missingAddons = filteredExpectedAddons.filter(exp => !stremioAddonUrls.has(normalizeUrl(exp.manifestUrl)))
-    const extraAddons = stremioAddons.filter(stremioAddon => {
-      const url = normalizeUrl(stremioAddon.transportUrl || stremioAddon.manifestUrl)
-      if (!url) return false
-      if (protectedUrlSet.has(url)) return false
-      return !expectedAddonUrls.has(url)
+    // Get desired addons (group addons + protected addons)
+    const { success: desiredAddonsSuccess, addons: desiredAddons, error: desiredAddonsError } = await getDesiredAddons(user, req, {
+      prisma,
+      getAccountId,
+      decrypt,
+      parseAddonIds,
+      parseProtectedAddons,
+      canonicalizeManifestUrl,
+      StremioAPIClient
     })
+    if (!desiredAddonsSuccess) {
+      return { isSynced: false, status: 'error', message: desiredAddonsError }
+    }
 
-    const userOrder = stremioAddons.map(a => normalizeUrl(a.transportUrl || a.manifestUrl)).filter(Boolean).filter(u => !protectedUrlSet.has(u))
-    const expectedOrder = filteredExpectedAddons.map(a => normalizeUrl(a.manifestUrl)).filter(u => !protectedUrlSet.has(u))
-    const userGroupAddons = userOrder.filter(url => expectedAddonUrls.has(url))
-    const orderMatches = JSON.stringify(userGroupAddons) === JSON.stringify(expectedOrder)
-
-    const isSynced = missingAddons.length === 0 && extraAddons.length === 0 && orderMatches
+    // Simple comparison: are the two JSON arrays equal?
+    const isSynced = JSON.stringify(userAddons) === JSON.stringify(desiredAddons)
 
     return {
       isSynced,
       status: isSynced ? 'synced' : 'unsynced',
-      stremioAddonsCount: stremioAddons.length,
-      groupAddonsCount: filteredExpectedAddons.length,
-      excludedAddons,
-      protectedAddons,
-      orderMatches,
-      debugInfo: process.env.NODE_ENV === 'development' ? { expectedOrder, actualOrder: userGroupAddons, orderMatches } : undefined,
+      stremioAddonsCount: userAddons.length,
+      groupAddonsCount: desiredAddons.length,
+      excludedAddons: parseAddonIds(user.excludedAddons),
+      protectedAddons: parseProtectedAddons(user.protectedAddons, req),
     }
   }
 }

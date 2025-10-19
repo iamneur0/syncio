@@ -71,16 +71,13 @@ export default function UserDetailModal({
   const [localExcludedSet, setLocalExcludedSet] = useState<Set<string>>(new Set())
   const [localProtectedSet, setLocalProtectedSet] = useState<Set<string>>(new Set())
   
-  // Drag and drop state for Stremio addons
-  const [stremioAddons, setStremioAddons] = useState<any[]>([])
-  
   // Debug modal state
   const [showCurrentModal, setShowCurrentModal] = useState(false)
   const [showDesiredModal, setShowDesiredModal] = useState(false)
   const [showGroupAddonsModal, setShowGroupAddonsModal] = useState(false)
-  const [currentAddonsData, setCurrentAddonsData] = useState<any[]>([])
-  const [desiredAddonsData, setDesiredAddonsData] = useState<any[]>([])
-  const [groupAddonsData, setGroupAddonsData] = useState<any[]>([])
+  const [currentAddonsData, setCurrentAddonsData] = useState<any>({})
+  const [desiredAddonsData, setDesiredAddonsData] = useState<any>({})
+  const [groupAddonsData, setGroupAddonsData] = useState<any>({})
 
   // Initialize local state when opening the modal or switching user
   useEffect(() => {
@@ -134,10 +131,10 @@ export default function UserDetailModal({
   })
 
 
-  // Fetch Stremio addons
+  // Fetch Stremio addons using getUserAddons (raw Stremio API format)
   const { data: stremioAddonsData } = useQuery({
     queryKey: ['user', user?.id, 'stremio-addons'],
-    queryFn: () => usersAPI.getStremioAddons(user!.id),
+    queryFn: () => usersAPI.getUserAddons(user!.id),
     enabled: !!user?.id,
   })
 
@@ -146,18 +143,23 @@ export default function UserDetailModal({
   const isDebugMode = process.env.NEXT_PUBLIC_DEBUG === 'true' || process.env.NEXT_PUBLIC_DEBUG === '1'
 
   // Debug function to show raw Stremio addons
-  const handleDebugStremioAddons = () => {
-    // Extract just the addons array from the API response
-    const addonsArray = stremioAddonsData?.addons || stremioAddonsData || []
-    setCurrentAddonsData(addonsArray)
-    setShowCurrentModal(true)
+  const handleDebugStremioAddons = async () => {
+    try {
+      // Call getUserAddons directly to get the exact response
+      const response = await usersAPI.getUserAddons(user!.id)
+      setCurrentAddonsData(response || {})
+      setShowCurrentModal(true)
+    } catch (error) {
+      console.error('Failed to fetch user addons:', error)
+      toast.error('Failed to fetch user addons')
+    }
   }
 
   // Debug function to show desired addons
   const handleDebugDesiredAddons = async () => {
     try {
       const response = await usersAPI.getDesiredAddons(user!.id)
-      setDesiredAddonsData(response.addons || [])
+      setDesiredAddonsData(response || {})
       setShowDesiredModal(true)
     } catch (error) {
       console.error('Failed to fetch desired addons:', error)
@@ -169,7 +171,7 @@ export default function UserDetailModal({
   const handleDebugGroupAddons = async () => {
     try {
       const response = await usersAPI.getGroupAddons(user!.id)
-      setGroupAddonsData(response.addons || [])
+      setGroupAddonsData(response || {})
       setShowGroupAddonsModal(true)
     } catch (error) {
       console.error('Failed to fetch group addons:', error)
@@ -180,8 +182,6 @@ export default function UserDetailModal({
   // Reset/reload Stremio account addons (same UX as other reset buttons)
   const handleResetStremioAddons = () => {
     if (!user) return
-    // Optimistically clear UI
-    setStremioAddons([])
     const promise = (usersAPI.clearStremioAddons
       ? usersAPI.clearStremioAddons(currentUser.id)
       : usersAPI.reloadUserAddons(currentUser.id))
@@ -199,12 +199,6 @@ export default function UserDetailModal({
   }
 
 
-  // Update Stremio addons when data changes
-  useEffect(() => {
-    if (stremioAddonsData?.addons) {
-      setStremioAddons(stremioAddonsData.addons)
-    }
-  }, [stremioAddonsData?.addons])
 
   // Fetch groups for group selection
   const { data: groups = [] } = useQuery({
@@ -299,17 +293,19 @@ export default function UserDetailModal({
   const handleDragEnd = (event: any) => {
     const { active, over } = event
     if (active.id !== over?.id) {
+      const currentAddons = stremioAddonsData?.addons || []
       const reordered = arrayMove(
-        stremioAddons,
-        stremioAddons.findIndex(item => (item.manifestUrl || item.transportUrl || item.url || item.id) === active.id),
-        stremioAddons.findIndex(item => (item.manifestUrl || item.transportUrl || item.url || item.id) === over.id)
+        currentAddons,
+        currentAddons.findIndex((item: any) => (item.transportUrl || item.manifestUrl || item.url || item.id) === active.id),
+        currentAddons.findIndex((item: any) => (item.transportUrl || item.manifestUrl || item.url || item.id) === over.id)
       )
-      setStremioAddons(reordered)
       // Persist order in backend
-      const orderedManifestUrls = (reordered || stremioAddons).map(a => a.manifestUrl || a.transportUrl || a.url || a.id).filter(Boolean)
+      const orderedManifestUrls = reordered.map((a: any) => a.transportUrl || a.manifestUrl || a.url || a.id).filter(Boolean)
       if (currentUser) {
         usersAPI.reorderStremioAddons?.(currentUser.id, orderedManifestUrls)
           .then(() => {
+            // Refresh the data from the server
+            queryClient.invalidateQueries({ queryKey: ['user', currentUser.id, 'stremio-addons'] })
             toast.success('Stremio addons order updated')
             refreshAllSyncStatus(undefined, currentUser.id)
           })
@@ -327,8 +323,8 @@ export default function UserDetailModal({
     const id = currentUser.id
     usersAPI.removeStremioAddon(id, addonId, isUnsafeMode)
       .then(() => {
-        // Remove from local list
-        setStremioAddons(prev => prev.filter(a => (a.manifestUrl || a.transportUrl || a.url || a.id) !== addonId))
+        // Refresh the data from the server instead of local state manipulation
+        queryClient.invalidateQueries({ queryKey: ['user', id, 'stremio-addons'] })
         toast.success('Addon removed from Stremio account')
         // Refresh sync badge
         refreshAllSyncStatus(undefined, id)
@@ -346,7 +342,7 @@ export default function UserDetailModal({
       'https://v3-cinemeta.strem.io/manifest.json',
       'http://127.0.0.1:11470/local-addon/manifest.json'
     ]
-    const defaultNames = ['Cinemeta', 'Local Files']
+    const defaultNames = ['Cinemeta', 'Local Files (without catalog support)']
     
     return defaultAddonIds.includes(addonId) ||
            defaultManifestUrls.includes(addonId) ||
@@ -391,7 +387,14 @@ export default function UserDetailModal({
 
   // Custom GroupAddonItem component with exclude button
   const GroupAddonItem = ({ addon, index }: { addon: any; index: number }) => {
-    const isExcluded = localExcludedSet.has(addon.id)
+    // Support both legacy shape (plain manifest) and new shape ({ transportUrl, transportName, manifest })
+    const manifest = addon?.manifest || addon
+    const addonId = manifest?.id || addon?.id
+    const name = addon?.transportName || manifest?.name || 'Unknown'
+    const version = manifest?.version
+    const description = manifest?.description || ''
+    const iconUrl = addon?.iconUrl || manifest?.logo || manifest?.icon || null
+    const isExcluded = localExcludedSet.has(addonId)
     
     return (
       <div className={`relative rounded-lg border p-4 hover:shadow-md transition-all ${
@@ -401,23 +404,23 @@ export default function UserDetailModal({
       }`}>
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center flex-1 min-w-0">
-            <AddonIcon name={addon.name || 'Addon'} iconUrl={addon.iconUrl} size="10" className="mr-3 flex-shrink-0" />
+            <AddonIcon name={name || 'Addon'} iconUrl={iconUrl} size="10" className="mr-3 flex-shrink-0" />
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2 mb-1">
                 <h4 className={`font-medium truncate ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                  {addon.name || 'Unknown Addon'}
+                  {name || 'Unknown Addon'}
                 </h4>
-                {addon.version && (
-                  <VersionChip version={addon.version} />
+                {version && (
+                  <VersionChip version={version} />
                 )}
               </div>
               <p className={`text-sm truncate ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
-                {addon.description || 'No description'}
+                {description || 'No description'}
               </p>
             </div>
           </div>
           <button
-            onClick={() => handleExcludeGroupAddon(addon.id)}
+            onClick={() => handleExcludeGroupAddon(addonId)}
             className={`p-2 rounded-lg transition-colors ${
               isExcluded
                 ? ((isMono || isDark) ? 'text-red-400 hover:bg-red-900/20' : 'text-red-600 hover:bg-red-50')
@@ -434,9 +437,15 @@ export default function UserDetailModal({
 
   // SortableStremioAddonItem component
   const SortableStremioAddonItem = ({ addon, index }: { addon: any; index: number }) => {
-    const addonId = addon.manifestUrl || addon.transportUrl || addon.url || addon.id
+    // Handle getUserAddons format: { transportUrl, transportName, manifest: { name, version, description, logo } }
+    const addonId = addon.transportUrl || addon.manifestUrl || addon.url || addon.id
+    const addonName = addon.transportName || addon.manifest?.name || addon.name || 'Unknown Addon'
+    const addonVersion = addon.manifest?.version || addon.version
+    const addonDescription = addon.manifest?.description || addon.description || 'No description'
+    const addonIconUrl = addon.manifest?.logo || addon.manifest?.icon || addon.iconUrl
+    
     const isProtected = localProtectedSet.has(addonId)
-    const isDefault = isDefaultAddon(addonId, addon.name)
+    const isDefault = isDefaultAddon(addonId, addonName)
     // Use global setting reflected in modal state
     const unsafe = isUnsafeMode
     
@@ -469,18 +478,18 @@ export default function UserDetailModal({
       >
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center flex-1 min-w-0">
-            <AddonIcon name={addon.name || 'Addon'} iconUrl={addon.iconUrl} size="10" className="mr-3 flex-shrink-0" />
+            <AddonIcon name={addonName} iconUrl={addonIconUrl} size="10" className="mr-3 flex-shrink-0" />
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2 mb-1">
                 <h4 className={`font-medium truncate ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                  {addon.name || 'Unknown Addon'}
+                  {addonName}
                 </h4>
-                {addon.version && (
-                  <VersionChip version={addon.version} />
+                {addonVersion && (
+                  <VersionChip version={addonVersion} />
                 )}
               </div>
               <p className={`text-sm truncate ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
-                {addon.description || 'No description'}
+                {addonDescription}
               </p>
             </div>
           </div>
@@ -667,8 +676,8 @@ export default function UserDetailModal({
           {/* Stremio Account Addons Section */}
           <EntityList
             title="Stremio Account Addons"
-            count={stremioAddons?.length || 0}
-            items={stremioAddons || []}
+            count={stremioAddonsData?.addons?.length || 0}
+            items={stremioAddonsData?.addons || []}
             isLoading={false}
             onClear={handleResetStremioAddons}
             confirmReset={{
@@ -702,7 +711,7 @@ export default function UserDetailModal({
             isDraggable={true}
             renderItem={(addon: any, index: number) => (
               <SortableStremioAddonItem
-                key={addon.id || addon.manifestUrl || addon.transportUrl || index}
+                key={addon.transportUrl || addon.id || index}
                 addon={addon}
                 index={index}
               />
@@ -716,11 +725,11 @@ export default function UserDetailModal({
               modifiers={[restrictToParentElement]}
               onDragEnd={handleDragEnd}
             >
-              <SortableContext items={stremioAddons.map(addon => addon.manifestUrl || addon.transportUrl || addon.url || addon.id)} strategy={verticalListSortingStrategy}>
+              <SortableContext items={(stremioAddonsData?.addons || []).map((addon: any) => addon.transportUrl || addon.id)} strategy={verticalListSortingStrategy}>
                 <div className="space-y-3">
-                  {stremioAddons.map((addon: any, index: number) => (
+                  {(stremioAddonsData?.addons || []).map((addon: any, index: number) => (
                     <SortableStremioAddonItem
-                      key={addon.id || addon.manifestUrl || addon.transportUrl || index}
+                      key={addon.transportUrl || addon.id || index}
                       addon={addon}
                       index={index}
                     />
@@ -739,7 +748,7 @@ export default function UserDetailModal({
           <div className={`rounded-lg p-6 max-w-2xl max-h-[80vh] overflow-y-auto ${isDark ? 'bg-gray-800' : 'bg-white'}`}>
             <div className="flex justify-between items-center mb-4">
               <h3 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                Current Stremio Addons ({currentAddonsData.length})
+                Current Stremio Addons ({Array.isArray(currentAddonsData) ? currentAddonsData.length : (currentAddonsData?.addons?.length || 0)})
               </h3>
               <div className="flex items-center gap-2">
                 <button
@@ -765,7 +774,7 @@ export default function UserDetailModal({
               </div>
             </div>
             <div className="space-y-2">
-              {currentAddonsData.length === 0 ? (
+              {(!currentAddonsData || (Array.isArray(currentAddonsData) && currentAddonsData.length === 0) || (!Array.isArray(currentAddonsData) && !currentAddonsData.addons)) ? (
                 <p className={`${isDark ? 'text-gray-400' : 'text-gray-600'}`}>No addons found</p>
               ) : (
                 <div className="relative">
@@ -785,7 +794,7 @@ export default function UserDetailModal({
           <div className={`rounded-lg p-6 max-w-2xl max-h-[80vh] overflow-y-auto ${isDark ? 'bg-gray-800' : 'bg-white'}`}>
             <div className="flex justify-between items-center mb-4">
               <h3 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                Desired Addons from Groups ({desiredAddonsData.length})
+                Desired Addons from Groups ({Array.isArray(desiredAddonsData) ? desiredAddonsData.length : (desiredAddonsData?.addons?.length || 0)})
               </h3>
               <div className="flex items-center gap-2">
                 <button
@@ -811,7 +820,7 @@ export default function UserDetailModal({
               </div>
             </div>
             <div className="space-y-2">
-              {desiredAddonsData.length === 0 ? (
+              {(!desiredAddonsData || (Array.isArray(desiredAddonsData) && desiredAddonsData.length === 0) || (!Array.isArray(desiredAddonsData) && !desiredAddonsData.addons)) ? (
                 <p className={`${isDark ? 'text-gray-400' : 'text-gray-600'}`}>No addons found</p>
               ) : (
                 <div className="relative">
@@ -831,7 +840,7 @@ export default function UserDetailModal({
           <div className={`rounded-lg p-6 max-w-2xl max-h-[80vh] overflow-y-auto ${isDark ? 'bg-gray-800' : 'bg-white'}`}>
             <div className="flex justify-between items-center mb-4">
               <h3 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                Group Addons ({groupAddonsData.length})
+                Group Addons ({Array.isArray(groupAddonsData) ? groupAddonsData.length : (groupAddonsData?.addons?.length || 0)})
               </h3>
               <div className="flex items-center gap-2">
                 <button
@@ -857,7 +866,7 @@ export default function UserDetailModal({
               </div>
             </div>
             <div className="space-y-2">
-              {groupAddonsData.length === 0 ? (
+              {(!groupAddonsData || (Array.isArray(groupAddonsData) && groupAddonsData.length === 0) || (!Array.isArray(groupAddonsData) && !groupAddonsData.addons)) ? (
                 <p className={`${isDark ? 'text-gray-400' : 'text-gray-600'}`}>No addons found</p>
               ) : (
                 <div className="relative">
