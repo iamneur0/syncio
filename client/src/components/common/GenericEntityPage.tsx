@@ -532,7 +532,7 @@ export default function GenericEntityPage({ config }: GenericEntityPageProps) {
             action={finalConfig.emptyStateAction}
           />
         ) : viewMode === 'card' ? (
-          <div className="grid [grid-template-columns:repeat(auto-fit,minmax(320px,1fr))] gap-4 items-start max-w-full">
+          <div className="grid [grid-template-columns:repeat(auto-fill,minmax(320px,1fr))] gap-4 items-start max-w-full">
             {displayEntities.map((entity: any) => (
               <EntityCard
                 key={finalConfig.getEntityId?.(entity) || entity.id}

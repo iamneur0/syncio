@@ -167,7 +167,7 @@ export default function EntityList({
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 accent-border"></div>
         </div>
       ) : items.length > 0 ? (
-        <div className={layout === 'grid' ? 'grid [grid-template-columns:repeat(auto-fit,minmax(320px,1fr))] gap-3 max-w-full' : 'space-y-3'}>
+        <div className={layout === 'grid' ? 'grid [grid-template-columns:repeat(auto-fill,minmax(320px,1fr))] gap-3 max-w-full' : 'space-y-3'}>
           {isDraggable && children ? (
             children
           ) : (

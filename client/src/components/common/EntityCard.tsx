@@ -586,8 +586,8 @@ export default function EntityCard({
         {variant === 'group' && (
           <>
             <div className="flex items-center">
-              <Puzzle className="w-4 h-4 text-gray-400 mr-2" />
-              <div>
+              <Puzzle className="w-4 h-4 text-gray-400 mr-2 flex-shrink-0" />
+              <div className="min-w-0">
                 <p className={`text-lg font-semibold ${
                   isModern ? 'text-purple-100' : isModernDark ? 'text-purple-100' : (isDark ? 'text-white' : 'text-gray-900')
                 }`}>
@@ -599,8 +599,8 @@ export default function EntityCard({
               </div>
             </div>
             <div className="flex items-center">
-              <UserIcon className="w-4 h-4 text-gray-400 mr-2" />
-              <div>
+              <UserIcon className="w-4 h-4 text-gray-400 mr-2 flex-shrink-0" />
+              <div className="min-w-0">
                 <p className={`text-lg font-semibold ${
                   isModern ? 'text-purple-100' : isModernDark ? 'text-purple-100' : (isDark ? 'text-white' : 'text-gray-900')
                 }`}>
@@ -616,8 +616,8 @@ export default function EntityCard({
         {variant === 'user' && (
           <>
             <div className="flex items-center">
-              <Puzzle className="w-4 h-4 text-gray-400 mr-2" />
-              <div>
+              <Puzzle className="w-4 h-4 text-gray-400 mr-2 flex-shrink-0" />
+              <div className="min-w-0">
                 <p className={`text-lg font-semibold ${
                   isModern ? 'text-purple-100' : isModernDark ? 'text-purple-100' : (isDark ? 'text-white' : 'text-gray-900')
                 }`}>
@@ -629,8 +629,8 @@ export default function EntityCard({
               </div>
             </div>
             <div className="flex items-center">
-              <UserIcon className="w-4 h-4 text-gray-400 mr-2" />
-              <div>
+              <UserIcon className="w-4 h-4 text-gray-400 mr-2 flex-shrink-0" />
+              <div className="min-w-0">
                 <p className={`text-lg font-semibold ${
                   isModern ? 'text-purple-100' : isModernDark ? 'text-purple-100' : (isDark ? 'text-white' : 'text-gray-900')
                 }`}>
@@ -643,8 +643,8 @@ export default function EntityCard({
         {variant === 'addon' && (
           <>
             <div className="flex items-center">
-              <UserIcon className="w-4 h-4 text-gray-400 mr-2" />
-              <div>
+              <UserIcon className="w-4 h-4 text-gray-400 mr-2 flex-shrink-0" />
+              <div className="min-w-0">
                 <p className={`text-lg font-semibold ${
                   isModern ? 'text-purple-100' : isModernDark ? 'text-purple-100' : (isDark ? 'text-white' : 'text-gray-900')
                 }`}>{addonUsersCount}</p>
@@ -654,8 +654,8 @@ export default function EntityCard({
               </div>
             </div>
             <div className="flex items-center">
-              <GroupIcon className="w-4 h-4 text-gray-400 mr-2" />
-              <div>
+              <GroupIcon className="w-4 h-4 text-gray-400 mr-2 flex-shrink-0" />
+              <div className="min-w-0">
                 <p className={`text-lg font-semibold ${
                   isModern ? 'text-purple-100' : isModernDark ? 'text-purple-100' : (isDark ? 'text-white' : 'text-gray-900')
                 }`}>{addonGroupsCount}</p>
