@@ -636,7 +636,7 @@ export default function UserDetailModal({
           count={userDetails?.addons?.length || 0}
           items={userDetails?.addons || []}
             isLoading={isLoadingUserDetails}
-            headerRight={(
+            headerRight={isDebugMode ? (
               <div className="flex items-center gap-2">
                 <button
                   onClick={handleDebugGroupAddons}
@@ -661,6 +661,20 @@ export default function UserDetailModal({
                   ))}
                 </select>
               </div>
+            ) : (
+              <select
+                value={userDetails?.groupId || userDetails?.groups?.[0]?.id || ''}
+                onChange={(e) => handleGroupChange(e.target.value)}
+                className={`px-3 py-2 border rounded-lg text-sm focus:outline-none ${
+                  isDark ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'
+                }`}
+                title="Change group"
+              >
+                <option value="">No group</option>
+                {groups?.map((group: any) => (
+                  <option key={group.id} value={group.id}>{group.name}</option>
+                ))}
+              </select>
             )}
             renderItem={(addon: any, index: number) => (
               <GroupAddonItem
@@ -686,7 +700,7 @@ export default function UserDetailModal({
               confirmText: 'Reset',
               isDanger: true,
             }}
-            headerRight={
+            headerRight={isDebugMode ? (
               <div className="flex items-center gap-2">
                 <button
                   onClick={handleDebugStremioAddons}
@@ -707,7 +721,7 @@ export default function UserDetailModal({
                   Desired 2
                 </button>
               </div>
-            }
+            ) : undefined}
             isDraggable={true}
             renderItem={(addon: any, index: number) => (
               <SortableStremioAddonItem

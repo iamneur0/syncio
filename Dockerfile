@@ -68,6 +68,7 @@ ENV PRISMA_CLI_BINARY_TARGETS="linux-musl-openssl-3.0.x,linux-musl-arm64-openssl
 # Allow building instance-specific images (private/public) and set default instance
 ARG INSTANCE=public
 ENV INSTANCE=$INSTANCE
+ENV NEXT_PUBLIC_DEBUG=false
 
 # Copy built application
 COPY --from=builder --chown=appuser:nodejs /app/package*.json ./
