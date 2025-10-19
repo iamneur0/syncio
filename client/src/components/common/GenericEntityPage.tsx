@@ -678,7 +678,6 @@ export default function GenericEntityPage({ config }: GenericEntityPageProps) {
           isCreating={createMutation.isPending}
           groups={groups || []}
           users={users || []}
-          editingUser={editingUser}
         />,
         document.body
       )}
