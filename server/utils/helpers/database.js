@@ -177,13 +177,9 @@ async function getGroupAddons(prisma, groupId, req) {
   
   const filtered = (group.addons || []).filter(ga => ga?.addon && ga.addon.isActive !== false && (!accId || ga.addon.accountId === accId))
   const sorted = filtered.slice().sort((a, b) => ((a?.position ?? 0) - (b?.position ?? 0)))
-  return sorted.map(ga => ({
-    id: ga.addon.id,
-    name: ga.addon.name,
-    description: ga.addon.description || '',
-    manifestUrl: (() => { try { return decrypt(ga.addon.manifestUrl, req) } catch { return ga.addon.manifestUrl } })(),
-    // Try to decrypt and parse the manifest for sync operations
-    manifest: (() => {
+  return sorted.map(ga => {
+    // Decrypt and parse manifest from the database
+    const manifest = (() => {
       try {
         const raw = ga.addon.manifest
         if (!raw) return null
@@ -191,12 +187,27 @@ async function getGroupAddons(prisma, groupId, req) {
         try { dec = decrypt(raw, req) } catch { dec = raw }
         try { return typeof dec === 'string' ? JSON.parse(dec) : dec } catch { return dec }
       } catch { return null }
-    })(),
-    version: ga.addon.version || null,
-    isEnabled: ga.addon.isActive,
-    iconUrl: ga.addon.iconUrl,
-    position: ga.position ?? null,
-  }))
+    })()
+
+    if (!manifest) return null
+
+    // Decrypt manifestUrl for transportUrl
+    const transportUrl = (() => {
+      try { return decrypt(ga.addon.manifestUrl, req) } catch { return ga.addon.manifestUrl }
+    })()
+
+    // Determine transportName from manifest name or DB addon name
+    const transportName = (manifest && manifest.name) ? manifest.name : (ga.addon?.name || 'Unknown')
+
+    // Strip manifest.manifestUrl to mirror getUserAddons shape
+    const { manifestUrl: _omitManifestUrl, ...cleanManifest } = (manifest && typeof manifest === 'object') ? manifest : {}
+
+    return {
+      transportUrl,
+      transportName,
+      manifest: cleanManifest
+    }
+  }).filter(Boolean)
 }
 
 /**

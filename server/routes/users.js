@@ -419,6 +419,54 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
     }
   });
 
+  // Get user's raw Stremio addons (getUserAddons function)
+  router.get('/:id/user-addons', async (req, res) => {
+    try {
+      const { id } = req.params
+      console.log('🔍 Fetching raw Stremio addons for user:', id)
+
+      // Get user
+      const user = await prisma.user.findUnique({
+        where: { 
+          id,
+          accountId: getAccountId(req)
+        },
+        select: { 
+          id: true,
+          stremioAuthKey: true,
+          isActive: true
+        }
+      })
+
+      if (!user) {
+        return res.status(404).json({ message: 'User not found' })
+      }
+
+      if (!user.stremioAuthKey) {
+        return res.status(400).json({ message: 'User not connected to Stremio' })
+      }
+
+      // Import the getUserAddons function
+      const { getUserAddons } = require('../utils/sync')
+      
+      // Get raw Stremio addons
+      const result = await getUserAddons(user, req, {
+        decrypt,
+        StremioAPIClient
+      })
+
+      if (!result.success) {
+        return res.status(500).json({ message: 'Failed to fetch Stremio addons', error: result.error })
+      }
+
+      // Removed verbose raw addons log to reduce noise
+      res.json(result.addons)
+    } catch (error) {
+      console.error('❌ Error fetching raw Stremio addons:', error)
+      res.status(500).json({ message: 'Failed to fetch raw Stremio addons', error: error?.message })
+    }
+  });
+
   // Get user's Stremio addons
   router.get('/:id/stremio-addons', async (req, res) => {
     try {
@@ -647,18 +695,99 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
     }
   });
 
-  // Sync user addons (UI endpoint) – delegate to shared syncUserAddons logic for consistent behavior/logging
+  // Sync user addons (UI endpoint) – simple implementation using getDesiredAddons
   router.post('/:id/sync', async (req, res) => {
     try {
       const { id } = req.params
-      const { excludedManifestUrls = [], mode = 'normal', unsafe = false } = req.body || {}
-      console.log(`🔄 POST /api/users/${id}/sync called`, { mode, unsafe, excludedCount: Array.isArray(excludedManifestUrls) ? excludedManifestUrls.length : 0 })
-      const result = await syncUserAddons(id, excludedManifestUrls, mode, unsafe, req)
-      console.log('🔍 syncUserAddons result:', result)
-      if (result?.success) {
-        return res.json({ message: 'User synced successfully', ...result })
+      console.log(`🔄 POST /api/users/${id}/sync called`)
+
+      // Get user
+      const user = await prisma.user.findUnique({
+        where: { 
+          id,
+          accountId: getAccountId(req)
+        },
+        select: { 
+          id: true,
+          stremioAuthKey: true,
+          isActive: true,
+          excludedAddons: true,
+          protectedAddons: true
+        }
+      })
+
+      if (!user) {
+        return res.status(404).json({ message: 'User not found' })
       }
-      return res.status(500).json({ message: 'Failed to sync user', error: result?.error || 'Unknown error' })
+
+      if (!user.isActive) {
+        return res.status(400).json({ message: 'User is disabled' })
+      }
+
+      if (!user.stremioAuthKey) {
+        return res.status(400).json({ message: 'User not connected to Stremio' })
+      }
+
+      // Get desired addons
+      const { getDesiredAddons } = require('../utils/sync')
+      const result = await getDesiredAddons(user, req, {
+        prisma,
+        getAccountId,
+        decrypt,
+        parseAddonIds,
+        parseProtectedAddons,
+        canonicalizeManifestUrl,
+        StremioAPIClient
+      })
+
+      if (!result.success) {
+        return res.status(500).json({ message: 'Failed to get desired addons', error: result.error })
+      }
+
+      console.log('📦 Desired addons to sync:', result.addons.length)
+      
+      if (result.addons.length === 0) {
+        return res.json({ message: 'No addons to sync', addonsCount: 0 })
+      }
+
+      // Use Stremio API client to manage addons
+      const authKeyPlain = decrypt(user.stremioAuthKey, req)
+      const apiClient = new StremioAPIClient({ endpoint: 'https://api.strem.io', authKey: authKeyPlain })
+      
+      // Convert desired addons to the exact format expected by Stremio API
+      // Prefer collection-style objects coming from getDesiredAddons: { transportUrl, transportName, manifest }
+      const addonsForSync = result.addons.map((item) => {
+        if (item && (item.transportUrl || item.transportName || item.manifest)) {
+          return {
+            transportUrl: item.transportUrl,
+            transportName: item.transportName || (item.manifest && item.manifest.name) || item.name || 'Addon',
+            manifest: item.manifest || item,
+          }
+        }
+        // Fallback if an entry is a raw manifest object (legacy)
+        const fallbackUrl = item?.manifestUrl || item?.url || item?.transportUrl || ''
+        const fallbackName = item?.name || item?.manifest?.name || 'Addon'
+        return {
+          transportUrl: fallbackUrl,
+          transportName: fallbackName,
+          manifest: item?.manifest || item,
+        }
+      })
+
+      // Set the entire desired collection (this replaces the current collection)
+      try {
+        await apiClient.request('addonCollectionSet', { addons: addonsForSync })
+        console.log('✅ Successfully set addon collection')
+      } catch (error) {
+        console.error('❌ Failed to set addon collection:', error.message)
+        return res.status(500).json({ message: 'Failed to sync addons', error: error.message })
+      }
+
+      console.log(`✅ Synced ${result.addons.length} addons for user ${id}`)
+      res.json({ 
+        message: 'User synced successfully', 
+        addonsCount: result.addons.length
+      })
     } catch (error) {
       console.error('Error in sync endpoint:', error)
       return res.status(500).json({ message: 'Failed to sync user', error: error?.message })
