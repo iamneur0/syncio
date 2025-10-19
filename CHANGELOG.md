@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.2](https://github.com/iamneur0/syncio/compare/v0.1.1...v0.1.2) (2025-10-19)
+
+
+### Features
+
+* reconnect user when logins expire ([381b7e1](https://github.com/iamneur0/syncio/commit/381b7e18bec188934cbd7190f258cd31647e4f22))
+
 ## [0.1.1](https://github.com/iamneur0/syncio/compare/v0.1.0...v0.1.1) (2025-10-19)
 
 
