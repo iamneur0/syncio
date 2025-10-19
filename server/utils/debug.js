@@ -1,5 +1,5 @@
 // Debug utility for conditional logging
-const DEBUG = process.env.DEBUG === 'true' || process.env.DEBUG === '1'
+const DEBUG = process.env.NEXT_PUBLIC_DEBUG === 'true' || process.env.NEXT_PUBLIC_DEBUG === '1'
 
 const debug = {
   log: (...args) => {

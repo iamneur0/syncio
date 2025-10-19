@@ -60,7 +60,7 @@ const allowedOrigins = [/^http:\/\/localhost:300\d$/, /^http:\/\/127\.0\.0\.1:30
 
 // Quiet mode
 const QUIET = process.env.QUIET === 'true' || process.env.QUIET === '1';
-const DEBUG_ENABLED = process.env.DEBUG === 'true' || process.env.DEBUG === '1';
+const DEBUG_ENABLED = process.env.NEXT_PUBLIC_DEBUG === 'true' || process.env.NEXT_PUBLIC_DEBUG === '1';
 
 // Port
 const PORT = process.env.PORT || 4000;
