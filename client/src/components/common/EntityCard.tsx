@@ -215,12 +215,12 @@ export default function EntityCard({
             : isDark 
             ? 'bg-gray-800 border-gray-700 hover:bg-gray-750' 
             : 'bg-white border-gray-200 hover:bg-gray-50'
-        } ${!entity.isActive ? 'opacity-50' : ''} cursor-pointer ${
+        } ${!entity.isActive ? 'opacity-50' : ''} cursor-pointer min-w-[320px] ${
           isSelected 
             ? (isMono ? 'ring-2 ring-white/50 border-white/40' : 'ring-2 ring-gray-400 border-gray-400') 
             : ''
         }` :
-        `rounded-lg shadow-sm border p-6 hover:shadow-md transition-all flex flex-col h-full relative group ${
+        `rounded-lg shadow-sm border p-6 hover:shadow-md transition-all flex flex-col h-full relative group min-w-[320px] ${
           isModern
             ? 'bg-gradient-to-br from-purple-50/90 to-blue-50/90 backdrop-blur-sm border-purple-200/60'
             : isModernDark
@@ -240,10 +240,12 @@ export default function EntityCard({
         <div className="w-full flex flex-row items-center justify-between gap-3">
           <div className="flex items-center gap-4 min-w-0 flex-1">
             {variant === 'addon' ? (
-              <AddonIcon name={entity.name} iconUrl={(entity as any).iconUrl} size="12" />
+              <div className="flex-shrink-0">
+                <AddonIcon name={entity.name} iconUrl={(entity as any).iconUrl} size="12" />
+              </div>
             ) : (
               <div 
-                className={`logo-circle-12 ${
+                className={`logo-circle-12 flex-shrink-0 ${
                   isMono
                     ? `${iconBg} border ${iconBorder} text-white`
                     : isModern
@@ -259,26 +261,6 @@ export default function EntityCard({
                 </span>
               </div>
             )}
-          {variant === 'addon' ? (
-            <AddonIcon name={entity.name} iconUrl={(entity as any).iconUrl} size="12" />
-          ) : (
-            <div 
-              className={`logo-circle-12 ${
-                isMono
-                  ? `${iconBg} border ${iconBorder} text-white`
-                  : isModern
-                  ? 'bg-gradient-to-br from-purple-600 to-blue-800 text-white'
-                  : isModernDark
-                  ? 'bg-gradient-to-br from-purple-800 to-blue-900 text-white'
-                  : `${iconBg} border ${iconBorder} text-white`
-              }`}
-              style={{ backgroundColor: getColorHexValue(entity.colorIndex, isMono ? 'mono' : isDark ? 'dark' : 'light') }}
-            >
-              <span className="text-white font-semibold text-lg">
-                {getAvatarText()}
-              </span>
-            </div>
-          )}
             
             <div className="flex-1 min-w-0 overflow-hidden">
               <div className="flex items-center gap-2 mb-1 flex-wrap">
@@ -386,7 +368,7 @@ export default function EntityCard({
               )}
               {variant === 'group' && (
                 <div className="flex items-center gap-1 text-xs text-gray-500">
-                  <AddonIcon name="Addon" className="w-4 h-4" />
+                  <Puzzle className="w-4 h-4" />
                   <span>{groupAddonsCount}</span>
                 </div>
               )}
@@ -509,9 +491,9 @@ export default function EntityCard({
         // Card mode layout
         <div className="flex flex-col h-full">
           <div className="flex items-start justify-between mb-4">
-        <div className="flex items-center min-w-0 flex-1">
+        <div className="flex items-center gap-3 flex-1 min-w-0">
           <div 
-            className={`logo-circle-12 ${
+            className={`logo-circle-12 flex-shrink-0 ${
               variant === 'addon' && (entity as any).iconUrl
                 ? `border-0 ${(!isDark && !isMono && !isModern && !isModernDark) ? 'accent-bg' : ''}`
                 : variant === 'addon'
@@ -544,7 +526,7 @@ export default function EntityCard({
               {getAvatarText()}
             </span>
           </div>
-          <div className="ml-3 min-w-0">
+          <div className="min-w-0 flex-1">
             <h3 className={`font-medium cursor-pointer transition-colors ${
               isModern ? 'text-purple-800 hover:text-purple-900' : 
               isModernDark ? 'text-purple-200 hover:text-purple-100' : 
