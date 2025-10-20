@@ -424,6 +424,12 @@ export const groupsAPI = {
     return response.data
   },
 
+  // Get group addons directly
+  getGroupAddons: async (id: string): Promise<any> => {
+    const response: AxiosResponse<any> = await api.get(`/groups/${id}/addons`)
+    return response.data
+  },
+
   // Clone group
   clone: async (id: string): Promise<Group> => {
     const response: AxiosResponse<{ group: Group }> = await api.post('/groups/clone', { originalGroupId: id })
