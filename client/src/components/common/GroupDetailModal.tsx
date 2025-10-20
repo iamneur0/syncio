@@ -7,6 +7,8 @@ import { useSyncStatusRefresh } from '@/hooks/useSyncStatusRefresh'
 import { getColorBgClass, getColorHexValue } from '@/utils/colorMapping'
 import toast from 'react-hot-toast'
 import { VersionChip, SyncBadge, EntityList, UserItem, AddonItem, UserSelectModal, AddonSelectModal, InlineEdit, ColorPicker } from './'
+import AddonIcon from './AddonIcon'
+import SortableAddonItem from './SortableAddonItem'
 import { Users, Puzzle, Plus, X } from 'lucide-react'
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors } from '@dnd-kit/core'
 import { restrictToParentElement } from '@dnd-kit/modifiers'
@@ -80,20 +82,27 @@ export default function GroupDetailModal({
     initialData: group // Use prop as initial data
   })
 
+  // Fetch group addons directly
+  const { data: groupAddonsData, isLoading: isLoadingGroupAddons } = useQuery({
+    queryKey: ['group', group?.id, 'addons'],
+    queryFn: () => groupsAPI.getGroupAddons(group!.id),
+    enabled: !!group?.id && isOpen,
+  })
+
   // Use the query data instead of the prop
   const currentGroup = groupDetails || group
 
   // Force refresh when group data changes
   useEffect(() => {
     setRefreshKey(prev => prev + 1)
-  }, [groupDetails?.users?.length, groupDetails?.addons?.length])
+  }, [groupDetails?.users?.length, groupAddonsData?.addons?.length])
 
-  // Update addons when group details change (backend already returns sorted by position)
+  // Update addons when group addons data changes (backend already returns sorted by position)
   useEffect(() => {
-    if (groupDetails?.addons) {
-      setAddons(groupDetails.addons)
+    if (groupAddonsData?.addons) {
+      setAddons(groupAddonsData.addons)
     }
-  }, [groupDetails?.addons])
+  }, [groupAddonsData?.addons])
 
   // Fetch users and addons
   const { data: users = [] } = useQuery({
@@ -180,6 +189,7 @@ export default function GroupDetailModal({
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['group'] })
       queryClient.invalidateQueries({ queryKey: ['group', group?.id, 'details'] })
+      queryClient.invalidateQueries({ queryKey: ['group', group?.id, 'addons'] })
       // Also refresh all group details to update counts
       queryClient.refetchQueries({ queryKey: ['group'] })
       // Fetch aggregated group+users sync status and update badges
@@ -206,13 +216,23 @@ export default function GroupDetailModal({
   const handleDragEnd = (event: any) => {
     const { active, over } = event
 
-    if (active.id !== over.id) {
-      const newAddons = arrayMove(addons, addons.findIndex((item) => item.id === active.id), addons.findIndex((item) => item.id === over.id))
+    if (active.id !== over?.id) {
+      // Use the same ID extraction logic as SortableAddonItem
+      const getAddonId = (item: any) => {
+        const manifest = item?.manifest || item
+        return item?.transportUrl || item?.manifestUrl || item?.url || manifest?.id || item?.id || 'unknown'
+      }
+
+      const newAddons = arrayMove(
+        addons,
+        addons.findIndex((item) => getAddonId(item) === active.id),
+        addons.findIndex((item) => getAddonId(item) === over.id)
+      )
       setAddons(newAddons)
       
       // Update backend with new order
       if (group) {
-        const orderedManifestUrls = newAddons.map(addon => addon.manifestUrl || addon.url).filter(Boolean)
+        const orderedManifestUrls = newAddons.map(addon => addon.transportUrl || addon.manifestUrl || addon.url).filter(Boolean)
         reorderAddonsMutation.mutate({
           groupId: group.id,
           orderedManifestUrls
@@ -228,6 +248,7 @@ export default function GroupDetailModal({
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['group'] })
       queryClient.invalidateQueries({ queryKey: ['group', group?.id, 'details'] })
+      queryClient.invalidateQueries({ queryKey: ['group', group?.id, 'addons'] })
       queryClient.invalidateQueries({ queryKey: ['addons'] })
       // Also refresh all group details to update addon counts
       queryClient.refetchQueries({ queryKey: ['group'] })
@@ -288,6 +309,7 @@ export default function GroupDetailModal({
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['group'] })
       queryClient.invalidateQueries({ queryKey: ['group', group?.id, 'details'] })
+      queryClient.invalidateQueries({ queryKey: ['group', group?.id, 'addons'] })
       queryClient.invalidateQueries({ queryKey: ['addons'] })
       // Also refresh all group details to update addon counts
       queryClient.refetchQueries({ queryKey: ['group'] })
@@ -351,35 +373,6 @@ export default function GroupDetailModal({
     }
   }
 
-  // Sortable Addon Item Component
-  const SortableAddonItem = ({ addon, onRemove }: { addon: any; onRemove: (id: string) => void }) => {
-    const {
-      attributes,
-      listeners,
-      setNodeRef,
-      transform,
-      transition,
-      isDragging,
-    } = useSortable({ id: addon.id })
-
-    const style = {
-      transform: CSS.Transform.toString(transform),
-      transition,
-      opacity: isDragging ? 0.5 : 1,
-    }
-
-    return (
-      <div ref={setNodeRef} style={style} className="select-none touch-none">
-        <AddonItem
-          addon={addon}
-          onRemove={onRemove}
-          isDraggable={true}
-          dragProps={attributes}
-          dragListeners={listeners}
-        />
-      </div>
-    )
-  }
 
   if (!isOpen || !group) return null
 
@@ -532,9 +525,9 @@ export default function GroupDetailModal({
           {/* Group Addons */}
           <EntityList
             title="Addons"
-            count={groupDetails?.addons?.length || 0}
+            count={groupAddonsData?.addons?.length || 0}
             items={addons}
-            isLoading={isLoadingGroupDetails}
+            isLoading={isLoadingGroupAddons}
             renderItem={() => null as any}
             onClear={() => {
               addons.forEach((addon: any) => {
@@ -556,24 +549,27 @@ export default function GroupDetailModal({
             emptyIcon={<Puzzle className={`w-12 h-12 mx-auto mb-4 ${isDark ? 'text-gray-500' : 'text-gray-400'}`} />}
             emptyMessage="No addons in this group"
           >
-            <DndContext
-              sensors={sensors}
-              collisionDetection={closestCenter}
-              modifiers={[restrictToParentElement]}
-              onDragEnd={handleDragEnd}
-            >
-              <SortableContext items={addons.map(addon => addon.id)} strategy={verticalListSortingStrategy}>
-                <div className="space-y-3">
+            {!isLoadingGroupAddons && addons.length > 0 && (
+              <DndContext
+                sensors={sensors}
+                collisionDetection={closestCenter}
+                modifiers={[restrictToParentElement]}
+                onDragEnd={handleDragEnd}
+              >
+                <SortableContext items={addons.map(addon => addon.id || addon.transportUrl || addon.manifestUrl).filter(Boolean)} strategy={verticalListSortingStrategy}>
+                  <div className="space-y-3">
                   {addons.map((addon: any, index: number) => (
                     <SortableAddonItem
-                      key={addon.id || index}
+                      key={addon.id || addon.transportUrl || addon.manifestUrl || index}
                       addon={addon}
                       onRemove={handleRemoveAddon}
+                      showProtectButton={false}
                     />
                   ))}
-                </div>
-              </SortableContext>
-            </DndContext>
+                  </div>
+                </SortableContext>
+              </DndContext>
+            )}
           </EntityList>
 
         </div>

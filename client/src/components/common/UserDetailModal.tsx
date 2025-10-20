@@ -7,6 +7,7 @@ import { getColorBgClass, getColorHexValue } from '@/utils/colorMapping'
 import toast from 'react-hot-toast'
 import { VersionChip, EntityList, SyncBadge, InlineEdit, ColorPicker } from './'
 import AddonIcon from './AddonIcon'
+import SortableAddonItem from './SortableAddonItem'
 import { useSyncStatusRefresh } from '@/hooks/useSyncStatusRefresh'
 import { Puzzle, X, Eye, EyeOff, LockKeyhole, Unlock, Bug, Copy } from 'lucide-react'
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors } from '@dnd-kit/core'
@@ -127,6 +128,13 @@ export default function UserDetailModal({
   const { data: userDetails, isLoading: isLoadingUserDetails } = useQuery({
     queryKey: ['user', user?.id, 'details'],
     queryFn: () => usersAPI.getById(user!.id),
+    enabled: !!user?.id,
+  })
+
+  // Fetch group addons for user
+  const { data: userGroupAddons, isLoading: isLoadingGroupAddons } = useQuery({
+    queryKey: ['user', user?.id, 'group-addons'],
+    queryFn: () => usersAPI.getGroupAddons(user!.id),
     enabled: !!user?.id,
   })
 
@@ -299,12 +307,19 @@ export default function UserDetailModal({
         currentAddons.findIndex((item: any) => (item.transportUrl || item.manifestUrl || item.url || item.id) === active.id),
         currentAddons.findIndex((item: any) => (item.transportUrl || item.manifestUrl || item.url || item.id) === over.id)
       )
+      
+      // Update the query cache immediately for smooth UI
+      queryClient.setQueryData(['user', currentUser?.id, 'stremio-addons'], (oldData: any) => ({
+        ...oldData,
+        addons: reordered
+      }))
+      
       // Persist order in backend
       const orderedManifestUrls = reordered.map((a: any) => a.transportUrl || a.manifestUrl || a.url || a.id).filter(Boolean)
       if (currentUser) {
         usersAPI.reorderStremioAddons?.(currentUser.id, orderedManifestUrls)
           .then(() => {
-            // Refresh the data from the server
+            // Refresh the data from the server to ensure consistency
             queryClient.invalidateQueries({ queryKey: ['user', currentUser.id, 'stremio-addons'] })
             toast.success('Stremio addons order updated')
             refreshAllSyncStatus(undefined, currentUser.id)
@@ -312,6 +327,8 @@ export default function UserDetailModal({
           .catch((error) => {
             console.error('Failed to reorder Stremio addons:', error)
             toast.error('Failed to update order')
+            // Revert the optimistic update on error
+            queryClient.invalidateQueries({ queryKey: ['user', currentUser.id, 'stremio-addons'] })
           })
       }
     }
@@ -435,122 +452,6 @@ export default function UserDetailModal({
     )
   }
 
-  // SortableStremioAddonItem component
-  const SortableStremioAddonItem = ({ addon, index }: { addon: any; index: number }) => {
-    // Handle getUserAddons format: { transportUrl, transportName, manifest: { name, version, description, logo } }
-    const addonId = addon.transportUrl || addon.manifestUrl || addon.url || addon.id
-    const addonName = addon.manifest?.name || addon.transportName || addon.name || 'Unknown Addon'
-    const addonVersion = addon.manifest?.version || addon.version
-    const addonDescription = addon.manifest?.description || addon.description || 'No description'
-    const addonIconUrl = addon.manifest?.logo || addon.manifest?.icon || addon.iconUrl
-    
-    const isProtected = localProtectedSet.has(addonId)
-    const isDefault = isDefaultAddon(addonId, addonName)
-    // Use global setting reflected in modal state
-    const unsafe = isUnsafeMode
-    
-    
-    const {
-      attributes,
-      listeners,
-      setNodeRef,
-      transform,
-      transition,
-      isDragging,
-    } = useSortable({ id: addonId })
-
-    const style = {
-      transform: CSS.Transform.toString(transform),
-      transition,
-    }
-
-    return (
-      <div
-        ref={setNodeRef}
-        style={style}
-        className={`relative rounded-lg border p-4 hover:shadow-md transition-all cursor-grab active:cursor-grabbing select-none touch-none ${
-          isDark
-            ? 'bg-gray-600 border-gray-500 hover:bg-gray-550'
-            : 'bg-white border-gray-200 hover:bg-gray-50'
-        } ${isDragging ? 'opacity-50' : ''}`}
-        {...attributes}
-        {...listeners}
-      >
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center flex-1 min-w-0">
-            <AddonIcon name={addonName} iconUrl={addonIconUrl} size="10" className="mr-3 flex-shrink-0" />
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2 mb-1">
-                <h4 className={`font-medium truncate ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                  {addonName}
-                </h4>
-                {addonVersion && (
-                  <VersionChip version={addonVersion} />
-                )}
-              </div>
-              <p className={`text-sm truncate ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
-                {addonDescription}
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={(e) => {
-                e.stopPropagation()
-                if (!isDefault || unsafe) {
-                  handleProtectStremioAddon(addonId)
-                }
-              }}
-              onPointerDown={(e) => {
-                e.stopPropagation()
-              }}
-              disabled={Boolean(isDefault && !unsafe)}
-              className={`p-2 rounded-lg transition-colors ${
-                isDefault && !unsafe
-                  ? ((isMono || isDark) ? 'text-gray-500 cursor-not-allowed' : 'text-gray-500 cursor-not-allowed')
-                  : isProtected
-                    ? ((isMono || isDark) ? 'text-green-400 hover:bg-green-900/20' : 'text-green-600 hover:bg-green-50')
-                    : ((isMono || isDark) ? 'text-gray-400 hover:bg-gray-700' : 'text-gray-600 hover:bg-gray-100')
-              }`}
-              title={
-                isDefault && !unsafe
-                  ? "Default addon - cannot be unprotected in safe mode"
-                  : isProtected
-                    ? "Unprotect addon"
-                    : "Protect addon"
-              }
-            >
-              {isProtected ? <LockKeyhole className="w-4 h-4" /> : <Unlock className="w-4 h-4" />}
-            </button>
-            <button
-              onClick={(e) => {
-                e.stopPropagation()
-                if (!isDefault || unsafe) {
-                  handleDeleteStremioAddon(addonId)
-                }
-              }}
-              onPointerDown={(e) => {
-                e.stopPropagation()
-              }}
-              disabled={Boolean(isDefault && !unsafe)}
-              className={`p-2 rounded-lg transition-colors ${
-                isDefault && !unsafe
-                  ? ((isMono || isDark) ? 'text-gray-500 cursor-not-allowed' : 'text-gray-500 cursor-not-allowed')
-                  : ((isMono || isDark) ? 'text-red-400 hover:bg-red-900/20' : 'text-red-600 hover:bg-red-50')
-              }`}
-              title={
-                isDefault && !unsafe
-                  ? "Default addon - cannot be deleted in safe mode"
-                  : "Delete addon"
-              }
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-      </div>
-    )
-  }
 
   if (!isOpen || !user || !mounted || typeof window === 'undefined' || !document.body) {
     return null
@@ -633,9 +534,9 @@ export default function UserDetailModal({
           {/* Group Addons Section */}
           <EntityList
             title="Group Addons"
-          count={userDetails?.addons?.length || 0}
-          items={userDetails?.addons || []}
-            isLoading={isLoadingUserDetails}
+            count={userGroupAddons?.addons?.length || 0}
+            items={userGroupAddons?.addons || []}
+            isLoading={isLoadingGroupAddons}
             headerRight={isDebugMode ? (
               <div className="flex items-center gap-2">
                 <button
@@ -723,13 +624,27 @@ export default function UserDetailModal({
               </div>
             ) : undefined}
             isDraggable={true}
-            renderItem={(addon: any, index: number) => (
-              <SortableStremioAddonItem
-                key={addon.transportUrl || addon.id || index}
-                addon={addon}
-                index={index}
-              />
-            )}
+            renderItem={(addon: any, index: number) => {
+              const addonId = addon.transportUrl || addon.manifestUrl || addon.url || addon.id
+              const addonName = addon.manifest?.name || addon.transportName || addon.name || 'Unknown Addon'
+              const isProtected = localProtectedSet.has(addonId)
+              const isDefault = isDefaultAddon(addonId, addonName)
+              
+              console.log('🔍 UserDetailModal renderItem:', { addonId, addonName, isProtected, isDefault, isUnsafeMode })
+              
+              return (
+                <SortableAddonItem
+                  key={addonId || index}
+                  addon={addon}
+                  onRemove={handleDeleteStremioAddon}
+                  onProtect={handleProtectStremioAddon}
+                  isProtected={isProtected}
+                  isDefault={!!isDefault}
+                  isUnsafeMode={isUnsafeMode}
+                  showProtectButton={true}
+                />
+              )
+            }}
             emptyIcon={<Puzzle className={`w-12 h-12 mx-auto mb-4 ${isDark ? 'text-gray-500' : 'text-gray-400'}`} />}
             emptyMessage="No Stremio addons found for this user"
           >
@@ -741,13 +656,25 @@ export default function UserDetailModal({
             >
               <SortableContext items={(stremioAddonsData?.addons || []).map((addon: any) => addon.transportUrl || addon.id)} strategy={verticalListSortingStrategy}>
                 <div className="space-y-3">
-                  {(stremioAddonsData?.addons || []).map((addon: any, index: number) => (
-                    <SortableStremioAddonItem
-                      key={addon.transportUrl || addon.id || index}
-                      addon={addon}
-                      index={index}
-                    />
-                  ))}
+                  {(stremioAddonsData?.addons || []).map((addon: any, index: number) => {
+                    const addonId = addon.transportUrl || addon.manifestUrl || addon.url || addon.id
+                    const addonName = addon.manifest?.name || addon.transportName || addon.name || 'Unknown Addon'
+                    const isProtected = localProtectedSet.has(addonId)
+                    const isDefault = isDefaultAddon(addonId, addonName)
+                    
+                    return (
+                      <SortableAddonItem
+                        key={addonId || index}
+                        addon={addon}
+                        onRemove={handleDeleteStremioAddon}
+                        onProtect={handleProtectStremioAddon}
+                        isProtected={isProtected}
+                        isDefault={!!isDefault}
+                        isUnsafeMode={isUnsafeMode}
+                        showProtectButton={true}
+                      />
+                    )
+                  })}
                 </div>
               </SortableContext>
             </DndContext>

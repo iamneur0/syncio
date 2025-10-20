@@ -950,5 +950,23 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
     }
   });
 
+  // Get group addons directly
+  router.get('/:id/addons', async (req, res) => {
+    try {
+      const { id } = req.params
+      const group = await findGroupById(prisma, id, getAccountId(req))
+      if (!group) return sendError(res, 404, 'Group not found')
+      
+      // Use shared helper to get ordered addons for this group
+      const { getGroupAddons } = require('../utils/helpers')
+      const filteredAddonsSorted = await getGroupAddons(prisma, id, req)
+      
+      res.json({ addons: filteredAddonsSorted })
+    } catch (error) {
+      console.error('Error fetching group addons:', error)
+      res.status(500).json({ message: 'Failed to fetch group addons', error: error?.message })
+    }
+  })
+
   return router;
 };
