@@ -495,39 +495,60 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
         });
       }
 
-      // Filter manifest according to selected resources stored on addon
+      // Get current resource and catalog selections
+      const currentResources = (() => { 
+        try { return addon.resources ? JSON.parse(addon.resources) : [] } catch { return [] } 
+      })()
+      const currentCatalogs = (() => { 
+        try { return addon.catalogs ? JSON.parse(addon.catalogs) : [] } catch { return [] } 
+      })()
+
+      // Apply the same filtering logic as the update endpoint
       let filtered = manifestData
-      try {
-        const rawSelected = (() => { try { return addon.resources ? JSON.parse(addon.resources) : [] } catch { return [] } })()
-        const selected = Array.isArray(rawSelected)
-          ? rawSelected.map((r) => (typeof r === 'string' ? r : (r && (r.name || r.type)))).filter(Boolean)
-          : []
-        console.log(`🔍 Reload filtering with selected resources:`, selected)
-        if (Array.isArray(selected) && manifestData) {
-          filtered = filterManifestByResources(manifestData, selected)
-          console.log(`🔍 Filtered manifest catalogs:`, filtered?.catalogs?.length || 0)
+      if (Array.isArray(currentResources) || Array.isArray(currentCatalogs)) {
+        try {
+          console.log('🔍 Reload applying resource/catalog filtering with current selections')
+          
+          if (Array.isArray(currentResources) && currentResources.length > 0) {
+            console.log('🔍 Reload filtering with current resources:', currentResources)
+            filtered = filterManifestByResources(manifestData, currentResources)
+            console.log('🔍 Filtered manifest has catalogs:', Array.isArray(filtered?.catalogs) ? filtered.catalogs.length : 'no catalogs')
+          }
+          
+          // Apply catalog filtering if catalogs are provided
+          if (Array.isArray(currentCatalogs) && currentCatalogs.length > 0 && filtered) {
+            console.log('🔍 Reload filtering catalogs with current selections:', currentCatalogs)
+            filtered = filterManifestByCatalogs(filtered, currentCatalogs)
+            console.log('🔍 After catalog filtering, manifest has catalogs:', Array.isArray(filtered?.catalogs) ? filtered.catalogs.length : 'no catalogs')
+          }
+        } catch (e) {
+          console.error('Error filtering manifest on reload:', e)
+          filtered = manifestData
         }
-      } catch (e) {
-        console.error('Failed to filter manifest on reload:', e)
       }
 
-      // Update the addon with fresh original manifest and derived manifest; preserve display name
+      // Update the addon using the same logic as the update endpoint
       const updatedAddon = await prisma.addon.update({
         where: { 
           id,
           accountId: getAccountId(req)
         },
         data: {
-          name: addon.name, // explicitly preserve name
+          name: addon.name, // preserve name
           description: manifestData?.description || addon.description,
           version: manifestData?.version || addon.version,
-          // Update logo URL from manifest
           iconUrl: manifestData?.logo || addon.iconUrl || null,
           // Store encrypted manifests (original untouched, filtered current)
           originalManifest: encrypt(JSON.stringify(manifestData), req),
           manifest: encrypt(JSON.stringify(filtered), req),
-          // Always recompute manifestHash on reload based on filtered manifest
-          manifestHash: manifestHash(filtered)
+          manifestHash: manifestHash(filtered),
+          // Keep current resource and catalog selections (they're already validated by the filtering functions)
+          resources: JSON.stringify(Array.isArray(currentResources) ? currentResources.map(r => {
+            if (typeof r === 'string') return r
+            if (r && typeof r === 'object' && r.name) return r.name
+            return null
+          }).filter(Boolean) : []),
+          catalogs: JSON.stringify(Array.isArray(currentCatalogs) ? currentCatalogs.map(c => ({ type: c.type, id: c.id })).filter(c => c.type && c.id) : [])
         }
       });
 
