@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.1.4](https://github.com/iamneur0/syncio/compare/v0.1.3...v0.1.4) (2025-10-21)
+
+
+### Bug Fixes
+
+* add addon in a group with same manifesturl but differnet manifest ([7864f40](https://github.com/iamneur0/syncio/commit/7864f402026f537d978aa9a4f39f2a1a93ac7880))
+* addon clone missing fields ([81ebb24](https://github.com/iamneur0/syncio/commit/81ebb2451573c5805698da7a4481e4566fe85332))
+* addon info now reflecting db instead of manifest ([b6b825f](https://github.com/iamneur0/syncio/commit/b6b825f87f68ed28bb9d561367a4aeec5b07862e))
+* changed order of tabs ([62a1955](https://github.com/iamneur0/syncio/commit/62a195500d6b19480b8a902d98724b5c923e5c5e))
+* debug unavailable in public for security ([8f2cdfa](https://github.com/iamneur0/syncio/commit/8f2cdfa2814b64ae39b4e43eb975e0b6872f60cf))
+* dragging listItems and items name ([d453933](https://github.com/iamneur0/syncio/commit/d4539335f730dd6f40e8fffc9d95159373dad8db))
+* regression for exclude logic ([13aba2b](https://github.com/iamneur0/syncio/commit/13aba2bb48cf7a983c94df1d0dfaab3d3ff9d2cb))
+* regression on excluded addons ([6ab1572](https://github.com/iamneur0/syncio/commit/6ab1572d22afdb8e7604c2a86a8534ee9a7d5e65))
+* reload inconsistency with filters, refactored with addonUpdate ([d53d87c](https://github.com/iamneur0/syncio/commit/d53d87c5fcedd6da4c6225301a6834eafa450cb3))
+* reload now adds new resources/catalogs ([63617fa](https://github.com/iamneur0/syncio/commit/63617fadfd5f56ac5add36cee103f1f3480b17bf))
+* reworked addon group add ([845fbd6](https://github.com/iamneur0/syncio/commit/845fbd6b863ce213b9aa4257584a261f182db55a))
+* sync badge update on addon add ([853f3b8](https://github.com/iamneur0/syncio/commit/853f3b8b2759cfb61d3325d7edfced79c3220b00))
+* unsafe mode now properly handling default addons as normal addons ([a058ec2](https://github.com/iamneur0/syncio/commit/a058ec2056795808b6d335539531dfaa3a6b5254))
+* user addon import associates existing addons, check now manifest content ([5367ef9](https://github.com/iamneur0/syncio/commit/5367ef9fef4ee1a02e000cb87f48645c86af0f2a))
+
 ## [0.1.3](https://github.com/iamneur0/syncio/compare/v0.1.2...v0.1.3) (2025-10-19)
 
 
