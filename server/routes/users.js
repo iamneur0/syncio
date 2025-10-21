@@ -2065,6 +2065,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
         return res.status(400).json({ message: 'addons array is required' })
       }
 
+      // Validate user exists
       const user = await prisma.user.findUnique({ 
         where: { 
           id: userId,
@@ -2073,15 +2074,42 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
       })
       if (!user) return res.status(404).json({ message: 'User not found' })
 
-      // We'll create/attach to the import group only if at least one addon is newly imported
-      const groupName = `${user.username} Imports`
-      let group = null
+      // Create import group with unique name
+      const baseGroupName = `${user.username} Imports`
+      let groupName = baseGroupName
+      let group = await prisma.group.findFirst({
+        where: { name: groupName, accountId: getAccountId(req) }
+      })
+      
+      // Find unique name if group exists (Copy, Copy #2, etc.)
+      if (group) {
+        let copyNumber = 1
+        while (group) {
+          groupName = copyNumber === 1 ? `${baseGroupName} Copy` : `${baseGroupName} Copy #${copyNumber}`
+          group = await prisma.group.findFirst({
+            where: { name: groupName, accountId: getAccountId(req) }
+          })
+          copyNumber++
+        }
+      }
+      
+      // Create the group
+      group = await prisma.group.create({
+        data: {
+          name: groupName,
+          description: `Imported addons from ${user.username}`,
+          colorIndex: 0,
+          isActive: true,
+          accountId: getAccountId(req)
+        }
+      })
+      console.log(`✅ Created import group: ${groupName}`)
 
       // Process each addon
       const processedAddons = []
       const newlyImportedAddons = []
       const existingAddons = []
-      console.log(`🚀 Starting import of ${addons.length} addons for user ${userId}`)
+      
       for (const addonData of addons) {
         const addonUrl = addonData.manifestUrl || addonData.transportUrl || addonData.url
         if (!addonUrl) {
@@ -2089,54 +2117,37 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
           continue
         }
 
-        const addonId = addonData.id
-        console.log(`🔍 Processing addon: ID="${addonId}", URL="${addonUrl}", Name="${addonData.name || addonData.manifest?.name || 'Unknown'}"`)
-        debug.log(`🔍 Processing addon: ID="${addonId}", URL="${addonUrl}"`)
-
-        // SIMPLE RULE: if an addon with the exact manifestUrl exists, attach it to the group and continue
+        // Check if addon exists by manifest URL hash
         let addon = null
         try {
-          const { manifestUrlHash } = require('./utils/hash')
-          const existingByExactUrl = await prisma.addon.findFirst({ 
-          where: {
-              manifestUrlHash: manifestUrlHash(addonUrl),
+          const existingAddon = await prisma.addon.findFirst({ 
+            where: {
+              manifestUrlHash: manifestUrlHmac(req, addonUrl),
               accountId: getAccountId(req)
             },
             select: { id: true, name: true, manifestUrl: true, accountId: true }
           })
-          if (existingByExactUrl) {
-            // Attach directly in DB (no internal HTTP)
-            try {
-              await prisma.groupAddon.upsert({
-                where: { groupId_addonId: { groupId: group.id, addonId: existingByExactUrl.id } },
-                update: { isEnabled: true },
-                create: { groupId: group.id, addonId: existingByExactUrl.id, isEnabled: true }
-              })
-              console.log(`✅ Attached existing addon to group in DB: ${existingByExactUrl.name}`)
-              } catch (e) {
-              console.log(`⚠️ DB attach failed:`, e?.message || e)
-              }
-              processedAddons.push(existingByExactUrl)
-              existingAddons.push(existingByExactUrl)
-              addon = existingByExactUrl
-              continue
+          if (existingAddon) {
+            console.log(`♻️ Found existing addon: ${existingAddon.name}`)
+            processedAddons.push(existingAddon)
+            existingAddons.push(existingAddon)
+            addon = existingAddon
           }
-          addon = existingByExactUrl
         } catch (e) {
-          console.log(`⚠️ Exact URL check failed for ${addonUrl}:`, e?.message || e)
+          console.log(`⚠️ URL check failed for ${addonUrl}:`, e?.message || e)
         }
 
-        // If we didn't find an existing addon by exact URL, create a new one
+        // Create new addon if not found
         if (!addon) {
           console.log(`🔨 Creating new addon for: ${addonUrl}`)
-          // Prefer full manifest from payload; if missing, fetch from URL to mirror addon creation flow
+          
+          // Get manifest data
           let manifestData = addonData.manifest
           if (!manifestData) {
             try {
               const resp = await fetch(addonUrl)
               if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
               manifestData = await resp.json()
-              console.log(`ℹ️ Fetched manifest for import: ${manifestData?.name} ${manifestData?.version}`)
             } catch (e) {
               manifestData = {
                 id: addonData.id || 'unknown',
@@ -2147,118 +2158,75 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
                 types: addonData.manifest?.types || ['other'],
                 catalogs: addonData.manifest?.catalogs || []
               }
-              console.log(`ℹ️ Using synthesized manifest for import: ${manifestData?.name} ${manifestData?.version}`)
             }
           }
-          // Try existence check step 3: match any addon whose stored URL contains the manifest.id
-          const manifestIdRaw = typeof manifestData?.id === 'string' ? manifestData.id : ''
-          if (manifestIdRaw) {
-            // Check if any existing addon has this manifest ID in its URL
-            const byIdInUrl = await prisma.addon.findFirst({
-              where: {
-                manifestUrl: { contains: manifestIdRaw },
-                accountId: getAccountId(req)
+
+          // Fetch original manifest for full capabilities
+          let originalManifestObj = manifestData
+          try {
+            const resp = await fetch(addonUrl)
+            if (resp.ok) {
+              originalManifestObj = await resp.json()
+            }
+          } catch {}
+
+          // Create addon
+          try {
+            const resourcesNames = JSON.stringify(
+              Array.isArray(manifestData?.resources) 
+                ? manifestData.resources.map(r => typeof r === 'string' ? r : (r?.name || r?.type)).filter(Boolean)
+                : []
+            )
+
+            const createdAddon = await prisma.addon.create({
+              data: {
+                accountId: getAccountId(req),
+                name: manifestData?.name || addonData.name || 'Unknown Addon',
+                description: manifestData?.description || addonData.description || '',
+                version: manifestData?.version || addonData.version || null,
+                iconUrl: manifestData?.logo || addonData.iconUrl || null,
+                stremioAddonId: manifestData?.id || addonData.stremioAddonId || null,
+                isActive: true,
+                manifestUrl: encrypt(addonUrl, req),
+                manifestUrlHash: manifestUrlHmac(req, addonUrl),
+                originalManifest: originalManifestObj ? encrypt(JSON.stringify(originalManifestObj), req) : null,
+                manifest: manifestData ? encrypt(JSON.stringify(manifestData), req) : null,
+                manifestHash: manifestData ? manifestHash(manifestData) : null,
+                resources: resourcesNames
               }
             })
-            if (byIdInUrl) {
-              addon = byIdInUrl
-              console.log(`✅ Found existing addon by manifest.id in URL: ${addon.name} (${addon.manifestUrl})`)
-            }
-          }
-
-          if (addon) {
-            // Skip creation; will consider group attach later
-          } else {
-            // Create addon directly in DB using explicit fields to separate originalManifest vs manifest
-            try {
-              // originalManifest: full capabilities from live URL if possible; fallback to current manifest
-              let originalManifestObj = manifestData
-              try {
-                const resp = await fetch(addonUrl)
-                if (resp.ok) {
-                  originalManifestObj = await resp.json()
-                  console.log(`ℹ️ Fetched originalManifest for import: ${originalManifestObj?.name} ${originalManifestObj?.version}`)
-                }
-              } catch {}
-
-              const resourcesNames = (() => {
-                try {
-                  const src = Array.isArray(manifestData?.resources) ? manifestData.resources : []
-                  return JSON.stringify(src.map(r => (typeof r === 'string' ? r : (r && (r.name || r.type)))).filter(Boolean))
-                } catch { return JSON.stringify([]) }
-              })()
-
-              const createdAddon = await prisma.addon.create({
-                data: {
-                  accountId: getAccountId(req),
-                  name: manifestData?.name || addonData.name || 'Unknown Addon',
-                  description: manifestData?.description || addonData.description || '',
-                  version: manifestData?.version || addonData.version || null,
-                  iconUrl: manifestData?.logo || addonData.iconUrl || null,
-                  stremioAddonId: manifestData?.id || addonData.stremioAddonId || null,
-                  isActive: true,
-                  manifestUrl: encrypt(addonUrl, req),
-                  manifestUrlHash: manifestUrlHmac(req, addonUrl),
-                  originalManifest: originalManifestObj ? encrypt(JSON.stringify(originalManifestObj), req) : null,
-                  manifest: manifestData ? encrypt(JSON.stringify(manifestData), req) : null,
-                  manifestHash: manifestData ? manifestHash(manifestData) : null,
-                  resources: resourcesNames
-                }
-              })
-              addon = createdAddon
-              console.log(`✅ Created new addon in DB: ${addon.name} (ID: ${addon.id})`)
-              processedAddons.push(addon)
-              newlyImportedAddons.push(addon)
-            } catch (error) {
-              console.log(`❌ Failed to create addon in DB:`, error?.message || error)
-                    continue
-                  }
+            
+            addon = createdAddon
+            processedAddons.push(addon)
+            newlyImportedAddons.push(addon)
+            console.log(`✅ Created new addon: ${addon.name}`)
+          } catch (error) {
+            console.error(`❌ Failed to create addon:`, error?.message || error)
+            continue
           }
         }
-        // Attachment deferred until we decide to create/use a group
       }
 
-      console.log(`🎉 Import completed! Processed ${processedAddons.length} addons out of ${addons.length} total addons`)
-      console.log(`📋 Processed addons:`, processedAddons.map(a => `${a.name} (${a.id})`))
-      console.log(`📊 Newly imported: ${newlyImportedAddons.length}, Already existing: ${existingAddons.length}`)
-
-      // If nothing new was imported, do NOT create a group or attach anything
-      if (newlyImportedAddons.length === 0) {
-        const message = existingAddons.length > 0
-          ? `All ${existingAddons.length} addons already existed. No group created.`
-          : `No addons were processed. No group created.`
-        return res.json({
-          message,
-          addonCount: processedAddons.length,
-          newlyImported: newlyImportedAddons.length,
-          existing: existingAddons.length
-        })
+      // Attach all processed addons to the group
+      for (const addon of processedAddons) {
+        try {
+          await prisma.groupAddon.upsert({
+            where: { groupId_addonId: { groupId: group.id, addonId: addon.id } },
+            update: { isEnabled: true },
+            create: { groupId: group.id, addonId: addon.id, isEnabled: true }
+          })
+          console.log(`✅ Attached ${addon.name} to group`)
+        } catch (error) {
+          console.error(`❌ Failed to attach ${addon.name}:`, error?.message || error)
+        }
       }
 
-      // Ensure import group exists now that we know we have imports
-      group = await prisma.group.findFirst({
-        where: { name: groupName }
-      })
-      if (!group) {
-        group = await prisma.group.create({
-          data: {
-            name: groupName,
-            description: `Imported addons from ${user.username}`,
-            colorIndex: 0,
-            isActive: true,
-            accountId: getAccountId(req)
-          }
-        })
-        debug.log(`✅ Created import group: ${groupName}`)
-      } else {
-        debug.log(`ℹ️ Using existing import group: ${groupName}`)
-      }
-
-      // Ensure user usership only if they have no group assigned yet
+      // Assign user to group if they don't have any groups
       const allGroups = await prisma.group.findMany({
         where: { accountId: getAccountId(req) },
         select: { id: true, userIds: true }
       })
+      
       let userInAnyGroup = false
       for (const g of allGroups) {
         if (g.userIds) {
@@ -2273,30 +2241,15 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
           }
         }
       }
+      
       if (!userInAnyGroup) {
         await assignUserToGroup(userId, group.id, req)
-        debug.log(`✅ Added user to import group (user had no previous groups)`)
-          } else {
-        debug.log(`ℹ️ Skipped adding user to import group (user already has a group)`)
-      }
-
-      // Attach all processed addons (existing and newly created) to the import group
-      for (const addon of processedAddons) {
-        try {
-          await prisma.groupAddon.upsert({
-            where: { groupId_addonId: { groupId: group.id, addonId: addon.id } },
-            update: { isEnabled: true },
-            create: { groupId: group.id, addonId: addon.id, isEnabled: true }
-          })
-          console.log(`✅ Attached ${addon.name} to import group in DB`)
-          } catch (error) {
-          console.error(`❌ DB attach error for ${addon.name}:`, error?.message || error)
-        }
+        console.log(`✅ Added user to import group`)
       }
 
       const message = existingAddons.length > 0
-        ? `Successfully imported ${newlyImportedAddons.length} addons to group "${groupName}" (${existingAddons.length} already existed)`
-        : `Successfully imported ${newlyImportedAddons.length} addons to group "${groupName}"`
+        ? `Successfully imported ${processedAddons.length} addons to group "${groupName}" (${existingAddons.length} already existed, ${newlyImportedAddons.length} newly created)`
+        : `Successfully imported ${processedAddons.length} addons to group "${groupName}"`
 
       res.json({
         message,
@@ -2309,7 +2262,6 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
 
     } catch (error) {
       console.error('❌ Import addons error:', error)
-      console.error('❌ Error stack:', error.stack)
       res.status(500).json({ message: 'Failed to import addons', error: error.message })
     }
   });
