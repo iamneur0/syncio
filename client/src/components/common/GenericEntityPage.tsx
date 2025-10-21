@@ -6,6 +6,9 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTheme } from '@/contexts/ThemeContext'
 import { addonsAPI, usersAPI, groupsAPI } from '@/services/api'
 import { useSyncStatusRefresh } from '@/hooks/useSyncStatusRefresh'
+import { invalidateEntityQueries, invalidateSyncStatusQueries } from '@/utils/queryUtils'
+import { genericSuccessHandlers } from '@/utils/toastUtils'
+import { useModalState } from '@/hooks/useCommonState'
 import toast from 'react-hot-toast'
 import { Puzzle, User as UserIcon, Users } from 'lucide-react'
 
@@ -124,7 +127,6 @@ export default function GenericEntityPage({ config }: GenericEntityPageProps) {
   // Debug logging for data updates
   useEffect(() => {
     if (entities) {
-      console.log(`🔍 GenericEntityPage: ${finalConfig.entityType} data updated:`, entities?.length || 0, 'items')
     }
   }, [entities, finalConfig.entityType])
 
@@ -145,8 +147,8 @@ export default function GenericEntityPage({ config }: GenericEntityPageProps) {
   const updateMutation = useMutation({
     mutationFn: ({ id, data }: { id: string; data: any }) => finalConfig.api.update(id, data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [finalConfig.entityType] })
-      toast.success(`${finalConfig.title.slice(0, -1)} updated successfully`)
+      invalidateEntityQueries(queryClient, { entityType: finalConfig.entityType })
+      genericSuccessHandlers.sync(finalConfig.title.slice(0, -1))
       // Close detail modal after successful save
       setShowDetailModal(false)
       setSelectedEntity(null)
@@ -159,8 +161,8 @@ export default function GenericEntityPage({ config }: GenericEntityPageProps) {
   const createMutation = useMutation({
     mutationFn: (data: any) => finalConfig.api.create(data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [finalConfig.entityType] })
-      toast.success(`${finalConfig.title.slice(0, -1)} created successfully`)
+      invalidateEntityQueries(queryClient, { entityType: finalConfig.entityType })
+      genericSuccessHandlers.sync(finalConfig.title.slice(0, -1))
       setShowAddModal(false)
     },
     onError: (error: any) => {
@@ -173,7 +175,7 @@ export default function GenericEntityPage({ config }: GenericEntityPageProps) {
     mutationFn: ({ id, name }: { id: string; name: string }) => finalConfig.api.delete(id),
     onSuccess: (_data, variables) => {
       // Invalidate the main list
-      queryClient.invalidateQueries({ queryKey: [finalConfig.entityType] })
+      invalidateEntityQueries(queryClient, { entityType: finalConfig.entityType })
       // Stop any lingering sync-status polling for this specific user
       if (finalConfig.entityType === 'user' && variables?.id) {
         try {
@@ -184,7 +186,7 @@ export default function GenericEntityPage({ config }: GenericEntityPageProps) {
           window.dispatchEvent(new CustomEvent('sfm:user:deleted', { detail: { userId: variables.id } } as any))
         } catch {}
       }
-      toast.success(`${finalConfig.title.slice(0, -1)} deleted successfully`)
+      genericSuccessHandlers.sync(finalConfig.title.slice(0, -1))
       setShowDeleteConfirm(false)
       setEntityToDelete(null)
     },
@@ -421,11 +423,9 @@ export default function GenericEntityPage({ config }: GenericEntityPageProps) {
       if (finalConfig.entityType === 'user') {
         try {
           const syncStatus = await usersAPI.getSyncStatus(id)
-          console.log('🔍 Sync status for user', id, ':', syncStatus)
           if (syncStatus?.status === 'connect') {
             // User needs to reconnect - use the user data from the entities list instead of fetching
             const user = entities?.find((u: any) => u.id === id)
-            console.log('🔍 Found user in entities list:', user)
             if (user) {
               const editingUserData = {
                 id: user.id,
@@ -434,7 +434,6 @@ export default function GenericEntityPage({ config }: GenericEntityPageProps) {
                 groupId: user.groups?.[0]?.id,
                 colorIndex: user.colorIndex || 0
               }
-              console.log('🔍 Setting editing user data:', editingUserData)
               setEditingUser(editingUserData)
               setShowAddModal(true)
               return

@@ -99,16 +99,6 @@ export default function AddonDetailModal({
   // Initialize form data when addon changes
   useEffect(() => {
     if (currentAddon) {
-      console.log('🔍 AddonDetailModal addon data:', {
-        name: currentAddon.name,
-        resources: currentAddon.resources,
-        manifest: currentAddon.manifest,
-        originalManifest: currentAddon.originalManifest,
-        manifestResources: currentAddon.manifest?.resources,
-        originalManifestResources: currentAddon.originalManifest?.resources,
-        catalogs: currentAddon.manifest?.catalogs,
-        originalCatalogs: currentAddon.originalManifest?.catalogs
-      })
       setEditName(currentAddon.name || '')
       // Initialize associated groups by ids (supports both groupIds and groups arrays)
       try {
@@ -124,11 +114,9 @@ export default function AddonDetailModal({
         const stored = Array.isArray(currentAddon.resources) ? currentAddon.resources : null
         const detailManifest: any = currentAddon.originalManifest || currentAddon.manifest
         const fallback = Array.isArray(detailManifest?.resources) ? detailManifest.resources : []
-        console.log('🔍 Resources initialization:', { stored, fallback, final: stored !== null ? stored : fallback })
         // Use stored resources if explicitly set (including empty array), otherwise use manifest resources
         setEditResources(stored !== null ? stored : fallback)
       } catch (e) { 
-        console.log('🔍 Error initializing resources:', e)
         setEditResources([]) 
       }
 
@@ -151,11 +139,9 @@ export default function AddonDetailModal({
         
         const detailManifest: any = currentAddon.originalManifest || currentAddon.manifest
         const fallback = Array.isArray(detailManifest?.catalogs) ? detailManifest.catalogs : []
-        console.log('🔍 Catalogs initialization:', { stored, fallback, final: stored !== null ? stored : fallback })
         // Use stored catalogs if explicitly set (including empty array), otherwise use manifest catalogs
         setEditCatalogs(stored !== null ? stored : fallback)
       } catch (e) { 
-        console.log('🔍 Error initializing catalogs:', e)
         setEditCatalogs([]) 
       }
     }
@@ -177,9 +163,6 @@ export default function AddonDetailModal({
     if (Array.isArray(editResources)) updateData.resources = editResources
     if (Array.isArray(editCatalogs)) updateData.catalogs = editCatalogs
 
-    console.log('🔍 AddonDetailModal submitting data:', updateData)
-    console.log('🔍 editCatalogs:', editCatalogs)
-    console.log('🔍 editResources:', editResources)
 
     onSave(updateData)
   }
@@ -427,12 +410,6 @@ export default function AddonDetailModal({
             // Always get all resources from originalManifest (show all available options)
             const detailManifest: any = currentAddon?.originalManifest || currentAddon?.manifest
             const allResources: any[] = Array.isArray(detailManifest?.resources) ? detailManifest.resources : []
-            
-            console.log('🔍 Resources debug:', {
-              allResources,
-              addonResources: currentAddon?.resources,
-              detailManifest: detailManifest?.resources
-            })
             
             const isSelected = (item: any) => {
               const label = typeof item === 'string' ? item : (item?.name || item?.type || JSON.stringify(item))

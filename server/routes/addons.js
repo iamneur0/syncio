@@ -1,8 +1,9 @@
 const express = require('express');
 const { StremioAPIClient } = require('stremio-api-client');
 const { handleDatabaseError, sendError, createRouteHandler, DatabaseTransactions } = require('../utils/handlers');
-const { findAddonById, getAllAddons, sanitizeUrl, validateAccountContext } = require('../utils/helpers');
+const { findAddonById, sanitizeUrl, validateAccountContext } = require('../utils/helpers');
 const { canonicalizeManifestUrl } = require('../utils/validation');
+const { responseUtils, dbUtils } = require('../utils/routeUtils');
 
 // Shared helper function to reload a single addon
 async function reloadAddon(prisma, getAccountId, addonId, req, { filterManifestByResources, filterManifestByCatalogs, encrypt, getDecryptedManifestUrl, manifestHash }) {
@@ -32,11 +33,9 @@ async function reloadAddon(prisma, getAccountId, addonId, req, { filterManifestB
   // Fetch the latest manifest
   let manifestData = null;
   try {
-    console.log(`🔍 Reloading manifest for addon: ${addon.name} (${transportUrl})`);
     const manifestResponse = await fetch(transportUrl);
     if (manifestResponse.ok) {
       manifestData = await manifestResponse.json();
-      console.log(`✅ Reloaded manifest:`, manifestData?.name, manifestData?.version);
     } else {
       throw new Error(`HTTP ${manifestResponse.status}: ${manifestResponse.statusText}`);
     }
@@ -71,28 +70,19 @@ async function reloadAddon(prisma, getAccountId, addonId, req, { filterManifestB
   const updatedResources = [...currentResources, ...newResources]
   const updatedCatalogs = [...currentCatalogs, ...newCatalogs]
   
-  console.log('🔍 Reload found new resources:', newResources)
-  console.log('🔍 Reload found new catalogs:', newCatalogs)
-  console.log('🔍 Updated resources:', updatedResources)
-  console.log('🔍 Updated catalogs:', updatedCatalogs)
 
   // Apply the same filtering logic as the update endpoint
   let filtered = manifestData
   if (Array.isArray(updatedResources) || Array.isArray(updatedCatalogs)) {
     try {
-      console.log('🔍 Reload applying resource/catalog filtering with updated selections')
       
       if (Array.isArray(updatedResources) && updatedResources.length > 0) {
-        console.log('🔍 Reload filtering with updated resources:', updatedResources)
         filtered = filterManifestByResources(manifestData, updatedResources)
-        console.log('🔍 Filtered manifest has catalogs:', Array.isArray(filtered?.catalogs) ? filtered.catalogs.length : 'no catalogs')
       }
       
       // Apply catalog filtering if catalogs are provided
       if (Array.isArray(updatedCatalogs) && updatedCatalogs.length > 0 && filtered) {
-        console.log('🔍 Reload filtering catalogs with updated selections:', updatedCatalogs)
         filtered = filterManifestByCatalogs(filtered, updatedCatalogs)
-        console.log('🔍 After catalog filtering, manifest has catalogs:', Array.isArray(filtered?.catalogs) ? filtered.catalogs.length : 'no catalogs')
       }
     } catch (e) {
       console.error('Error filtering manifest on reload:', e)
@@ -236,22 +226,17 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
   router.put('/:id/enable', async (req, res) => {
     try {
       const { id } = req.params
-      const existing = await prisma.addon.findUnique({ 
-        where: { 
-          id,
-          accountId: getAccountId(req)
-        }
-      })
-      if (!existing) return res.status(404).json({ message: 'Addon not found' })
+      
+      // Validate addon exists
+      const addon = await dbUtils.findEntity(prisma, 'addon', id, getAccountId(req))
+      if (!addon) {
+        return responseUtils.notFound(res, 'Addon')
+      }
 
-      const updated = await prisma.addon.update({ 
-        where: { 
-          id,
-          accountId: getAccountId(req)
-        }, 
-        data: { isActive: true } 
-      })
-      return res.json({
+      // Update addon
+      const updated = await dbUtils.updateEntity(prisma, 'addon', id, { isActive: true }, getAccountId(req))
+      
+      return responseUtils.success(res, {
         id: updated.id,
         name: updated.name,
         description: updated.description,
@@ -260,10 +245,10 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
         status: updated.isActive ? 'active' : 'inactive',
         users: 0,
         groups: 0
-      })
+      }, 'Addon enabled successfully')
     } catch (error) {
       console.error('Error enabling addon:', error)
-      return res.status(500).json({ message: 'Failed to enable addon' })
+      return responseUtils.internalError(res, error.message)
     }
   })
 
@@ -271,22 +256,17 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
   router.put('/:id/disable', async (req, res) => {
     try {
       const { id } = req.params
-      const existing = await prisma.addon.findUnique({ 
-        where: { 
-          id,
-          accountId: getAccountId(req)
-        }
-      })
-      if (!existing) return res.status(404).json({ message: 'Addon not found' })
+      
+      // Validate addon exists
+      const addon = await dbUtils.findEntity(prisma, 'addon', id, getAccountId(req))
+      if (!addon) {
+        return responseUtils.notFound(res, 'Addon')
+      }
 
-      const updated = await prisma.addon.update({ 
-        where: { 
-          id,
-          accountId: getAccountId(req)
-        }, 
-        data: { isActive: false } 
-      })
-      return res.json({
+      // Update addon
+      const updated = await dbUtils.updateEntity(prisma, 'addon', id, { isActive: false }, getAccountId(req))
+      
+      return responseUtils.success(res, {
         id: updated.id,
         name: updated.name,
         description: updated.description,
@@ -295,10 +275,10 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
         status: updated.isActive ? 'active' : 'inactive',
         users: 0,
         groups: 0
-      })
+      }, 'Addon disabled successfully')
     } catch (error) {
       console.error('Error disabling addon:', error)
-      return res.status(500).json({ message: 'Failed to disable addon' })
+      return responseUtils.internalError(res, error.message)
     }
   })
 
@@ -308,25 +288,16 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
       const { id } = req.params
       const { isActive } = req.body
       
-      console.log(`🔍 PATCH /api/addons/${id}/toggle-status called with:`, { isActive })
-      
-      const existing = await prisma.addon.findUnique({ 
-        where: { 
-          id,
-          accountId: getAccountId(req)
-        }
-      })
-      if (!existing) return res.status(404).json({ message: 'Addon not found' })
+      // Validate addon exists
+      const addon = await dbUtils.findEntity(prisma, 'addon', id, getAccountId(req))
+      if (!addon) {
+        return responseUtils.notFound(res, 'Addon')
+      }
 
-      const updated = await prisma.addon.update({ 
-        where: { 
-          id,
-          accountId: getAccountId(req)
-        }, 
-        data: { isActive: isActive } 
-      })
+      // Update addon
+      const updated = await dbUtils.updateEntity(prisma, 'addon', id, { isActive }, getAccountId(req))
       
-      return res.json({
+      return responseUtils.success(res, {
         id: updated.id,
         name: updated.name,
         description: updated.description,
@@ -335,10 +306,10 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
         status: updated.isActive ? 'active' : 'inactive',
         users: 0,
         groups: 0
-      })
+      }, `Addon ${isActive ? 'enabled' : 'disabled'} successfully`)
     } catch (error) {
       console.error('Error toggling addon status:', error)
-      return res.status(500).json({ message: 'Failed to toggle addon status' })
+      return responseUtils.internalError(res, error.message)
     }
   })
 
@@ -348,7 +319,7 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
       const { url, name, description, groupIds, manifestData: providedManifestData } = req.body;
     
       if (!url) {
-        return res.status(400).json({ message: 'Addon URL is required' });
+        return responseUtils.badRequest(res, 'Addon URL is required');
       }
 
       // Validate account context
@@ -360,7 +331,7 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
       // Use centralized URL sanitization
       const sanitizedUrl = sanitizeUrl(url);
       if (!sanitizedUrl) {
-        return sendError(res, 400, 'Invalid URL provided');
+        return responseUtils.badRequest(res, 'Invalid URL provided');
       }
       
       const lowerUrl = sanitizedUrl.toLowerCase()
@@ -377,13 +348,11 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
       let manifestData = providedManifestData
       if (!manifestData) {
         try {
-          console.log(`🔍 Fetching manifest for new addon: ${sanitizedUrl}`)
           const resp = await fetch(sanitizedUrl)
           if (!resp.ok) {
             return res.status(400).json({ message: 'Failed to fetch addon manifest. The add-on URL may be incorrect.' })
           }
           manifestData = await resp.json()
-          console.log(`✅ Fetched manifest:`, manifestData?.name, manifestData?.version)
         } catch (e) {
           return res.status(400).json({ message: 'Failed to fetch addon manifest. The add-on URL may be incorrect.' })
         }
@@ -418,7 +387,6 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
         let assignedGroups = [];
         if (groupIds && Array.isArray(groupIds) && groupIds.length > 0) {
           try {
-            console.log(`🔍 Assigning reactivated addon to groups:`, groupIds);
             
             // Create group addon relationships
             for (const groupId of groupIds) {
@@ -526,7 +494,6 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
       let assignedGroups = [];
       if (groupIds && Array.isArray(groupIds) && groupIds.length > 0) {
         try {
-          console.log(`🔍 Assigning new addon to groups:`, groupIds);
           
           // Create group addon relationships
           for (const groupId of groupIds) {
@@ -606,25 +573,22 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
       
       // Handle specific error cases
       if (error.message === 'Addon not found') {
-        return res.status(404).json({ error: 'Addon not found' });
+        return responseUtils.notFound(res, 'Addon');
       }
       if (error.message === 'Addon is disabled') {
-        return res.status(400).json({ error: 'Addon is disabled' });
+        return responseUtils.badRequest(res, 'Addon is disabled');
       }
       if (error.message === 'Addon has no manifest URL') {
-        return res.status(400).json({ error: 'Addon has no manifest URL' });
+        return responseUtils.badRequest(res, 'Addon has no manifest URL');
       }
       if (error.message === 'Failed to resolve addon URL') {
-        return res.status(400).json({ error: 'Failed to resolve addon URL' });
+        return responseUtils.badRequest(res, 'Failed to resolve addon URL');
       }
       if (error.message.includes('Failed to fetch addon manifest')) {
-        return res.status(400).json({ 
-          error: 'Failed to fetch addon manifest',
-          details: error.message.replace('Failed to fetch addon manifest: ', '')
-        });
+        return responseUtils.badRequest(res, 'Failed to fetch addon manifest');
       }
       
-      res.status(500).json({ error: 'Failed to reload addon', details: error?.message });
+      return responseUtils.internalError(res, error?.message || 'Failed to reload addon');
     }
   });
 
@@ -663,13 +627,7 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
         return res.status(404).json({ message: 'Addon not found' });
       }
       
-      console.log('🔍 Clone debug - Original addon data:', {
-        id: originalAddon.id,
-        name: originalAddon.name,
-        manifestUrlHash: originalAddon.manifestUrlHash,
-        originalManifest: originalAddon.originalManifest ? 'exists' : 'null',
-        manifest: originalAddon.manifest ? 'exists' : 'null'
-      });
+;
       
       // Find unique name for the clone
       const baseCloneName = `${originalAddon.name} (Copy)`
@@ -690,7 +648,6 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
         copyNumber++
       }
       
-      console.log('🔍 Clone name:', cloneName)
       
       // Create a clone with a modified name
       const clonedAddon = await prisma.addon.create({
@@ -712,13 +669,7 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
         }
       });
       
-      console.log('🔍 Clone debug - Cloned addon data:', {
-        id: clonedAddon.id,
-        name: clonedAddon.name,
-        manifestUrlHash: clonedAddon.manifestUrlHash,
-        originalManifest: clonedAddon.originalManifest ? 'exists' : 'null',
-        manifest: clonedAddon.manifest ? 'exists' : 'null'
-      });
+;
       
       // Clone group associations
       if (originalAddon.groups && originalAddon.groups.length > 0) {
@@ -844,8 +795,6 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
       const { id } = req.params;
       const { name, description, url, version, groupIds, resources, catalogs } = req.body;
       
-      console.log(`🔍 PUT /api/addons/${id} called with:`, { name, description, url, groupIds, resources, catalogs });
-      console.log(`🔍 AUTH_ENABLED: ${AUTH_ENABLED}, req.appAccountId: ${req.appAccountId}`);
 
       // Check if addon exists
       const existingAddon = await prisma.addon.findUnique({

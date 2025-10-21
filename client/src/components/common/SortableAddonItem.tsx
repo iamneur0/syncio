@@ -34,13 +34,6 @@ export default function SortableAddonItem({
   // For group addons, use database ID; for Stremio addons, use transportUrl (this is what the protect function expects)
   const addonId = addon?.id || addon?.transportUrl || addon?.manifestUrl || addon?.url || manifest?.id || 'unknown'
   
-  // Debug logging to see what data we're getting
-  console.log('🔍 SortableAddonItem addon data:', { 
-    id: addon?.id, 
-    transportUrl: addon?.transportUrl, 
-    manifestUrl: addon?.manifestUrl,
-    finalAddonId: addonId 
-  })
   // Use database fields for display (name, description, version, iconUrl)
   const name = addon?.name || manifest?.name || addon?.transportName || 'Unknown'
   const version = addon?.version || manifest?.version
@@ -63,12 +56,8 @@ export default function SortableAddonItem({
 
   const handleProtect = (e: React.MouseEvent) => {
     e.stopPropagation()
-    console.log('🔍 SortableAddonItem handleProtect called:', { addonId, isDefault, isUnsafeMode, onProtect: !!onProtect })
     if (onProtect && (!isDefault || isUnsafeMode)) {
-      console.log('🔍 Calling onProtect with addonId:', addonId)
       onProtect(addonId)
-    } else {
-      console.log('🔍 Not calling onProtect - conditions not met')
     }
   }
 

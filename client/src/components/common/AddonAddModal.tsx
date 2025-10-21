@@ -30,10 +30,6 @@ export default function AddonAddModal({
   const { isDark, isMono } = useTheme()
   const [mounted, setMounted] = useState(false)
   
-  // Debug modal props
-  useEffect(() => {
-    console.log('AddonAddModal - isOpen changed:', isOpen, 'mounted:', mounted)
-  }, [isOpen, mounted])
   const [addonName, setAddonName] = useState('')
   const [addonUrl, setAddonUrl] = useState('')
   const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>([])

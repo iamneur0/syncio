@@ -3,7 +3,8 @@ const { decrypt } = require('../utils/encryption')
 const { parseAddonIds, parseProtectedAddons, canonicalizeManifestUrl } = require('../utils/validation')
 const { StremioAPIClient } = require('stremio-api-client')
 const { handleDatabaseError, sendError } = require('../utils/handlers');
-const { findGroupById, getAllGroups, getGroupUsers } = require('../utils/helpers');
+const { findGroupById } = require('../utils/helpers');
+const { responseUtils, dbUtils } = require('../utils/routeUtils');
 
 // Export a function that returns the router, allowing dependency injection
 module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserToGroup, getDecryptedManifestUrl, manifestUrlHmac }) => {
@@ -138,7 +139,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
       });
 
       if (!originalGroup) {
-        return res.status(404).json({ message: 'Original group not found' });
+        return responseUtils.notFound(res, 'Original group');
       }
 
       // Create a clone with a modified name
@@ -200,14 +201,12 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
       });
 
       if (!group) {
-        return res.status(404).json({ message: 'Group not found' });
+        return responseUtils.notFound(res, 'Group');
       }
 
       // Use the shared reload group addons function
-      console.log(`🔄 Group reload: Reloading addons for group "${group.name}"`)
       const { reloadGroupAddons } = require('./users')
       const reloadResult = await reloadGroupAddons(prisma, getAccountId, group.id, req)
-      console.log(`🔄 Reloaded ${reloadResult.reloadedCount} addons, ${reloadResult.failedCount} failed`)
 
       res.json({
         message: 'Group addons reloaded successfully',
@@ -344,7 +343,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
           }
         } 
       })
-      if (!group) return res.status(404).json({ message: 'Group not found' })
+      if (!group) return responseUtils.notFound(res, 'Group')
 
       // Update basic fields (ignore empty strings)
       const nextName = (typeof name === 'string' && name.trim() === '') ? undefined : name
@@ -422,7 +421,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
         }
       })
       if (!existing) {
-        return res.status(404).json({ message: 'Group not found' })
+        return responseUtils.notFound(res, 'Group')
       }
 
       await prisma.$transaction([
@@ -441,7 +440,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
     } catch (error) {
       console.error('Error deleting group:', error)
       if (error.code === 'P2025') {
-        return res.status(404).json({ message: 'Group not found' })
+        return responseUtils.notFound(res, 'Group')
       }
       return res.status(500).json({ message: 'Failed to delete group', error: error?.message })
     }
@@ -460,7 +459,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
       })
       
       if (!group) {
-        return res.status(404).json({ message: 'Group not found' })
+        return responseUtils.notFound(res, 'Group')
       }
 
       // Parse current userIds and remove the specified user
@@ -508,7 +507,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
       })
       
       if (!group) {
-        return res.status(404).json({ message: 'Group not found' })
+        return responseUtils.notFound(res, 'Group')
       }
 
       // Check if addon exists
@@ -520,7 +519,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
       })
       
       if (!addon) {
-        return res.status(404).json({ message: 'Addon not found' })
+        return responseUtils.notFound(res, 'Addon')
       }
 
       // Get the addon's manifest URL for comparison
@@ -529,7 +528,6 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
       let existingGroupAddon = null
       if (addonUrl) {
         const targetHash = manifestUrlHmac(req, addonUrl)
-        console.log('🔍 Looking for existing addon with hash:', targetHash)
         
         // Check if addon with same manifest URL already exists in group
         existingGroupAddon = await prisma.groupAddon.findFirst({
@@ -543,15 +541,9 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
           include: { addon: true }
         })
         
-        console.log('🔍 Existing addon check:', {
-          found: !!existingGroupAddon,
-          existingAddonName: existingGroupAddon?.addon?.name,
-          existingHash: existingGroupAddon?.addon?.manifestUrlHash
-        })
         
         // If not found by hash, try to find by URL (for corrupted data)
         if (!existingGroupAddon) {
-          console.log('🔍 Hash not found, trying to find by URL...')
           const allGroupAddons = await prisma.groupAddon.findMany({
             where: { groupId: groupId },
             include: { addon: true }
@@ -560,7 +552,6 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
           for (const ga of allGroupAddons) {
             const existingUrl = ga.addon.manifestUrl ? decrypt(ga.addon.manifestUrl, req) : null
             if (existingUrl === addonUrl) {
-              console.log('🔍 Found by URL match:', ga.addon.name, 'with hash:', ga.addon.manifestUrlHash)
               existingGroupAddon = ga
               break
             }
@@ -632,7 +623,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
       })
       
       if (!group) {
-        return res.status(404).json({ message: 'Group not found' })
+        return responseUtils.notFound(res, 'Group')
       }
 
       // Find and remove the group-addon relationship
@@ -644,7 +635,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
       })
 
       if (!groupAddon) {
-        return res.status(404).json({ message: 'Addon not found in this group' })
+        return responseUtils.notFound(res, 'Addon in this group')
       }
 
       await prisma.groupAddon.delete({
@@ -676,7 +667,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
       })
       
       if (!group) {
-        return res.status(404).json({ message: 'Group not found' })
+        return responseUtils.notFound(res, 'Group')
       }
 
       await prisma.group.update({
@@ -707,7 +698,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
       })
       
       if (!group) {
-        return res.status(404).json({ message: 'Group not found' })
+        return responseUtils.notFound(res, 'Group')
       }
 
       await prisma.group.update({
@@ -741,7 +732,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
       })
       
       if (!group) {
-        return res.status(404).json({ message: 'Group not found' })
+        return responseUtils.notFound(res, 'Group')
       }
 
       // Placeholder sync logic - in practice this would sync addons with Stremio
@@ -764,7 +755,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
         where: { id, accountId: getAccountId(req) },
         include: { addons: { include: { addon: true } } }
       })
-      if (!group) return res.status(404).json({ message: 'Group not found' })
+      if (!group) return responseUtils.notFound(res, 'Group')
 
       // Resolve userIds JSON
       let userIds = []
@@ -797,7 +788,6 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
       const { id: groupId } = req.params
       const { orderedManifestUrls } = req.body || {}
 
-      console.log('🔄 Reorder group addons:', { groupId, orderedManifestUrls })
 
       if (!Array.isArray(orderedManifestUrls) || orderedManifestUrls.length === 0) {
         return res.status(400).json({ message: 'orderedManifestUrls array is required' })
@@ -808,7 +798,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
         where: { id: groupId, accountId: getAccountId(req) },
         include: { addons: { include: { addon: true } } }
       })
-      if (!group) return res.status(404).json({ message: 'Group not found' })
+      if (!group) return responseUtils.notFound(res, 'Group')
 
       // Validate URLs against current addons list
       const currentUrls = (group.addons || [])
@@ -883,7 +873,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
         where: { id, accountId: getAccountId(req) },
         include: { addons: { include: { addon: true } } }
       })
-      if (!group) return res.status(404).json({ message: 'Group not found' })
+      if (!group) return responseUtils.notFound(res, 'Group')
 
       const currentUrls = (group.addons || [])
         .map(ga => { try { return getDecryptedManifestUrl(ga.addon, req) } catch { return ga.addon?.manifestUrl } })
@@ -933,7 +923,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
       })
       
       if (!group) {
-        return res.status(404).json({ message: 'Group not found' })
+        return responseUtils.notFound(res, 'Group')
       }
 
       // Check if user exists
@@ -969,7 +959,6 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
       const { id } = req.params
       const { isActive } = req.body
       
-      console.log(`🔍 PATCH /api/groups/${id}/toggle-status called with:`, { isActive })
       
       // Update group status
       const updatedGroup = await prisma.group.update({

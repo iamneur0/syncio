@@ -4,6 +4,9 @@ import { useTheme } from '@/contexts/ThemeContext'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { usersAPI, groupsAPI } from '@/services/api'
 import { getColorBgClass, getColorHexValue } from '@/utils/colorMapping'
+import { invalidateUserQueries, invalidateSyncStatusQueries } from '@/utils/queryUtils'
+import { userSuccessHandlers } from '@/utils/toastUtils'
+import { useModalState } from '@/hooks/useCommonState'
 import toast from 'react-hot-toast'
 import { VersionChip, EntityList, SyncBadge, InlineEdit, ColorPicker } from './'
 import AddonIcon from './AddonIcon'
@@ -50,7 +53,7 @@ export default function UserDetailModal({
   const theme = useTheme()
   const { isDark, isModern, isModernDark, isMono, hideSensitive } = theme as any
   const queryClient = useQueryClient()
-  const [mounted, setMounted] = useState(false)
+  const { mounted } = useModalState()
   const [showColorPicker, setShowColorPicker] = useState(false)
   const logoRef = useRef<HTMLDivElement>(null)
   const { refreshAllSyncStatus } = useSyncStatusRefresh()
@@ -104,9 +107,7 @@ export default function UserDetailModal({
     }
   }, [isOpen, onClose])
 
-  useEffect(() => {
-    setMounted(true)
-  }, [])
+  // Mounted state is handled by useModalState hook
 
   // Read delete mode from localStorage (set in SettingsPage)
   useEffect(() => {
@@ -220,10 +221,8 @@ export default function UserDetailModal({
     mutationFn: ({ id, userData }: { id: string; userData: any }) => 
       usersAPI.update(id, userData),
     onSuccess: () => {
-      console.log('🔍 UserDetailModal: Invalidating queries after name update')
       queryClient.invalidateQueries({ queryKey: ['user'] })
       queryClient.invalidateQueries({ queryKey: ['user', currentUser?.id, 'details'] })
-      console.log('🔍 UserDetailModal: Queries invalidated')
       toast.success('User updated successfully')
     },
     onError: (error: any) => {
@@ -369,15 +368,11 @@ export default function UserDetailModal({
 
   const handleProtectStremioAddon = (addonId: string) => {
     if (currentUser) {
-      console.log('🔍 Protecting Stremio addon:', addonId)
-      console.log('🔍 User ID:', currentUser.id)
-      console.log('🔍 Current protected set:', Array.from(localProtectedSet))
       
       // Use the single addon toggle endpoint
       // addonId is the manifest URL, but we'll use it as the addon identifier
       usersAPI.toggleProtectAddon(currentUser.id, addonId, isUnsafeMode)
         .then((response) => {
-          console.log('🔍 Protect response:', response)
           // Update local state immediately for better UX
           const newProtectedSet = new Set(localProtectedSet)
           if (response.isProtected) {
@@ -407,7 +402,8 @@ export default function UserDetailModal({
   const GroupAddonItem = ({ addon, index }: { addon: any; index: number }) => {
     // Support both legacy shape (plain manifest) and new shape ({ transportUrl, transportName, manifest })
     const manifest = addon?.manifest || addon
-    const addonId = addon?.id || manifest?.id
+    // For group addons, prioritize database ID over manifest ID to handle duplicates correctly
+    const addonId = addon?.id || addon?.transportUrl || manifest?.id
     const name = addon?.name || manifest?.name || addon?.transportName || 'Unknown'
     const version = addon?.version || manifest?.version
     const description = addon?.description || manifest?.description || ''
@@ -631,7 +627,6 @@ export default function UserDetailModal({
               const isProtected = localProtectedSet.has(addonId)
               const isDefault = isDefaultAddon(addonId, addonName)
               
-              console.log('🔍 UserDetailModal renderItem:', { addonId, addonName, isProtected, isDefault, isUnsafeMode })
               
               return (
                 <SortableAddonItem

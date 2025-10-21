@@ -4,6 +4,7 @@ const jwt = require('jsonwebtoken');
 const multer = require('multer');
 const crypto = require('crypto');
 const { repairAddonsList } = require('../utils/repair');
+const { responseUtils, dbUtils } = require('../utils/routeUtils');
 
 module.exports = ({ prisma, getAccountId, AUTH_ENABLED, issueAccessToken, issueRefreshToken, cookieName, isProdEnv, encrypt, decrypt, getDecryptedManifestUrl, scopedWhere, getAccountDek, decryptWithFallback, manifestUrlHmac, manifestHash, filterManifestByResources, filterManifestByCatalogs }) => {
   console.log('PublicAuth router initialized, prisma available:', !!prisma);
@@ -87,15 +88,15 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, issueAccessToken, issueR
     try {
       const { uuid, password } = req.body || {};
       if (!uuid || !password) {
-        return res.status(400).json({ message: 'uuid and password are required' });
+        return responseUtils.badRequest(res, 'uuid and password are required');
       }
       // Enforce RFC 4122 UUID format (any version, correct variant)
       const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
       if (!uuidPattern.test(String(uuid))) {
-        return res.status(400).json({ message: 'Invalid UUID format' });
+        return responseUtils.badRequest(res, 'Invalid UUID format');
       }
       if (String(password).length < 4) {
-        return res.status(400).json({ message: 'Password must be at least 4 characters' });
+        return responseUtils.badRequest(res, 'Password must be at least 4 characters');
       }
 
       const existing = await prisma.appAccount.findUnique({ where: { uuid } });
@@ -121,7 +122,7 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, issueAccessToken, issueR
       });
     } catch (error) {
       console.error('Registration error:', error);
-      return res.status(500).json({ message: 'Failed to register', error: String(error && error.message || error) });
+      return responseUtils.internalError(res, String(error && error.message || error));
     }
   });
 
@@ -129,7 +130,7 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, issueAccessToken, issueR
     try {
       const { uuid, password } = req.body || {};
       if (!uuid || !password) {
-        return res.status(400).json({ message: 'uuid and password are required' });
+        return responseUtils.badRequest(res, 'uuid and password are required');
       }
 
       const account = await prisma.appAccount.findUnique({ where: { uuid } });
@@ -155,7 +156,7 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, issueAccessToken, issueR
       });
     } catch (error) {
       console.error('Login error:', error);
-      return res.status(500).json({ message: 'Failed to login', error: String(error && error.message || error) });
+      return responseUtils.internalError(res, String(error && error.message || error));
     }
   });
 
@@ -176,13 +177,13 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, issueAccessToken, issueR
       });
 
       if (!account) {
-        return res.status(404).json({ message: 'Account not found' });
+        return responseUtils.notFound(res, 'Account');
       }
 
       res.json({ account });
     } catch (error) {
       console.error('Session error:', error);
-      return res.status(500).json({ message: 'Failed to resolve session', error: String(error && error.message || error) });
+      return responseUtils.internalError(res, String(error && error.message || error));
     }
   });
 
@@ -477,7 +478,7 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, issueAccessToken, issueR
         console.log('Processing JSON data from body');
         jsonData = JSON.parse(req.body.jsonData);
       } else {
-        return res.status(400).json({ message: 'No file or jsonData provided' });
+        return responseUtils.badRequest(res, 'No file or jsonData provided');
       }
 
       // Handle both wrapped and direct config formats
@@ -485,7 +486,7 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, issueAccessToken, issueR
       console.log('Config data structure:', Object.keys(configData));
       
       if (!configData || (!configData.users && !configData.addons)) {
-        return res.status(400).json({ message: 'Invalid config format' });
+        return responseUtils.badRequest(res, 'Invalid config format');
       }
 
       const { users, groups, addons, groupAddons } = configData;
@@ -929,7 +930,7 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, issueAccessToken, issueR
       }
       // Check if file was uploaded
       if (!req.file) {
-        return res.status(400).json({ message: 'No file uploaded' });
+        return responseUtils.badRequest(res, 'No file uploaded');
       }
 
       const file = req.file;
@@ -939,13 +940,13 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, issueAccessToken, issueR
       try {
         importData = JSON.parse(fileData);
       } catch (parseError) {
-        return res.status(400).json({ message: 'Invalid JSON file' });
+        return responseUtils.badRequest(res, 'Invalid JSON file');
       }
 
       // Normalize input: accept either root array or { addons: [...] }
       const addonsArray = Array.isArray(importData) ? importData : importData.addons
       if (!Array.isArray(addonsArray)) {
-        return res.status(400).json({ message: 'Invalid JSON structure. Expected an array or an object with "addons" array.' });
+        return responseUtils.badRequest(res, 'Invalid JSON structure. Expected an array or an object with "addons" array.');
       }
 
       let successful = 0;
