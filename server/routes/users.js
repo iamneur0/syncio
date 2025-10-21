@@ -579,6 +579,9 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
       // Import the getDesiredAddons function
       const { getDesiredAddons } = require('../utils/sync')
       
+      // Get unsafe mode from query parameter
+      const unsafe = req.query.unsafe === 'true'
+      
       // Call getDesiredAddons with all required dependencies
       const result = await getDesiredAddons(user, req, {
         prisma,
@@ -587,7 +590,8 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
         parseAddonIds,
         parseProtectedAddons,
         canonicalizeManifestUrl,
-        StremioAPIClient
+        StremioAPIClient,
+        unsafeMode: unsafe
       })
 
       if (!result.success) {
@@ -702,6 +706,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
   router.post('/:id/sync', async (req, res) => {
     try {
       const { id } = req.params
+      const { unsafe } = req.body
       console.log(`🔄 POST /api/users/${id}/sync called`)
 
       // Get user
@@ -740,7 +745,8 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
         parseAddonIds,
         parseProtectedAddons,
         canonicalizeManifestUrl,
-        StremioAPIClient
+        StremioAPIClient,
+        unsafeMode: unsafe === true
       })
 
       if (!result.success) {

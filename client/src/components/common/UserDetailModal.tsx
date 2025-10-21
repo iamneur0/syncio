@@ -166,7 +166,8 @@ export default function UserDetailModal({
   // Debug function to show desired addons
   const handleDebugDesiredAddons = async () => {
     try {
-      const response = await usersAPI.getDesiredAddons(user!.id)
+      // Pass unsafe=true for advanced mode
+      const response = await usersAPI.getDesiredAddons(user!.id, true)
       setDesiredAddonsData(response || {})
       setShowDesiredModal(true)
     } catch (error) {

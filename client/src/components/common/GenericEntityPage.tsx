@@ -414,6 +414,9 @@ export default function GenericEntityPage({ config }: GenericEntityPageProps) {
 
   const handleSync = async (id: string) => {
     if (finalConfig.api.sync) {
+      // Get unsafe mode from localStorage
+      const isUnsafeMode = localStorage.getItem('sfm_delete_mode') === 'unsafe'
+      
       // For users, check if they need to reconnect first
       if (finalConfig.entityType === 'user') {
         try {
@@ -446,14 +449,14 @@ export default function GenericEntityPage({ config }: GenericEntityPageProps) {
       setSyncingEntities(prev => new Set(prev).add(id))
       try {
         // Sync the group or user itself
-        await finalConfig.api.sync(id)
+        await finalConfig.api.sync(id, [], 'normal', isUnsafeMode)
         // If syncing a group from the listing, cascade to all users to match modal behavior
         if (finalConfig.entityType === 'group') {
           try {
             const groupDetails = await groupsAPI.getById(id as any)
             const usersInGroup = Array.isArray(groupDetails?.users) ? groupDetails.users : []
             if (usersInGroup.length > 0) {
-              await Promise.all(usersInGroup.map((u: any) => usersAPI.sync(u.id)))
+              await Promise.all(usersInGroup.map((u: any) => usersAPI.sync(u.id, [], 'normal', isUnsafeMode)))
             }
           } catch {}
         }

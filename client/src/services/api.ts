@@ -257,8 +257,8 @@ export const usersAPI = {
   },
 
   // Get desired addons for user (group addons + protected addons)
-  getDesiredAddons: async (id: string): Promise<any> => {
-    const response: AxiosResponse<any> = await api.get(`/users/${id}/desired-addons`)
+  getDesiredAddons: async (id: string, unsafe = false): Promise<any> => {
+    const response: AxiosResponse<any> = await api.get(`/users/${id}/desired-addons?unsafe=${unsafe}`)
     return response.data
   },
 

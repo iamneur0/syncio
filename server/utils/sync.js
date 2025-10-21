@@ -37,7 +37,7 @@ async function getUserAddons(user, req, { decrypt, StremioAPIClient }) {
 /**
  * Get desired addons for a user (group addons + protected addons from Stremio)
  */
-async function getDesiredAddons(user, req, { prisma, getAccountId, decrypt, parseAddonIds, parseProtectedAddons, canonicalizeManifestUrl, StremioAPIClient }) {
+async function getDesiredAddons(user, req, { prisma, getAccountId, decrypt, parseAddonIds, parseProtectedAddons, canonicalizeManifestUrl, StremioAPIClient, unsafeMode = false }) {
   try {
     // Get group addons
     const groups = await prisma.group.findMany({
@@ -81,7 +81,7 @@ async function getDesiredAddons(user, req, { prisma, getAccountId, decrypt, pars
       protectedAddons: protectedAddons
     })
     
-    // Include default addons as protected addons
+    // Include default addons as protected addons (only in safe mode)
     const { defaultAddons } = require('../utils/config')
     const normalizeUrl = (u) => {
       try {
@@ -91,12 +91,19 @@ async function getDesiredAddons(user, req, { prisma, getAccountId, decrypt, pars
       }
     }
     
-    const defaultProtectedUrls = defaultAddons.manifestUrls.map(normalizeUrl)
+    // Only include default addons as protected in safe mode (not in unsafe/advanced mode)
+    const defaultProtectedUrls = unsafeMode ? [] : defaultAddons.manifestUrls.map(normalizeUrl)
     const allProtectedUrls = [
       ...(Array.isArray(protectedAddons) ? protectedAddons : []).filter(Boolean).map(normalizeUrl),
       ...defaultProtectedUrls
     ]
     const protectedUrlSet = new Set(allProtectedUrls)
+    
+    console.log('🔍 Protected addons debug:', {
+      unsafeMode,
+      defaultProtectedUrls,
+      allProtectedUrls: Array.from(protectedUrlSet)
+    })
 
     // Helper function to check if an addon is protected
     const isProtected = (addon) => {
@@ -264,7 +271,8 @@ function createGetUserSyncStatus({ prisma, getAccountId, decrypt, parseAddonIds,
       parseAddonIds,
       parseProtectedAddons,
       canonicalizeManifestUrl,
-      StremioAPIClient
+      StremioAPIClient,
+      unsafeMode: unsafe
     })
     if (!desiredAddonsSuccess) {
       return { isSynced: false, status: 'error', message: desiredAddonsError }
