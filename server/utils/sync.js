@@ -73,6 +73,14 @@ async function getDesiredAddons(user, req, { prisma, getAccountId, decrypt, pars
     const excludedAddons = parseAddonIds(user.excludedAddons)
     const protectedAddons = parseProtectedAddons(user.protectedAddons, req)
     
+    console.log('🔍 getDesiredAddons debug:', {
+      groupsLength: groups.length,
+      groupAddonsLength: groupAddons.length,
+      userAddonsLength: userAddons.length,
+      excludedAddons: excludedAddons,
+      protectedAddons: protectedAddons
+    })
+    
     // Include default addons as protected addons
     const { defaultAddons } = require('../utils/config')
     const normalizeUrl = (u) => {
@@ -104,6 +112,12 @@ async function getDesiredAddons(user, req, { prisma, getAccountId, decrypt, pars
       const manifestId = groupAddon?.manifest?.id
       return !(manifestId && excludedSet.has(manifestId))
     })
+    
+    console.log('🔍 getDesiredAddons filtering debug:', {
+      groupAddonsLength: groupAddons.length,
+      groupAddonsFilteredLength: groupAddonsFiltered.length,
+      excludedSet: Array.from(excludedSet)
+    })
 
     // 2) Keep only protected addons from userAddons
     const protectedUserAddons = (userAddons || []).filter(addon => isProtected(addon))
@@ -119,6 +133,12 @@ async function getDesiredAddons(user, req, { prisma, getAccountId, decrypt, pars
     const nonProtectedGroupAddons = groupAddonsFiltered.filter(groupAddon => {
       const url = normalizeUrl(groupAddon.transportUrl || groupAddon.manifestUrl || groupAddon?.manifest?.manifestUrl)
       return url && !protectedUserUrlSet.has(url)
+    })
+    
+    console.log('🔍 getDesiredAddons final debug:', {
+      nonProtectedGroupAddonsLength: nonProtectedGroupAddons.length,
+      protectedUserAddonsLength: protectedUserAddons.length,
+      finalLength: userAddons.length
     })
 
     // Build locked positions map for protected addons from current Stremio account
@@ -159,6 +179,13 @@ async function getDesiredAddons(user, req, { prisma, getAccountId, decrypt, pars
     // Add any remaining group addons at the end
     while (groupAddonIndex < nonProtectedGroupAddons.length) {
       finalDesiredCollection.push(nonProtectedGroupAddons[groupAddonIndex++])
+    }
+
+    // If current is empty (finalLength = 0), ensure we still add all group addons
+    if (finalLength === 0 && nonProtectedGroupAddons.length > 0) {
+      console.log('🔍 getDesiredAddons: Current empty, returning group addons:', nonProtectedGroupAddons.length)
+      // When current is empty, just return all non-protected group addons
+      return { success: true, addons: nonProtectedGroupAddons, error: null }
     }
 
     // Remove nulls and return

@@ -134,7 +134,7 @@ export default function UserDetailModal({
   // Fetch group addons for user
   const { data: userGroupAddons, isLoading: isLoadingGroupAddons } = useQuery({
     queryKey: ['user', user?.id, 'group-addons'],
-    queryFn: () => usersAPI.getGroupAddons(user!.id),
+    queryFn: () => usersAPI.getGroupAddons(user!.id, true), // Include database fields
     enabled: !!user?.id,
   })
 
@@ -406,10 +406,10 @@ export default function UserDetailModal({
   const GroupAddonItem = ({ addon, index }: { addon: any; index: number }) => {
     // Support both legacy shape (plain manifest) and new shape ({ transportUrl, transportName, manifest })
     const manifest = addon?.manifest || addon
-    const addonId = manifest?.id || addon?.id
-    const name = manifest?.name || addon?.transportName || 'Unknown'
-    const version = manifest?.version
-    const description = manifest?.description || ''
+    const addonId = addon?.id || manifest?.id
+    const name = addon?.name || manifest?.name || addon?.transportName || 'Unknown'
+    const version = addon?.version || manifest?.version
+    const description = addon?.description || manifest?.description || ''
     const iconUrl = addon?.iconUrl || manifest?.logo || manifest?.icon || null
     const isExcluded = localExcludedSet.has(addonId)
     

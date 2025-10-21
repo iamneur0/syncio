@@ -528,17 +528,44 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
       
       let existingGroupAddon = null
       if (addonUrl) {
+        const targetHash = manifestUrlHmac(req, addonUrl)
+        console.log('🔍 Looking for existing addon with hash:', targetHash)
+        
         // Check if addon with same manifest URL already exists in group
         existingGroupAddon = await prisma.groupAddon.findFirst({
           where: {
             groupId: groupId,
             addon: {
-              manifestUrlHash: manifestUrlHmac(req, addonUrl),
+              manifestUrlHash: targetHash,
               accountId: getAccountId(req)
             }
           },
           include: { addon: true }
         })
+        
+        console.log('🔍 Existing addon check:', {
+          found: !!existingGroupAddon,
+          existingAddonName: existingGroupAddon?.addon?.name,
+          existingHash: existingGroupAddon?.addon?.manifestUrlHash
+        })
+        
+        // If not found by hash, try to find by URL (for corrupted data)
+        if (!existingGroupAddon) {
+          console.log('🔍 Hash not found, trying to find by URL...')
+          const allGroupAddons = await prisma.groupAddon.findMany({
+            where: { groupId: groupId },
+            include: { addon: true }
+          })
+          
+          for (const ga of allGroupAddons) {
+            const existingUrl = ga.addon.manifestUrl ? decrypt(ga.addon.manifestUrl, req) : null
+            if (existingUrl === addonUrl) {
+              console.log('🔍 Found by URL match:', ga.addon.name, 'with hash:', ga.addon.manifestUrlHash)
+              existingGroupAddon = ga
+              break
+            }
+          }
+        }
       }
 
       // If addon with same URL exists, remove it first and preserve its position
@@ -580,9 +607,9 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
             position: position
           }
         })
+        
+        console.log(`🔢 Added addon to group ${groupId} at position ${preservedPosition !== null ? preservedPosition : 'bottom'}`)
       })
-      
-      console.log(`🔢 Added addon to group ${groupId} at position ${preservedPosition !== null ? preservedPosition : 'bottom'}`)
 
       res.json({ message: 'Addon added to group successfully' })
     } catch (error) {
@@ -971,12 +998,13 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
   router.get('/:id/addons', async (req, res) => {
     try {
       const { id } = req.params
+      const { includeDatabaseFields } = req.query
       const group = await findGroupById(prisma, id, getAccountId(req))
       if (!group) return sendError(res, 404, 'Group not found')
       
       // Use shared helper to get ordered addons for this group
       const { getGroupAddons } = require('../utils/helpers')
-      const filteredAddonsSorted = await getGroupAddons(prisma, id, req)
+      const filteredAddonsSorted = await getGroupAddons(prisma, id, req, includeDatabaseFields === 'true')
       
       res.json({ addons: filteredAddonsSorted })
     } catch (error) {
