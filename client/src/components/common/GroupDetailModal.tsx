@@ -313,7 +313,10 @@ export default function GroupDetailModal({
       queryClient.invalidateQueries({ queryKey: ['addons'] })
       // Also refresh all group details to update addon counts
       queryClient.refetchQueries({ queryKey: ['group'] })
-      // Note: Removed getSyncStatus call to avoid 404 errors
+      // Trigger sync status refresh for all users in the group
+      if (group?.id) {
+        refreshAllSyncStatus(group.id)
+      }
       toast.success('Addon added to group')
     },
     onError: (error: any) => {
