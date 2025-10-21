@@ -449,9 +449,13 @@ export default function GenericEntityPage({ config }: GenericEntityPageProps) {
       setSyncingEntities(prev => new Set(prev).add(id))
       try {
         // Sync the group or user itself
-        await finalConfig.api.sync(id, [], 'normal', isUnsafeMode)
-        // If syncing a group from the listing, cascade to all users to match modal behavior
-        if (finalConfig.entityType === 'group') {
+        if (finalConfig.entityType === 'user') {
+          // User sync with unsafe mode
+          await usersAPI.sync(id, [], 'normal', isUnsafeMode)
+        } else if (finalConfig.entityType === 'group') {
+          // Group sync (no unsafe mode parameter)
+          await groupsAPI.sync(id, [])
+          // Cascade to all users in the group
           try {
             const groupDetails = await groupsAPI.getById(id as any)
             const usersInGroup = Array.isArray(groupDetails?.users) ? groupDetails.users : []
@@ -459,6 +463,9 @@ export default function GenericEntityPage({ config }: GenericEntityPageProps) {
               await Promise.all(usersInGroup.map((u: any) => usersAPI.sync(u.id, [], 'normal', isUnsafeMode)))
             }
           } catch {}
+        } else {
+          // Fallback for other entity types
+          await finalConfig.api.sync(id)
         }
         toast.success(`${finalConfig.title.slice(0, -1)} synced successfully`)
         queryClient.invalidateQueries({ queryKey: [finalConfig.entityType] })
