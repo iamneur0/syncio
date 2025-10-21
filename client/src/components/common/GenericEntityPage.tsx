@@ -257,13 +257,25 @@ export default function GenericEntityPage({ config }: GenericEntityPageProps) {
 
   const reloadMutation = useMutation({
     mutationFn: (id: string) => finalConfig.api.reload!(id),
-    onSuccess: (_, id) => {
+    onSuccess: (result: any, id) => {
       queryClient.invalidateQueries({ queryKey: [finalConfig.entityType] })
       // Trigger sync status refresh for users and groups
       if (finalConfig.entityType === 'user' || finalConfig.entityType === 'group') {
         refreshAllSyncStatus(finalConfig.entityType === 'group' ? id : undefined, finalConfig.entityType === 'user' ? id : undefined)
       }
-      toast.success(`${finalConfig.title.slice(0, -1)} reloaded successfully`)
+      
+      // Show specific reload statistics for users and groups
+      if ((finalConfig.entityType === 'user' || finalConfig.entityType === 'group') && result?.reloadedCount !== undefined) {
+        const { reloadedCount, failedCount, total } = result
+        if (failedCount > 0) {
+          toast.success(`${reloadedCount}/${total} addons reloaded successfully (${failedCount} failed)`)
+        } else {
+          toast.success(`${reloadedCount}/${total} addons reloaded successfully`)
+        }
+      } else {
+        // Default message for other entity types
+        toast.success(`${finalConfig.title.slice(0, -1)} reloaded successfully`)
+      }
     },
     onError: (error: any) => {
       const message = error?.response?.data?.error || error?.message || `Failed to reload ${finalConfig.entityType}`
@@ -639,40 +651,7 @@ export default function GenericEntityPage({ config }: GenericEntityPageProps) {
             setEditingUser(null)
           }}
           onAdd={(data: any) => createMutation.mutate(data)}
-          onAddUser={async (data: any) => {
-            console.log('🔍 onAddUser called with data:', data)
-            console.log('🔍 editingUser:', editingUser)
-            if (editingUser) {
-              // Reconnect existing user with new Stremio credentials
-              try {
-                const reconnectData = {
-                  username: editingUser.username,
-                  email: editingUser.email,
-                  password: data.password
-                }
-                console.log('🔍 Calling usersAPI.reconnectStremio with:', reconnectData)
-                const result = await usersAPI.reconnectStremio(reconnectData)
-                console.log('🔍 Reconnect successful, result:', result)
-                queryClient.invalidateQueries({ queryKey: [finalConfig.entityType] })
-                toast.success('User reconnected successfully')
-                setEditingUser(null)
-                setShowAddModal(false)
-              } catch (error: any) {
-                console.error('🔍 Reconnect error:', error)
-                console.error('🔍 Error details:', {
-                  message: error?.message,
-                  response: error?.response?.data,
-                  status: error?.response?.status
-                })
-                const message = error?.response?.data?.message || error?.message || 'Failed to reconnect user'
-                toast.error(message)
-              }
-            } else {
-              // Create new user
-              console.log('🔍 Creating new user (not reconnecting)')
-              createMutation.mutate(data)
-            }
-          }}
+          onAddUser={(data: any) => createMutation.mutate(data)}
           onAddAddon={(data: any) => createMutation.mutate(data)}
           onCreateGroup={(data: any) => createMutation.mutate(data)}
           isCreating={createMutation.isPending}

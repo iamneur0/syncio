@@ -170,9 +170,26 @@ export const usersAPI = {
     return response.data
   },
 
-  // Reload all addons for a user and apply them
+  // Reload all group addons for a user (calls reloadGroupAddons on user's group)
   reloadUserAddons: async (id: string): Promise<any> => {
-    const response: AxiosResponse<any> = await api.post(`/users/${id}/reload-addons`)
+    // Get user details to find their group ID
+    const userResponse = await api.get(`/users/${id}`)
+    const user = userResponse.data
+    
+    // Find the group ID from user's groups
+    const groupId = user?.groups?.[0]?.id
+    
+    if (!groupId) {
+      return Promise.resolve({ 
+        message: 'User not in any group',
+        reloadedCount: 0,
+        failedCount: 0,
+        total: 0
+      })
+    }
+    
+    // Call reloadGroupAddons on the user's group
+    const response = await api.post(`/groups/${groupId}/reload-addons`)
     return response.data
   },
 
