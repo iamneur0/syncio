@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 import { getColorHexValue, getThemePalette } from '@/utils/colorMapping'
 import { useTheme } from '@/contexts/ThemeContext'
+import { useModalState, useFormState } from '@/hooks/useCommonState'
 import toast from 'react-hot-toast'
 
 interface GroupAddModalProps {
@@ -24,15 +25,13 @@ export default function GroupAddModal({
   isCreating 
 }: GroupAddModalProps) {
   const { isDark, isMono, isModern, isModernDark } = useTheme()
-  const [mounted, setMounted] = useState(false)
-  const [groupName, setGroupName] = useState('')
-  const [groupDescription, setGroupDescription] = useState('')
-  const [colorIndex, setColorIndex] = useState(0)
-  const [colorIndexRef, setColorIndexRef] = useState(0)
-
-  useEffect(() => {
-    setMounted(true)
-  }, [])
+  const { mounted } = useModalState()
+  const { formData, updateField, reset } = useFormState({
+    groupName: '',
+    groupDescription: '',
+    colorIndex: 0,
+    colorIndexRef: 0
+  })
 
   // Close on Escape
   useEffect(() => {
@@ -50,23 +49,20 @@ export default function GroupAddModal({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    if (!groupName.trim()) {
+    if (!formData.groupName.trim()) {
       toast.error('Group name is required')
       return
     }
     onCreateGroup({
-      name: groupName.trim(),
-      description: groupDescription.trim() || '',
+      name: formData.groupName.trim(),
+      description: formData.groupDescription.trim() || '',
       restrictions: 'none' as const,
-      colorIndex: colorIndexRef
+      colorIndex: formData.colorIndexRef
     })
   }
 
   const handleClose = () => {
-    setGroupName('')
-    setGroupDescription('')
-    setColorIndex(1)
-    setColorIndexRef(1)
+    reset()
     onClose()
   }
 
@@ -106,8 +102,8 @@ export default function GroupAddModal({
             <input
               type="text"
               placeholder="Group name"
-              value={groupName}
-              onChange={(e) => setGroupName(e.target.value)}
+              value={formData.groupName}
+              onChange={(e) => updateField('groupName', e.target.value)}
               className={`w-full px-3 py-2 border rounded-lg focus:outline-none ${
                 isDark 
                   ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
@@ -120,8 +116,8 @@ export default function GroupAddModal({
             <textarea
               placeholder="Describe the purpose of this group..."
               rows={3}
-              value={groupDescription}
-              onChange={(e) => setGroupDescription(e.target.value)}
+              value={formData.groupDescription}
+              onChange={(e) => updateField('groupDescription', e.target.value)}
               className={`w-full px-3 py-2 border rounded-lg focus:outline-none ${
                 isDark 
                   ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
@@ -139,16 +135,16 @@ export default function GroupAddModal({
                     key={index}
                     type="button"
                     onClick={() => {
-                      setColorIndex(actualColorIndex)
-                      setColorIndexRef(actualColorIndex)
+                      updateField('colorIndex', actualColorIndex)
+                      updateField('colorIndexRef', actualColorIndex)
                     }}
-                    aria-pressed={colorIndex === actualColorIndex}
-                    className={`relative w-8 h-8 rounded-full border-2 transition ${colorIndex === actualColorIndex ? 'border-white ring-2 ring-offset-2 ring-stremio-purple' : 'border-gray-300'}`}
+                    aria-pressed={formData.colorIndex === actualColorIndex}
+                    className={`relative w-8 h-8 rounded-full border-2 transition ${formData.colorIndex === actualColorIndex ? 'border-white ring-2 ring-offset-2 ring-stremio-purple' : 'border-gray-300'}`}
                     style={{ 
                       backgroundColor: colorOption.hexValue
                     }}
                   >
-                    {colorIndex === actualColorIndex && (
+                    {formData.colorIndex === actualColorIndex && (
                       <span className="absolute inset-0 flex items-center justify-center">
                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="white" className="w-4 h-4">
                           <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-7.25 7.25a1 1 0 01-1.414 0l-3-3a1 1 0 111.414-1.414L8.5 11.586l6.543-6.543a1 1 0 011.414 0z" clipRule="evenodd" />

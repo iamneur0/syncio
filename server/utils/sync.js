@@ -58,7 +58,7 @@ async function getDesiredAddons(user, req, { prisma, getAccountId, decrypt, pars
 
     const { getGroupAddons } = require('../utils/helpers')
     // groupAddons are returned in collection shape: { transportUrl, transportName, manifest }
-    const groupAddons = groups.length > 0 ? await getGroupAddons(prisma, groups[0].id, req) : []
+    const groupAddons = groups.length > 0 ? await getGroupAddons(prisma, groups[0].id, req, true) : []
 
     // Get user's Stremio addons
     const { success, addons: userAddonsResponse, error } = await getUserAddons(user, req, { decrypt, StremioAPIClient })
@@ -73,13 +73,6 @@ async function getDesiredAddons(user, req, { prisma, getAccountId, decrypt, pars
     const excludedAddons = parseAddonIds(user.excludedAddons)
     const protectedAddons = parseProtectedAddons(user.protectedAddons, req)
     
-    console.log('🔍 getDesiredAddons debug:', {
-      groupsLength: groups.length,
-      groupAddonsLength: groupAddons.length,
-      userAddonsLength: userAddons.length,
-      excludedAddons: excludedAddons,
-      protectedAddons: protectedAddons
-    })
     
     // Include default addons as protected addons (only in safe mode)
     const { defaultAddons } = require('../utils/config')
@@ -99,11 +92,6 @@ async function getDesiredAddons(user, req, { prisma, getAccountId, decrypt, pars
     ]
     const protectedUrlSet = new Set(allProtectedUrls)
     
-    console.log('🔍 Protected addons debug:', {
-      unsafeMode,
-      defaultProtectedUrls,
-      allProtectedUrls: Array.from(protectedUrlSet)
-    })
 
     // Helper function to check if an addon is protected
     const isProtected = (addon) => {
@@ -111,43 +99,23 @@ async function getDesiredAddons(user, req, { prisma, getAccountId, decrypt, pars
       return addonUrl && protectedUrlSet.has(addonUrl)
     }
 
-    // Parse excluded addons and get their stremioAddonIds
+    // Parse excluded addons - keep as database IDs, don't convert to stremioAddonId
     const excludedAddonIds = (excludedAddons || []).map(id => String(id).trim()).filter(Boolean)
+    const excludedAddonIdSet = new Set(excludedAddonIds)
     
-    // Get the stremioAddonIds for excluded addons
-    let excludedStremioAddonIds = []
-    if (excludedAddonIds.length > 0) {
-      const excludedAddonRecords = await prisma.addon.findMany({
-        where: {
-          id: { in: excludedAddonIds },
-          accountId: getAccountId(req)
-        },
-        select: { stremioAddonId: true }
-      })
-      excludedStremioAddonIds = excludedAddonRecords
-        .map(addon => addon.stremioAddonId)
-        .filter(Boolean)
-    }
-    
-    const excludedStremioIdSet = new Set(excludedStremioAddonIds)
-    
-    console.log('🔍 Excluded addons debug:', {
-      excludedAddonIds,
-      excludedStremioAddonIds,
-      excludedStremioIdSet: Array.from(excludedStremioIdSet)
-    })
 
     // 1) Remove excluded addons from groupAddons
+    console.log('🔍 getDesiredAddons - excludedAddonIdSet:', Array.from(excludedAddonIdSet))
+    console.log('🔍 getDesiredAddons - groupAddons count:', groupAddons.length)
     const groupAddonsFiltered = groupAddons.filter(groupAddon => {
-      const manifestId = groupAddon?.manifest?.id
-      return !(manifestId && excludedStremioIdSet.has(manifestId))
+      // Use database ID for exclusion filtering to handle duplicates correctly
+      const addonId = groupAddon?.id
+      const isExcluded = addonId && excludedAddonIdSet.has(addonId)
+      console.log('🔍 getDesiredAddons - addon:', groupAddon?.name || groupAddon?.transportName, 'addonId:', addonId, 'isExcluded:', isExcluded)
+      return !isExcluded
     })
+    console.log('🔍 getDesiredAddons - groupAddonsFiltered count:', groupAddonsFiltered.length)
     
-    console.log('🔍 getDesiredAddons filtering debug:', {
-      groupAddonsLength: groupAddons.length,
-      groupAddonsFilteredLength: groupAddonsFiltered.length,
-      excludedStremioIdSet: Array.from(excludedStremioIdSet)
-    })
 
     // 2) Keep only protected addons from userAddons
     const protectedUserAddons = (userAddons || []).filter(addon => isProtected(addon))
@@ -165,11 +133,6 @@ async function getDesiredAddons(user, req, { prisma, getAccountId, decrypt, pars
       return url && !protectedUserUrlSet.has(url)
     })
     
-    console.log('🔍 getDesiredAddons final debug:', {
-      nonProtectedGroupAddonsLength: nonProtectedGroupAddons.length,
-      protectedUserAddonsLength: protectedUserAddons.length,
-      finalLength: userAddons.length
-    })
 
     // Build locked positions map for protected addons from current Stremio account
     // IMPORTANT: positions must be taken from the FULL userAddons list, not the filtered protected subset
@@ -213,7 +176,6 @@ async function getDesiredAddons(user, req, { prisma, getAccountId, decrypt, pars
 
     // If current is empty (finalLength = 0), ensure we still add all group addons
     if (finalLength === 0 && nonProtectedGroupAddons.length > 0) {
-      console.log('🔍 getDesiredAddons: Current empty, returning group addons:', nonProtectedGroupAddons.length)
       // When current is empty, just return all non-protected group addons
       return { success: true, addons: nonProtectedGroupAddons, error: null }
     }

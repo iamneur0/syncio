@@ -4,6 +4,8 @@ import React from 'react'
 import { useTheme } from '@/contexts/ThemeContext'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { usersAPI, groupsAPI } from '@/services/api'
+import { invalidateSyncStatusQueries } from '@/utils/queryUtils'
+import { useUnsafeMode } from '@/hooks/useCommonState'
 
 interface SyncBadgeProps {
   // Simple mode - just show status
@@ -35,7 +37,6 @@ export default function SyncBadge({
   userExcludedSet,
   userProtectedSet
 }: SyncBadgeProps) {
-  console.log('🔍 SyncBadge rendered with props:', { userId, groupId, status, onClick })
   
   const { isDark, isMono } = useTheme()
   const queryClient = useQueryClient()
@@ -46,23 +47,14 @@ export default function SyncBadge({
   const isSmartMode = !status && Boolean(userId || groupId)
 
   // Get unsafe mode from localStorage
-  const [isUnsafeMode, setIsUnsafeMode] = React.useState(false)
-  
-  React.useEffect(() => {
-    try {
-      const mode = localStorage.getItem('sfm_delete_mode')
-      setIsUnsafeMode(mode === 'unsafe')
-    } catch {}
-  }, [])
+  const { isUnsafeMode } = useUnsafeMode()
 
   // User sync logic
   const { data: userSyncStatus, isLoading: userSyncLoading, error: userSyncError } = useQuery({
     queryKey: ['user', userId, 'sync-status', groupId || 'nogroup', isUnsafeMode ? 'unsafe' : 'safe'],
     queryFn: async () => {
       if (!userId) return null
-      console.log(`🔍 SyncBadge: Fetching sync status for user ${userId}${groupId ? ` in group ${groupId}` : ' (no group)'} (unsafe: ${isUnsafeMode})`)
       const result = await usersAPI.getSyncStatus(userId, groupId, isUnsafeMode)
-      console.log(`🔍 SyncBadge: Sync status result for user ${userId}:`, result)
       return result
     },
     enabled: isSmartMode && Boolean(userId),
@@ -72,16 +64,6 @@ export default function SyncBadge({
     refetchInterval: 30000, // Refetch every 30 seconds to keep status fresh
   })
 
-  // Debug logging for query state
-  console.log('🔍 SyncBadge Debug:', {
-    userId,
-    groupId,
-    isSmartMode,
-    userSyncLoading,
-    userSyncError,
-    userSyncStatus,
-    enabled: isSmartMode && Boolean(userId)
-  })
 
   // Group sync logic
   const { data: groupDetails } = useQuery({
@@ -174,25 +156,19 @@ export default function SyncBadge({
 
     if (userId && userSyncStatus) {
       const status = (userSyncStatus as any).status
-      console.log('🔍 SyncBadge - userSyncStatus:', userSyncStatus)
-      console.log('🔍 SyncBadge - status:', status)
       // If status is 'error' but it's an authentication error, show 'connect' instead
       if (status === 'error') {
         const message = (userSyncStatus as any).message || ''
-        console.log('🔍 SyncBadge - error message:', message)
         if (message.includes('Stremio connection invalid') || 
             message.includes('authentication') || 
             message.includes('auth') || 
             message.includes('invalid') || 
             message.includes('corrupted')) {
-          console.log('🔍 SyncBadge - setting status to connect')
           setSmartStatus('connect')
         } else {
-          console.log('🔍 SyncBadge - setting status to error')
           setSmartStatus('error')
         }
       } else {
-        console.log('🔍 SyncBadge - setting status to:', status)
         setSmartStatus(status || 'checking')
       }
       setIsLoading(false)

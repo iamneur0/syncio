@@ -1,6 +1,8 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { usersAPI, groupsAPI, addonsAPI } from '@/services/api'
-import toast from 'react-hot-toast'
+import { invalidateUserQueries, invalidateGroupQueries, invalidateAddonQueries } from '@/utils/queryUtils'
+import { userErrorHandlers, groupErrorHandlers, addonErrorHandlers } from '@/utils/errorUtils'
+import { userSuccessHandlers, groupSuccessHandlers, addonSuccessHandlers } from '@/utils/toastUtils'
 
 export function useUserMutations() {
   const queryClient = useQueryClient()
@@ -8,46 +10,37 @@ export function useUserMutations() {
   const createUserMutation = useMutation({
     mutationFn: usersAPI.create,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['users'] })
-      toast.success('User created successfully')
+      invalidateUserQueries(queryClient)
+      userSuccessHandlers.create()
     },
-    onError: (error: any) => {
-      toast.error(error.response?.data?.message || 'Failed to create user')
-    }
+    onError: userErrorHandlers.create
   })
 
   const updateUserMutation = useMutation({
     mutationFn: ({ id, data }: { id: string; data: any }) => usersAPI.update(id, data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['users'] })
-      toast.success('User updated successfully')
+      invalidateUserQueries(queryClient)
+      userSuccessHandlers.update()
     },
-    onError: (error: any) => {
-      toast.error(error.response?.data?.message || 'Failed to update user')
-    }
+    onError: userErrorHandlers.update
   })
 
   const deleteUserMutation = useMutation({
     mutationFn: usersAPI.delete,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['users'] })
-      toast.success('User deleted successfully')
+      invalidateUserQueries(queryClient)
+      userSuccessHandlers.delete()
     },
-    onError: (error: any) => {
-      toast.error(error.response?.data?.message || 'Failed to delete user')
-    }
+    onError: userErrorHandlers.delete
   })
 
   const syncUserMutation = useMutation({
     mutationFn: (id: string) => usersAPI.sync(id),
-    // mutationFn: usersAPI.sync,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['users'] })
-      toast.success('User synced successfully')
+      invalidateUserQueries(queryClient)
+      userSuccessHandlers.sync()
     },
-    onError: (error: any) => {
-      toast.error(error.response?.data?.message || 'Failed to sync user')
-    }
+    onError: userErrorHandlers.sync
   })
 
   return {
@@ -64,38 +57,32 @@ export function useGroupMutations() {
   const createGroupMutation = useMutation({
     mutationFn: groupsAPI.create,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['group'] })
-      toast.success('Group created successfully')
+      invalidateGroupQueries(queryClient)
+      groupSuccessHandlers.create()
     },
-    onError: (error: any) => {
-      toast.error(error.response?.data?.message || 'Failed to create group')
-    }
+    onError: groupErrorHandlers.create
   })
 
   const updateGroupMutation = useMutation({
     mutationFn: ({ id, data }: { id: string; data: any }) => groupsAPI.update(id, data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['group'] })
+      invalidateGroupQueries(queryClient)
       // Also refresh all group details to update counts
       queryClient.refetchQueries({ queryKey: ['group'] })
-      toast.success('Group updated successfully')
+      groupSuccessHandlers.update()
     },
-    onError: (error: any) => {
-      toast.error(error.response?.data?.message || 'Failed to update group')
-    }
+    onError: groupErrorHandlers.update
   })
 
   const deleteGroupMutation = useMutation({
     mutationFn: groupsAPI.delete,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['group'] })
+      invalidateGroupQueries(queryClient)
       // Also refresh all group details to update counts
       queryClient.refetchQueries({ queryKey: ['group'] })
-      toast.success('Group deleted successfully')
+      groupSuccessHandlers.delete()
     },
-    onError: (error: any) => {
-      toast.error(error.response?.data?.message || 'Failed to delete group')
-    }
+    onError: groupErrorHandlers.delete
   })
 
   return {
@@ -111,35 +98,28 @@ export function useAddonMutations() {
   const createAddonMutation = useMutation({
     mutationFn: addonsAPI.create,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['addons'] })
-      toast.success('Addon created successfully')
+      invalidateAddonQueries(queryClient)
+      addonSuccessHandlers.create()
     },
-    onError: (error: any) => {
-      const message = error?.response?.data?.message || error?.response?.data?.error || error?.message || 'Failed to create addon'
-      toast.error(message)
-    }
+    onError: addonErrorHandlers.create
   })
 
   const updateAddonMutation = useMutation({
     mutationFn: ({ id, data }: { id: string; data: any }) => addonsAPI.update(id, data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['addons'] })
-      toast.success('Addon updated successfully')
+      invalidateAddonQueries(queryClient)
+      addonSuccessHandlers.update()
     },
-    onError: (error: any) => {
-      toast.error(error.response?.data?.message || 'Failed to update addon')
-    }
+    onError: addonErrorHandlers.update
   })
 
   const deleteAddonMutation = useMutation({
     mutationFn: addonsAPI.delete,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['addons'] })
-      toast.success('Addon deleted successfully')
+      invalidateAddonQueries(queryClient)
+      addonSuccessHandlers.delete()
     },
-    onError: (error: any) => {
-      toast.error(error.response?.data?.message || 'Failed to delete addon')
-    }
+    onError: addonErrorHandlers.delete
   })
 
   return {

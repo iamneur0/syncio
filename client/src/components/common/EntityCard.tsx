@@ -91,13 +91,10 @@ export default function EntityCard({
 
   const handleToggle = (e?: React.MouseEvent) => {
     try {
-      console.log('🔄 EntityCard toggle clicked:', { id: entity.id, isActive: entity.isActive })
       if (e && typeof e.stopPropagation === 'function') {
         e.stopPropagation()
       }
-      console.log('🔄 Calling onToggle with:', { id: entity.id, isActive: entity.isActive })
       onToggle(entity.id, entity.isActive)
-      console.log('🔄 onToggle called successfully')
     } catch (error) {
       console.error('❌ Error in handleToggle:', error)
     }

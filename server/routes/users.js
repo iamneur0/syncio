@@ -2,8 +2,9 @@ const express = require('express');
 const { StremioAPIClient } = require('stremio-api-client');
 const bcrypt = require('bcrypt');
 const crypto = require('crypto');
-const { handleStremioError, handleDatabaseError, sendError } = require('../utils/handlers');
-const { findUserById, isUserActive, validateStremioCredentials } = require('../utils/helpers');
+const { handleStremioError } = require('../utils/handlers');
+const { findUserById } = require('../utils/helpers');
+const { responseUtils, dbUtils } = require('../utils/routeUtils');
 
 // Export a function that returns the router, allowing dependency injection
 module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, encrypt, parseAddonIds, parseProtectedAddons, getDecryptedManifestUrl, StremioAPIClient, StremioAPIStore, assignUserToGroup, debug, defaultAddons, canonicalizeManifestUrl, getAccountDek, getServerKey, aesGcmDecrypt, validateStremioAuthKey, manifestUrlHmac, manifestHash }) => {
@@ -97,7 +98,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
       
       const user = await findUserById(prisma, id, getAccountId(req), {})
       if (!user) {
-        return sendError(res, 404, 'User not found')
+        return responseUtils.notFound(res, 'User')
       }
 
       // Find groups that contain this user
@@ -172,7 +173,6 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
       const { id } = req.params
       const { username, email, password, groupId, colorIndex } = req.body
       
-      console.log(`🔍 PUT /api/users/${id} called with:`, { username, email, groupId })
 
       // Check if user exists
       const existingUser = await prisma.user.findUnique({
@@ -227,10 +227,8 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
       })
 
       // Handle group assignment
-      console.log(`🔍 Group assignment - groupId: "${groupId}", type: ${typeof groupId}`)
       if (groupId !== undefined) {
         await assignUserToGroup(id, groupId, req)
-        console.log(`🔍 User group assignment completed`)
       }
 
       // Fetch updated user for response
@@ -288,7 +286,6 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
     try {
       const { id } = req.params
       
-      console.log(`🔍 PUT /api/users/${id}/enable called`)
       
       // Update user status to active
       const updatedUser = await prisma.user.update({
@@ -316,7 +313,6 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
     try {
       const { id } = req.params
       
-      console.log(`🔍 PUT /api/users/${id}/disable called`)
       
       // Update user status to inactive
       const updatedUser = await prisma.user.update({
@@ -352,7 +348,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
         }
       })
       if (!existingUser) {
-        return res.status(404).json({ message: 'User not found' })
+        return responseUtils.notFound(res, 'User')
       }
 
       // Remove user from all groups first (update userIds arrays)
@@ -412,7 +408,6 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
       })
 
       const result = await getUserSyncStatus(id, { groupId, unsafe }, req)
-      console.log('🔍 Sync status result for user', id, ':', result)
       return res.json(result)
     } catch (error) {
       console.error('Error getting sync status:', error)
@@ -424,7 +419,6 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
   router.get('/:id/user-addons', async (req, res) => {
     try {
       const { id } = req.params
-      console.log('🔍 Fetching raw Stremio addons for user:', id)
 
       // Get user
       const user = await prisma.user.findUnique({
@@ -440,7 +434,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
       })
 
       if (!user) {
-        return res.status(404).json({ message: 'User not found' })
+        return responseUtils.notFound(res, 'User')
       }
 
       if (!user.stremioAuthKey) {
@@ -473,7 +467,6 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
   router.get('/:id/stremio-addons', async (req, res) => {
     try {
       const { id } = req.params
-      console.log('🔍 Fetching Stremio addons for user:', id)
       // Fetch the user's stored Stremio auth
       const user = await prisma.user.findUnique({
         where: { 
@@ -484,7 +477,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
       })
 
       if (!user) {
-        return res.status(404).json({ message: 'User not found' })
+        return responseUtils.notFound(res, 'User')
       }
 
       if (!user.stremioAuthKey) {
@@ -556,7 +549,6 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
   router.get('/:id/desired-addons', async (req, res) => {
     try {
       const { id } = req.params
-      console.log('🔍 Fetching desired addons for user:', id)
       
       // Fetch the user
       const user = await prisma.user.findUnique({
@@ -573,7 +565,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
       })
 
       if (!user) {
-        return res.status(404).json({ message: 'User not found' })
+        return responseUtils.notFound(res, 'User')
       }
 
       // Import the getDesiredAddons function
@@ -598,7 +590,6 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
         return res.status(500).json({ message: result.error })
       }
 
-      console.log('📦 Desired addons:', result.addons.length)
       res.json({ addons: result.addons })
     } catch (error) {
       console.error('❌ Error fetching desired addons:', error)
@@ -611,7 +602,6 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
     try {
       const { id } = req.params
       const { includeDatabaseFields } = req.query
-      console.log('🔍 Fetching group addons for user:', id)
       
       // Get user's groups
       const groups = await prisma.group.findMany({
@@ -636,7 +626,6 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
       // Get group addons with proper ordering and decryption
       const groupAddons = await getGroupAddons(prisma, primaryGroup.id, req, includeDatabaseFields === 'true')
 
-      console.log('📦 Group addons:', groupAddons.length)
       res.json({ addons: groupAddons })
     } catch (error) {
       console.error('❌ Error fetching group addons:', error)
@@ -655,7 +644,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
       })
 
       if (!user) {
-        return res.status(404).json({ message: 'User not found' })
+        return responseUtils.notFound(res, 'User')
       }
 
       const updatedUser = await prisma.user.update({
@@ -684,7 +673,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
       })
 
       if (!user) {
-        return res.status(404).json({ message: 'User not found' })
+        return responseUtils.notFound(res, 'User')
       }
 
       const updatedUser = await prisma.user.update({
@@ -707,7 +696,6 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
     try {
       const { id } = req.params
       const { unsafe } = req.body
-      console.log(`🔄 POST /api/users/${id}/sync called`)
 
       // Get user
       const user = await prisma.user.findUnique({
@@ -725,7 +713,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
       })
 
       if (!user) {
-        return res.status(404).json({ message: 'User not found' })
+        return responseUtils.notFound(res, 'User')
       }
 
       if (!user.isActive) {
@@ -753,7 +741,6 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
         return res.status(500).json({ message: 'Failed to get desired addons', error: result.error })
       }
 
-      console.log('📦 Desired addons to sync:', result.addons.length)
       
       // Note: We still need to sync even when desired is empty to clear current addons
 
@@ -784,13 +771,11 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
       // Set the entire desired collection (this replaces the current collection)
       try {
         await apiClient.request('addonCollectionSet', { addons: addonsForSync })
-        console.log('✅ Successfully set addon collection')
       } catch (error) {
         console.error('❌ Failed to set addon collection:', error.message)
         return res.status(500).json({ message: 'Failed to sync addons', error: error.message })
       }
 
-      console.log(`✅ Synced ${result.addons.length} addons for user ${id}`)
       res.json({ 
         message: 'User synced successfully', 
         addonsCount: result.addons.length
@@ -843,7 +828,6 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
             }
           } else {
             errors.push(`${user.username || user.email}: ${syncResult.error}`)
-            console.log(`❌ Failed to sync user: ${user.username || user.email} - ${syncResult.error}`)
           }
         } catch (error) {
           errors.push(`${user.username || user.email}: ${error.message}`)
@@ -934,7 +918,6 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
       const { addonId, manifestUrl } = req.body
       const { unsafe } = req.query
       
-      console.log(`🔍 POST /api/users/${id}/protect-addon called with addonId:`, addonId, 'manifestUrl:', manifestUrl, 'unsafe:', unsafe)
       
       // Resolve target URL to protect/unprotect
       let targetUrl = null
@@ -1036,7 +1019,6 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
   router.post('/:id/reload-addons', async (req, res) => {
     try {
       const { id } = req.params
-      console.log('🔄 Reload group addons for user endpoint called for user:', id)
 
       const user = await prisma.user.findUnique({
         where: { 
@@ -1049,7 +1031,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
       })
 
       if (!user) {
-        return res.status(404).json({ message: 'User not found' })
+        return responseUtils.notFound(res, 'User')
       }
 
       if (!user.isActive) {
@@ -1076,9 +1058,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
       }
 
       // Call reloadGroupAddons on the user's group
-      console.log(`🔄 User belongs to group "${userGroup.name}" - reloading group addons`)
       const reloadResult = await reloadGroupAddons(prisma, getAccountId, userGroup.id, req)
-      console.log(`🔄 Reloaded ${reloadResult.reloadedCount} addons, ${reloadResult.failedCount} failed`)
 
         res.json({
         message: 'Group addons reloaded successfully',
@@ -1114,7 +1094,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
       })
 
       if (!user) {
-        return res.status(404).json({ message: 'User not found' })
+        return responseUtils.notFound(res, 'User')
       }
 
       if (!user.stremioAuthKey) {
@@ -1196,7 +1176,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
       })
 
       if (!user) {
-        return res.status(404).json({ message: 'User not found' })
+        return responseUtils.notFound(res, 'User')
       }
 
       if (!user.stremioAuthKey) {
@@ -1248,7 +1228,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
       })
 
       if (!user) {
-        return res.status(404).json({ message: 'User not found' })
+        return responseUtils.notFound(res, 'User')
       }
 
       if (!user.stremioAuthKey) {
@@ -1330,7 +1310,6 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
 
         // Set the filtered addons using the proper format
         await apiClient.request('addonCollectionSet', { addons: filteredAddons })
-        console.log(`✅ Successfully removed addon using proper format`)
       } catch (e) {
         console.error(`❌ Failed to remove addon:`, e.message)
         throw e
@@ -1361,7 +1340,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
       })
 
       if (!user) {
-        return res.status(404).json({ message: 'User not found' })
+        return responseUtils.notFound(res, 'User')
       }
 
       // Encrypt and store the auth key
@@ -1398,7 +1377,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
       })
 
       if (!user) {
-        return res.status(404).json({ message: 'User not found' })
+        return responseUtils.notFound(res, 'User')
       }
 
       // Clear Stremio credentials
@@ -1438,7 +1417,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
       })
 
       if (!user) {
-        return res.status(404).json({ message: 'User not found' })
+        return responseUtils.notFound(res, 'User')
       }
 
       // Encrypt and store the auth key
@@ -1488,7 +1467,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
       })
 
       if (!user) {
-        return res.status(404).json({ message: 'User not found' })
+        return responseUtils.notFound(res, 'User')
       }
 
       // Find groups that contain this user
@@ -1621,7 +1600,6 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
       const { id: userId } = req.params
       const { orderedManifestUrls } = req.body || {}
       
-      console.log(`🔄 Reordering Stremio addons for user ${userId}:`, orderedManifestUrls)
       
       if (!Array.isArray(orderedManifestUrls) || orderedManifestUrls.length === 0) {
         return res.status(400).json({ message: 'orderedManifestUrls array is required' })
@@ -1636,7 +1614,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
       })
       
       if (!user) {
-        return res.status(404).json({ message: 'User not found' })
+        return responseUtils.notFound(res, 'User')
       }
       
       if (!user.stremioAuthKey) {
@@ -1697,7 +1675,6 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
       const { addonId, manifestUrl } = req.body
       const { unsafe } = req.query
       
-      console.log(`🔍 POST /api/users/${id}/protect-addon called with addonId:`, addonId, 'manifestUrl:', manifestUrl, 'unsafe:', unsafe)
       
       // Resolve target URL to protect/unprotect
       let targetUrl = null
@@ -1891,13 +1868,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
       }
       
       // Check if user already has Stremio credentials
-      console.log('🔍 User stremioAuthKey:', existingUser.stremioAuthKey);
-      console.log('🔍 User stremioAuthKey type:', typeof existingUser.stremioAuthKey);
-      console.log('🔍 User stremioAuthKey truthy:', !!existingUser.stremioAuthKey);
-      
       // Allow reconnection - we'll update the stremioAuthKey with new credentials
-      console.log('🔍 User stremioAuthKey exists:', !!existingUser.stremioAuthKey);
-      console.log('🔍 Allowing reconnection to update credentials');
       
       // Create a temporary storage object for this authentication session
       const tempStorage = {};
@@ -1963,11 +1934,6 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
       const authKey = apiStore.authKey || tempStorage.auth || tempStorage.authKey;
       const userData = apiStore.user || tempStorage.user;
       
-      // Debug: Check what's available
-      console.log('🔍 apiStore.authKey:', !!apiStore.authKey);
-      console.log('🔍 tempStorage.auth:', !!tempStorage.auth);
-      console.log('🔍 apiStore.user:', !!apiStore.user);
-      console.log('🔍 tempStorage.user:', !!tempStorage.user);
       
       if (!authKey || !userData) {
         console.error('🔍 Missing auth data - authKey:', !!authKey, 'userData:', !!userData);
@@ -2018,7 +1984,6 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
           };
         }));
         
-        console.log('🔍 Processed addonsData length:', addonsData.length);
       } catch (e) {
         console.log('Could not fetch addons:', e.message);
       }
@@ -2108,7 +2073,6 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
           accountId: getAccountId(req)
         }
       })
-      console.log(`✅ Created import group: ${groupName}`)
 
       // Process each addon
       const processedAddons = []
@@ -2227,7 +2191,6 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
               addon = createdAddon
               processedAddons.push(addon)
               newlyImportedAddons.push(addon)
-            console.log(`✅ Created new addon: ${addon.name}`)
             } catch (error) {
             console.error(`❌ Failed to create addon:`, error?.message || error)
                     continue
@@ -2276,7 +2239,6 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
               isEnabled: true
             }
           })
-          console.log(`✅ Attached ${addon.name} to group`)
         } catch (error) {
           console.error(`❌ Failed to attach ${addon.name}:`, error?.message || error)
         }
@@ -2305,7 +2267,6 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
       
       if (!userInAnyGroup) {
         await assignUserToGroup(userId, group.id, req)
-        console.log(`✅ Added user to import group`)
       }
 
       const message = existingAddons.length > 0
@@ -2382,11 +2343,9 @@ async function reloadGroupAddons(prisma, getAccountId, groupId, req) {
     .filter(ga => ga.addon && ga.addon.isActive !== false)
     .map(ga => ga.addon)
 
-  console.log(`🔄 Reloading ${groupAddons.length} addons from group "${group.name}"...`)
   
   for (const addon of groupAddons) {
     try {
-      console.log(`🔄 Reloading addon: ${addon.name}`)
       
       // Use the existing reloadAddon function
       const result = await reloadAddon(prisma, getAccountId, addon.id, req, { 
@@ -2398,7 +2357,6 @@ async function reloadGroupAddons(prisma, getAccountId, groupId, req) {
       })
       
       if (result.success) {
-        console.log(`✅ Successfully reloaded: ${addon.name}`)
         reloadedCount++
       } else {
         console.warn(`⚠️ Failed to reload ${addon.name}`)
@@ -2411,7 +2369,6 @@ async function reloadGroupAddons(prisma, getAccountId, groupId, req) {
     }
   }
   
-  console.log(`🔄 Reload complete: ${reloadedCount} successful, ${failedCount} failed`)
   
   return {
     reloadedCount,
@@ -2478,7 +2435,6 @@ async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'nor
     let totalAddons = groupAddons.length
     
     if (syncMode === 'advanced') {
-      console.log('🔄 Advanced sync mode: reloading all group addons first...')
       
       // Use the existing reload addon functionality
       const reloadResult = await reloadGroupAddons(prisma, getAccountId, groupAddons, req)
@@ -2509,7 +2465,6 @@ async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'nor
             .filter((fa) => fa?.manifestUrl && !excludedSet.has(fa.manifestUrl))
         : []
       
-      console.log('🔍 Updated group addons after reload:', JSON.stringify(updatedFamilyAddons, null, 2))
       
       // Use updated addons for sync
       groupAddons.splice(0, groupAddons.length, ...updatedFamilyAddons)
@@ -2616,7 +2571,6 @@ async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'nor
         // Use the stored manifest directly instead of fetching from URL
         // This preserves the user's resource selections and customizations
         if (fa.manifest && typeof fa.manifest === 'object') {
-          console.log(`🔍 Using stored manifest for ${fa.name} (preserves user selections)`)
           desiredGroup.push({
             transportUrl: fa.manifestUrl,
             transportName: fa.manifest.name || fa.name,
@@ -2629,7 +2583,6 @@ async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'nor
           throw new Error(`HTTP ${resp.status}: ${resp.statusText}`)
         }
         const manifest = await resp.json()
-        console.log(`🔍 Live manifest fetched for ${fa.name}:`, { id: manifest?.id, name: manifest?.name, version: manifest?.version })
         
         // Ensure manifest has required fields
         const safeManifest = {
@@ -2639,7 +2592,6 @@ async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'nor
           description: manifest?.description || fa.description || '',
           ...manifest // Include all other manifest fields
         }
-        console.log(`🔍 Safe manifest created:`, { id: safeManifest.id, name: safeManifest.name, version: safeManifest.version })
         
         desiredGroup.push({
           transportUrl: fa.manifestUrl,
@@ -2656,7 +2608,6 @@ async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'nor
         if (fa.manifest && typeof fa.manifest === 'object') {
           // Use the stored manifest JSON directly - no need to reconstruct it
           fallbackManifest = fa.manifest
-          console.log(`🔍 Using stored manifest directly for ${fa.name}`)
         } else {
           // Fallback to database fields if no stored manifest
           fallbackManifest = {
@@ -2668,7 +2619,6 @@ async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'nor
             resources: [],
             catalogs: []
           }
-          console.log(`🔍 Using database fields for ${fa.name}:`, { id: fallbackManifest.id, name: fallbackManifest.name, version: fallbackManifest.version })
         }
         
         desiredGroup.push({ 
@@ -2781,7 +2731,6 @@ async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'nor
       JSON.stringify(currentAddons.map(toUrl)) === JSON.stringify(finalDesired.map(toUrl))
 
     if (alreadySynced) {
-      console.log('✅ User is already synced')
       if (syncMode === 'advanced') {
         return { 
           success: true, 
@@ -2796,8 +2745,6 @@ async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'nor
 
     // Set the addon collection using the proper format (replaces, removes extras not included)
     try {
-      console.log('🔄 Setting addon collection (preserve protected addons + add group addons, exclude excluded addons)')
-      console.log('📊 Desired collection (order):')
       finalDesiredCollection.forEach((a, idx) => {
         const name = a?.manifest?.name || a?.name || a?.transportName || 'Unknown'
         const prot = isProtected(a) ? ' (protected)' : ''
@@ -2805,7 +2752,6 @@ async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'nor
       })
       
       await apiClient.request('addonCollectionSet', { addons: finalDesired })
-      console.log('✅ Successfully set addon collection')
       // Skip propagation wait to speed up normal sync
       if (syncMode === 'advanced') {
         await new Promise((r) => setTimeout(r, 1200))
@@ -2828,7 +2774,6 @@ async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'nor
     // No database update needed for connect
     console.log('💾 Connect completed (stremioAddons field removed from schema)')
 
-    console.log('✅ Sync complete, total addons:', total)
     if (syncMode === 'advanced') {
       return { success: true, total, reloadedCount, totalAddons }
     }

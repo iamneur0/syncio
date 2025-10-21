@@ -5,6 +5,9 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { groupsAPI, usersAPI, addonsAPI } from '@/services/api'
 import { useSyncStatusRefresh } from '@/hooks/useSyncStatusRefresh'
 import { getColorBgClass, getColorHexValue } from '@/utils/colorMapping'
+import { invalidateGroupQueries, invalidateSyncStatusQueries } from '@/utils/queryUtils'
+import { groupSuccessHandlers } from '@/utils/toastUtils'
+import { useModalState } from '@/hooks/useCommonState'
 import toast from 'react-hot-toast'
 import { VersionChip, SyncBadge, EntityList, UserItem, AddonItem, UserSelectModal, AddonSelectModal, InlineEdit, ColorPicker } from './'
 import AddonIcon from './AddonIcon'
@@ -37,7 +40,7 @@ export default function GroupDetailModal({
 }: GroupDetailModalProps) {
   const theme = useTheme()
   const { isDark, isModern, isModernDark, isMono } = theme
-  const [mounted, setMounted] = useState(false)
+  const { mounted } = useModalState()
   const [addons, setAddons] = useState<any[]>([])
   const [refreshKey, setRefreshKey] = useState(0)
   const [showUserSelectModal, setShowUserSelectModal] = useState(false)
@@ -59,9 +62,7 @@ export default function GroupDetailModal({
     }
   }, [isOpen, onClose])
 
-  useEffect(() => {
-    setMounted(true)
-  }, [])
+  // Mounted state is handled by useModalState hook
 
   const queryClient = useQueryClient()
   const { refreshAllSyncStatus } = useSyncStatusRefresh()
@@ -120,14 +121,10 @@ export default function GroupDetailModal({
     mutationFn: ({ groupId, groupData }: { groupId: string; groupData: any }) => 
       groupsAPI.update(groupId, groupData),
     onSuccess: () => {
-      console.log('🔍 GroupDetailModal: Invalidating queries after name update')
-      queryClient.invalidateQueries({ queryKey: ['group'] })
-      queryClient.invalidateQueries({ queryKey: ['group', currentGroup?.id, 'details'] })
-      queryClient.invalidateQueries({ queryKey: ['group'] })
+      invalidateGroupQueries(queryClient, currentGroup?.id)
       // Also refresh all group details to update counts
       queryClient.refetchQueries({ queryKey: ['group'] })
-      console.log('🔍 GroupDetailModal: Queries invalidated')
-      toast.success('Group updated successfully')
+      groupSuccessHandlers.update()
     },
     onError: (error: any) => {
       toast.error(error?.response?.data?.message || 'Failed to update group')
@@ -159,8 +156,7 @@ export default function GroupDetailModal({
     mutationFn: ({ groupId, userId }: { groupId: string; userId: string }) => 
       groupsAPI.removeUser(groupId, userId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['group'] })
-      queryClient.invalidateQueries({ queryKey: ['group', group?.id, 'details'] })
+      invalidateGroupQueries(queryClient, group?.id)
       queryClient.invalidateQueries({ queryKey: ['users'] })
       // Also refresh all group details to update user counts
       queryClient.refetchQueries({ queryKey: ['group'] })

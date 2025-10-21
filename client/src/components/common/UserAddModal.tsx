@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 import { useTheme } from '@/contexts/ThemeContext'
 import { getColorHexValue, getThemePalette } from '@/utils/colorMapping'
+import { useModalState, useFormState } from '@/hooks/useCommonState'
 
 interface UserAddModalProps {
   isOpen: boolean
@@ -36,7 +37,6 @@ export default function UserAddModal({
   groups = [],
   editingUser
 }: UserAddModalProps) {
-  console.log('🔍 UserAddModal rendered with editingUser:', editingUser)
   const { isDark, isMono } = useTheme()
   const [mounted, setMounted] = useState(false)
   const [stremioEmail, setStremioEmail] = useState('')
@@ -55,12 +55,7 @@ export default function UserAddModal({
 
   // Populate form when editing a user
   useEffect(() => {
-    console.log('🔍 UserAddModal useEffect - editingUser:', editingUser)
     if (editingUser) {
-      console.log('🔍 Setting form fields with editingUser data:', {
-        username: editingUser.username,
-        email: editingUser.email
-      })
       setStremioUsername(editingUser.username || '')
       setStremioEmail(editingUser.email || '')
       setSelectedGroup(editingUser.groupId || '')
@@ -69,14 +64,6 @@ export default function UserAddModal({
       setAuthMode('authkey') // Default to authkey mode for reconnection
       setStremioRegisterNew(false) // Hide register option for reconnection
       
-      // Debug: Log the state after setting
-      setTimeout(() => {
-        console.log('🔍 State after setting:', {
-          stremioUsername,
-          stremioEmail,
-          authMode
-        })
-      }, 100)
     } else {
       // Reset form when not editing
       setStremioEmail('')
@@ -122,23 +109,8 @@ export default function UserAddModal({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     
-    console.log('🔍 UserAddModal handleSubmit called')
-    console.log('🔍 editingUser:', editingUser)
-    console.log('🔍 form data:', {
-      stremioUsername: stremioUsername.trim(),
-      stremioEmail: stremioEmail.trim(),
-      stremioPassword: stremioPassword.trim(),
-      authMode,
-      selectedGroup,
-      newGroupName: newGroupName.trim()
-    })
-    console.log('🔍 Password field value:', stremioPassword)
-    console.log('🔍 Password field length:', stremioPassword.length)
     
     if (!stremioUsername.trim() || !stremioPassword.trim()) {
-      console.log('🔍 Validation failed: missing username or password')
-      console.log('🔍 Username:', stremioUsername.trim())
-      console.log('🔍 Password:', stremioPassword.trim())
       return
     }
 
@@ -154,13 +126,10 @@ export default function UserAddModal({
       colorIndex: colorIndexRef,
     }
 
-    console.log('🔍 Calling onAddUser with data:', submitData)
-    console.log('🔍 onAddUser function:', typeof onAddUser)
     
     // Single call including groupName so backend assigns user to group
     try {
       ;(onAddUser as any)(submitData)
-      console.log('🔍 onAddUser called successfully')
     } catch (error) {
       console.error('🔍 Error calling onAddUser:', error)
     }
@@ -410,7 +379,7 @@ export default function UserAddModal({
               <button
                 type="submit"
                 disabled={isCreating}
-                onClick={() => console.log('🔍 Reconnect button clicked')}
+                onClick={() => {}}
                 className="flex-1 px-4 py-2 accent-bg accent-text rounded-lg transition-colors disabled:opacity-50"
               >
                 {isCreating ? (stremioRegisterNew ? 'Registering...' : (editingUser ? 'Reconnecting...' : 'Adding...')) : (stremioRegisterNew ? 'Register & Connect' : (editingUser ? 'Reconnect User' : 'Add User'))}
