@@ -45,13 +45,23 @@ export default function SyncBadge({
   // Smart mode: auto-detect sync status
   const isSmartMode = !status && Boolean(userId || groupId)
 
+  // Get unsafe mode from localStorage
+  const [isUnsafeMode, setIsUnsafeMode] = React.useState(false)
+  
+  React.useEffect(() => {
+    try {
+      const mode = localStorage.getItem('sfm_delete_mode')
+      setIsUnsafeMode(mode === 'unsafe')
+    } catch {}
+  }, [])
+
   // User sync logic
   const { data: userSyncStatus, isLoading: userSyncLoading, error: userSyncError } = useQuery({
-    queryKey: ['user', userId, 'sync-status', groupId || 'nogroup'],
+    queryKey: ['user', userId, 'sync-status', groupId || 'nogroup', isUnsafeMode ? 'unsafe' : 'safe'],
     queryFn: async () => {
       if (!userId) return null
-      console.log(`🔍 SyncBadge: Fetching sync status for user ${userId}${groupId ? ` in group ${groupId}` : ' (no group)'}`)
-      const result = await usersAPI.getSyncStatus(userId, groupId)
+      console.log(`🔍 SyncBadge: Fetching sync status for user ${userId}${groupId ? ` in group ${groupId}` : ' (no group)'} (unsafe: ${isUnsafeMode})`)
+      const result = await usersAPI.getSyncStatus(userId, groupId, isUnsafeMode)
       console.log(`🔍 SyncBadge: Sync status result for user ${userId}:`, result)
       return result
     },
@@ -94,7 +104,7 @@ export default function SyncBadge({
 
   // Get sync status for all users in the group
   const { data: groupSyncStatus } = useQuery({
-    queryKey: ['group', groupId, 'sync-status'],
+    queryKey: ['group', groupId, 'sync-status', isUnsafeMode ? 'unsafe' : 'safe'],
     queryFn: async () => {
       if (!groupId || !groupUsers || groupUsers.length === 0) {
         return { status: 'stale', allSynced: false }
@@ -104,7 +114,7 @@ export default function SyncBadge({
         const userSyncResults = await Promise.all(
           groupUsers.map(async (user: any) => {
             try {
-              const syncStatus = await usersAPI.getSyncStatus(user.id, groupId)
+              const syncStatus = await usersAPI.getSyncStatus(user.id, groupId, isUnsafeMode)
               return (syncStatus as any)?.status === 'synced'
             } catch {
               return false
