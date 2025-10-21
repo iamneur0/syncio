@@ -6,7 +6,7 @@ const { handleDatabaseError, sendError } = require('../utils/handlers');
 const { findGroupById, getAllGroups, getGroupUsers } = require('../utils/helpers');
 
 // Export a function that returns the router, allowing dependency injection
-module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserToGroup, getDecryptedManifestUrl }) => {
+module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserToGroup, getDecryptedManifestUrl, manifestUrlHmac }) => {
   const router = express.Router();
 
   // Get all groups
@@ -523,43 +523,66 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
         return res.status(404).json({ message: 'Addon not found' })
       }
 
-      // Check if addon is already in group
-      const existingGroupAddon = await prisma.groupAddon.findFirst({
-        where: {
-          groupId: groupId,
-          addonId: addonId
-        }
-      })
-
-      if (existingGroupAddon) {
-        return res.status(400).json({ message: 'Addon already in this group' })
+      // Get the addon's manifest URL for comparison
+      const addonUrl = addon.manifestUrl ? decrypt(addon.manifestUrl, req) : null
+      
+      let existingGroupAddon = null
+      if (addonUrl) {
+        // Check if addon with same manifest URL already exists in group
+        existingGroupAddon = await prisma.groupAddon.findFirst({
+          where: {
+            groupId: groupId,
+            addon: {
+              manifestUrlHash: manifestUrlHmac(req, addonUrl),
+              accountId: getAccountId(req)
+            }
+          },
+          include: { addon: true }
+        })
       }
 
-      // Add addon to group at the top (position 0) and shift existing addons down
-      await prisma.$transaction(async (tx) => {
-        // Increment position of all existing addons in this group
-        await tx.groupAddon.updateMany({
-          where: { 
-            groupId: groupId,
-            position: { not: null }
-          },
-          data: {
-            position: { increment: 1 }
+      // If addon with same URL exists, remove it first and preserve its position
+      let preservedPosition = null
+      if (existingGroupAddon) {
+        preservedPosition = existingGroupAddon.position
+        await prisma.groupAddon.delete({
+          where: {
+            groupId_addonId: {
+              groupId: groupId,
+              addonId: existingGroupAddon.addonId
+            }
           }
         })
+        console.log(`🗑️ Removed existing addon with same URL: ${existingGroupAddon.addon.name} (position: ${preservedPosition})`)
+      }
 
-        // Add new addon at position 0 (top)
+      // Add addon to group
+      await prisma.$transaction(async (tx) => {
+        let position
+        if (preservedPosition !== null) {
+          // Use the preserved position from the replaced addon
+          position = preservedPosition
+        } else {
+          // Add at the bottom (highest position + 1)
+          const maxPosition = await tx.groupAddon.aggregate({
+            where: { groupId: groupId },
+            _max: { position: true }
+          })
+          position = (maxPosition._max.position ?? -1) + 1
+        }
+
+        // Add new addon at the determined position
         await tx.groupAddon.create({
           data: {
             groupId: groupId,
             addonId: addonId,
             isEnabled: true,
-            position: 0
+            position: position
           }
         })
       })
       
-      console.log(`🔢 Added addon to group ${groupId} at position 0 (top)`)
+      console.log(`🔢 Added addon to group ${groupId} at position ${preservedPosition !== null ? preservedPosition : 'bottom'}`)
 
       res.json({ message: 'Addon added to group successfully' })
     } catch (error) {
@@ -598,7 +621,12 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
       }
 
       await prisma.groupAddon.delete({
-        where: { id: groupAddon.id }
+        where: { 
+          groupId_addonId: {
+            groupId: groupId,
+            addonId: addonId
+          }
+        }
       })
 
       res.json({ message: 'Addon removed from group successfully' })

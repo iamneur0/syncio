@@ -2117,58 +2117,81 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
           continue
         }
 
-        // Check if addon exists by manifest URL hash
+        // Get manifest data first
+        let manifestData = addonData.manifest
+        if (!manifestData) {
+          try {
+            const resp = await fetch(addonUrl)
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+            manifestData = await resp.json()
+          } catch (e) {
+            manifestData = {
+              id: addonData.id || 'unknown',
+              name: addonData.name || 'Unknown Addon',
+              version: addonData.version || '1.0.0',
+              description: addonData.description || '',
+              resources: addonData.manifest?.resources || [],
+              types: addonData.manifest?.types || ['other'],
+              catalogs: addonData.manifest?.catalogs || []
+            }
+          }
+        }
+
+        // Check if addon exists by manifest content hash
         let addon = null
         try {
           const existingAddon = await prisma.addon.findFirst({ 
             where: {
-              manifestUrlHash: manifestUrlHmac(req, addonUrl),
+              manifestHash: manifestHash(manifestData),
               accountId: getAccountId(req)
             },
             select: { id: true, name: true, manifestUrl: true, accountId: true }
           })
           if (existingAddon) {
-            console.log(`♻️ Found existing addon: ${existingAddon.name}`)
+            console.log(`♻️ Found existing addon with same manifest: ${existingAddon.name}`)
             processedAddons.push(existingAddon)
             existingAddons.push(existingAddon)
             addon = existingAddon
           }
         } catch (e) {
-          console.log(`⚠️ URL check failed for ${addonUrl}:`, e?.message || e)
+          console.log(`⚠️ Manifest check failed for ${addonUrl}:`, e?.message || e)
         }
 
         // Create new addon if not found
         if (!addon) {
           console.log(`🔨 Creating new addon for: ${addonUrl}`)
           
-          // Get manifest data
-          let manifestData = addonData.manifest
-          if (!manifestData) {
-            try {
-              const resp = await fetch(addonUrl)
-              if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
-              manifestData = await resp.json()
-            } catch (e) {
-              manifestData = {
-                id: addonData.id || 'unknown',
-                name: addonData.name || 'Unknown Addon',
-                version: addonData.version || '1.0.0',
-                description: addonData.description || '',
-                resources: addonData.manifest?.resources || [],
-                types: addonData.manifest?.types || ['other'],
-                catalogs: addonData.manifest?.catalogs || []
+          // Check if addon name exists and find unique name
+          let addonName = manifestData?.name || addonData.name || 'Unknown Addon'
+          let finalAddonName = addonName
+          let copyNumber = 1
+          
+          while (true) {
+            const nameExists = await prisma.addon.findFirst({
+              where: {
+                name: finalAddonName,
+                accountId: getAccountId(req)
               }
-            }
+            })
+            
+            if (!nameExists) break
+            
+            finalAddonName = copyNumber === 1 ? `${addonName} Copy` : `${addonName} Copy #${copyNumber}`
+            copyNumber++
+          }
+          
+          if (finalAddonName !== addonName) {
+            console.log(`📝 Addon name exists, using: ${finalAddonName}`)
           }
 
           // Fetch original manifest for full capabilities
-          let originalManifestObj = manifestData
-          try {
-            const resp = await fetch(addonUrl)
-            if (resp.ok) {
-              originalManifestObj = await resp.json()
-            }
-          } catch {}
+              let originalManifestObj = manifestData
+              try {
+                const resp = await fetch(addonUrl)
+                if (resp.ok) {
+                  originalManifestObj = await resp.json()
+                }
+              } catch {}
 
           // Create addon
           try {
@@ -2178,42 +2201,75 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
                 : []
             )
 
-            const createdAddon = await prisma.addon.create({
-              data: {
-                accountId: getAccountId(req),
-                name: manifestData?.name || addonData.name || 'Unknown Addon',
-                description: manifestData?.description || addonData.description || '',
-                version: manifestData?.version || addonData.version || null,
-                iconUrl: manifestData?.logo || addonData.iconUrl || null,
-                stremioAddonId: manifestData?.id || addonData.stremioAddonId || null,
-                isActive: true,
-                manifestUrl: encrypt(addonUrl, req),
-                manifestUrlHash: manifestUrlHmac(req, addonUrl),
-                originalManifest: originalManifestObj ? encrypt(JSON.stringify(originalManifestObj), req) : null,
-                manifest: manifestData ? encrypt(JSON.stringify(manifestData), req) : null,
-                manifestHash: manifestData ? manifestHash(manifestData) : null,
-                resources: resourcesNames
-              }
-            })
+              const createdAddon = await prisma.addon.create({
+                data: {
+                  accountId: getAccountId(req),
+                  name: finalAddonName,
+                  description: manifestData?.description || addonData.description || '',
+                  version: manifestData?.version || addonData.version || null,
+                  iconUrl: manifestData?.logo || addonData.iconUrl || null,
+                  stremioAddonId: manifestData?.id || addonData.stremioAddonId || null,
+                  isActive: true,
+                  manifestUrl: encrypt(addonUrl, req),
+                  manifestUrlHash: manifestUrlHmac(req, addonUrl),
+                  originalManifest: originalManifestObj ? encrypt(JSON.stringify(originalManifestObj), req) : null,
+                  manifest: manifestData ? encrypt(JSON.stringify(manifestData), req) : null,
+                  manifestHash: manifestData ? manifestHash(manifestData) : null,
+                  resources: resourcesNames
+                }
+              })
             
-            addon = createdAddon
-            processedAddons.push(addon)
-            newlyImportedAddons.push(addon)
+              addon = createdAddon
+              processedAddons.push(addon)
+              newlyImportedAddons.push(addon)
             console.log(`✅ Created new addon: ${addon.name}`)
-          } catch (error) {
+            } catch (error) {
             console.error(`❌ Failed to create addon:`, error?.message || error)
-            continue
+                    continue
+                  }
           }
-        }
       }
 
       // Attach all processed addons to the group
       for (const addon of processedAddons) {
         try {
-          await prisma.groupAddon.upsert({
-            where: { groupId_addonId: { groupId: group.id, addonId: addon.id } },
-            update: { isEnabled: true },
-            create: { groupId: group.id, addonId: addon.id, isEnabled: true }
+          // Get the addon URL for comparison
+          const addonUrl = addon.manifestUrl ? decrypt(addon.manifestUrl, req) : null
+          
+          if (addonUrl) {
+            // Check if addon with same URL already exists in group
+            const existingGroupAddon = await prisma.groupAddon.findFirst({
+              where: {
+                groupId: group.id,
+                addon: {
+                  manifestUrlHash: manifestUrlHmac(req, addonUrl),
+                  accountId: getAccountId(req)
+                }
+              },
+              include: { addon: true }
+            })
+
+            if (existingGroupAddon) {
+              // Remove old addon from group
+              await prisma.groupAddon.delete({
+                where: {
+                  groupId_addonId: {
+                    groupId: group.id,
+                    addonId: existingGroupAddon.addonId
+                  }
+                }
+              })
+              console.log(`🗑️ Removed old addon from group: ${existingGroupAddon.addon.name}`)
+            }
+          }
+
+          // Add new addon to group
+          await prisma.groupAddon.create({
+            data: {
+              groupId: group.id,
+              addonId: addon.id,
+              isEnabled: true
+            }
           })
           console.log(`✅ Attached ${addon.name} to group`)
         } catch (error) {

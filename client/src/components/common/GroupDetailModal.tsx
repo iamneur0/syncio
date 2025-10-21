@@ -220,7 +220,7 @@ export default function GroupDetailModal({
       // Use the same ID extraction logic as SortableAddonItem
       const getAddonId = (item: any) => {
         const manifest = item?.manifest || item
-        return item?.transportUrl || item?.manifestUrl || item?.url || manifest?.id || item?.id || 'unknown'
+        return item?.id || item?.transportUrl || item?.manifestUrl || item?.url || manifest?.id || 'unknown'
       }
 
       const newAddons = arrayMove(
@@ -313,19 +313,7 @@ export default function GroupDetailModal({
       queryClient.invalidateQueries({ queryKey: ['addons'] })
       // Also refresh all group details to update addon counts
       queryClient.refetchQueries({ queryKey: ['group'] })
-      // Fetch aggregated group+users sync status and update badges
-      if (group?.id) {
-        groupsAPI.getSyncStatus(group.id)
-          .then(({ groupStatus, userStatuses }) => {
-            try { window.dispatchEvent(new CustomEvent('sfm:group:sync-status', { detail: { id: group.id, status: groupStatus } } as any)) } catch {}
-            ;(userStatuses || []).forEach((s: any) => {
-              try { window.dispatchEvent(new CustomEvent('sfm:user-sync-data', { detail: { userId: s.userId, status: s.status } } as any)) } catch {}
-              queryClient.invalidateQueries({ queryKey: ['user', s.userId, 'sync-status'] })
-              queryClient.refetchQueries({ queryKey: ['user', s.userId, 'sync-status'], exact: true })
-            })
-          })
-          .catch(() => {})
-      }
+      // Note: Removed getSyncStatus call to avoid 404 errors
       toast.success('Addon added to group')
     },
     onError: (error: any) => {
