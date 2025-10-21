@@ -41,10 +41,10 @@ export default function SortableAddonItem({
     manifestUrl: addon?.manifestUrl,
     finalAddonId: addonId 
   })
-  // Prefer DB name when available; fall back to manifest/transport name
-  const name = addon?.name || addon?.transportName || manifest?.name || 'Unknown'
-  const version = manifest?.version || addon?.version
-  const description = manifest?.description || addon?.description || 'No description'
+  // Use database fields for display (name, description, version, iconUrl)
+  const name = addon?.name || manifest?.name || addon?.transportName || 'Unknown'
+  const version = addon?.version || manifest?.version
+  const description = addon?.description || manifest?.description || 'No description'
   const iconUrl = addon?.iconUrl || manifest?.logo || manifest?.icon || null
 
   const {
