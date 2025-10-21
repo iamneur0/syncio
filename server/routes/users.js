@@ -1027,11 +1027,11 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
     }
   })
 
-  // Reload all addons for a user and apply them to their Stremio account
+  // Reload all group addons for a user (fetch fresh manifests and update database)
   router.post('/:id/reload-addons', async (req, res) => {
     try {
       const { id } = req.params
-      console.log('🔄 Reload user addons endpoint called for user:', id)
+      console.log('🔄 Reload group addons for user endpoint called for user:', id)
 
       const user = await prisma.user.findUnique({
         where: { 
@@ -1039,7 +1039,6 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
           accountId: getAccountId(req)
         },
         select: { 
-          stremioAuthKey: true,
           isActive: true
         }
       })
@@ -1048,94 +1047,40 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
         return res.status(404).json({ message: 'User not found' })
       }
 
-      if (!user.stremioAuthKey) {
-        return res.status(400).json({ message: 'User not connected to Stremio' })
-      }
-
       if (!user.isActive) {
         return res.status(400).json({ message: 'User is disabled' })
       }
 
-      try {
-        const authKeyPlain = decrypt(user.stremioAuthKey, req)
-        const apiClient = new StremioAPIClient({ endpoint: 'https://api.strem.io', authKey: authKeyPlain })
-        
-        // Get current addons from Stremio
-        const collection = await apiClient.request('addonCollectionGet', {})
-        const rawAddons = collection?.addons || collection || {}
-        const currentAddons = Array.isArray(rawAddons) ? rawAddons : (typeof rawAddons === 'object' ? Object.values(rawAddons) : [])
-
-        // Clear all addons
-        for (const addon of currentAddons) {
-          try {
-            await apiClient.request('addonCollectionRemove', {
-              addonId: addon.transportUrl || addon.id
-            })
-          } catch (error) {
-            console.error(`Error removing addon ${addon.name}:`, error)
-          }
-        }
-
-        // Get user's groups and their addons
-        const groups = await prisma.group.findMany({
+      // Get user's group
+      const userGroup = await prisma.group.findFirst({
           where: {
             accountId: getAccountId(req),
             userIds: {
               contains: user.id
             }
-          },
-          include: {
-            addons: {
-              include: { addon: true }
-            }
           }
         })
 
-        if (groups.length === 0) {
+      if (!userGroup) {
           return res.json({ 
-            message: 'User not in any groups, all addons cleared',
-            clearedCount: currentAddons.length
-          })
-        }
+          message: 'User not in any group, no addons to reload',
+          reloadedCount: 0,
+          failedCount: 0,
+          total: 0
+        })
+      }
 
-        // Get all addons from user's groups
-        const groupAddons = groups.flatMap(group => 
-          group.addons
-            .filter(ga => ga.addon && ga.addon.isActive !== false)
-            .map(ga => ({
-              id: ga.addon.id,
-              name: ga.addon.name,
-              version: ga.addon.version,
-              description: ga.addon.description,
-              manifestUrl: ga.addon.manifestUrl,
-              manifest: ga.addon.manifest,
-            }))
-        )
-
-        // Add all group addons to Stremio
-        let addedCount = 0
-        for (const addon of groupAddons) {
-          try {
-            await apiClient.request('addonCollectionAdd', {
-              addonId: addon.manifestUrl,
-              manifest: addon.manifest
-            })
-            addedCount++
-          } catch (error) {
-            console.error(`Error adding addon ${addon.name}:`, error)
-          }
-        }
+      // Call reloadGroupAddons on the user's group
+      console.log(`🔄 User belongs to group "${userGroup.name}" - reloading group addons`)
+      const reloadResult = await reloadGroupAddons(prisma, getAccountId, userGroup.id, req)
+      console.log(`🔄 Reloaded ${reloadResult.reloadedCount} addons, ${reloadResult.failedCount} failed`)
 
         res.json({
-          message: 'User addons reloaded successfully',
-          clearedCount: currentAddons.length,
-          addedCount,
-          totalAddons: groupAddons.length
-        })
-      } catch (error) {
-        console.error('Error reloading user addons:', error)
-        res.status(500).json({ message: 'Failed to reload user addons', error: error?.message })
-      }
+        message: 'Group addons reloaded successfully',
+        reloadedCount: reloadResult.reloadedCount,
+        failedCount: reloadResult.failedCount,
+        total: reloadResult.total
+      })
     } catch (error) {
       console.error('Error in reload addons endpoint:', error)
       res.status(500).json({ message: 'Failed to reload user addons', error: error?.message })
@@ -2372,6 +2317,9 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
   return router;
 };
 
+// Export the reloadGroupAddons helper function for use by other modules
+module.exports.reloadGroupAddons = reloadGroupAddons;
+
 // Helper function to get sync mode from request headers
 function getSyncMode(req) {
   const syncMode = req?.headers?.['x-sync-mode'] || 'normal'
@@ -2382,9 +2330,82 @@ function getSyncMode(req) {
 // Import helpers for standalone usage (when called outside router closure)
 const {
   parseAddonIds: parseAddonIdsUtil,
-  canonicalizeManifestUrl: canonicalizeManifestUrlUtil
+  canonicalizeManifestUrl: canonicalizeManifestUrlUtil,
+  filterManifestByResources,
+  filterManifestByCatalogs
 } = require('../utils/validation')
-const { getAccountDek: getAccountDekUtil, getServerKey: getServerKeyUtil, aesGcmDecrypt: aesGcmDecryptUtil } = require('../utils/encryption')
+const { 
+  getAccountDek: getAccountDekUtil, 
+  getServerKey: getServerKeyUtil, 
+  aesGcmDecrypt: aesGcmDecryptUtil,
+  encrypt,
+  getDecryptedManifestUrl
+} = require('../utils/encryption')
+const { manifestHash } = require('../utils/hashing')
+
+// Import the shared reload addon helper at module level
+const { reloadAddon } = require('./addons')
+
+// Helper function to reload all addons for a group
+async function reloadGroupAddons(prisma, getAccountId, groupId, req) {
+  let reloadedCount = 0
+  let failedCount = 0
+  
+  // Get all active addons in the group
+  const group = await prisma.group.findUnique({
+    where: { id: groupId, accountId: getAccountId(req) },
+    include: {
+      addons: {
+        include: { addon: true }
+      }
+    }
+  })
+
+  if (!group) {
+    throw new Error('Group not found')
+  }
+
+  const groupAddons = group.addons
+    .filter(ga => ga.addon && ga.addon.isActive !== false)
+    .map(ga => ga.addon)
+
+  console.log(`🔄 Reloading ${groupAddons.length} addons from group "${group.name}"...`)
+  
+  for (const addon of groupAddons) {
+    try {
+      console.log(`🔄 Reloading addon: ${addon.name}`)
+      
+      // Use the existing reloadAddon function
+      const result = await reloadAddon(prisma, getAccountId, addon.id, req, { 
+        filterManifestByResources, 
+        filterManifestByCatalogs, 
+        encrypt, 
+        getDecryptedManifestUrl, 
+        manifestHash 
+      })
+      
+      if (result.success) {
+        console.log(`✅ Successfully reloaded: ${addon.name}`)
+        reloadedCount++
+      } else {
+        console.warn(`⚠️ Failed to reload ${addon.name}`)
+        failedCount++
+      }
+      
+    } catch (error) {
+      console.warn(`⚠️ Error reloading ${addon.name}:`, error.message)
+      failedCount++
+    }
+  }
+  
+  console.log(`🔄 Reload complete: ${reloadedCount} successful, ${failedCount} failed`)
+  
+  return {
+    reloadedCount,
+    failedCount,
+    total: groupAddons.length
+  }
+}
 
 async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'normal', unsafeMode = false, req) {
   try {
@@ -2445,44 +2466,10 @@ async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'nor
     
     if (syncMode === 'advanced') {
       console.log('🔄 Advanced sync mode: reloading all group addons first...')
-      for (const fa of groupAddons) {
-        try {
-          console.log(`🔄 Reloading addon: ${fa.name} (${fa.manifestUrl})`)
-          
-          // Fetch fresh manifest
-          const response = await fetch(fa.manifestUrl, {
-            method: 'GET',
-            headers: { 'Accept': 'application/json' },
-            signal: AbortSignal.timeout(10000)
-          })
-          
-          if (response.ok) {
-            const manifestData = await response.json()
-            
-            // Update the addon in database with fresh data
-            await prisma.addon.update({
-              where: { 
-                id: fa.id,
-                accountId: getAccountId(req)
-              },
-              data: {
-                name: manifestData?.name || fa.name,
-                description: manifestData?.description || fa.description,
-                version: manifestData?.version || fa.version,
-                manifest: manifestData,
-                iconUrl: manifestData?.logo || null,
-              }
-            })
-            
-            console.log(`✅ Successfully reloaded: ${fa.name}`)
-            reloadedCount++
-          } else {
-            console.warn(`⚠️ Failed to reload ${fa.name}: ${response.status}`)
-          }
-        } catch (error) {
-          console.warn(`⚠️ Error reloading ${fa.name}:`, error.message)
-        }
-      }
+      
+      // Use the existing reload addon functionality
+      const reloadResult = await reloadGroupAddons(prisma, getAccountId, groupAddons, req)
+      reloadedCount = reloadResult.reloadedCount
       
       // Reload the group addons from database to get updated data
       const updatedFamilyGroup = await prisma.group.findUnique({
@@ -2497,7 +2484,7 @@ async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'nor
       
       const updatedFamilyAddons = Array.isArray(updatedFamilyGroup?.addons)
         ? updatedFamilyGroup.addons
-            .filter((ga) => (ga?.isEnabled !== false) && (ga?.addon?.isActive !== false) && ga?.addon?.accountId === user.accountId)
+            .filter((ga) => (ga?.isEnabled !== false) && (ga?.addon?.isActive !== false) && (ga?.addon?.accountId === user.accountId))
             .map((ga) => ({
               id: ga.addon.id,
               name: ga.addon.name,

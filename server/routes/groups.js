@@ -203,28 +203,17 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
         return res.status(404).json({ message: 'Group not found' });
       }
 
-      // Get all addons in this group
-      const groupAddons = group.addons || [];
-      let reloadedCount = 0;
-      let failedCount = 0;
-
-      for (const groupAddon of groupAddons) {
-        try {
-          // Trigger addon reload by calling the addon reload endpoint logic
-          // This is a simplified version - in practice you might want to call the actual addon reload logic
-          console.log(`Reloading addon ${groupAddon.addon.name} for group ${group.name}`);
-          reloadedCount++;
-        } catch (error) {
-          console.error(`Failed to reload addon ${groupAddon.addon.name}:`, error);
-          failedCount++;
-        }
-      }
+      // Use the shared reload group addons function
+      console.log(`🔄 Group reload: Reloading addons for group "${group.name}"`)
+      const { reloadGroupAddons } = require('./users')
+      const reloadResult = await reloadGroupAddons(prisma, getAccountId, group.id, req)
+      console.log(`🔄 Reloaded ${reloadResult.reloadedCount} addons, ${reloadResult.failedCount} failed`)
 
       res.json({
-        message: 'Addon reload completed',
-        reloaded: reloadedCount,
-        failed: failedCount,
-        total: groupAddons.length
+        message: 'Group addons reloaded successfully',
+        reloadedCount: reloadResult.reloadedCount,
+        failedCount: reloadResult.failedCount,
+        total: reloadResult.total
       });
     } catch (error) {
       console.error('Error reloading group addons:', error);

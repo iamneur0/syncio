@@ -4,6 +4,141 @@ const { handleDatabaseError, sendError, createRouteHandler, DatabaseTransactions
 const { findAddonById, getAllAddons, sanitizeUrl, validateAccountContext } = require('../utils/helpers');
 const { canonicalizeManifestUrl } = require('../utils/validation');
 
+// Shared helper function to reload a single addon
+async function reloadAddon(prisma, getAccountId, addonId, req, { filterManifestByResources, filterManifestByCatalogs, encrypt, getDecryptedManifestUrl, manifestHash }) {
+  // Find the addon (scope to account to avoid cross-account mismatches)
+  const addon = await prisma.addon.findFirst({
+    where: { id: addonId, accountId: getAccountId(req) }
+  });
+
+  if (!addon) {
+    throw new Error('Addon not found');
+  }
+
+  if (!addon.isActive) {
+    throw new Error('Addon is disabled');
+  }
+
+  if (!addon.manifestUrl) {
+    throw new Error('Addon has no manifest URL');
+  }
+
+  // Resolve decrypted transport URL
+  const transportUrl = getDecryptedManifestUrl(addon, req)
+  if (!transportUrl) {
+    throw new Error('Failed to resolve addon URL')
+  }
+
+  // Fetch the latest manifest
+  let manifestData = null;
+  try {
+    console.log(`🔍 Reloading manifest for addon: ${addon.name} (${transportUrl})`);
+    const manifestResponse = await fetch(transportUrl);
+    if (manifestResponse.ok) {
+      manifestData = await manifestResponse.json();
+      console.log(`✅ Reloaded manifest:`, manifestData?.name, manifestData?.version);
+    } else {
+      throw new Error(`HTTP ${manifestResponse.status}: ${manifestResponse.statusText}`);
+    }
+  } catch (e) {
+    console.error(`❌ Failed to fetch manifest:`, e.message);
+    throw new Error(`Failed to fetch addon manifest: ${e.message}`);
+  }
+
+  // Get current resource and catalog selections
+  const currentResources = (() => { 
+    try { return addon.resources ? JSON.parse(addon.resources) : [] } catch { return [] } 
+  })()
+  const currentCatalogs = (() => { 
+    try { return addon.catalogs ? JSON.parse(addon.catalogs) : [] } catch { return [] } 
+  })()
+
+  // Find new resources and catalogs from the fresh manifest
+  const manifestResources = manifestData?.resources || []
+  const manifestCatalogs = manifestData?.catalogs || []
+  
+  // Find new resources (not in current selection)
+  const newResources = manifestResources.filter(r => !currentResources.includes(r))
+  
+  // Find new catalogs (not in current selection)
+  const newCatalogs = manifestCatalogs.filter(c => 
+    !currentCatalogs.some(existing => 
+      existing.type === c.type && existing.id === c.id
+    )
+  )
+  
+  // Combine existing selections with new ones
+  const updatedResources = [...currentResources, ...newResources]
+  const updatedCatalogs = [...currentCatalogs, ...newCatalogs]
+  
+  console.log('🔍 Reload found new resources:', newResources)
+  console.log('🔍 Reload found new catalogs:', newCatalogs)
+  console.log('🔍 Updated resources:', updatedResources)
+  console.log('🔍 Updated catalogs:', updatedCatalogs)
+
+  // Apply the same filtering logic as the update endpoint
+  let filtered = manifestData
+  if (Array.isArray(updatedResources) || Array.isArray(updatedCatalogs)) {
+    try {
+      console.log('🔍 Reload applying resource/catalog filtering with updated selections')
+      
+      if (Array.isArray(updatedResources) && updatedResources.length > 0) {
+        console.log('🔍 Reload filtering with updated resources:', updatedResources)
+        filtered = filterManifestByResources(manifestData, updatedResources)
+        console.log('🔍 Filtered manifest has catalogs:', Array.isArray(filtered?.catalogs) ? filtered.catalogs.length : 'no catalogs')
+      }
+      
+      // Apply catalog filtering if catalogs are provided
+      if (Array.isArray(updatedCatalogs) && updatedCatalogs.length > 0 && filtered) {
+        console.log('🔍 Reload filtering catalogs with updated selections:', updatedCatalogs)
+        filtered = filterManifestByCatalogs(filtered, updatedCatalogs)
+        console.log('🔍 After catalog filtering, manifest has catalogs:', Array.isArray(filtered?.catalogs) ? filtered.catalogs.length : 'no catalogs')
+      }
+    } catch (e) {
+      console.error('Error filtering manifest on reload:', e)
+      filtered = manifestData
+    }
+  }
+
+  // Update the addon using the same logic as the update endpoint
+  const updatedAddon = await prisma.addon.update({
+    where: { 
+      id: addonId,
+      accountId: getAccountId(req)
+    },
+    data: {
+      name: addon.name, // preserve name
+      description: manifestData?.description || addon.description,
+      version: manifestData?.version || addon.version,
+      iconUrl: manifestData?.logo || addon.iconUrl || null,
+      // Store encrypted manifests (original untouched, filtered current)
+      originalManifest: encrypt(JSON.stringify(manifestData), req),
+      manifest: encrypt(JSON.stringify(filtered), req),
+      manifestHash: manifestHash(filtered),
+      // Update with new resource and catalog selections (including newly added ones)
+      resources: JSON.stringify(Array.isArray(updatedResources) ? updatedResources.map(r => {
+        if (typeof r === 'string') return r
+        if (r && typeof r === 'object' && r.name) return r.name
+        return null
+      }).filter(Boolean) : []),
+      catalogs: JSON.stringify(Array.isArray(updatedCatalogs) ? updatedCatalogs.map(c => ({ type: c.type, id: c.id })).filter(c => c.type && c.id) : [])
+    }
+  });
+
+  return {
+    success: true,
+    addon: {
+      id: updatedAddon.id,
+      name: updatedAddon.name,
+      description: updatedAddon.description,
+      url: updatedAddon.manifestUrl,
+      version: updatedAddon.version,
+      iconUrl: updatedAddon.iconUrl,
+      status: updatedAddon.isActive ? 'active' : 'inactive'
+    }
+  };
+}
+
 // Export a function that returns the router, allowing dependency injection
 module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifestUrl, scopedWhere, AUTH_ENABLED, manifestHash, filterManifestByResources, filterManifestByCatalogs }) => {
   const router = express.Router();
@@ -453,119 +588,42 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
     try {
       const { id } = req.params;
       
-      // Find the addon (scope to account to avoid cross-account mismatches)
-      const addon = await prisma.addon.findFirst({
-        where: { id, accountId: getAccountId(req) }
-      });
-
-      if (!addon) {
-        return res.status(404).json({ error: 'Addon not found' });
-      }
-
-      if (!addon.isActive) {
-        return res.status(400).json({ error: 'Addon is disabled' });
-      }
-
-      if (!addon.manifestUrl) {
-        return res.status(400).json({ error: 'Addon has no manifest URL' });
-      }
-
-      // Resolve decrypted transport URL
-      const transportUrl = getDecryptedManifestUrl(addon, req)
-      if (!transportUrl) {
-        return res.status(400).json({ error: 'Failed to resolve addon URL' })
-      }
-
-      // Fetch the latest manifest
-      let manifestData = null;
-      try {
-        console.log(`🔍 Reloading manifest for addon: ${addon.name} (${transportUrl})`);
-        const manifestResponse = await fetch(transportUrl);
-        if (manifestResponse.ok) {
-          manifestData = await manifestResponse.json();
-          console.log(`✅ Reloaded manifest:`, manifestData?.name, manifestData?.version);
-        } else {
-          throw new Error(`HTTP ${manifestResponse.status}: ${manifestResponse.statusText}`);
-        }
-      } catch (e) {
-        console.error(`❌ Failed to fetch manifest:`, e.message);
-        return res.status(400).json({ 
-          error: 'Failed to fetch addon manifest',
-          details: e.message 
-        });
-      }
-
-      // Get current resource and catalog selections
-      const currentResources = (() => { 
-        try { return addon.resources ? JSON.parse(addon.resources) : [] } catch { return [] } 
-      })()
-      const currentCatalogs = (() => { 
-        try { return addon.catalogs ? JSON.parse(addon.catalogs) : [] } catch { return [] } 
-      })()
-
-      // Apply the same filtering logic as the update endpoint
-      let filtered = manifestData
-      if (Array.isArray(currentResources) || Array.isArray(currentCatalogs)) {
-        try {
-          console.log('🔍 Reload applying resource/catalog filtering with current selections')
-          
-          if (Array.isArray(currentResources) && currentResources.length > 0) {
-            console.log('🔍 Reload filtering with current resources:', currentResources)
-            filtered = filterManifestByResources(manifestData, currentResources)
-            console.log('🔍 Filtered manifest has catalogs:', Array.isArray(filtered?.catalogs) ? filtered.catalogs.length : 'no catalogs')
-          }
-          
-          // Apply catalog filtering if catalogs are provided
-          if (Array.isArray(currentCatalogs) && currentCatalogs.length > 0 && filtered) {
-            console.log('🔍 Reload filtering catalogs with current selections:', currentCatalogs)
-            filtered = filterManifestByCatalogs(filtered, currentCatalogs)
-            console.log('🔍 After catalog filtering, manifest has catalogs:', Array.isArray(filtered?.catalogs) ? filtered.catalogs.length : 'no catalogs')
-          }
-        } catch (e) {
-          console.error('Error filtering manifest on reload:', e)
-          filtered = manifestData
-        }
-      }
-
-      // Update the addon using the same logic as the update endpoint
-      const updatedAddon = await prisma.addon.update({
-        where: { 
-          id,
-          accountId: getAccountId(req)
-        },
-        data: {
-          name: addon.name, // preserve name
-          description: manifestData?.description || addon.description,
-          version: manifestData?.version || addon.version,
-          iconUrl: manifestData?.logo || addon.iconUrl || null,
-          // Store encrypted manifests (original untouched, filtered current)
-          originalManifest: encrypt(JSON.stringify(manifestData), req),
-          manifest: encrypt(JSON.stringify(filtered), req),
-          manifestHash: manifestHash(filtered),
-          // Keep current resource and catalog selections (they're already validated by the filtering functions)
-          resources: JSON.stringify(Array.isArray(currentResources) ? currentResources.map(r => {
-            if (typeof r === 'string') return r
-            if (r && typeof r === 'object' && r.name) return r.name
-            return null
-          }).filter(Boolean) : []),
-          catalogs: JSON.stringify(Array.isArray(currentCatalogs) ? currentCatalogs.map(c => ({ type: c.type, id: c.id })).filter(c => c.type && c.id) : [])
-        }
+      // Use the shared reload helper function
+      const result = await reloadAddon(prisma, getAccountId, id, req, { 
+        filterManifestByResources, 
+        filterManifestByCatalogs, 
+        encrypt, 
+        getDecryptedManifestUrl, 
+        manifestHash 
       });
 
       res.json({
         message: 'Addon reloaded successfully',
-        addon: {
-          id: updatedAddon.id,
-          name: updatedAddon.name,
-          description: updatedAddon.description,
-          url: updatedAddon.manifestUrl,
-          version: updatedAddon.version,
-          iconUrl: updatedAddon.iconUrl,
-          status: updatedAddon.isActive ? 'active' : 'inactive'
-        }
+        addon: result.addon
       });
     } catch (error) {
       console.error('Error reloading addon:', error);
+      
+      // Handle specific error cases
+      if (error.message === 'Addon not found') {
+        return res.status(404).json({ error: 'Addon not found' });
+      }
+      if (error.message === 'Addon is disabled') {
+        return res.status(400).json({ error: 'Addon is disabled' });
+      }
+      if (error.message === 'Addon has no manifest URL') {
+        return res.status(400).json({ error: 'Addon has no manifest URL' });
+      }
+      if (error.message === 'Failed to resolve addon URL') {
+        return res.status(400).json({ error: 'Failed to resolve addon URL' });
+      }
+      if (error.message.includes('Failed to fetch addon manifest')) {
+        return res.status(400).json({ 
+          error: 'Failed to fetch addon manifest',
+          details: error.message.replace('Failed to fetch addon manifest: ', '')
+        });
+      }
+      
       res.status(500).json({ error: 'Failed to reload addon', details: error?.message });
     }
   });
@@ -961,3 +1019,6 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
 
   return router;
 };
+
+// Export the reloadAddon helper function for use by other modules
+module.exports.reloadAddon = reloadAddon;
