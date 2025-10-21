@@ -606,6 +606,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
   router.get('/:id/group-addons', async (req, res) => {
     try {
       const { id } = req.params
+      const { includeDatabaseFields } = req.query
       console.log('🔍 Fetching group addons for user:', id)
       
       // Get user's groups
@@ -629,7 +630,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
       const { getGroupAddons } = require('../utils/helpers')
       
       // Get group addons with proper ordering and decryption
-      const groupAddons = await getGroupAddons(prisma, primaryGroup.id, req)
+      const groupAddons = await getGroupAddons(prisma, primaryGroup.id, req, includeDatabaseFields === 'true')
 
       console.log('📦 Group addons:', groupAddons.length)
       res.json({ addons: groupAddons })
@@ -748,9 +749,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
 
       console.log('📦 Desired addons to sync:', result.addons.length)
       
-      if (result.addons.length === 0) {
-        return res.json({ message: 'No addons to sync', addonsCount: 0 })
-      }
+      // Note: We still need to sync even when desired is empty to clear current addons
 
       // Use Stremio API client to manage addons
       const authKeyPlain = decrypt(user.stremioAuthKey, req)
@@ -2118,22 +2117,22 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
         }
 
         // Get manifest data first
-        let manifestData = addonData.manifest
-        if (!manifestData) {
-          try {
-            const resp = await fetch(addonUrl)
-            if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
-            manifestData = await resp.json()
-          } catch (e) {
-            manifestData = {
-              id: addonData.id || 'unknown',
-              name: addonData.name || 'Unknown Addon',
-              version: addonData.version || '1.0.0',
-              description: addonData.description || '',
-              resources: addonData.manifest?.resources || [],
-              types: addonData.manifest?.types || ['other'],
-              catalogs: addonData.manifest?.catalogs || []
-            }
+          let manifestData = addonData.manifest
+          if (!manifestData) {
+            try {
+              const resp = await fetch(addonUrl)
+              if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+              manifestData = await resp.json()
+            } catch (e) {
+              manifestData = {
+                id: addonData.id || 'unknown',
+                name: addonData.name || 'Unknown Addon',
+                version: addonData.version || '1.0.0',
+                description: addonData.description || '',
+                resources: addonData.manifest?.resources || [],
+                types: addonData.manifest?.types || ['other'],
+                catalogs: addonData.manifest?.catalogs || []
+              }
           }
         }
 
@@ -2141,7 +2140,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
         let addon = null
         try {
           const existingAddon = await prisma.addon.findFirst({ 
-            where: {
+              where: {
               manifestHash: manifestHash(manifestData),
               accountId: getAccountId(req)
             },
@@ -2265,7 +2264,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
 
           // Add new addon to group
           await prisma.groupAddon.create({
-            data: {
+          data: {
               groupId: group.id,
               addonId: addon.id,
               isEnabled: true
