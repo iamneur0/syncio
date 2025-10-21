@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.3](https://github.com/iamneur0/syncio/compare/v0.1.2...v0.1.3) (2025-10-19)
+
+
+### Bug Fixes
+
+* error preventing build ([780e7ff](https://github.com/iamneur0/syncio/commit/780e7ff14ab034e42fd56b9feae926c7d504c2b9))
+
 ## [0.1.2](https://github.com/iamneur0/syncio/compare/v0.1.1...v0.1.2) (2025-10-19)
 
 
