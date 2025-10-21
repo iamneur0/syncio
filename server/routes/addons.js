@@ -140,7 +140,7 @@ async function reloadAddon(prisma, getAccountId, addonId, req, { filterManifestB
 }
 
 // Export a function that returns the router, allowing dependency injection
-module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifestUrl, scopedWhere, AUTH_ENABLED, manifestHash, filterManifestByResources, filterManifestByCatalogs }) => {
+module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifestUrl, scopedWhere, AUTH_ENABLED, manifestHash, filterManifestByResources, filterManifestByCatalogs, manifestUrlHmac }) => {
   const router = express.Router();
 
 
@@ -663,12 +663,43 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
         return res.status(404).json({ message: 'Addon not found' });
       }
       
+      console.log('🔍 Clone debug - Original addon data:', {
+        id: originalAddon.id,
+        name: originalAddon.name,
+        manifestUrlHash: originalAddon.manifestUrlHash,
+        originalManifest: originalAddon.originalManifest ? 'exists' : 'null',
+        manifest: originalAddon.manifest ? 'exists' : 'null'
+      });
+      
+      // Find unique name for the clone
+      const baseCloneName = `${originalAddon.name} (Copy)`
+      let cloneName = baseCloneName
+      let copyNumber = 1
+      
+      while (true) {
+        const nameExists = await prisma.addon.findFirst({
+          where: {
+            name: cloneName,
+            accountId: getAccountId(req)
+          }
+        })
+        
+        if (!nameExists) break
+        
+        cloneName = copyNumber === 1 ? `${originalAddon.name} (Copy)` : `${originalAddon.name} (Copy #${copyNumber})`
+        copyNumber++
+      }
+      
+      console.log('🔍 Clone name:', cloneName)
+      
       // Create a clone with a modified name
       const clonedAddon = await prisma.addon.create({
         data: {
-          name: `${originalAddon.name} (Copy)`,
+          name: cloneName,
           description: originalAddon.description,
           manifestUrl: originalAddon.manifestUrl,
+          manifestUrlHash: originalAddon.manifestUrlHash, // Copy the hash
+          originalManifest: originalAddon.originalManifest, // Copy the original manifest
           manifest: originalAddon.manifest,
           manifestHash: originalAddon.manifestHash,
           version: originalAddon.version,
@@ -676,9 +707,17 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
           stremioAddonId: originalAddon.stremioAddonId,
           resources: originalAddon.resources,
           catalogs: originalAddon.catalogs,
-          isActive: false, // Clone as inactive by default
+          isActive: true, // Clone as active by default
           accountId: getAccountId(req)
         }
+      });
+      
+      console.log('🔍 Clone debug - Cloned addon data:', {
+        id: clonedAddon.id,
+        name: clonedAddon.name,
+        manifestUrlHash: clonedAddon.manifestUrlHash,
+        originalManifest: clonedAddon.originalManifest ? 'exists' : 'null',
+        manifest: clonedAddon.manifest ? 'exists' : 'null'
       });
       
       // Clone group associations
@@ -950,7 +989,7 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
           ...(description !== undefined && { description }),
           ...(nextUrl && { 
             manifestUrl: encrypt(nextUrl, req),
-            manifestUrlHash: manifestHash(nextUrl)
+            manifestUrlHash: manifestUrlHmac(req, nextUrl)
           }),
           ...(version !== undefined && { version }),
           ...(resources !== undefined && { 
