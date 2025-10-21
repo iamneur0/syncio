@@ -104,19 +104,42 @@ async function getDesiredAddons(user, req, { prisma, getAccountId, decrypt, pars
       return addonUrl && protectedUrlSet.has(addonUrl)
     }
 
-    // Parse excluded addons
-    const excludedSet = new Set((excludedAddons || []).map(id => String(id).trim()))
+    // Parse excluded addons and get their stremioAddonIds
+    const excludedAddonIds = (excludedAddons || []).map(id => String(id).trim()).filter(Boolean)
+    
+    // Get the stremioAddonIds for excluded addons
+    let excludedStremioAddonIds = []
+    if (excludedAddonIds.length > 0) {
+      const excludedAddonRecords = await prisma.addon.findMany({
+        where: {
+          id: { in: excludedAddonIds },
+          accountId: getAccountId(req)
+        },
+        select: { stremioAddonId: true }
+      })
+      excludedStremioAddonIds = excludedAddonRecords
+        .map(addon => addon.stremioAddonId)
+        .filter(Boolean)
+    }
+    
+    const excludedStremioIdSet = new Set(excludedStremioAddonIds)
+    
+    console.log('🔍 Excluded addons debug:', {
+      excludedAddonIds,
+      excludedStremioAddonIds,
+      excludedStremioIdSet: Array.from(excludedStremioIdSet)
+    })
 
     // 1) Remove excluded addons from groupAddons
     const groupAddonsFiltered = groupAddons.filter(groupAddon => {
       const manifestId = groupAddon?.manifest?.id
-      return !(manifestId && excludedSet.has(manifestId))
+      return !(manifestId && excludedStremioIdSet.has(manifestId))
     })
     
     console.log('🔍 getDesiredAddons filtering debug:', {
       groupAddonsLength: groupAddons.length,
       groupAddonsFilteredLength: groupAddonsFiltered.length,
-      excludedSet: Array.from(excludedSet)
+      excludedStremioIdSet: Array.from(excludedStremioIdSet)
     })
 
     // 2) Keep only protected addons from userAddons
