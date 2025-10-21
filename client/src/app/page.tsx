@@ -19,14 +19,14 @@ import SettingsPage from '@/components/pages/SettingsPage'
 import AccountMenuButton from '@/components/auth/AccountMenuButton'
 
 const navigation = [
-  { name: 'Addons', icon: Puzzle, id: 'addons' },
   { name: 'Users', icon: User, id: 'users' },
   { name: 'Groups', icon: Users, id: 'groups' },
+  { name: 'Addons', icon: Puzzle, id: 'addons' },
   { name: 'Settings', icon: Settings, id: 'settings' },
 ]
 
 export default function HomePage() {
-  const [activeTab, setActiveTab] = useState('addons')
+  const [activeTab, setActiveTab] = useState('users')
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const { isDark, isMono } = useTheme()
@@ -54,7 +54,7 @@ export default function HomePage() {
       case 'settings':
         return <SettingsPage />
       default:
-        return <AddonsPage />
+        return <UsersPage />
     }
   }
 
