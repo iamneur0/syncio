@@ -31,9 +31,18 @@ export default function SortableAddonItem({
 
   // Extract data from the addon format (handles both Stremio and group addon formats)
   const manifest = addon?.manifest || addon
-  // For Stremio addons, use transportUrl as the primary ID (this is what the protect function expects)
-  const addonId = addon?.transportUrl || addon?.manifestUrl || addon?.url || manifest?.id || addon?.id || 'unknown'
-  const name = manifest?.name || addon?.transportName || addon?.name || 'Unknown'
+  // For group addons, use database ID; for Stremio addons, use transportUrl (this is what the protect function expects)
+  const addonId = addon?.id || addon?.transportUrl || addon?.manifestUrl || addon?.url || manifest?.id || 'unknown'
+  
+  // Debug logging to see what data we're getting
+  console.log('🔍 SortableAddonItem addon data:', { 
+    id: addon?.id, 
+    transportUrl: addon?.transportUrl, 
+    manifestUrl: addon?.manifestUrl,
+    finalAddonId: addonId 
+  })
+  // Prefer DB name when available; fall back to manifest/transport name
+  const name = addon?.name || addon?.transportName || manifest?.name || 'Unknown'
   const version = manifest?.version || addon?.version
   const description = manifest?.description || addon?.description || 'No description'
   const iconUrl = addon?.iconUrl || manifest?.logo || manifest?.icon || null

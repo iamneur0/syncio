@@ -203,6 +203,8 @@ async function getGroupAddons(prisma, groupId, req) {
     const { manifestUrl: _omitManifestUrl, ...cleanManifest } = (manifest && typeof manifest === 'object') ? manifest : {}
 
     return {
+      id: ga.addon.id,        // Add database ID for delete operations
+      name: ga.addon.name,    // Prefer DB name in UI over manifest name
       transportUrl,
       transportName,
       manifest: cleanManifest
