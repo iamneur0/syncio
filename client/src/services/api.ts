@@ -263,8 +263,8 @@ export const usersAPI = {
   },
 
   // Get group addons for user
-  getGroupAddons: async (id: string, includeDatabaseFields = false): Promise<any> => {
-    const response: AxiosResponse<any> = await api.get(`/users/${id}/group-addons?includeDatabaseFields=${includeDatabaseFields}`)
+  getGroupAddons: async (id: string): Promise<any> => {
+    const response: AxiosResponse<any> = await api.get(`/users/${id}/group-addons`)
     return response.data
   },
 
@@ -436,8 +436,8 @@ export const groupsAPI = {
   },
 
   // Get group addons directly
-  getGroupAddons: async (id: string, includeDatabaseFields = false): Promise<any> => {
-    const response: AxiosResponse<any> = await api.get(`/groups/${id}/addons?includeDatabaseFields=${includeDatabaseFields}`)
+  getGroupAddons: async (id: string): Promise<any> => {
+    const response: AxiosResponse<any> = await api.get(`/groups/${id}/addons`)
     return response.data
   },
 

@@ -601,7 +601,6 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
   router.get('/:id/group-addons', async (req, res) => {
     try {
       const { id } = req.params
-      const { includeDatabaseFields } = req.query
       
       // Get user's groups
       const groups = await prisma.group.findMany({
@@ -624,7 +623,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
       const { getGroupAddons } = require('../utils/helpers')
       
       // Get group addons with proper ordering and decryption
-      const groupAddons = await getGroupAddons(prisma, primaryGroup.id, req, includeDatabaseFields === 'true')
+      const groupAddons = await getGroupAddons(prisma, primaryGroup.id, req)
 
       res.json({ addons: groupAddons })
     } catch (error) {

@@ -86,7 +86,7 @@ export default function GroupDetailModal({
   // Fetch group addons directly
   const { data: groupAddonsData, isLoading: isLoadingGroupAddons } = useQuery({
     queryKey: ['group', group?.id, 'addons'],
-    queryFn: () => groupsAPI.getGroupAddons(group!.id, true), // Include database fields
+    queryFn: () => groupsAPI.getGroupAddons(group!.id),
     enabled: !!group?.id && isOpen,
   })
 
