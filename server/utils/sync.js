@@ -99,19 +99,17 @@ async function getDesiredAddons(user, req, { prisma, getAccountId, decrypt, pars
       return addonUrl && protectedUrlSet.has(addonUrl)
     }
 
-    // Parse excluded addons - keep as database IDs, don't convert to stremioAddonId
-    const excludedAddonIds = (excludedAddons || []).map(id => String(id).trim()).filter(Boolean)
-    const excludedAddonIdSet = new Set(excludedAddonIds)
-    
+    // Parse excluded addons - these are stremioAddonIds stored in the database
+    const excludedStremioAddonIds = (excludedAddons || []).map(id => String(id).trim()).filter(Boolean)
+    const excludedStremioAddonIdSet = new Set(excludedStremioAddonIds)
 
     // 1) Remove excluded addons from groupAddons
-    console.log('🔍 getDesiredAddons - excludedAddonIdSet:', Array.from(excludedAddonIdSet))
+    console.log('🔍 getDesiredAddons - excludedStremioAddonIdSet:', Array.from(excludedStremioAddonIdSet))
     console.log('🔍 getDesiredAddons - groupAddons count:', groupAddons.length)
     const groupAddonsFiltered = groupAddons.filter(groupAddon => {
-      // Use database ID for exclusion filtering to handle duplicates correctly
-      const addonId = groupAddon?.id
-      const isExcluded = addonId && excludedAddonIdSet.has(addonId)
-      console.log('🔍 getDesiredAddons - addon:', groupAddon?.name || groupAddon?.transportName, 'addonId:', addonId, 'isExcluded:', isExcluded)
+      const stremioAddonId = groupAddon?.manifest?.id
+      const isExcluded = stremioAddonId && excludedStremioAddonIdSet.has(stremioAddonId)
+      console.log('🔍 getDesiredAddons - addon:', groupAddon?.transportName, 'stremioAddonId:', stremioAddonId, 'isExcluded:', isExcluded)
       return !isExcluded
     })
     console.log('🔍 getDesiredAddons - groupAddonsFiltered count:', groupAddonsFiltered.length)

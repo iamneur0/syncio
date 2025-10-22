@@ -987,13 +987,12 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
   router.get('/:id/addons', async (req, res) => {
     try {
       const { id } = req.params
-      const { includeDatabaseFields } = req.query
       const group = await findGroupById(prisma, id, getAccountId(req))
       if (!group) return sendError(res, 404, 'Group not found')
       
       // Use shared helper to get ordered addons for this group
       const { getGroupAddons } = require('../utils/helpers')
-      const filteredAddonsSorted = await getGroupAddons(prisma, id, req, includeDatabaseFields === 'true')
+      const filteredAddonsSorted = await getGroupAddons(prisma, id, req)
       
       res.json({ addons: filteredAddonsSorted })
     } catch (error) {

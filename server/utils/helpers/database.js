@@ -162,7 +162,7 @@ function scopedWhere(req, extra = {}) {
 /**
  * Get group addons with proper ordering and decryption
  */
-async function getGroupAddons(prisma, groupId, req, includeDatabaseFields = false) {
+async function getGroupAddons(prisma, groupId, req) {
   const accId = getAccountId(req);
   if (!accId) return [];
   
@@ -202,25 +202,11 @@ async function getGroupAddons(prisma, groupId, req, includeDatabaseFields = fals
     // Strip manifest.manifestUrl to mirror getUserAddons shape
     const { manifestUrl: _omitManifestUrl, ...cleanManifest } = (manifest && typeof manifest === 'object') ? manifest : {}
 
-    const baseResult = {
+    return {
       transportUrl,
       transportName,
       manifest: cleanManifest
     }
-
-    // Include database fields if requested
-    if (includeDatabaseFields) {
-      return {
-        ...baseResult,
-        id: ga.addon.id,
-        name: ga.addon.name,
-        description: ga.addon.description,
-        version: ga.addon.version,
-        iconUrl: ga.addon.iconUrl
-      }
-    }
-
-    return baseResult
   }).filter(Boolean)
 }
 

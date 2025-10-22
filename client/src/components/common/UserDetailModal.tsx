@@ -135,7 +135,7 @@ export default function UserDetailModal({
   // Fetch group addons for user
   const { data: userGroupAddons, isLoading: isLoadingGroupAddons } = useQuery({
     queryKey: ['user', user?.id, 'group-addons'],
-    queryFn: () => usersAPI.getGroupAddons(user!.id, true), // Include database fields
+    queryFn: () => usersAPI.getGroupAddons(user!.id),
     enabled: !!user?.id,
   })
 
@@ -402,8 +402,8 @@ export default function UserDetailModal({
   const GroupAddonItem = ({ addon, index }: { addon: any; index: number }) => {
     // Support both legacy shape (plain manifest) and new shape ({ transportUrl, transportName, manifest })
     const manifest = addon?.manifest || addon
-    // For group addons, prioritize database ID over manifest ID to handle duplicates correctly
-    const addonId = addon?.id || addon?.transportUrl || manifest?.id
+    // Use Stremio addon ID from manifest for exclusions
+    const addonId = manifest?.id
     const name = addon?.name || manifest?.name || addon?.transportName || 'Unknown'
     const version = addon?.version || manifest?.version
     const description = addon?.description || manifest?.description || ''
