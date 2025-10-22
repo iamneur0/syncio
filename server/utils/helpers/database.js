@@ -196,8 +196,8 @@ async function getGroupAddons(prisma, groupId, req, includeDatabaseFields = fals
       try { return decrypt(ga.addon.manifestUrl, req) } catch { return ga.addon.manifestUrl }
     })()
 
-    // Determine transportName from manifest name or DB addon name
-    const transportName = (manifest && manifest.name) ? manifest.name : (ga.addon?.name || 'Unknown')
+    // Set transportName to empty string
+    const transportName = ""
 
     // Strip manifest.manifestUrl to mirror getUserAddons shape
     const { manifestUrl: _omitManifestUrl, ...cleanManifest } = (manifest && typeof manifest === 'object') ? manifest : {}

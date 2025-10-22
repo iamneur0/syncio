@@ -13,7 +13,7 @@ async function getUserAddons(user, req, { decrypt, StremioAPIClient }) {
     const apiClient = new StremioAPIClient({ endpoint: 'https://api.strem.io', authKey: authKeyPlain })
     const collection = await apiClient.request('addonCollectionGet', {})
 
-    // Return the API response but strip manifest.manifestUrl from each addon
+    // Return the API response but strip manifest.manifestUrl from each addon and set transportName to empty string
     const sanitized = collection && Array.isArray(collection.addons)
       ? {
           ...collection,
@@ -21,9 +21,9 @@ async function getUserAddons(user, req, { decrypt, StremioAPIClient }) {
             const manifest = addon?.manifest
             if (manifest && typeof manifest === 'object') {
               const { manifestUrl, ...restManifest } = manifest
-              return { ...addon, manifest: restManifest }
+              return { ...addon, manifest: restManifest, transportName: "" }
             }
-            return addon
+            return { ...addon, transportName: "" }
           })
         }
       : collection
@@ -58,7 +58,7 @@ async function getDesiredAddons(user, req, { prisma, getAccountId, decrypt, pars
 
     const { getGroupAddons } = require('../utils/helpers')
     // groupAddons are returned in collection shape: { transportUrl, transportName, manifest }
-    const groupAddons = groups.length > 0 ? await getGroupAddons(prisma, groups[0].id, req, true) : []
+    const groupAddons = groups.length > 0 ? await getGroupAddons(prisma, groups[0].id, req) : []
 
     // Get user's Stremio addons
     const { success, addons: userAddonsResponse, error } = await getUserAddons(user, req, { decrypt, StremioAPIClient })
