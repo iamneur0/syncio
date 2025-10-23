@@ -542,12 +542,22 @@ export default function AddonDetailModal({
                 return selectedId === catalogId && selectedType === catalogType
               })
             }
+
+            // Filter regular catalogs: show only catalogs that either have no search OR have search + other extras
+            const regularCatalogs = catalogAddons.filter((catalog: any) => {
+              if (!catalog.extra || !Array.isArray(catalog.extra)) return true // No extras = regular catalog
+              
+              const hasSearch = catalog.extra.some((extra: any) => extra.name === 'search')
+              const hasOtherExtras = catalog.extra.some((extra: any) => extra.name !== 'search')
+              
+              return !hasSearch || hasOtherExtras // Show if no search OR has search + other extras
+            })
             
             return (
               <EntityList
                 title="Catalogs"
-                count={catalogAddons.length}
-                items={catalogAddons}
+                count={regularCatalogs.length}
+                items={regularCatalogs}
                 layout="grid"
                 onClear={handleResetCatalogs}
                 getIsSelected={isCatalogSelected}
@@ -560,6 +570,58 @@ export default function AddonDetailModal({
                   />
                 )}
                 emptyMessage="No catalogs available for this addon"
+                emptyIcon={<BookOpen className="w-8 h-8" />}
+              />
+            )
+          })()}
+
+          {/* Search Catalogs Section */}
+          {(() => {
+            const detailManifest: any = currentAddon?.originalManifest || currentAddon?.manifest
+            const catalogAddons = detailManifest?.catalogs || []
+            
+            // Check if catalog resource is enabled
+            const isCatalogResourceEnabled = editResources.includes('catalog') || editResources.some(r => 
+              (typeof r === 'string' ? r : r?.name || r?.type) === 'catalog'
+            )
+            
+            if (catalogAddons.length === 0 || !isCatalogResourceEnabled) return null
+
+            // Find search catalogs (all catalogs with search in extras)
+            const searchCatalogs: any[] = []
+            
+            catalogAddons.forEach((catalog: any) => {
+              // Check if this catalog has search in its extras
+              if (catalog.extra && Array.isArray(catalog.extra)) {
+                const hasSearch = catalog.extra.some((extra: any) => extra.name === 'search')
+                
+                if (hasSearch) {
+                  searchCatalogs.push({
+                    ...catalog,
+                    searchRequired: catalog.extra.find((extra: any) => extra.name === 'search')?.isRequired || false
+                  })
+                }
+              }
+            })
+
+            if (searchCatalogs.length === 0) return null
+
+            return (
+              <EntityList
+                title="Search Catalogs"
+                count={searchCatalogs.length}
+                items={searchCatalogs}
+                layout="grid"
+                renderItem={(searchCatalog: any, index: number) => (
+                  <CatalogItem
+                    key={index}
+                    catalog={searchCatalog}
+                    isSelected={false} // Search catalogs are display-only for now
+                    onToggle={() => {}} // No toggle functionality for now
+                    showSearchInfo={true} // Show search-specific info
+                  />
+                )}
+                emptyMessage="No search catalogs available for this addon"
                 emptyIcon={<BookOpen className="w-8 h-8" />}
               />
             )
