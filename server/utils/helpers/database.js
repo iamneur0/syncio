@@ -203,6 +203,11 @@ async function getGroupAddons(prisma, groupId, req) {
     const { manifestUrl: _omitManifestUrl, ...cleanManifest } = (manifest && typeof manifest === 'object') ? manifest : {}
 
     return {
+      id: ga.addon.id,
+      name: ga.addon.name,
+      description: ga.addon.description,
+      version: ga.addon.version,
+      iconUrl: ga.addon.iconUrl,
       transportUrl,
       transportName,
       manifest: cleanManifest
