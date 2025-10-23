@@ -6,9 +6,10 @@ interface CatalogItemProps {
   catalog: any
   isSelected: boolean
   onToggle: (catalog: any) => void
+  showSearchInfo?: boolean
 }
 
-export default function CatalogItem({ catalog, isSelected, onToggle }: CatalogItemProps) {
+export default function CatalogItem({ catalog, isSelected, onToggle, showSearchInfo = false }: CatalogItemProps) {
   const { isDark, isMono } = useTheme()
 
   const getCatalogIcon = (catalog: any) => {
@@ -84,7 +85,7 @@ export default function CatalogItem({ catalog, isSelected, onToggle }: CatalogIt
           <h4 className={`font-medium text-sm ${isDark ? 'text-white' : 'text-gray-900'}`}>
             {getCatalogLabel(catalog)}
           </h4>
-          <div className="mt-1 flex items-center gap-2">
+          <div className="mt-1 flex items-center gap-2 flex-wrap">
             <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
               isDark ? 'bg-gray-700 text-gray-200' : 'bg-gray-100 text-gray-800'
             }`}>
