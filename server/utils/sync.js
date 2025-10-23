@@ -99,21 +99,27 @@ async function getDesiredAddons(user, req, { prisma, getAccountId, decrypt, pars
       return addonUrl && protectedUrlSet.has(addonUrl)
     }
 
-    // Parse excluded addons - these are stremioAddonIds stored in the database
-    const excludedStremioAddonIds = (excludedAddons || []).map(id => String(id).trim()).filter(Boolean)
-    const excludedStremioAddonIdSet = new Set(excludedStremioAddonIds)
+    // Parse excluded addons - these are database IDs stored in the database
+    const excludedAddonIds = (excludedAddons || []).map(id => String(id).trim()).filter(Boolean)
+    const excludedAddonIdSet = new Set(excludedAddonIds)
 
     // 1) Remove excluded addons from groupAddons
-    console.log('🔍 getDesiredAddons - excludedStremioAddonIdSet:', Array.from(excludedStremioAddonIdSet))
+    console.log('🔍 getDesiredAddons - excludedAddonIdSet:', Array.from(excludedAddonIdSet))
     console.log('🔍 getDesiredAddons - groupAddons count:', groupAddons.length)
     const groupAddonsFiltered = groupAddons.filter(groupAddon => {
-      const stremioAddonId = groupAddon?.manifest?.id
-      const isExcluded = stremioAddonId && excludedStremioAddonIdSet.has(stremioAddonId)
-      console.log('🔍 getDesiredAddons - addon:', groupAddon?.transportName, 'stremioAddonId:', stremioAddonId, 'isExcluded:', isExcluded)
+      const addonId = groupAddon?.id
+      const isExcluded = addonId && excludedAddonIdSet.has(addonId)
+      console.log('🔍 getDesiredAddons - addon:', groupAddon?.transportName, 'addonId:', addonId, 'isExcluded:', isExcluded)
       return !isExcluded
     })
     console.log('🔍 getDesiredAddons - groupAddonsFiltered count:', groupAddonsFiltered.length)
     
+    // Strip database fields from filtered group addons for clean JSON
+    const cleanGroupAddons = groupAddonsFiltered.map(addon => ({
+      transportUrl: addon.transportUrl,
+      transportName: addon.transportName,
+      manifest: addon.manifest
+    }))
 
     // 2) Keep only protected addons from userAddons
     const protectedUserAddons = (userAddons || []).filter(addon => isProtected(addon))
@@ -126,7 +132,7 @@ async function getDesiredAddons(user, req, { prisma, getAccountId, decrypt, pars
     )
 
     // 3) If an addon is protected and also present in groupAddons, remove it from groupAddons (compare by URL)
-    const nonProtectedGroupAddons = groupAddonsFiltered.filter(groupAddon => {
+    const nonProtectedGroupAddons = cleanGroupAddons.filter(groupAddon => {
       const url = normalizeUrl(groupAddon.transportUrl || groupAddon.manifestUrl || groupAddon?.manifest?.manifestUrl)
       return url && !protectedUserUrlSet.has(url)
     })

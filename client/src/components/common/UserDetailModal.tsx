@@ -402,8 +402,8 @@ export default function UserDetailModal({
   const GroupAddonItem = ({ addon, index }: { addon: any; index: number }) => {
     // Support both legacy shape (plain manifest) and new shape ({ transportUrl, transportName, manifest })
     const manifest = addon?.manifest || addon
-    // Use Stremio addon ID from manifest for exclusions
-    const addonId = manifest?.id
+    // Use database ID for exclusions
+    const addonId = addon?.id
     const name = addon?.name || manifest?.name || addon?.transportName || 'Unknown'
     const version = addon?.version || manifest?.version
     const description = addon?.description || manifest?.description || ''
