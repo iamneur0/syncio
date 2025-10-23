@@ -2174,6 +2174,12 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
                 : []
             )
 
+            const catalogsData = JSON.stringify(
+              Array.isArray(manifestData?.catalogs) 
+                ? manifestData.catalogs.map(c => ({ type: c?.type, id: c?.id })).filter(c => c.type && c.id)
+                : []
+            )
+
               const createdAddon = await prisma.addon.create({
                 data: {
                   accountId: getAccountId(req),
@@ -2188,7 +2194,8 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
                   originalManifest: originalManifestObj ? encrypt(JSON.stringify(originalManifestObj), req) : null,
                   manifest: manifestData ? encrypt(JSON.stringify(manifestData), req) : null,
                   manifestHash: manifestData ? manifestHash(manifestData) : null,
-                  resources: resourcesNames
+                  resources: resourcesNames,
+                  catalogs: catalogsData
                 }
               })
             
