@@ -94,6 +94,13 @@ export default function AddonDetailModal({
   const [editResources, setEditResources] = useState<any[]>([])
   const [editCatalogs, setEditCatalogs] = useState<any[]>([])
   const [urlCopied, setUrlCopied] = useState(false)
+  const [showManifestModal, setShowManifestModal] = useState(false)
+  const [showOriginalManifestModal, setShowOriginalManifestModal] = useState(false)
+  const [manifestJson, setManifestJson] = useState('')
+  const [originalManifestJson, setOriginalManifestJson] = useState('')
+
+  // Debug mode check
+  const isDebugMode = process.env.NEXT_PUBLIC_DEBUG === 'true' || process.env.NEXT_PUBLIC_DEBUG === '1'
   
   
   // Initialize form data when addon changes
@@ -336,6 +343,65 @@ export default function AddonDetailModal({
             </div>
           </div>
 
+          {/* Manifest Buttons - Debug Only */}
+          {isDebugMode && (
+            <div className={`p-4 rounded-lg mb-6 ${isDark ? 'bg-gray-700' : 'bg-gray-50'}`}>
+              <h3 className={`text-lg font-semibold mb-3 ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                Manifest (Debug)
+              </h3>
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (currentAddon?.manifest) {
+                      try {
+                        // manifest is already decrypted by the backend
+                        const manifest = typeof currentAddon.manifest === 'string' 
+                          ? JSON.parse(currentAddon.manifest) 
+                          : currentAddon.manifest
+                        setManifestJson(JSON.stringify(manifest, null, 2))
+                        setShowManifestModal(true)
+                      } catch (err) {
+                        console.error('Failed to parse manifest:', err)
+                      }
+                    }
+                  }}
+                  className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+                    isDark 
+                      ? 'bg-gray-600 text-white hover:bg-gray-550' 
+                      : 'bg-gray-100 text-gray-900 hover:bg-gray-200'
+                  }`}
+                >
+                  View Manifest
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (currentAddon?.originalManifest) {
+                      try {
+                        // originalManifest is already decrypted by the backend
+                        const originalManifest = typeof currentAddon.originalManifest === 'string' 
+                          ? JSON.parse(currentAddon.originalManifest) 
+                          : currentAddon.originalManifest
+                        setOriginalManifestJson(JSON.stringify(originalManifest, null, 2))
+                        setShowOriginalManifestModal(true)
+                      } catch (err) {
+                        console.error('Failed to parse original manifest:', err)
+                      }
+                    }
+                  }}
+                  className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+                    isDark 
+                      ? 'bg-gray-600 text-white hover:bg-gray-550' 
+                      : 'bg-gray-100 text-gray-900 hover:bg-gray-200'
+                  }`}
+                >
+                  View Original Manifest
+                </button>
+              </div>
+            </div>
+          )}
+
 
           {/* Description at top */}
           <div className={`p-4 rounded-lg mb-6 ${isDark ? 'bg-gray-700' : 'bg-gray-50'}`}>
@@ -523,6 +589,62 @@ export default function AddonDetailModal({
           </form>
         </div>
       </div>
+
+      {/* Manifest JSON Modal */}
+      {showManifestModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-[1001] p-4">
+          <div className={`relative w-full max-w-4xl max-h-[90vh] overflow-y-auto rounded-lg shadow-xl ${
+            isDark ? 'bg-gray-800' : 'bg-white'
+          }`}>
+            <button
+              onClick={() => setShowManifestModal(false)}
+              className={`absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded transition-colors border-0 ${
+                isDark ? 'text-gray-400 hover:text-gray-300 hover:bg-gray-700' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
+              }`}
+            >
+              <X className="w-4 h-4" />
+            </button>
+            <div className="p-6 pt-12">
+              <h3 className={`text-lg font-semibold mb-4 ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                Manifest JSON
+              </h3>
+              <pre className={`p-4 rounded-lg overflow-auto text-sm ${
+                isDark ? 'bg-gray-900 text-gray-100' : 'bg-gray-100 text-gray-900'
+              }`}>
+                {manifestJson}
+              </pre>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Original Manifest JSON Modal */}
+      {showOriginalManifestModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-[1001] p-4">
+          <div className={`relative w-full max-w-4xl max-h-[90vh] overflow-y-auto rounded-lg shadow-xl ${
+            isDark ? 'bg-gray-800' : 'bg-white'
+          }`}>
+            <button
+              onClick={() => setShowOriginalManifestModal(false)}
+              className={`absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded transition-colors border-0 ${
+                isDark ? 'text-gray-400 hover:text-gray-300 hover:bg-gray-700' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
+              }`}
+            >
+              <X className="w-4 h-4" />
+            </button>
+            <div className="p-6 pt-12">
+              <h3 className={`text-lg font-semibold mb-4 ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                Original Manifest JSON
+              </h3>
+              <pre className={`p-4 rounded-lg overflow-auto text-sm ${
+                isDark ? 'bg-gray-900 text-gray-100' : 'bg-gray-100 text-gray-900'
+              }`}>
+                {originalManifestJson}
+              </pre>
+            </div>
+          </div>
+        </div>
+      )}
     </div>,
     document.body
   )

@@ -86,18 +86,42 @@ function normalizeManifestObject(manifest) {
       pick.resources = labels
     }
 
-    // Normalize catalogs to array of {id/name/type} strings for stability
+    // Normalize catalogs to include all functional fields
     if (Array.isArray(manifest.catalogs)) {
-      const catalogKeys = manifest.catalogs
+      const catalogData = manifest.catalogs
         .map((c) => {
           if (!c || typeof c !== 'object') return null
-          const nm = c.name || c.id || ''
-          const tp = c.type || (Array.isArray(c.types) ? c.types.join(',') : '')
-          return `${String(nm)}::${String(tp)}`
+          
+          const catalog = {
+            id: c.id || '',
+            name: c.name || '',
+            type: c.type || ''
+          }
+          
+          // Include functional fields
+          if (Array.isArray(c.genres)) {
+            catalog.genres = [...c.genres].map(String).sort()
+          }
+          
+          if (Array.isArray(c.extra)) {
+            catalog.extra = c.extra
+              .map(e => typeof e === 'object' ? e : { name: String(e) })
+              .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+          }
+          
+          if (Array.isArray(c.extraSupported)) {
+            catalog.extraSupported = [...c.extraSupported].map(String).sort()
+          }
+          
+          if (Array.isArray(c.extraRequired)) {
+            catalog.extraRequired = [...c.extraRequired].map(String).sort()
+          }
+          
+          return catalog
         })
         .filter(Boolean)
-        .sort()
-      if (catalogKeys.length) pick.catalogs = catalogKeys
+      
+      if (catalogData.length) pick.catalogs = catalogData
     }
 
     // behaviorHints is often used by Stremio to affect behavior
@@ -109,6 +133,21 @@ function normalizeManifestObject(manifest) {
       const obj = {}
       for (const [k, v] of entries) obj[k] = v
       pick.behaviorHints = obj
+    }
+
+    // Include other functional fields
+    if (Array.isArray(manifest.idPrefixes)) {
+      pick.idPrefixes = [...manifest.idPrefixes].map(String).sort()
+    }
+
+    if (Array.isArray(manifest.addonCatalogs)) {
+      pick.addonCatalogs = manifest.addonCatalogs
+        .map(ac => ({
+          id: ac.id || '',
+          name: ac.name || '',
+          type: ac.type || ''
+        }))
+        .sort((a, b) => (a.id + a.type).localeCompare(b.id + b.type))
     }
 
     // Stable stringify with sorted keys

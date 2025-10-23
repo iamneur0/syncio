@@ -2152,14 +2152,19 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
             console.log(`📝 Addon name exists, using: ${finalAddonName}`)
           }
 
-          // Fetch original manifest for full capabilities
-              let originalManifestObj = manifestData
+          // Fetch original manifest for full capabilities - always try to fetch from transportUrl first
+              let originalManifestObj = null
               try {
                 const resp = await fetch(addonUrl)
                 if (resp.ok) {
                   originalManifestObj = await resp.json()
                 }
               } catch {}
+              
+              // If fetch failed, use the same manifest that goes into the manifest field
+              if (!originalManifestObj) {
+                originalManifestObj = manifestData
+              }
 
           // Create addon
           try {
