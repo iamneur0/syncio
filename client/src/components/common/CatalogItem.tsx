@@ -7,9 +7,10 @@ interface CatalogItemProps {
   isSelected: boolean
   onToggle: (catalog: any) => void
   showSearchInfo?: boolean
+  disabled?: boolean
 }
 
-export default function CatalogItem({ catalog, isSelected, onToggle, showSearchInfo = false }: CatalogItemProps) {
+export default function CatalogItem({ catalog, isSelected, onToggle, showSearchInfo = false, disabled = false }: CatalogItemProps) {
   const { isDark, isMono } = useTheme()
 
   const getCatalogIcon = (catalog: any) => {
@@ -63,14 +64,20 @@ export default function CatalogItem({ catalog, isSelected, onToggle, showSearchI
 
   return (
     <div 
-      className={`flex items-center justify-between p-3 rounded-lg transition-colors cursor-pointer ${
-        isDark ? 'bg-gray-600 hover:bg-gray-550' : 'bg-white hover:bg-gray-50'
+      className={`flex items-center justify-between p-3 rounded-lg transition-colors ${
+        disabled 
+          ? 'cursor-not-allowed opacity-50' 
+          : 'cursor-pointer'
+      } ${
+        disabled 
+          ? (isDark ? 'bg-gray-700' : 'bg-gray-100')
+          : (isDark ? 'bg-gray-600 hover:bg-gray-550' : 'bg-white hover:bg-gray-50')
       } border ${
         isSelected 
           ? (isMono ? 'ring-2 ring-white/50 border-white/40' : 'ring-2 ring-gray-400 border-gray-400')
           : 'border-transparent'
       }`}
-      onClick={() => onToggle(catalog)}
+      onClick={disabled ? undefined : () => onToggle(catalog)}
     >
       <div className="flex items-center flex-1 min-w-0">
         <div 

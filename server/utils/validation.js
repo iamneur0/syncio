@@ -108,16 +108,82 @@ function filterManifestByResources(manifestObj, selectedResourceNames) {
 
 function filterManifestByCatalogs(manifestObj, selectedCatalogIds) {
   if (!manifestObj || typeof manifestObj !== 'object') return null
-  const selectedIds = new Set(
-    (Array.isArray(selectedCatalogIds) ? selectedCatalogIds : [])
-      .map((c) => (typeof c === 'string' ? c : (c && c.id)))
-      .filter(Boolean)
-  )
+  
+  // Parse selected catalog tuples: (type, id, search)
+  const selectedCatalogs = new Map()
+  
+  if (Array.isArray(selectedCatalogIds)) {
+    selectedCatalogIds.forEach(catalog => {
+      if (Array.isArray(catalog) && catalog.length >= 2) {
+        // Format: [type, id, search] where search is optional (defaults to false)
+        const [type, id, search = false] = catalog
+        const catalogKey = `${id}:${type}`
+        selectedCatalogs.set(catalogKey, { type, id, search })
+      } else if (typeof catalog === 'string') {
+        // Legacy string format - assume no search
+        selectedCatalogs.set(catalog, { type: 'unknown', id: catalog, search: false })
+      } else if (catalog && catalog.id) {
+        // Database object format: { type, id, search }
+        const catalogKey = `${catalog.id}:${catalog.type || 'unknown'}`
+        selectedCatalogs.set(catalogKey, { 
+          type: catalog.type || 'unknown', 
+          id: catalog.id, 
+          search: catalog.search || false 
+        })
+      }
+    })
+  }
+  
   const clone = JSON.parse(JSON.stringify(manifestObj))
   if (Array.isArray(clone.catalogs)) {
-    clone.catalogs = clone.catalogs.filter((c) => {
-      const catalogId = typeof c === 'string' ? c : (c && c.id)
-      return catalogId && selectedIds.has(catalogId)
+    clone.catalogs = clone.catalogs.filter((catalog) => {
+      const catalogId = typeof catalog === 'string' ? catalog : (catalog && catalog.id)
+      const catalogType = typeof catalog === 'string' ? 'unknown' : (catalog && catalog.type) || 'unknown'
+      const catalogKey = `${catalogId}:${catalogType}`
+      
+      // Check if this catalog is selected
+      const selectedCatalog = selectedCatalogs.get(catalogKey)
+      console.log(`🔍 Looking for catalog key: ${catalogKey}`)
+      console.log(`🔍 Available keys:`, Array.from(selectedCatalogs.keys()))
+      console.log(`🔍 Found selected catalog:`, selectedCatalog)
+      if (!selectedCatalog) return false
+      
+      // If this catalog has search functionality, check if search is enabled
+      if (catalog.extra && Array.isArray(catalog.extra)) {
+        const hasSearch = catalog.extra.some((extra) => extra.name === 'search')
+        const hasOtherExtras = catalog.extra.some((extra) => extra.name !== 'search')
+        const isEmbeddedSearch = hasSearch && hasOtherExtras
+        
+        if (isEmbeddedSearch) {
+          // For embedded search catalogs, check if search is enabled in the tuple
+          console.log(`🔍 Catalog ${catalogId}:${catalogType} - selectedSearch:`, selectedCatalog.search)
+          console.log(`🔍 Selected catalog object:`, selectedCatalog)
+          console.log(`🔍 Catalog type match: ${selectedCatalog.type} === ${catalogType}`, selectedCatalog.type === catalogType)
+          
+          if (!selectedCatalog.search) {
+            // Remove search functionality from this catalog
+            console.log(`🔍 Removing search from ${catalogId}:${catalogType}`)
+            // Only remove the extra object with name: "search", keep extraSupported intact
+            catalog.extra = catalog.extra.filter((extra) => extra.name !== 'search')
+            // Don't modify extraSupported - keep it as is
+          } else {
+            console.log(`🔍 Keeping search for ${catalogId}:${catalogType}`)
+          }
+        } else if (hasSearch && !hasOtherExtras) {
+          // For standalone search catalogs, check if search is enabled
+          console.log(`🔍 Standalone search catalog ${catalogId}:${catalogType} - selectedSearch:`, selectedCatalog.search)
+          
+          if (!selectedCatalog.search) {
+            // Remove search functionality from this catalog
+            console.log(`🔍 Removing search from standalone ${catalogId}:${catalogType}`)
+            catalog.extra = catalog.extra.filter((extra) => extra.name !== 'search')
+          } else {
+            console.log(`🔍 Keeping search for standalone ${catalogId}:${catalogType}`)
+          }
+        }
+      }
+      
+      return true
     })
   }
   return clone

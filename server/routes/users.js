@@ -2174,11 +2174,49 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
                 : []
             )
 
-            const catalogsData = JSON.stringify(
-              Array.isArray(manifestData?.catalogs) 
-                ? manifestData.catalogs.map(c => ({ type: c?.type, id: c?.id })).filter(c => c.type && c.id)
-                : []
-            )
+            // Process catalogs with search detection logic
+            const processedCatalogs = []
+            if (Array.isArray(manifestData?.catalogs)) {
+              for (const catalog of manifestData.catalogs) {
+                if (!catalog?.type || !catalog?.id) continue
+                
+                // Check if catalog has search functionality
+                const hasSearch = catalog?.extra?.some((extra) => extra.name === 'search')
+                const hasOtherExtras = catalog?.extra?.some((extra) => extra.name !== 'search')
+                const isEmbeddedSearch = hasSearch && hasOtherExtras
+                const isStandaloneSearch = hasSearch && !hasOtherExtras
+                
+                if (isStandaloneSearch) {
+                  // Standalone search catalog: add with original ID (no suffix)
+                  processedCatalogs.push({
+                    type: catalog.type,
+                    id: catalog.id
+                  })
+                } else if (isEmbeddedSearch) {
+                  // Embedded search catalog: add both original and search versions
+                  processedCatalogs.push({
+                    type: catalog.type,
+                    id: catalog.id
+                  })
+                  processedCatalogs.push({
+                    type: catalog.type,
+                    id: `${catalog.id}-embed-search`
+                  })
+                } else {
+                  // Regular catalog: add as-is
+                  processedCatalogs.push({
+                    type: catalog.type,
+                    id: catalog.id
+                  })
+                }
+              }
+            }
+            
+            const catalogsData = JSON.stringify(processedCatalogs.map(c => ({
+              type: c.type,
+              id: c.id,
+              search: false // Default to false for imported catalogs
+            })))
 
               const createdAddon = await prisma.addon.create({
                 data: {

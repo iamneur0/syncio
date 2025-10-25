@@ -3,7 +3,7 @@
 
 import React, { useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'
-import { Puzzle, X, BookOpen, Clapperboard, Tv, Library, Zap, Clipboard, ClipboardList, Users } from 'lucide-react'
+import { Puzzle, X, BookOpen, Clapperboard, Tv, Library, Zap, Clipboard, ClipboardList, Users, Copy } from 'lucide-react'
 import { useTheme } from '@/contexts/ThemeContext'
 import { getColorBgClass, getColorTextClass, getColorBorderClass, getColorHexValue } from '@/utils/colorMapping'
 import { VersionChip, EntityList, InlineEdit } from './'
@@ -93,6 +93,7 @@ export default function AddonDetailModal({
   const [editGroupIds, setEditGroupIds] = useState<string[]>([])
   const [editResources, setEditResources] = useState<any[]>([])
   const [editCatalogs, setEditCatalogs] = useState<any[]>([])
+  const [catalogSearchState, setCatalogSearchState] = useState<Map<string, boolean>>(new Map())
   const [urlCopied, setUrlCopied] = useState(false)
   const [showManifestModal, setShowManifestModal] = useState(false)
   const [showOriginalManifestModal, setShowOriginalManifestModal] = useState(false)
@@ -120,7 +121,20 @@ export default function AddonDetailModal({
       try {
         const stored = Array.isArray(currentAddon.resources) ? currentAddon.resources : null
         const detailManifest: any = currentAddon.originalManifest || currentAddon.manifest
-        const fallback = Array.isArray(detailManifest?.resources) ? detailManifest.resources : []
+        const manifestResources = Array.isArray(detailManifest?.resources) ? detailManifest.resources : []
+        
+        // Check if there are any search catalogs
+        const catalogAddons = detailManifest?.catalogs || []
+        const hasSearchCatalogs = catalogAddons.some((catalog: any) => 
+          catalog.extra?.some((extra: any) => extra.name === 'search')
+        )
+        
+        // Add "search" resource if there are search catalogs
+        const fallback = [...manifestResources]
+        if (hasSearchCatalogs && !fallback.includes('search')) {
+          fallback.push('search')
+        }
+        
         // Use stored resources if explicitly set (including empty array), otherwise use manifest resources
         setEditResources(stored !== null ? stored : fallback)
       } catch (e) { 
@@ -147,7 +161,83 @@ export default function AddonDetailModal({
         const detailManifest: any = currentAddon.originalManifest || currentAddon.manifest
         const fallback = Array.isArray(detailManifest?.catalogs) ? detailManifest.catalogs : []
         // Use stored catalogs if explicitly set (including empty array), otherwise use manifest catalogs
-        setEditCatalogs(stored !== null ? stored : fallback)
+        // For new addons, always use manifest catalogs as default
+        if (stored !== null && stored.length > 0) {
+          // If we have stored catalogs, we need to merge them with manifest data to get the full structure
+          const manifestCatalogs = Array.isArray(detailManifest?.catalogs) ? detailManifest.catalogs : []
+          
+          // Create a map of stored catalogs to check for search functionality
+          const storedCatalogMap = new Map()
+          stored.forEach((storedCatalog: any) => {
+            const key = `${storedCatalog.id}:${storedCatalog.type}`
+            storedCatalogMap.set(key, storedCatalog)
+          })
+          
+          const mergedCatalogs = manifestCatalogs.map((manifestCatalog: any) => {
+            const key = `${manifestCatalog.id}:${manifestCatalog.type}`
+            const storedCatalog = storedCatalogMap.get(key)
+            
+            if (storedCatalog) {
+              // Check if this catalog has embedded search functionality in the manifest
+              const hasSearch = manifestCatalog.extra?.some((extra: any) => extra.name === 'search')
+              const hasOtherExtras = manifestCatalog.extra?.some((extra: any) => extra.name !== 'search')
+              const isEmbeddedSearch = hasSearch && hasOtherExtras
+              
+              if (isEmbeddedSearch) {
+                // For embedded search catalogs, use the database state to determine search functionality
+                const storedHasSearch = storedCatalog.search === true
+                
+                console.log(`🔍 Initializing ${manifestCatalog.id}:${manifestCatalog.type} - storedHasSearch:`, storedHasSearch)
+                console.log(`🔍 Stored catalog:`, storedCatalog)
+                
+                if (storedHasSearch) {
+                  // Keep the search functionality from manifest
+                  console.log(`🔍 Keeping search for ${manifestCatalog.id}:${manifestCatalog.type}`)
+                  return manifestCatalog
+                } else {
+                  // Remove the search functionality based on database state
+                  console.log(`🔍 Removing search for ${manifestCatalog.id}:${manifestCatalog.type}`)
+                  return {
+                    ...manifestCatalog,
+                    extra: manifestCatalog.extra?.filter((extra: any) => extra.name !== 'search') || [],
+                    extraSupported: manifestCatalog.extraSupported?.filter((extra: any) => extra !== 'search') || []
+                  }
+                }
+              } else {
+                // Regular catalog, use as-is
+                return manifestCatalog
+              }
+            } else {
+              // Not in stored catalogs - this means it was unselected
+              // Return null to indicate it should be filtered out
+              console.log(`🔍 Catalog ${manifestCatalog.id}:${manifestCatalog.type} was unselected (not in database)`)
+              return null
+            }
+          }).filter(Boolean) // Remove null entries
+          
+          // Initialize search state map
+          const searchStateMap = new Map<string, boolean>()
+          stored.forEach((storedCatalog: any) => {
+            const key = `${storedCatalog.id}:${storedCatalog.type}`
+            searchStateMap.set(key, storedCatalog.search === true)
+          })
+          setCatalogSearchState(searchStateMap)
+          setEditCatalogs(mergedCatalogs)
+        } else {
+          // For new addons (stored is null), initialize search state based on manifest
+          const manifestCatalogs = Array.isArray(detailManifest?.catalogs) ? detailManifest.catalogs : []
+          const searchStateMap = new Map<string, boolean>()
+          
+          manifestCatalogs.forEach((catalog: any) => {
+            const key = `${catalog.id}:${catalog.type}`
+            const hasSearch = catalog.extra?.some((extra: any) => extra.name === 'search')
+            // For new addons, assume all search functionality is enabled by default
+            searchStateMap.set(key, hasSearch)
+          })
+          
+          setCatalogSearchState(searchStateMap)
+          setEditCatalogs(fallback)
+        }
       } catch (e) { 
         setEditCatalogs([]) 
       }
@@ -168,8 +258,22 @@ export default function AddonDetailModal({
     
     updateData.groupIds = editGroupIds
     if (Array.isArray(editResources)) updateData.resources = editResources
-    if (Array.isArray(editCatalogs)) updateData.catalogs = editCatalogs
-
+    
+    // Convert catalogs to tuple format: [type, id, search]
+    if (Array.isArray(editCatalogs)) {
+      updateData.catalogs = editCatalogs.map(catalog => {
+        if (typeof catalog === 'string') {
+          return [catalog, catalog, false] // [type, id, search] - legacy string format
+        } else if (catalog && catalog.id) {
+          // Use the search state map to determine if search is enabled
+          const key = `${catalog.id}:${catalog.type}`
+          const hasSearch = catalogSearchState.get(key) || false
+          console.log(`🔍 Converting catalog ${catalog.id}:${catalog.type} - hasSearch:`, hasSearch)
+          return [catalog.type || 'unknown', catalog.id, hasSearch]
+        }
+        return catalog // fallback
+      })
+    }
 
     onSave(updateData)
   }
@@ -201,19 +305,125 @@ export default function AddonDetailModal({
           return !(selectedId === catalogId && selectedType === catalogType)
         })
       } else {
-        // Store catalog object with id and type only
-        const catalogObject = {
-          id: catalog?.id || catalog?.name,
-          type: catalog?.type || 'unknown'
+        // Store the full catalog object
+        return [...prev, catalog]
+      }
+    })
+  }
+
+  const handleSearchCatalogToggle = (catalog: any) => {
+    const catalogId = catalog?.id || catalog?.name
+    const catalogType = catalog?.type || 'unknown'
+    const key = `${catalogId}:${catalogType}`
+    
+    setEditCatalogs((prev) => {
+      // Check if this is an embedded search catalog (has both search and other extras)
+      const hasSearch = catalog?.extra?.some((extra: any) => extra.name === 'search')
+      const hasOtherExtras = catalog?.extra?.some((extra: any) => extra.name !== 'search')
+      const isEmbeddedSearch = hasSearch && hasOtherExtras
+      
+      if (isEmbeddedSearch) {
+        // For embedded search: manage the search extra in the main catalog
+        const mainCatalogIndex = prev.findIndex(selected => {
+          const selectedId = selected?.id || selected
+          const selectedType = selected?.type || 'unknown'
+          return selectedId === catalogId && selectedType === catalogType
+        })
+        
+        if (mainCatalogIndex !== -1) {
+          // Main catalog exists, toggle search extra
+          const mainCatalog = prev[mainCatalogIndex]
+          const hasSearchExtra = mainCatalog.extra?.some((extra: any) => extra.name === 'search')
+          
+          const updatedMainCatalog = {
+            ...mainCatalog,
+            extra: hasSearchExtra 
+              ? mainCatalog.extra?.filter((extra: any) => extra.name !== 'search') || []
+              : [...(mainCatalog.extra || []), { name: 'search' }],
+            extraSupported: hasSearchExtra
+              ? mainCatalog.extraSupported?.filter((extra: any) => extra !== 'search') || []
+              : [...(mainCatalog.extraSupported || []), 'search']
+          }
+          
+          const newCatalogs = [...prev]
+          newCatalogs[mainCatalogIndex] = updatedMainCatalog
+          
+          // Update search state map
+          setCatalogSearchState(prevState => {
+            const newState = new Map(prevState)
+            newState.set(key, !hasSearchExtra)
+            return newState
+          })
+          
+          return newCatalogs
+        } else {
+          // Main catalog doesn't exist, add it with search
+          const catalogWithSearch = {
+            ...catalog,
+            extra: [...(catalog.extra || []), { name: 'search' }],
+            extraSupported: [...(catalog.extraSupported || []), 'search']
+          }
+          
+          // Update search state map
+          setCatalogSearchState(prevState => {
+            const newState = new Map(prevState)
+            newState.set(key, true)
+            return newState
+          })
+          
+          return [...prev, catalogWithSearch]
         }
-        return [...prev, catalogObject]
+      } else {
+        // For standalone search: treat like regular catalog
+        const exists = prev.some(selected => {
+          const selectedId = selected?.id || selected
+          const selectedType = selected?.type || 'unknown'
+          return selectedId === catalogId && selectedType === catalogType
+        })
+        
+        if (exists) {
+          // Remove the catalog
+          setCatalogSearchState(prevState => {
+            const newState = new Map(prevState)
+            newState.set(key, false)
+            return newState
+          })
+          
+          return prev.filter(selected => {
+            const selectedId = selected?.id || selected
+            const selectedType = selected?.type || 'unknown'
+            return !(selectedId === catalogId && selectedType === catalogType)
+          })
+        } else {
+          // Add the catalog
+          setCatalogSearchState(prevState => {
+            const newState = new Map(prevState)
+            newState.set(key, true)
+            return newState
+          })
+          
+          return [...prev, catalog]
+        }
       }
     })
   }
 
   const handleResetResources = () => {
     const detailManifest: any = currentAddon?.originalManifest || currentAddon?.manifest
-    const defaultResources = Array.isArray(detailManifest?.resources) ? detailManifest.resources : []
+    const manifestResources = Array.isArray(detailManifest?.resources) ? detailManifest.resources : []
+    
+    // Check if there are any search catalogs
+    const catalogAddons = detailManifest?.catalogs || []
+    const hasSearchCatalogs = catalogAddons.some((catalog: any) => 
+      catalog.extra?.some((extra: any) => extra.name === 'search')
+    )
+    
+    // Add "search" resource if there are search catalogs
+    const defaultResources = [...manifestResources]
+    if (hasSearchCatalogs && !defaultResources.includes('search')) {
+      defaultResources.push('search')
+    }
+    
     setEditResources(defaultResources)
     // Note: Changes will be saved when user clicks "Update" button
   }
@@ -475,10 +685,37 @@ export default function AddonDetailModal({
           {(() => {
             // Always get all resources from originalManifest (show all available options)
             const detailManifest: any = currentAddon?.originalManifest || currentAddon?.manifest
-            const allResources: any[] = Array.isArray(detailManifest?.resources) ? detailManifest.resources : []
+            const manifestResources: any[] = Array.isArray(detailManifest?.resources) ? detailManifest.resources : []
+            
+            // Check if there are any search catalogs
+            const catalogAddons = detailManifest?.catalogs || []
+            const hasSearchCatalogs = catalogAddons.some((catalog: any) => 
+              catalog.extra?.some((extra: any) => extra.name === 'search')
+            )
+            
+            // Add "search" resource if there are search catalogs
+            const allResources: any[] = [...manifestResources]
+            if (hasSearchCatalogs && !allResources.includes('search')) {
+              allResources.push('search')
+            }
             
             const isSelected = (item: any) => {
               const label = typeof item === 'string' ? item : (item?.name || item?.type || JSON.stringify(item))
+              
+              // Special handling for "search" resource - check if any search catalogs are selected
+              if (label === 'search') {
+                // Check if any search catalogs are currently selected
+                const hasSelectedSearchCatalogs = editCatalogs.some((catalog: any) => {
+                  const hasSearch = catalog.extra?.some((extra: any) => extra.name === 'search')
+                  return hasSearch
+                })
+                
+                // Also check search state map for embedded search catalogs
+                const hasSearchStateEnabled = Array.from(catalogSearchState.values()).some(value => value === true)
+                
+                return hasSelectedSearchCatalogs || hasSearchStateEnabled
+              }
+              
               return editResources.some((s) => {
                 const sl = typeof s === 'string' ? s : (s?.name || s?.type || JSON.stringify(s))
                 return sl === label
@@ -486,17 +723,106 @@ export default function AddonDetailModal({
             }
 
             const handleResourceToggle = (resource: any) => {
-              setEditResources((prev) => {
-                const exists = isSelected(resource)
-                if (exists) {
-                  const label = typeof resource === 'string' ? resource : (resource?.name || resource?.type || JSON.stringify(resource))
-                  return prev.filter((p) => {
-                    const pl = typeof p === 'string' ? p : (p?.name || p?.type || JSON.stringify(p))
-                    return pl !== label
+              // Special handling for "search" resource
+              if (resource === 'search') {
+                const isCurrentlySelected = isSelected(resource)
+                
+                if (isCurrentlySelected) {
+                  // Search resource is being unselected - remove search functionality from search catalogs
+                  setEditCatalogs((prev) => {
+                    return prev.map((catalog: any) => {
+                      const hasSearch = catalog.extra?.some((extra: any) => extra.name === 'search')
+                      const hasOtherExtras = catalog.extra?.some((extra: any) => extra.name !== 'search')
+                      const isEmbeddedSearch = hasSearch && hasOtherExtras
+                      const isStandaloneSearch = hasSearch && !hasOtherExtras
+                      
+                      if (isStandaloneSearch) {
+                        // Remove entire standalone search catalog by returning null
+                        return null
+                      } else if (isEmbeddedSearch) {
+                        // Remove search functionality from embedded search catalogs
+                        return {
+                          ...catalog,
+                          extra: catalog.extra?.filter((extra: any) => extra.name !== 'search') || [],
+                          extraSupported: catalog.extraSupported?.filter((extra: any) => extra !== 'search') || []
+                        }
+                      } else {
+                        // Keep regular catalogs as-is
+                        return catalog
+                      }
+                    }).filter(Boolean) // Remove null entries (standalone search catalogs)
+                  })
+                  
+                  // Clear search state for all catalogs
+                  setCatalogSearchState((prevState) => {
+                    const newState = new Map(prevState)
+                    newState.forEach((value, key) => {
+                      newState.set(key, false)
+                    })
+                    return newState
+                  })
+                  
+                  // Remove "search" from resources
+                  setEditResources((prev) => {
+                    return prev.filter((p) => p !== 'search')
+                  })
+                } else {
+                  // Search resource is being selected - add it to resources and restore search catalogs
+                  setEditResources((prev) => {
+                    if (!prev.includes('search')) {
+                      return [...prev, 'search']
+                    }
+                    return prev
+                  })
+                  
+                  // Restore search catalogs from the original manifest
+                  setEditCatalogs((prev) => {
+                    const manifestCatalogs = Array.isArray(detailManifest?.catalogs) ? detailManifest.catalogs : []
+                    const searchCatalogs = manifestCatalogs.filter((catalog: any) => {
+                      const hasSearch = catalog.extra?.some((extra: any) => extra.name === 'search')
+                      return hasSearch
+                    })
+                    
+                    // Add back search catalogs that aren't already in editCatalogs
+                    const existingIds = new Set(prev.map((c: any) => `${c.id}:${c.type}`))
+                    const newSearchCatalogs = searchCatalogs.filter((catalog: any) => {
+                      const key = `${catalog.id}:${catalog.type}`
+                      return !existingIds.has(key)
+                    })
+                    
+                    return [...prev, ...newSearchCatalogs]
+                  })
+                  
+                  // Update search state for all search catalogs
+                  setCatalogSearchState((prevState) => {
+                    const newState = new Map(prevState)
+                    const manifestCatalogs = Array.isArray(detailManifest?.catalogs) ? detailManifest.catalogs : []
+                    
+                    manifestCatalogs.forEach((catalog: any) => {
+                      const hasSearch = catalog.extra?.some((extra: any) => extra.name === 'search')
+                      if (hasSearch) {
+                        const key = `${catalog.id}:${catalog.type}`
+                        newState.set(key, true)
+                      }
+                    })
+                    
+                    return newState
                   })
                 }
-                return [...prev, resource]
-              })
+              } else {
+                // Regular resource handling
+                setEditResources((prev) => {
+                  const exists = isSelected(resource)
+                  if (exists) {
+                    const label = typeof resource === 'string' ? resource : (resource?.name || resource?.type || JSON.stringify(resource))
+                    return prev.filter((p) => {
+                      const pl = typeof p === 'string' ? p : (p?.name || p?.type || JSON.stringify(p))
+                      return pl !== label
+                    })
+                  }
+                  return [...prev, resource]
+                })
+              }
             }
 
             return (
@@ -606,19 +932,34 @@ export default function AddonDetailModal({
 
             if (searchCatalogs.length === 0) return null
 
+            const isSearchCatalogSelected = (catalog: any) => {
+              const catalogId = catalog?.id || catalog?.name
+              const catalogType = catalog?.type || 'unknown'
+              const key = `${catalogId}:${catalogType}`
+              
+              // Use the search state map to determine if search is enabled
+              return catalogSearchState.get(key) || false
+            }
+
+            const isSearchCatalogDisabled = (catalog: any) => {
+              // With simplified logic, search catalogs are never disabled
+              return false
+            }
+
             return (
               <EntityList
                 title="Search Catalogs"
                 count={searchCatalogs.length}
                 items={searchCatalogs}
                 layout="grid"
+                getIsSelected={isSearchCatalogSelected}
                 renderItem={(searchCatalog: any, index: number) => (
                   <CatalogItem
                     key={index}
                     catalog={searchCatalog}
-                    isSelected={false} // Search catalogs are display-only for now
-                    onToggle={() => {}} // No toggle functionality for now
-                    showSearchInfo={true} // Show search-specific info
+                    isSelected={isSearchCatalogSelected(searchCatalog)}
+                    onToggle={handleSearchCatalogToggle}
+                    disabled={isSearchCatalogDisabled(searchCatalog)}
                   />
                 )}
                 emptyMessage="No search catalogs available for this addon"
@@ -658,14 +999,28 @@ export default function AddonDetailModal({
           <div className={`relative w-full max-w-4xl max-h-[90vh] overflow-y-auto rounded-lg shadow-xl ${
             isDark ? 'bg-gray-800' : 'bg-white'
           }`}>
-            <button
-              onClick={() => setShowManifestModal(false)}
-              className={`absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded transition-colors border-0 ${
-                isDark ? 'text-gray-400 hover:text-gray-300 hover:bg-gray-700' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
-              }`}
-            >
-              <X className="w-4 h-4" />
-            </button>
+            <div className="absolute top-4 right-4 flex gap-2">
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(manifestJson)
+                  toast.success('JSON copied to clipboard')
+                }}
+                className={`p-2 rounded-lg transition-colors ${
+                  isDark ? 'text-gray-400 hover:bg-gray-700' : 'text-gray-600 hover:bg-gray-100'
+                }`}
+                title="Copy JSON to clipboard"
+              >
+                <Copy className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() => setShowManifestModal(false)}
+                className={`p-2 rounded-lg transition-colors ${
+                  isDark ? 'text-gray-400 hover:bg-gray-700' : 'text-gray-600 hover:bg-gray-100'
+                }`}
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
             <div className="p-6 pt-12">
               <h3 className={`text-lg font-semibold mb-4 ${isDark ? 'text-white' : 'text-gray-900'}`}>
                 Manifest JSON
@@ -686,14 +1041,28 @@ export default function AddonDetailModal({
           <div className={`relative w-full max-w-4xl max-h-[90vh] overflow-y-auto rounded-lg shadow-xl ${
             isDark ? 'bg-gray-800' : 'bg-white'
           }`}>
-            <button
-              onClick={() => setShowOriginalManifestModal(false)}
-              className={`absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded transition-colors border-0 ${
-                isDark ? 'text-gray-400 hover:text-gray-300 hover:bg-gray-700' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
-              }`}
-            >
-              <X className="w-4 h-4" />
-            </button>
+            <div className="absolute top-4 right-4 flex gap-2">
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(originalManifestJson)
+                  toast.success('JSON copied to clipboard')
+                }}
+                className={`p-2 rounded-lg transition-colors ${
+                  isDark ? 'text-gray-400 hover:bg-gray-700' : 'text-gray-600 hover:bg-gray-100'
+                }`}
+                title="Copy JSON to clipboard"
+              >
+                <Copy className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() => setShowOriginalManifestModal(false)}
+                className={`p-2 rounded-lg transition-colors ${
+                  isDark ? 'text-gray-400 hover:bg-gray-700' : 'text-gray-600 hover:bg-gray-100'
+                }`}
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
             <div className="p-6 pt-12">
               <h3 className={`text-lg font-semibold mb-4 ${isDark ? 'text-white' : 'text-gray-900'}`}>
                 Original Manifest JSON

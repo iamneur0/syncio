@@ -82,7 +82,14 @@ async function reloadAddon(prisma, getAccountId, addonId, req, { filterManifestB
       
       // Apply catalog filtering if catalogs are provided
       if (Array.isArray(updatedCatalogs) && updatedCatalogs.length > 0 && filtered) {
-        filtered = filterManifestByCatalogs(filtered, updatedCatalogs)
+        // Convert tuples to objects for filtering
+        const catalogObjects = updatedCatalogs.map(c => {
+          if (Array.isArray(c) && c.length >= 2) {
+            return { type: c[0], id: c[1], search: c[2] !== undefined ? c[2] : false }
+          }
+          return c
+        })
+        filtered = filterManifestByCatalogs(filtered, catalogObjects)
       }
     } catch (e) {
       console.error('Error filtering manifest on reload:', e)
@@ -466,8 +473,45 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
       
       const simplifiedCatalogs = (() => {
         try {
-          const src = Array.isArray(manifestData?.catalogs) ? manifestData.catalogs : []
-          return src.map(c => ({ type: c.type, id: c.id })).filter(c => c.type && c.id)
+          // Use the UI state (catalogs parameter) if available, otherwise fall back to manifest data
+          const src = Array.isArray(catalogs) && catalogs.length > 0 ? catalogs : (Array.isArray(manifestData?.catalogs) ? manifestData.catalogs : [])
+          const processedCatalogs = []
+          
+          for (const catalog of src) {
+            if (!catalog?.type || !catalog?.id) continue
+            
+            // Check if catalog has search functionality enabled in UI state
+            const hasSearch = catalog?.extra?.some((extra) => extra.name === 'search')
+            const hasOtherExtras = catalog?.extra?.some((extra) => extra.name !== 'search')
+            const isEmbeddedSearch = hasSearch && hasOtherExtras
+            const isStandaloneSearch = hasSearch && !hasOtherExtras
+            
+            if (isStandaloneSearch) {
+              // Standalone search catalog: add with original ID (no suffix)
+              processedCatalogs.push({
+                type: catalog.type,
+                id: catalog.id
+              })
+            } else if (isEmbeddedSearch) {
+              // Embedded search catalog: add both original and search versions
+              processedCatalogs.push({
+                type: catalog.type,
+                id: catalog.id
+              })
+              processedCatalogs.push({
+                type: catalog.type,
+                id: `${catalog.id}-embed-search`
+              })
+            } else {
+              // Regular catalog: add as-is
+              processedCatalogs.push({
+                type: catalog.type,
+                id: catalog.id
+              })
+            }
+          }
+          
+          return processedCatalogs
         } catch { return [] }
       })()
 
@@ -877,19 +921,20 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
             }
           }
           
-          if (original && Array.isArray(original.resources)) {
-            const selected = Array.isArray(resources) ? resources : []
-            console.log('🔍 Filtering from original manifest with selected resources:', selected)
-            filtered = filterManifestByResources(original, selected) || { ...original, catalogs: [], addonCatalogs: [] }
-            console.log('🔍 Filtered manifest has catalogs:', Array.isArray(filtered?.catalogs) ? filtered.catalogs.length : 'no catalogs')
-            
-            // Apply catalog filtering if catalogs are provided
-            if (catalogs !== undefined && filtered) {
-              const selectedCatalogs = Array.isArray(catalogs) ? catalogs : []
-              console.log('🔍 Filtering catalogs with selected catalog IDs:', selectedCatalogs)
-              filtered = filterManifestByCatalogs(filtered, selectedCatalogs)
-              console.log('🔍 After catalog filtering, manifest has catalogs:', Array.isArray(filtered?.catalogs) ? filtered.catalogs.length : 'no catalogs')
+          if (original) {
+            // Always set filtered when we have original manifest
+            if (Array.isArray(original.resources)) {
+              const selected = Array.isArray(resources) ? resources : []
+              console.log('🔍 Filtering from original manifest with selected resources:', selected)
+              filtered = filterManifestByResources(original, selected) || { ...original, catalogs: [], addonCatalogs: [] }
+              console.log('🔍 Filtered manifest has catalogs:', Array.isArray(filtered?.catalogs) ? filtered.catalogs.length : 'no catalogs')
+            } else {
+              // No resources in original, use original as base
+              filtered = original
+              console.log('🔍 Using original manifest as base (no resources)')
             }
+            
+        // Note: Catalog filtering will be done after database update
           } else if (Array.isArray(resources)) {
             // If no original manifest available, create a minimal filtered manifest
             const names = resources.map(r => (typeof r === 'string' ? r : (r && (r.name || r.type)))).filter(Boolean)
@@ -905,13 +950,6 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
             }
           }
           
-          // Handle case where only catalogs are changed (without resources)
-          if (catalogs !== undefined && !resources && original && filtered) {
-            const selectedCatalogs = Array.isArray(catalogs) ? catalogs : []
-            console.log('🔍 Only catalogs changed, filtering catalogs with selected catalog IDs:', selectedCatalogs)
-            filtered = filterManifestByCatalogs(filtered, selectedCatalogs)
-            console.log('🔍 After catalog-only filtering, manifest has catalogs:', Array.isArray(filtered?.catalogs) ? filtered.catalogs.length : 'no catalogs')
-          }
         } catch (e) {
           console.error('Error filtering manifest from original:', e)
         }
@@ -949,7 +987,17 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
             }).filter(Boolean) : []) 
           }),
           ...(catalogs !== undefined && { 
-            catalogs: JSON.stringify(Array.isArray(catalogs) ? catalogs.map(c => ({ type: c.type, id: c.id })).filter(c => c.type && c.id) : []) 
+            catalogs: JSON.stringify(Array.isArray(catalogs) ? catalogs.map(c => {
+              // Handle tuple format: [type, id, search]
+              if (Array.isArray(c) && c.length >= 2) {
+                return { type: c[0], id: c[1], search: c[2] || false }
+              }
+              // Handle object format: { type, id, search }
+              else if (c && typeof c === 'object' && c.type && c.id) {
+                return { type: c.type, id: c.id, search: c.search || false }
+              }
+              return null
+            }).filter(Boolean) : []) 
           }),
           ...(manifestData && {
             originalManifest: encrypt(JSON.stringify(manifestData), req),
@@ -984,6 +1032,42 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
             });
           }
         }
+      }
+
+      // Apply catalog filtering using database state if catalogs were updated
+      if (catalogs !== undefined && filtered) {
+        // Read catalogs from database to get the correct search state
+        const updatedAddonWithCatalogs = await prisma.addon.findUnique({
+          where: { id },
+          select: { catalogs: true }
+        })
+        
+        let databaseCatalogs = []
+        if (updatedAddonWithCatalogs?.catalogs) {
+          try {
+            databaseCatalogs = JSON.parse(updatedAddonWithCatalogs.catalogs)
+          } catch (e) {
+            console.log('🔍 Failed to parse database catalogs:', e)
+          }
+        }
+        
+        console.log('🔍 Using database catalogs for filtering:', databaseCatalogs)
+        console.log('🔍 Database catalogs type:', typeof databaseCatalogs, 'isArray:', Array.isArray(databaseCatalogs))
+        if (Array.isArray(databaseCatalogs) && databaseCatalogs.length > 0) {
+          console.log('🔍 First database catalog:', databaseCatalogs[0])
+        }
+        
+        filtered = filterManifestByCatalogs(filtered, databaseCatalogs)
+        console.log('🔍 After catalog filtering, manifest has catalogs:', Array.isArray(filtered?.catalogs) ? filtered.catalogs.length : 'no catalogs')
+        
+        // Update the manifest in the database with the filtered version
+        await prisma.addon.update({
+          where: { id },
+          data: {
+            manifest: encrypt(JSON.stringify(filtered), req),
+            manifestHash: manifestHash(filtered)
+          }
+        })
       }
 
       res.json({
