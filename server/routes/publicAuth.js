@@ -622,10 +622,44 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, issueAccessToken, issueR
                 // If they're just IDs, try to match them with originalManifest catalogs
                 if (selectedCatalogs.length > 0 && typeof selectedCatalogs[0] === 'string') {
                   const originalCatalogs = Array.isArray(originalManifestObj?.catalogs) ? originalManifestObj.catalogs : []
-                  return selectedCatalogs.map(id => {
+                  const processedCatalogs = []
+                  
+                  for (const id of selectedCatalogs) {
                     const catalog = originalCatalogs.find(c => c.id === id)
-                    return catalog ? { type: catalog.type, id: catalog.id } : null
-                  }).filter(Boolean)
+                    if (!catalog) continue
+                    
+                    // Check if catalog has search functionality
+                    const hasSearch = catalog?.extra?.some((extra) => extra.name === 'search')
+                    const hasOtherExtras = catalog?.extra?.some((extra) => extra.name !== 'search')
+                    const isEmbeddedSearch = hasSearch && hasOtherExtras
+                    const isStandaloneSearch = hasSearch && !hasOtherExtras
+                    
+                    if (isStandaloneSearch) {
+                      // Standalone search catalog: add with original ID (no suffix)
+                      processedCatalogs.push({
+                        type: catalog.type,
+                        id: catalog.id
+                      })
+                    } else if (isEmbeddedSearch) {
+                      // Embedded search catalog: add both original and search versions
+                      processedCatalogs.push({
+                        type: catalog.type,
+                        id: catalog.id
+                      })
+                      processedCatalogs.push({
+                        type: catalog.type,
+                        id: `${catalog.id}-embed-search`
+                      })
+                    } else {
+                      // Regular catalog: add as-is
+                      processedCatalogs.push({
+                        type: catalog.type,
+                        id: catalog.id
+                      })
+                    }
+                  }
+                  
+                  return processedCatalogs
                 }
                 return []
               } catch { return [] }
@@ -647,7 +681,11 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, issueAccessToken, issueR
                 manifest: encrypt(JSON.stringify(filteredManifest), req), // Filtered manifest
                 manifestHash: manifestHash(filteredManifest),
                 resources: JSON.stringify(selectedResources), // Just names: ["stream", "catalog"]
-                catalogs: JSON.stringify(simplifiedCatalogs), // Just (type,id) pairs: [{"type":"movie","id":"123"}]
+                catalogs: JSON.stringify(simplifiedCatalogs.map(c => ({
+                  type: c.type,
+                  id: c.id,
+                  search: false // Default to false for imported catalogs
+                }))), // Just (type,id,search) pairs: [{"type":"movie","id":"123","search":false}]
               }
             });
 
