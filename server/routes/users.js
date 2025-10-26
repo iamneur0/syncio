@@ -2403,7 +2403,7 @@ async function reloadGroupAddons(prisma, getAccountId, groupId, req) {
         encrypt, 
         getDecryptedManifestUrl, 
         manifestHash 
-      })
+      }, false) // Don't auto-select new elements for bulk reload
       
       if (result.success) {
         reloadedCount++
