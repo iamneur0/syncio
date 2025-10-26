@@ -2401,7 +2401,7 @@ async function reloadGroupAddons(prisma, getAccountId, groupId, req) {
         filterManifestByResources, 
         filterManifestByCatalogs, 
         encrypt, 
-        decrypt,
+        decrypt: aesGcmDecryptUtil,
         getDecryptedManifestUrl, 
         manifestHash 
       }, true) // Auto-select truly new elements for bulk reload
