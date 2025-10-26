@@ -516,106 +516,124 @@ export default function AddonDetailModal({
       <div className={`relative w-full max-w-4xl max-h-[90vh] overflow-y-auto rounded-lg shadow-xl ${
         isDark ? 'bg-gray-800' : 'bg-white'
       }`}>
-        {/* Fixed close button in top-right */}
-        <button
-          onClick={onClose}
-          className={`absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded transition-colors border-0 ${
-            isDark ? 'text-gray-400 hover:text-gray-300 hover:bg-gray-700' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
-          }`}
-          aria-label="Close"
-        >
-          <X className="w-4 h-4" />
-        </button>
-        <div className="p-6 pt-12">
+        <div className="p-6">
           {/* Header */}
           <div className="flex items-center justify-between mb-6">
             <div className="flex items-center gap-4">
-              <div className={`logo-circle-12 mr-0 flex-shrink-0`}>
-                {(() => {
-                  const manifest = currentAddon?.originalManifest || currentAddon?.manifest || {}
-                  const logoUrl = currentAddon?.iconUrl || manifest?.logo || manifest?.icon || manifest?.images?.logo
-                  return logoUrl ? (
-                    <img
-                      src={logoUrl}
-                      alt={`${currentAddon?.name || 'Addon'} logo`}
-                      className="logo-img-fill"
-                      onError={(e) => {
-                        // Hide broken image and show puzzle fallback
-                        e.currentTarget.style.display = 'none'
-                        const nextEl = e.currentTarget.nextElementSibling as HTMLElement | null
-                        if (nextEl) {
-                          nextEl.style.display = 'block'
-                        }
-                      }}
-                    />
-                  ) : null
-                })()}
-                <div className="w-full h-full flex items-center justify-center" style={{ display: currentAddon?.iconUrl || (currentAddon?.originalManifest || currentAddon?.manifest)?.logo ? 'none' : 'flex' }}>
-                  <Puzzle className={`w-6 h-6 ${isDark ? 'text-gray-300' : 'text-gray-400'}`} />
-                </div>
-              </div>
-              <div className="flex items-center gap-3">
-                <InlineEdit
-                  value={currentAddon?.name || ''}
-                  onSave={handleAddonNameUpdate}
-                  placeholder="Enter addon name..."
-                  maxLength={100}
-                />
-                {currentAddon?.version && (
-                  <VersionChip version={currentAddon.version} />
-                )}
+            <div className={`logo-circle-12 mr-0 flex-shrink-0`}>
+              {(() => {
+                const manifest = currentAddon?.originalManifest || currentAddon?.manifest || {}
+                const logoUrl = currentAddon?.iconUrl || manifest?.logo || manifest?.icon || manifest?.images?.logo
+                return logoUrl ? (
+                  <img
+                    src={logoUrl}
+                    alt={`${currentAddon?.name || 'Addon'} logo`}
+                    className="logo-img-fill"
+                    onError={(e) => {
+                      // Hide broken image and show puzzle fallback
+                      e.currentTarget.style.display = 'none'
+                      const nextEl = e.currentTarget.nextElementSibling as HTMLElement | null
+                      if (nextEl) {
+                        nextEl.style.display = 'block'
+                      }
+                    }}
+                  />
+                ) : null
+              })()}
+              <div className="w-full h-full flex items-center justify-center" style={{ display: currentAddon?.iconUrl || (currentAddon?.originalManifest || currentAddon?.manifest)?.logo ? 'none' : 'flex' }}>
+                <Puzzle className={`w-6 h-6 ${isDark ? 'text-gray-300' : 'text-gray-400'}`} />
               </div>
             </div>
+            <div className="flex items-center gap-3">
+              <InlineEdit
+                value={currentAddon?.name || ''}
+                onSave={handleAddonNameUpdate}
+                placeholder="Enter addon name..."
+                maxLength={100}
+              />
+              {currentAddon?.version && (
+                <VersionChip version={currentAddon.version} />
+              )}
+            </div>
+            </div>
             <button
-              type="button"
-              onClick={handleMasterReset}
-              className={`px-3 py-1 text-sm rounded transition-colors ${
-                isDark 
-                  ? 'text-gray-300 hover:text-white hover:bg-gray-600' 
-                  : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+              onClick={onClose}
+              className={`w-8 h-8 flex items-center justify-center rounded transition-colors border-0 ${
+                isDark ? 'text-gray-400 hover:text-gray-300 hover:bg-gray-700' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
               }`}
-              title="Reset all resources and catalogs to defaults"
+              aria-label="Close"
             >
-              Reset
+              <X className="w-4 h-4" />
             </button>
           </div>
 
-          {/* URL */}
+          {/* URL and Description */}
           <div className={`p-4 rounded-lg mb-6 ${isDark ? 'bg-gray-700' : 'bg-gray-50'}`}>
-            <h3 className={`text-lg font-semibold mb-3 ${isDark ? 'text-white' : 'text-gray-900'}`}>
-              URL
-            </h3>
-            <div className="relative">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                Details
+              </h3>
               <button
                 type="button"
-                onClick={async () => {
-                  if (currentAddon?.url) {
-                    try {
-                      await navigator.clipboard.writeText(addon.url)
-                      setUrlCopied(true)
-                      setTimeout(() => setUrlCopied(false), 1000)
-                    } catch (err) {
-                      console.error('Failed to copy URL:', err)
-                    }
-                  }
-                }}
-                className={`w-full px-3 py-2 pr-10 border rounded-lg text-left transition-all duration-200 hover:opacity-80 ${
-                  urlCopied 
-                    ? (isMono ? 'bg-transparent border-white/20 text-white' : isDark ? 'bg-green-600 border-green-500 text-white' : 'bg-green-100 border-green-300 text-green-900')
-                    : (isMono ? 'bg-transparent border-white/20 text-white hover:bg-white/5' : isDark ? 'bg-gray-600 border-gray-500 text-white hover:bg-gray-550' : 'bg-gray-100 border-gray-300 text-gray-900 hover:bg-gray-200')
+                onClick={handleMasterReset}
+                className={`px-3 py-1 text-sm rounded transition-colors ${
+                  isDark 
+                    ? 'text-gray-300 hover:text-white hover:bg-gray-600' 
+                    : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
                 }`}
-                title={hideSensitive ? '***'.repeat(50) : (currentAddon?.url || 'No URL available')}
+                title="Reset all resources and catalogs to defaults"
               >
-                <span className={`block truncate ${hideSensitive ? 'blur-sm select-none' : ''}`}>
-                  {hideSensitive ? '***'.repeat(50) : (currentAddon?.url || 'No URL available')}
-                </span>
+                Reset
               </button>
-              <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
-                {urlCopied ? (
-                  <ClipboardList className={`w-4 h-4 ${isMono ? 'text-white' : isDark ? 'text-white' : 'text-green-600'}`} />
-                ) : (
-                  <Clipboard className={`w-4 h-4 ${isMono ? 'text-white/60' : isDark ? 'text-gray-400' : 'text-gray-500'}`} />
-                )}
+            </div>
+            
+            <div className="mb-4">
+              <h4 className={`text-sm font-semibold mb-2 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
+                URL
+              </h4>
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (currentAddon?.url) {
+                      try {
+                        await navigator.clipboard.writeText(addon.url)
+                        setUrlCopied(true)
+                        setTimeout(() => setUrlCopied(false), 1000)
+                      } catch (err) {
+                        console.error('Failed to copy URL:', err)
+                      }
+                    }
+                  }}
+                  className={`w-full px-3 py-2 pr-10 border rounded-lg text-left transition-all duration-200 hover:opacity-80 ${
+                    urlCopied 
+                      ? (isMono ? 'bg-transparent border-white/20 text-white' : isDark ? 'bg-green-600 border-green-500 text-white' : 'bg-green-100 border-green-300 text-green-900')
+                      : (isMono ? 'bg-transparent border-white/20 text-white hover:bg-white/5' : isDark ? 'bg-gray-600 border-gray-500 text-white hover:bg-gray-550' : 'bg-gray-100 border-gray-300 text-gray-900 hover:bg-gray-200')
+                  }`}
+                  title={hideSensitive ? '***'.repeat(50) : (currentAddon?.url || 'No URL available')}
+                >
+                  <span className={`block truncate ${hideSensitive ? 'blur-sm select-none' : ''}`}>
+                    {hideSensitive ? '***'.repeat(50) : (currentAddon?.url || 'No URL available')}
+                  </span>
+                </button>
+                <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
+                  {urlCopied ? (
+                    <ClipboardList className={`w-4 h-4 ${isMono ? 'text-white' : isDark ? 'text-white' : 'text-green-600'}`} />
+                  ) : (
+                    <Clipboard className={`w-4 h-4 ${isMono ? 'text-white/60' : isDark ? 'text-gray-400' : 'text-gray-500'}`} />
+                  )}
+                </div>
+              </div>
+            </div>
+            
+            <div>
+              <h4 className={`text-sm font-semibold mb-2 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
+                Description
+              </h4>
+              <div className={`w-full px-3 py-2 rounded-lg ${
+                isMono ? 'bg-black text-white border border-white/20' : (isDark ? 'bg-gray-800 text-white border border-gray-700' : 'bg-gray-100 text-gray-900 border border-gray-300')
+              }`}>
+                {currentAddon?.description || 'No description available'}
               </div>
             </div>
           </div>
@@ -678,19 +696,6 @@ export default function AddonDetailModal({
               </div>
             </div>
           )}
-
-
-          {/* Description at top */}
-          <div className={`p-4 rounded-lg mb-6 ${isDark ? 'bg-gray-700' : 'bg-gray-50'}`}>
-            <h3 className={`text-lg font-semibold mb-3 ${isDark ? 'text-white' : 'text-gray-900'}`}>
-              Description
-            </h3>
-            <div className={`w-full px-3 py-2 rounded-lg ${
-              isMono ? 'bg-black text-white border border-white/20' : (isDark ? 'bg-gray-800 text-white border border-gray-700' : 'bg-gray-100 text-gray-900 border border-gray-300')
-            }`}>
-              {currentAddon?.description || 'No description available'}
-            </div>
-          </div>
 
           {/* Content */}
           <form onSubmit={handleSubmit} className="space-y-6">

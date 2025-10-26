@@ -466,17 +466,7 @@ export default function UserDetailModal({
       <div className={`relative w-full max-w-4xl max-h-[90vh] overflow-y-auto overflow-x-hidden rounded-lg shadow-xl ${
         isDark ? 'bg-gray-800' : 'bg-white'
       }`}>
-        {/* Fixed close button in top-right */}
-        <button
-          onClick={onClose}
-          className={`absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded transition-colors border-0 ${
-            isDark ? 'text-gray-400 hover:text-gray-300 hover:bg-gray-700' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
-          }`}
-          aria-label="Close"
-        >
-          <X className="w-4 h-4" />
-        </button>
-        <div className="p-6 pt-12">
+        <div className="p-6">
           {/* Header: Logo + Name/email + Sync (left), Group selector + Close (right) */}
           <div className="flex flex-wrap items-start justify-between mb-6 gap-4">
             <div className="flex items-center gap-4 relative">
@@ -484,13 +474,13 @@ export default function UserDetailModal({
               <div 
                 ref={logoRef}
                 onClick={() => setShowColorPicker(!showColorPicker)}
-                className={`w-16 h-16 rounded-full flex items-center justify-center flex-shrink-0 border-2 cursor-pointer transition-all hover:scale-105 ${
+                className={`w-12 h-12 rounded-full flex items-center justify-center flex-shrink-0 border-2 cursor-pointer transition-all hover:scale-105 ${
                   getColorBgClass(currentUser.colorIndex || 0, isMono ? 'mono' : isDark ? 'dark' : 'light')
                 }`}
                 style={{ backgroundColor: getColorHexValue(currentUser.colorIndex || 0, isMono ? 'mono' : isDark ? 'dark' : 'light') }}
                 title="Click to change color"
               >
-                <span className="text-white font-semibold text-xl">
+                <span className="text-white font-semibold text-lg">
                   {(currentUser.username || currentUser.email || 'U').charAt(0).toUpperCase()}
                 </span>
               </div>
@@ -523,7 +513,15 @@ export default function UserDetailModal({
                 </div>
               </div>
             </div>
-            <div className="flex items-center gap-2"></div>
+            <button
+              onClick={onClose}
+              className={`w-8 h-8 flex items-center justify-center rounded transition-colors border-0 ${
+                isDark ? 'text-gray-400 hover:text-gray-300 hover:bg-gray-700' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
+              }`}
+              aria-label="Close"
+            >
+              <X className="w-4 h-4" />
+            </button>
           </div>
 
           {/* Removed legacy user info block */}

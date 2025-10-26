@@ -228,7 +228,28 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
 
       // Handle group assignment
       if (groupId !== undefined) {
-        await assignUserToGroup(id, groupId, req)
+        if (groupId === null) {
+          // Remove user from all groups
+          const allGroups = await prisma.group.findMany({
+            where: { accountId: getAccountId(req) },
+            select: { id: true, userIds: true }
+          });
+
+          for (const group of allGroups) {
+            if (group.userIds) {
+              const userIds = JSON.parse(group.userIds);
+              const updatedUserIds = userIds.filter(userId => userId !== id);
+              if (updatedUserIds.length !== userIds.length) {
+                await prisma.group.update({
+                  where: { id: group.id },
+                  data: { userIds: JSON.stringify(updatedUserIds) }
+                });
+              }
+            }
+          }
+        } else {
+          await assignUserToGroup(id, groupId, req)
+        }
       }
 
       // Fetch updated user for response

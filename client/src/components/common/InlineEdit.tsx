@@ -158,9 +158,9 @@ export default function InlineEdit({
   return (
     <span 
       onClick={handleStartEdit}
-      className={`text-xl font-bold cursor-pointer hover:opacity-80 transition-opacity ${
-        isDark ? 'text-white' : 'text-gray-900'
-      } ${disabled ? 'cursor-default hover:opacity-100' : ''} ${className}`}
+      className={`text-xl font-bold cursor-pointer hover:underline transition-all ${
+        isDark ? 'text-white hover:text-gray-200' : 'text-gray-900 hover:text-gray-700'
+      } ${disabled ? 'cursor-default hover:no-underline' : ''} ${className}`}
       title={disabled ? '' : 'Click to edit'}
     >
       {value || placeholder}

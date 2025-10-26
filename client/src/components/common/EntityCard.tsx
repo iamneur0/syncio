@@ -625,10 +625,10 @@ export default function EntityCard({
                 }`}>{(entity as any).stremioAddonsCount === 1 ? 'Addon' : 'Addons'}</p>
               </div>
             </div>
-            <div className="flex items-center">
+            <div className="flex items-center min-w-0">
               <UserIcon className="w-4 h-4 text-gray-400 mr-2 flex-shrink-0" />
-              <div className="min-w-0">
-                <p className={`text-lg font-semibold ${
+              <div className="min-w-0 flex-1">
+                <p className={`text-lg font-semibold truncate ${
                   isModern ? 'text-purple-100' : isModernDark ? 'text-purple-100' : (isDark ? 'text-white' : 'text-gray-900')
                 }`}>
                   {(entity as any).groupName || 'No group'}
@@ -665,7 +665,7 @@ export default function EntityCard({
         )}
       </div>
 
-      <div className="flex gap-2">
+      <div className="flex gap-2 mt-auto">
         {onView && (
           <button
             onClick={handleView}
