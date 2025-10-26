@@ -1,6 +1,6 @@
 import React from 'react'
 import { useTheme } from '@/contexts/ThemeContext'
-import { Captions, Play, BookOpen, Info } from 'lucide-react'
+import { Captions, Play, BookOpen, Info, Search } from 'lucide-react'
 
 interface ResourceItemProps {
   resource: any
@@ -22,12 +22,17 @@ export default function ResourceItem({ resource, isSelected, onToggle }: Resourc
     if (kind === 'subtitles' || kind === 'subtitle' || kind === 'subs') return <Captions className="w-5 h-5" />
     if (kind === 'catalog' || kind === 'catalogs') return <BookOpen className="w-5 h-5" />
     if (kind === 'meta' || kind === 'metadata') return <Info className="w-5 h-5" />
+    if (kind === 'search') return <Search className="w-5 h-5" />
 
     return <BookOpen className="w-5 h-5" />
   }
 
   const getResourceLabel = (resource: any) => {
     if (typeof resource === 'string') {
+      // Special case for search - keep it lowercase
+      if (resource.toLowerCase() === 'search') {
+        return 'search'
+      }
       return resource.charAt(0).toUpperCase() + resource.slice(1)
     }
     
@@ -45,6 +50,8 @@ export default function ResourceItem({ resource, isSelected, onToggle }: Resourc
           return 'Content catalog'
         case 'meta':
           return 'Metadata information'
+        case 'search':
+          return 'Search functionality'
         default:
           return 'Resource'
       }
@@ -61,6 +68,9 @@ export default function ResourceItem({ resource, isSelected, onToggle }: Resourc
     }
     if (resource?.type === 'subtitles') {
       return 'Subtitle provider'
+    }
+    if (resource?.type === 'search') {
+      return 'Search provider'
     }
     
     return 'Resource provider'
