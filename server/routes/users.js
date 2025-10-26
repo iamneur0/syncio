@@ -815,7 +815,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
           debug.log(`🔄 Syncing user: ${user.username || user.email}`)
           
           // Use the reusable sync function
-          const syncResult = await syncUserAddons(user.id, [], 'normal', false, req)
+          const syncResult = await syncUserAddons(user.id, [], 'normal', false, req, decrypt)
           
           if (syncResult.success) {
             syncedCount++
@@ -1057,7 +1057,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
       }
 
       // Call reloadGroupAddons on the user's group
-      const reloadResult = await reloadGroupAddons(prisma, getAccountId, userGroup.id, req)
+      const reloadResult = await reloadGroupAddons(prisma, getAccountId, userGroup.id, req, decrypt)
 
         res.json({
         message: 'Group addons reloaded successfully',
@@ -2370,7 +2370,7 @@ const { manifestHash } = require('../utils/hashing')
 const { reloadAddon } = require('./addons')
 
 // Helper function to reload all addons for a group
-async function reloadGroupAddons(prisma, getAccountId, groupId, req) {
+async function reloadGroupAddons(prisma, getAccountId, groupId, req, decrypt) {
   let reloadedCount = 0
   let failedCount = 0
   
@@ -2395,13 +2395,23 @@ async function reloadGroupAddons(prisma, getAccountId, groupId, req) {
   
   for (const addon of groupAddons) {
     try {
+      // Get fresh addon data from database to ensure we have latest resources/catalogs
+      const freshAddon = await prisma.addon.findFirst({
+        where: { id: addon.id, accountId: getAccountId(req) }
+      })
       
-      // Use the existing reloadAddon function
-      const result = await reloadAddon(prisma, getAccountId, addon.id, req, { 
+      if (!freshAddon) {
+        console.warn(`⚠️ Addon ${addon.name} not found in database`)
+        failedCount++
+        continue
+      }
+      
+      // Use the existing reloadAddon function with fresh addon data
+      const result = await reloadAddon(prisma, getAccountId, freshAddon.id, req, { 
         filterManifestByResources, 
         filterManifestByCatalogs, 
         encrypt, 
-        decrypt: aesGcmDecryptUtil,
+        decrypt,  // Use the same decrypt function as individual reload
         getDecryptedManifestUrl, 
         manifestHash 
       }, true) // Auto-select truly new elements for bulk reload
@@ -2427,7 +2437,7 @@ async function reloadGroupAddons(prisma, getAccountId, groupId, req) {
   }
 }
 
-async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'normal', unsafeMode = false, req) {
+async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'normal', unsafeMode = false, req, decrypt) {
   try {
     console.log('🚀 Syncing user addons:', userId)
 
@@ -2487,7 +2497,7 @@ async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'nor
     if (syncMode === 'advanced') {
       
       // Use the existing reload addon functionality
-      const reloadResult = await reloadGroupAddons(prisma, getAccountId, groupAddons, req)
+      const reloadResult = await reloadGroupAddons(prisma, getAccountId, primaryGroup.id, req, decrypt)
       reloadedCount = reloadResult.reloadedCount
       
       // Reload the group addons from database to get updated data
