@@ -6,7 +6,7 @@ const { canonicalizeManifestUrl } = require('../utils/validation');
 const { responseUtils, dbUtils } = require('../utils/routeUtils');
 
 // Shared helper function to reload a single addon
-async function reloadAddon(prisma, getAccountId, addonId, req, { filterManifestByResources, filterManifestByCatalogs, encrypt, getDecryptedManifestUrl, manifestHash }, autoSelectNewElements = false) {
+async function reloadAddon(prisma, getAccountId, addonId, req, { filterManifestByResources, filterManifestByCatalogs, encrypt, decrypt, getDecryptedManifestUrl, manifestHash }, autoSelectNewElements = true) {
   console.log(`🔄 Starting reload for addon ${addonId}`)
   
   // Find the addon (scope to account to avoid cross-account mismatches)
@@ -123,7 +123,7 @@ async function reloadAddon(prisma, getAccountId, addonId, req, { filterManifestB
   try {
     if (addon.originalManifest) {
       // Decrypt the original manifest first
-      const decryptedOriginalManifest = JSON.parse(addon.originalManifest)
+      const decryptedOriginalManifest = JSON.parse(decrypt(addon.originalManifest, req))
       const originalManifestData = decryptedOriginalManifest
       const originalManifestResources = Array.isArray(originalManifestData?.resources) ? originalManifestData.resources : []
       const originalManifestCatalogs = Array.isArray(originalManifestData?.catalogs) ? originalManifestData.catalogs : []
@@ -145,6 +145,7 @@ async function reloadAddon(prisma, getAccountId, addonId, req, { filterManifestB
   
   console.log('  Original resources:', originalResources)
   console.log('  Original catalogs:', originalCatalogs.length, 'items')
+  console.log('  Original catalog details:', originalCatalogs.map(c => `${c.type}:${c.id}`))
   
   // Keep only saved selections that still exist in the fresh manifest
   const validResources = savedResources.filter(r => resetResources.includes(r))
@@ -156,6 +157,7 @@ async function reloadAddon(prisma, getAccountId, addonId, req, { filterManifestB
   
   console.log('  Valid resources (preserved):', validResources)
   console.log('  Valid catalogs (preserved):', validCatalogs.length, 'items')
+  console.log('  Valid catalog details:', validCatalogs.map(c => `${c.type}:${c.id}`))
   
   // 5. Handle auto-selection of truly new elements
   let finalResources = validResources
@@ -174,10 +176,10 @@ async function reloadAddon(prisma, getAccountId, addonId, req, { filterManifestB
     // Find catalogs that exist in fresh manifest but were NOT in original manifest
     // This excludes catalogs that were previously unselected by the user
     const trulyNewCatalogs = resetCatalogs.filter(fresh => 
-      !originalCatalogs.some(orig => orig.type === fresh.type && orig.id === fresh.id) &&
-      !savedCatalogs.some(saved => saved.type === fresh.type && saved.id === fresh.id)
+      !originalCatalogs.some(orig => orig.type === fresh.type && orig.id === fresh.id)
     )
     console.log('  Truly new catalogs to auto-select:', trulyNewCatalogs.length, 'items')
+    console.log('  Truly new catalog details:', trulyNewCatalogs.map(c => `${c.type}:${c.id}`))
     
     // Combine preserved + truly new selections
     finalResources = [...validResources, ...trulyNewResources]
@@ -710,13 +712,14 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
   router.post('/:id/reload', async (req, res) => {
     try {
       const { id } = req.params;
-      const { autoSelectNewElements = false } = req.body; // Default to false to preserve user selections
+      const { autoSelectNewElements = true } = req.body; // Default to true to auto-select truly new elements
       
       // Use the shared reload helper function
       const result = await reloadAddon(prisma, getAccountId, id, req, { 
         filterManifestByResources, 
         filterManifestByCatalogs, 
         encrypt, 
+        decrypt,
         getDecryptedManifestUrl, 
         manifestHash 
       }, autoSelectNewElements);
