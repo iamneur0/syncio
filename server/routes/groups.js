@@ -7,7 +7,7 @@ const { findGroupById } = require('../utils/helpers');
 const { responseUtils, dbUtils } = require('../utils/routeUtils');
 
 // Export a function that returns the router, allowing dependency injection
-module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserToGroup, getDecryptedManifestUrl, manifestUrlHmac }) => {
+module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserToGroup, getDecryptedManifestUrl, manifestUrlHmac, decrypt }) => {
   const router = express.Router();
 
   // Get all groups
@@ -206,7 +206,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
 
       // Use the shared reload group addons function
       const { reloadGroupAddons } = require('./users')
-      const reloadResult = await reloadGroupAddons(prisma, getAccountId, group.id, req)
+      const reloadResult = await reloadGroupAddons(prisma, getAccountId, group.id, req, decrypt)
 
       res.json({
         message: 'Group addons reloaded successfully',

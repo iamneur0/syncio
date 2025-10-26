@@ -8,6 +8,9 @@ const { responseUtils, dbUtils } = require('../utils/routeUtils');
 // Shared helper function to reload a single addon
 async function reloadAddon(prisma, getAccountId, addonId, req, { filterManifestByResources, filterManifestByCatalogs, encrypt, decrypt, getDecryptedManifestUrl, manifestHash }, autoSelectNewElements = true) {
   console.log(`🔄 Starting reload for addon ${addonId}`)
+  console.log(`🔍 Request context - URL: ${req.url}, Method: ${req.method}`)
+  console.log(`🔍 Account ID from req: ${getAccountId(req)}`)
+  console.log(`🔍 Auto-select new elements: ${autoSelectNewElements}`)
   
   // Find the addon (scope to account to avoid cross-account mismatches)
   const addon = await prisma.addon.findFirst({
@@ -57,6 +60,11 @@ async function reloadAddon(prisma, getAccountId, addonId, req, { filterManifestB
 
   // 1. Save current selections from DB
   console.log(`💾 Loading current selections from DB`)
+  console.log(`🔍 Addon ID: ${addon.id}`)
+  console.log(`🔍 Addon resources field:`, addon.resources)
+  console.log(`🔍 Addon catalogs field:`, addon.catalogs)
+  console.log(`🔍 Account ID: ${getAccountId(req)}`)
+  
   const savedResources = (() => { 
     try { 
       const parsed = addon.resources ? JSON.parse(addon.resources) : []
@@ -71,6 +79,7 @@ async function reloadAddon(prisma, getAccountId, addonId, req, { filterManifestB
     try { 
       const parsed = addon.catalogs ? JSON.parse(addon.catalogs) : []
       console.log(`📦 Saved catalogs from DB:`, parsed.length, 'items')
+      console.log(`📦 Saved catalogs details:`, parsed)
       return parsed
     } catch (e) { 
       console.log(`❌ Error parsing saved catalogs:`, e.message)
@@ -232,7 +241,9 @@ async function reloadAddon(prisma, getAccountId, addonId, req, { filterManifestB
       manifestHash: manifestHash(filtered),
       // Store final selections (validated + optionally auto-selected new elements)
       resources: JSON.stringify(finalResources),
-      catalogs: JSON.stringify(finalCatalogs.map(c => ({ type: c.type, id: c.id, search: c.search })))
+      catalogs: JSON.stringify(finalCatalogs.map(c => ({ type: c.type, id: c.id, search: c.search })).filter((c, index, arr) => 
+        arr.findIndex(item => item.type === c.type && item.id === c.id) === index
+      ))
     }
   });
 
