@@ -49,6 +49,24 @@ export default function SyncBadge({
   // Get unsafe mode from localStorage
   const { isUnsafeMode } = useUnsafeMode()
 
+  // Get user details to check if user has a group
+  const { data: userDetails } = useQuery({
+    queryKey: ['user', userId, 'details'],
+    queryFn: async () => {
+      if (!userId) return null
+      try {
+        return await usersAPI.getById(userId)
+      } catch {
+        return null
+      }
+    },
+    enabled: isSmartMode && Boolean(userId),
+    refetchOnMount: 'always',
+    retry: false,
+  })
+
+  const userGroups = (userDetails as any)?.groups || []
+
   // User sync logic
   const { data: userSyncStatus, isLoading: userSyncLoading, error: userSyncError } = useQuery({
     queryKey: ['user', userId, 'sync-status', groupId || 'nogroup', isUnsafeMode ? 'unsafe' : 'safe'],
@@ -154,24 +172,33 @@ export default function SyncBadge({
     }
     window.addEventListener('sfm:user-sync-data' as any, onUserSyncData as any)
 
-    if (userId && userSyncStatus) {
-      const status = (userSyncStatus as any).status
-      // If status is 'error' but it's an authentication error, show 'connect' instead
-      if (status === 'error') {
-        const message = (userSyncStatus as any).message || ''
-        if (message.includes('Stremio connection invalid') || 
-            message.includes('authentication') || 
-            message.includes('auth') || 
-            message.includes('invalid') || 
-            message.includes('corrupted')) {
-          setSmartStatus('connect')
-        } else {
-          setSmartStatus('error')
-        }
-      } else {
-        setSmartStatus(status || 'checking')
+    if (userId) {
+      // Check if user has no groups - show stale
+      if (!userGroups || userGroups.length === 0) {
+        setSmartStatus('stale')
+        setIsLoading(false)
+        return
       }
-      setIsLoading(false)
+
+      if (userSyncStatus) {
+        const status = (userSyncStatus as any).status
+        // If status is 'error' but it's an authentication error, show 'connect' instead
+        if (status === 'error') {
+          const message = (userSyncStatus as any).message || ''
+          if (message.includes('Stremio connection invalid') || 
+              message.includes('authentication') || 
+              message.includes('auth') || 
+              message.includes('invalid') || 
+              message.includes('corrupted')) {
+            setSmartStatus('connect')
+          } else {
+            setSmartStatus('error')
+          }
+        } else {
+          setSmartStatus(status || 'checking')
+        }
+        setIsLoading(false)
+      }
     } else if (groupId) {
       if (!groupUsers || groupUsers.length === 0) {
         setSmartStatus('stale')

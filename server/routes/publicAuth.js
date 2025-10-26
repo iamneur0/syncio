@@ -303,8 +303,9 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, issueAccessToken, issueR
           try { return addon.catalogs ? JSON.parse(addon.catalogs) : [] } catch { return [] } 
         })()
 
+        // cleanedGroupAddons is only calculated for reference if needed but not exported in main payload
         const cleanedGroupAddons = (addon.groupAddons || []).map(ga => ({
-          id: ga.id,
+          name: addon.name,
           isEnabled: ga.isEnabled
           // omit groupId, addonId and settings
         }))
@@ -501,7 +502,7 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, issueAccessToken, issueR
       const importedGroups = [];
       if (groups && Array.isArray(groups)) {
         for (const groupData of groups) {
-          const { id: _exportGroupId, addons, userIds: exportUserIds, addonIds, ...groupFields } = groupData;
+          const { id: _exportGroupId, addons, userIds: exportUserIds, addonIds, users, ...groupFields } = groupData;
           const group = await prisma.group.create({
             data: {
               ...groupFields,
@@ -515,12 +516,15 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, issueAccessToken, issueR
             if (Array.isArray(exportUserIds)) exportUserIdsArr = exportUserIds
             else if (typeof exportUserIds === 'string' && exportUserIds.trim()) exportUserIdsArr = JSON.parse(exportUserIds)
           } catch {}
-          importedGroups.push({ 
+          const groupWithAddons = { 
             ...group, 
             addons: addons || [], 
+            users: users || exportUserIdsArr, // Store username array from export
             _exportUserIds: exportUserIdsArr,
             _exportAddonIds: addonIds || []
-          });
+          };
+          console.log(`🔍 Storing group "${groupWithAddons.name}" with addons:`, groupWithAddons.addons);
+          importedGroups.push(groupWithAddons);
         }
       }
 
@@ -612,12 +616,16 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, issueAccessToken, issueR
               console.log(`Filtered manifest has ${filteredManifest?.catalogs?.length || 0} catalogs after catalog filtering`)
             }
 
-            // Convert selected catalogs to simplified (type, id) format for storage
+            // Convert selected catalogs to simplified (type, id, search) format for storage
             const simplifiedCatalogs = (() => {
               try {
-                // If selectedCatalogs are already simplified, use them
+                // If selectedCatalogs are already simplified (from export), use them directly
                 if (selectedCatalogs.length > 0 && typeof selectedCatalogs[0] === 'object' && selectedCatalogs[0].type && selectedCatalogs[0].id) {
-                  return selectedCatalogs.map(c => ({ type: c.type, id: c.id }))
+                  return selectedCatalogs.map(c => ({ 
+                    type: c.type, 
+                    id: c.id,
+                    search: c.search !== undefined ? c.search : false
+                  }))
                 }
                 // If they're just IDs, try to match them with originalManifest catalogs
                 if (selectedCatalogs.length > 0 && typeof selectedCatalogs[0] === 'string') {
@@ -681,11 +689,7 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, issueAccessToken, issueR
                 manifest: encrypt(JSON.stringify(filteredManifest), req), // Filtered manifest
                 manifestHash: manifestHash(filteredManifest),
                 resources: JSON.stringify(selectedResources), // Just names: ["stream", "catalog"]
-                catalogs: JSON.stringify(simplifiedCatalogs.map(c => ({
-                  type: c.type,
-                  id: c.id,
-                  search: false // Default to false for imported catalogs
-                }))), // Just (type,id,search) pairs: [{"type":"movie","id":"123","search":false}]
+                catalogs: JSON.stringify(simplifiedCatalogs), // Just (type,id,search) pairs: [{"type":"movie","id":"123","search":false}]
               }
             });
 
@@ -744,10 +748,28 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, issueAccessToken, issueR
         }
       }
 
+      // Build username to user ID map
+      const usernameToUserId = new Map()
+      for (const user of importedUsers) {
+        if (user.username) {
+          usernameToUserId.set(user.username, user.id)
+        }
+      }
+
       // 3b. Update groups.userIds with new user IDs
       for (const g of importedGroups) {
+        let newUserIds = []
+        
+        // Try mapping from export user IDs
         if (Array.isArray(g._exportUserIds) && g._exportUserIds.length > 0) {
-          const newUserIds = g._exportUserIds.map(uid => exportUserIdToNewId.get(uid)).filter(Boolean)
+          newUserIds = g._exportUserIds.map(uid => exportUserIdToNewId.get(uid)).filter(Boolean)
+        }
+        // Try mapping from username array (from new export format)
+        else if (Array.isArray(g.users) && g.users.length > 0) {
+          newUserIds = g.users.map(username => usernameToUserId.get(username)).filter(Boolean)
+        }
+        
+        if (newUserIds.length > 0) {
           try {
             await prisma.group.update({
               where: { id: g.id },
@@ -797,7 +819,7 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, issueAccessToken, issueR
       for (const group of importedGroups) {
         const addedAddonIds = new Set()
         // Use addonIds array for proper ordering if available, otherwise fall back to addons array
-        const addonsToImport = group._exportAddonIds && Array.isArray(group._exportAddonIds) 
+        const addonsToImport = group._exportAddonIds && Array.isArray(group._exportAddonIds) && group._exportAddonIds.length > 0
           ? group._exportAddonIds.map((addonId, index) => ({ 
               id: addonId, 
               position: index,
@@ -822,14 +844,21 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, issueAccessToken, issueR
           }
         }
 
-        for (const addonRef of addonsToImport) {
+        for (let index = 0; index < addonsToImport.length; index++) {
           try {
+            const addonRef = addonsToImport[index];
             let resolvedAddonId = null;
-            let position = addonRef.position !== undefined ? addonRef.position : null;
+            // Use array index as position if not explicitly set
+            let position = addonRef.position !== undefined ? addonRef.position : index;
             let isEnabled = addonRef.isEnabled !== undefined ? addonRef.isEnabled : true;
 
+            // Handle new format: just { name, isEnabled } from group.addons array
+            if (addonRef.name && !addonRef.id && !addonRef.addon) {
+              resolvedAddonId = exportAddonNameToNewId.get(addonRef.name);
+            }
+            
             // If using addonIds array, the ID should be directly mappable
-            if (group._exportAddonIds && addonRef.id) {
+            if (!resolvedAddonId && group._exportAddonIds && addonRef.id) {
               resolvedAddonId = exportAddonIdToNewId.get(addonRef.id);
               // Fallback: resolve by name when id mapping is missing
               if (!resolvedAddonId && Array.isArray(group.addons)) {
@@ -1076,12 +1105,16 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, issueAccessToken, issueR
             console.log(`Filtered manifest has ${filteredManifest?.catalogs?.length || 0} catalogs after catalog filtering`)
           }
 
-          // Convert selected catalogs to simplified (type, id) format for storage
+          // Convert selected catalogs to simplified (type, id, search) format for storage
           const simplifiedCatalogs = (() => {
             try {
-              // If selectedCatalogs are already simplified, use them
+              // If selectedCatalogs are already simplified (from export), use them directly
               if (selectedCatalogs.length > 0 && typeof selectedCatalogs[0] === 'object' && selectedCatalogs[0].type && selectedCatalogs[0].id) {
-                return selectedCatalogs.map(c => ({ type: c.type, id: c.id }))
+                return selectedCatalogs.map(c => ({ 
+                  type: c.type, 
+                  id: c.id,
+                  search: c.search !== undefined ? c.search : false
+                }))
               }
               // If they're just IDs, try to match them with originalManifest catalogs
               if (selectedCatalogs.length > 0 && typeof selectedCatalogs[0] === 'string') {

@@ -204,6 +204,7 @@ async function getGroupAddons(prisma, groupId, req) {
 
     return {
       id: ga.addon.id,
+      name: ga.addon.name,
       transportUrl,
       transportName,
       manifest: cleanManifest
