@@ -409,8 +409,10 @@ export default function AddonDetailModal({
   }
 
   const handleResetResources = () => {
+    // Reset both resources and catalogs (same as master reset)
     const detailManifest: any = currentAddon?.originalManifest || currentAddon?.manifest
     const manifestResources = Array.isArray(detailManifest?.resources) ? detailManifest.resources : []
+    const manifestCatalogs = Array.isArray(detailManifest?.catalogs) ? detailManifest.catalogs : []
     
     // Check if there are any search catalogs
     const catalogAddons = detailManifest?.catalogs || []
@@ -419,25 +421,79 @@ export default function AddonDetailModal({
     )
     
     // Add "search" resource if there are search catalogs
-    const defaultResources = [...manifestResources]
-    if (hasSearchCatalogs && !defaultResources.includes('search')) {
-      defaultResources.push('search')
+    const allResources = [...manifestResources]
+    if (hasSearchCatalogs && !allResources.includes('search')) {
+      allResources.push('search')
     }
     
-    setEditResources(defaultResources)
-    // Note: Changes will be saved when user clicks "Update" button
-  }
-
-  const handleResetCatalogs = () => {
-    const detailManifest: any = currentAddon?.originalManifest || currentAddon?.manifest
-    const defaultCatalogs = Array.isArray(detailManifest?.catalogs) ? detailManifest.catalogs : []
-    // Create full catalog objects with id and type
-    const catalogObjects = defaultCatalogs.map((c: any) => ({
+    // Select ALL resources
+    setEditResources(allResources)
+    
+    // Select ALL catalogs from manifest (both regular and search catalogs)
+    const allCatalogs = manifestCatalogs.map((c: any) => ({
       id: c?.id || c?.name,
       type: c?.type || 'unknown'
     }))
-    setEditCatalogs(catalogObjects)
-    // Note: Changes will be saved when user clicks "Update" button
+    
+    setEditCatalogs(allCatalogs)
+    
+    // Initialize search state for all search catalogs
+    const searchStateMap = new Map<string, boolean>()
+    manifestCatalogs.forEach((catalog: any) => {
+      const hasSearch = catalog.extra?.some((extra: any) => extra.name === 'search')
+      if (hasSearch) {
+        const key = `${catalog.id}:${catalog.type}`
+        searchStateMap.set(key, true) // Enable search for all search catalogs
+      }
+    })
+    setCatalogSearchState(searchStateMap)
+  }
+
+  const handleResetCatalogs = () => {
+    // Reset both resources and catalogs (same as master reset)
+    const detailManifest: any = currentAddon?.originalManifest || currentAddon?.manifest
+    const manifestResources = Array.isArray(detailManifest?.resources) ? detailManifest.resources : []
+    const manifestCatalogs = Array.isArray(detailManifest?.catalogs) ? detailManifest.catalogs : []
+    
+    // Check if there are any search catalogs
+    const catalogAddons = detailManifest?.catalogs || []
+    const hasSearchCatalogs = catalogAddons.some((catalog: any) => 
+      catalog.extra?.some((extra: any) => extra.name === 'search')
+    )
+    
+    // Add "search" resource if there are search catalogs
+    const allResources = [...manifestResources]
+    if (hasSearchCatalogs && !allResources.includes('search')) {
+      allResources.push('search')
+    }
+    
+    // Select ALL resources
+    setEditResources(allResources)
+    
+    // Select ALL catalogs from manifest (both regular and search catalogs)
+    const allCatalogs = manifestCatalogs.map((c: any) => ({
+      id: c?.id || c?.name,
+      type: c?.type || 'unknown'
+    }))
+    
+    setEditCatalogs(allCatalogs)
+    
+    // Initialize search state for all search catalogs
+    const searchStateMap = new Map<string, boolean>()
+    manifestCatalogs.forEach((catalog: any) => {
+      const hasSearch = catalog.extra?.some((extra: any) => extra.name === 'search')
+      if (hasSearch) {
+        const key = `${catalog.id}:${catalog.type}`
+        searchStateMap.set(key, true) // Enable search for all search catalogs
+      }
+    })
+    setCatalogSearchState(searchStateMap)
+  }
+
+  const handleMasterReset = () => {
+    // Reset both resources and catalogs
+    handleResetResources()
+    handleResetCatalogs()
   }
 
 
@@ -510,7 +566,18 @@ export default function AddonDetailModal({
                 )}
               </div>
             </div>
-            <div className="w-8 h-8" />
+            <button
+              type="button"
+              onClick={handleMasterReset}
+              className={`px-3 py-1 text-sm rounded transition-colors ${
+                isDark 
+                  ? 'text-gray-300 hover:text-white hover:bg-gray-600' 
+                  : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+              }`}
+              title="Reset all resources and catalogs to defaults"
+            >
+              Reset
+            </button>
           </div>
 
           {/* URL */}
@@ -831,7 +898,6 @@ export default function AddonDetailModal({
                 count={allResources.length}
                 items={allResources}
                 layout="grid"
-                onClear={handleResetResources}
                 getIsSelected={isSelected}
                 renderItem={(resource: any) => (
                   <ResourceItem
@@ -843,6 +909,20 @@ export default function AddonDetailModal({
                 )}
                 emptyMessage="No resources available for this addon"
                 emptyIcon={<Puzzle className={`w-12 h-12 mx-auto mb-4 ${isDark ? 'text-gray-500' : 'text-gray-400'}`} />}
+                headerRight={
+                  <button
+                    type="button"
+                    onClick={handleResetResources}
+                    className={`px-3 py-1 text-sm rounded transition-colors ${
+                      isDark 
+                        ? 'text-gray-300 hover:text-white hover:bg-gray-600' 
+                        : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+                    }`}
+                    title="Reset all resources to defaults"
+                  >
+                    Reset
+                  </button>
+                }
               />
             )
           })()}
@@ -885,7 +965,6 @@ export default function AddonDetailModal({
                 count={regularCatalogs.length}
                 items={regularCatalogs}
                 layout="grid"
-                onClear={handleResetCatalogs}
                 getIsSelected={isCatalogSelected}
                 renderItem={(catalog: any, index: number) => (
                   <CatalogItem
@@ -897,6 +976,20 @@ export default function AddonDetailModal({
                 )}
                 emptyMessage="No catalogs available for this addon"
                 emptyIcon={<BookOpen className="w-8 h-8" />}
+                headerRight={
+                  <button
+                    type="button"
+                    onClick={handleResetCatalogs}
+                    className={`px-3 py-1 text-sm rounded transition-colors ${
+                      isDark 
+                        ? 'text-gray-300 hover:text-white hover:bg-gray-600' 
+                        : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+                    }`}
+                    title="Reset all catalogs to defaults"
+                  >
+                    Reset
+                  </button>
+                }
               />
             )
           })()}
