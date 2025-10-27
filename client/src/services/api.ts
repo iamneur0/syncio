@@ -366,12 +366,12 @@ export const groupsAPI = {
   },
 
   // Reorder addons in group (try alias first for compatibility, then canonical path)
-  reorderAddons: async (id: string, orderedManifestUrls: string[]): Promise<void> => {
+  reorderAddons: async (id: string, orderedAddonIds: string[]): Promise<void> => {
     try {
-      await api.post(`/groups/${id}/reorder-addons`, { orderedManifestUrls })
+      await api.post(`/groups/${id}/reorder-addons`, { orderedAddonIds })
     } catch (e: any) {
       // Fallback to canonical route
-      await api.post(`/groups/${id}/addons/reorder`, { orderedManifestUrls })
+      await api.post(`/groups/${id}/addons/reorder`, { orderedAddonIds })
     }
   },
 

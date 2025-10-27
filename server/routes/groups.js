@@ -786,11 +786,13 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
   router.post('/:id/addons/reorder', async (req, res) => {
     try {
       const { id: groupId } = req.params
-      const { orderedManifestUrls } = req.body || {}
+      const { orderedManifestUrls, orderedAddonIds } = req.body || {}
+      console.log('Reorder addons request:', { groupId, orderedManifestUrls, orderedAddonIds })
 
-
-      if (!Array.isArray(orderedManifestUrls) || orderedManifestUrls.length === 0) {
-        return res.status(400).json({ message: 'orderedManifestUrls array is required' })
+      // Support both orderedManifestUrls (legacy) and orderedAddonIds (new)
+      const orderedIds = orderedAddonIds || orderedManifestUrls
+      if (!Array.isArray(orderedIds) || orderedIds.length === 0) {
+        return res.status(400).json({ message: 'orderedAddonIds or orderedManifestUrls array is required' })
       }
 
       // Ensure group exists and is scoped to the account
@@ -800,31 +802,35 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
       })
       if (!group) return responseUtils.notFound(res, 'Group')
 
-      // Validate URLs against current addons list
-      const currentUrls = (group.addons || [])
-        .map(ga => {
-          try { return getDecryptedManifestUrl(ga.addon, req) } catch { return ga.addon?.manifestUrl }
-        })
-        .filter(Boolean)
-
-      const invalid = orderedManifestUrls.filter(u => !currentUrls.includes(u))
+      // Validate addon IDs against current addons list
+      const currentAddonIds = new Set((group.addons || []).map(ga => ga.addonId))
+      const invalid = orderedIds.filter(id => !currentAddonIds.has(id))
       if (invalid.length) {
-        return res.status(400).json({ message: 'Some URLs are not in group addons', invalid })
+        return res.status(400).json({ message: 'Some addon IDs are not in group addons', invalid })
       }
 
       // Persist order by storing position Int on GroupAddon
       try {
-        const urlToGroupAddon = new Map()
+        const addonIdToGroupAddon = new Map()
         for (const ga of group.addons) {
-          const url = (() => { try { return getDecryptedManifestUrl(ga.addon, req) } catch { return ga.addon?.manifestUrl } })()
-          if (url) urlToGroupAddon.set(url, ga)
+          addonIdToGroupAddon.set(ga.addonId, ga)
         }
+        
         let pos = 0
-        for (const url of orderedManifestUrls) {
-          const ga = urlToGroupAddon.get(url)
+        const positionUpdates = []
+        
+        for (const addonId of orderedIds) {
+          const ga = addonIdToGroupAddon.get(addonId)
           if (!ga) continue
+          positionUpdates.push({ 
+            addon: ga.addon.name, 
+            addonId: ga.addonId,
+            oldPosition: ga.position, 
+            newPosition: pos 
+          })
           await prisma.groupAddon.update({ where: { id: ga.id }, data: { position: pos++ } })
         }
+        console.log('Addon positions updated:', positionUpdates)
       } catch (e) {
         console.warn('Order persistence failed (position):', e?.message)
       }
@@ -845,7 +851,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
         }
       } catch {}
 
-      res.json({ message: 'Addons reordered successfully', groupId, reorderedCount: orderedManifestUrls.length })
+      res.json({ message: 'Addons reordered successfully', groupId, reorderedCount: orderedIds.length })
     } catch (error) {
       console.error('Error reordering addons:', error)
       res.status(500).json({ message: 'Failed to reorder addons', error: error?.message })
@@ -856,10 +862,12 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
   router.post('/:id/reorder-addons', async (req, res) => {
     try {
       const { id } = req.params
-      const { orderedManifestUrls, addonIds } = req.body || {}
-      const urls = Array.isArray(orderedManifestUrls) && orderedManifestUrls.length > 0
+      const { orderedManifestUrls, addonIds, orderedAddonIds } = req.body || {}
+      console.log('Reorder addons request (alias):', { groupId: id, orderedManifestUrls, addonIds, orderedAddonIds })
+      // Use orderedAddonIds first, then orderedManifestUrls, then addonIds
+      const urls = orderedAddonIds || (Array.isArray(orderedManifestUrls) && orderedManifestUrls.length > 0
         ? orderedManifestUrls
-        : Array.isArray(addonIds) ? addonIds : []
+        : Array.isArray(addonIds) ? addonIds : [])
       // Forward to primary handler shape by replacing req.body then calling next middleware stack manually is complex here;
       // so we re-run the same logic inline by crafting a request to the same endpoint.
       req.body = { orderedManifestUrls: urls }
@@ -875,26 +883,83 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
       })
       if (!group) return responseUtils.notFound(res, 'Group')
 
-      const currentUrls = (group.addons || [])
-        .map(ga => { try { return getDecryptedManifestUrl(ga.addon, req) } catch { return ga.addon?.manifestUrl } })
-        .filter(Boolean)
-      const invalid = urlsNorm.filter(u => !currentUrls.includes(u))
-      if (invalid.length) return res.status(400).json({ message: 'Some URLs are not in group addons', invalid })
+      // Check if urlsNorm contains addon IDs (from orderedAddonIds) or URLs (from orderedManifestUrls)
+      const isAddonIds = urlsNorm[0] && /^[a-zA-Z0-9]+$/.test(urlsNorm[0])
+      
+      // Validate IDs/URLs against current addons list
+      if (isAddonIds) {
+        // Handle as addon IDs
+        const currentAddonIds = new Set((group.addons || []).map(ga => ga.addonId))
+        const invalid = urlsNorm.filter(id => !currentAddonIds.has(id))
+        if (invalid.length) return res.status(400).json({ message: 'Some addon IDs are not in group addons', invalid })
+      } else {
+        // Handle as URLs (legacy)
+        const currentUrls = (group.addons || [])
+          .map(ga => { try { return getDecryptedManifestUrl(ga.addon, req) } catch { return ga.addon?.manifestUrl } })
+          .filter(Boolean)
+        const invalid = urlsNorm.filter(u => !currentUrls.includes(u))
+        if (invalid.length) return res.status(400).json({ message: 'Some URLs are not in group addons', invalid })
+      }
 
       // Persist order via position as above
       try {
-        const urlToGroupAddon = new Map()
-        for (const ga of group.addons) {
-          const url = (() => { try { return getDecryptedManifestUrl(ga.addon, req) } catch { return ga.addon?.manifestUrl } })()
-          if (url) urlToGroupAddon.set(url, ga)
+        const positionUpdates = []
+        
+        if (isAddonIds) {
+          // Map by addon ID
+          const addonIdToGroupAddon = new Map()
+          for (const ga of group.addons) {
+            addonIdToGroupAddon.set(ga.addonId, ga)
+          }
+          
+          let pos = 0
+          for (const addonId of urlsNorm) {
+            const ga = addonIdToGroupAddon.get(addonId)
+            if (!ga) continue
+            positionUpdates.push({ 
+              addon: ga.addon.name, 
+              addonId: ga.addonId,
+              oldPosition: ga.position, 
+              newPosition: pos 
+            })
+            await prisma.groupAddon.update({ where: { id: ga.id }, data: { position: pos++ } })
+          }
+        } else {
+          // Map by URL (legacy)
+          const urlToGroupAddons = new Map()
+          for (const ga of group.addons) {
+            const url = (() => { try { return getDecryptedManifestUrl(ga.addon, req) } catch { return ga.addon?.manifestUrl } })()
+            if (url) {
+              if (!urlToGroupAddons.has(url)) {
+                urlToGroupAddons.set(url, [])
+              }
+              urlToGroupAddons.get(url).push(ga)
+            }
+          }
+          
+          let pos = 0
+          const processedGroupAddonIds = new Set()
+          for (const url of urlsNorm) {
+            const groupAddons = urlToGroupAddons.get(url) || []
+            // For each URL, try to find an unprocessed group addon
+            for (const ga of groupAddons) {
+              if (processedGroupAddonIds.has(ga.id)) continue
+              positionUpdates.push({ 
+                addon: ga.addon.name, 
+                addonId: ga.addonId,
+                oldPosition: ga.position, 
+                newPosition: pos 
+              })
+              await prisma.groupAddon.update({ where: { id: ga.id }, data: { position: pos++ } })
+              processedGroupAddonIds.add(ga.id)
+              break // Only process one addon per URL in the order
+            }
+          }
         }
-        let pos = 0
-        for (const url of urlsNorm) {
-          const ga = urlToGroupAddon.get(url)
-          if (!ga) continue
-          await prisma.groupAddon.update({ where: { id: ga.id }, data: { position: pos++ } })
-        }
-      } catch {}
+        console.log('Addon positions updated:', positionUpdates)
+      } catch (e) {
+        console.error('Order persistence failed (position):', e?.message)
+      }
 
       res.json({ message: 'Addons reordered successfully', groupId: id, reorderedCount: urlsNorm.length })
     } catch (error) {
