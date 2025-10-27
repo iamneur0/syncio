@@ -180,8 +180,8 @@ export default function GroupDetailModal({
 
   // Reorder addons mutation
   const reorderAddonsMutation = useMutation({
-    mutationFn: ({ groupId, orderedManifestUrls }: { groupId: string; orderedManifestUrls: string[] }) => 
-      groupsAPI.reorderAddons(groupId, orderedManifestUrls),
+    mutationFn: ({ groupId, orderedAddonIds }: { groupId: string; orderedAddonIds: string[] }) => 
+      groupsAPI.reorderAddons(groupId, orderedAddonIds),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['group'] })
       queryClient.invalidateQueries({ queryKey: ['group', group?.id, 'details'] })
@@ -228,10 +228,12 @@ export default function GroupDetailModal({
       
       // Update backend with new order
       if (group) {
-        const orderedManifestUrls = newAddons.map(addon => addon.transportUrl || addon.manifestUrl || addon.url).filter(Boolean)
+        // Send addon IDs instead of URLs to handle duplicate URLs
+        const orderedAddonIds = newAddons.map(addon => addon.id).filter(Boolean)
+        console.log('Reorder payload:', { groupId: group.id, orderedAddonIds, newAddons })
         reorderAddonsMutation.mutate({
           groupId: group.id,
-          orderedManifestUrls
+          orderedAddonIds
         })
       }
     }

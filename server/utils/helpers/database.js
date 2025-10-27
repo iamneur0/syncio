@@ -177,6 +177,14 @@ async function getGroupAddons(prisma, groupId, req) {
   
   const filtered = (group.addons || []).filter(ga => ga?.addon && ga.addon.isActive !== false && (!accId || ga.addon.accountId === accId))
   const sorted = filtered.slice().sort((a, b) => ((a?.position ?? 0) - (b?.position ?? 0)))
+  
+  // Log addon positions for debugging
+  console.log('Group addons with positions:', sorted.map(ga => ({
+    name: ga.addon.name,
+    id: ga.addon.id,
+    position: ga.position
+  })))
+  
   return sorted.map(ga => {
     // Decrypt and parse manifest from the database
     const manifest = (() => {

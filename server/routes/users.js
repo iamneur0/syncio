@@ -2268,8 +2268,19 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
           }
       }
 
+      // Get the starting position for new addons in this group
+      const maxPositionResult = await prisma.groupAddon.aggregate({
+        where: { 
+          groupId: group.id,
+          position: { not: null }
+        },
+        _max: { position: true }
+      })
+      let nextPosition = (maxPositionResult._max.position ?? -1) + 1
+
       // Attach all processed addons to the group
-      for (const addon of processedAddons) {
+      for (let index = 0; index < processedAddons.length; index++) {
+        const addon = processedAddons[index]
         try {
           // Get the addon URL for comparison
           const addonUrl = addon.manifestUrl ? decrypt(addon.manifestUrl, req) : null
@@ -2301,14 +2312,18 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
             }
           }
 
-          // Add new addon to group
+          // Add new addon to group with the current position
           await prisma.groupAddon.create({
           data: {
               groupId: group.id,
               addonId: addon.id,
-              isEnabled: true
+              isEnabled: true,
+              position: nextPosition
             }
           })
+          
+          // Increment position for next addon
+          nextPosition++
         } catch (error) {
           console.error(`❌ Failed to attach ${addon.name}:`, error?.message || error)
         }
