@@ -302,11 +302,12 @@ export default function UserDetailModal({
     const { active, over } = event
     if (active.id !== over?.id) {
       const currentAddons = stremioAddonsData?.addons || []
-      const reordered = arrayMove(
-        currentAddons,
-        currentAddons.findIndex((item: any) => (item.transportUrl || item.manifestUrl || item.url || item.id) === active.id),
-        currentAddons.findIndex((item: any) => (item.transportUrl || item.manifestUrl || item.url || item.id) === over.id)
-      )
+      
+      // Extract index from the unique ID (format: "index-transportUrl")
+      const activeIndex = parseInt(active.id.split('-')[0])
+      const overIndex = parseInt(over.id.split('-')[0])
+      
+      const reordered = arrayMove(currentAddons, activeIndex, overIndex)
       
       // Update the query cache immediately for smooth UI
       queryClient.setQueryData(['user', currentUser?.id, 'stremio-addons'], (oldData: any) => ({
@@ -314,10 +315,10 @@ export default function UserDetailModal({
         addons: reordered
       }))
       
-      // Persist order in backend
-      const orderedManifestUrls = reordered.map((a: any) => a.transportUrl || a.manifestUrl || a.url || a.id).filter(Boolean)
+      // Persist order in backend using the FULL addon objects (not just URLs)
+      // This is important because addons with the same URL might have different configurations
       if (currentUser) {
-        usersAPI.reorderStremioAddons?.(currentUser.id, orderedManifestUrls)
+        usersAPI.reorderStremioAddons?.(currentUser.id, reordered)
           .then(() => {
             // Refresh the data from the server to ensure consistency
             queryClient.invalidateQueries({ queryKey: ['user', currentUser.id, 'stremio-addons'] })
@@ -648,17 +649,21 @@ export default function UserDetailModal({
               modifiers={[restrictToParentElement]}
               onDragEnd={handleDragEnd}
             >
-              <SortableContext items={(stremioAddonsData?.addons || []).map((addon: any) => addon.transportUrl || addon.id)} strategy={verticalListSortingStrategy}>
+              <SortableContext items={(stremioAddonsData?.addons || []).map((addon: any, index: number) => {
+                const addonId = addon.transportUrl || addon.manifestUrl || addon.url || addon.id
+                return `${index}-${addonId}`
+              })} strategy={verticalListSortingStrategy}>
                 <div className="space-y-3">
                   {(stremioAddonsData?.addons || []).map((addon: any, index: number) => {
                     const addonId = addon.transportUrl || addon.manifestUrl || addon.url || addon.id
+                    const uniqueId = `${index}-${addonId}`
                     const addonName = addon.manifest?.name || addon.transportName || addon.name || 'Unknown Addon'
                     const isProtected = localProtectedSet.has(addonId)
                     const isDefault = isDefaultAddon(addonId, addonName)
                     
                     return (
                       <SortableAddonItem
-                        key={addonId || index}
+                        key={uniqueId}
                         addon={addon}
                         onRemove={handleDeleteStremioAddon}
                         onProtect={handleProtectStremioAddon}
@@ -666,6 +671,7 @@ export default function UserDetailModal({
                         isDefault={!!isDefault}
                         isUnsafeMode={isUnsafeMode}
                         showProtectButton={true}
+                        uniqueId={uniqueId}
                       />
                     )
                   })}
