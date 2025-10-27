@@ -598,7 +598,7 @@ export default function SettingsPage() {
   }
 
   return (
-    <div ref={containerRef} className="p-4 sm:p-6">
+    <div ref={containerRef} className="p-4 sm:p-6" style={{ scrollbarGutter: 'stable' }}>
       {/* Header */}
       <div className="mb-6 sm:mb-8">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4 gap-4">
