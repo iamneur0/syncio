@@ -1618,11 +1618,18 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
   router.post('/:id/stremio-addons/reorder', async (req, res) => {
     try {
       const { id: userId } = req.params
-      const { orderedManifestUrls } = req.body || {}
+      const { orderedManifestUrls, orderedAddons } = req.body || {}
       
+      // Support both orderedAddons (new) and orderedManifestUrls (legacy)
+      if (orderedAddons && Array.isArray(orderedAddons) && orderedAddons.length > 0) {
+        // Use the full addon objects directly
+        const apiClient = new StremioAPIClient({ endpoint: 'https://api.strem.io', authKey: decrypt((await prisma.user.findUnique({ where: { id: userId, accountId: getAccountId(req) } })).stremioAuthKey, req) })
+        await apiClient.request('addonCollectionSet', { addons: orderedAddons })
+        return res.json({ message: 'Addons reordered successfully', reorderedCount: orderedAddons.length })
+      }
       
       if (!Array.isArray(orderedManifestUrls) || orderedManifestUrls.length === 0) {
-        return res.status(400).json({ message: 'orderedManifestUrls array is required' })
+        return res.status(400).json({ message: 'orderedAddons or orderedManifestUrls array is required' })
       }
       
       // Get the user
@@ -1654,17 +1661,20 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
       const current = await apiClient.request('addonCollectionGet', {})
       const currentAddons = current?.addons || []
       
-      // Create a map of manifest URLs to addon objects
-      const manifestToAddon = new Map()
+      // Create a map of manifest URLs to arrays of addon objects (handles duplicates)
+      const manifestToAddons = new Map()
       currentAddons.forEach(addon => {
         const manifestUrl = addon.transportUrl
         if (manifestUrl) {
-          manifestToAddon.set(manifestUrl, addon)
+          if (!manifestToAddons.has(manifestUrl)) {
+            manifestToAddons.set(manifestUrl, [])
+          }
+          manifestToAddons.get(manifestUrl).push(addon)
         }
       })
       
       // Validate that all provided URLs exist in the user's addons
-      const invalidUrls = orderedManifestUrls.filter(url => !manifestToAddon.has(url))
+      const invalidUrls = orderedManifestUrls.filter(url => !manifestToAddons.has(url))
       if (invalidUrls.length > 0) {
         return res.status(400).json({ 
           message: 'Some URLs are not in the user\'s current addons', 
@@ -1672,8 +1682,25 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
         })
       }
       
-      // Create reordered addons array
-      const reorderedAddons = orderedManifestUrls.map(url => manifestToAddon.get(url))
+      // Create reordered addons array, handling duplicates by taking the first occurrence for each URL
+      const processedUrls = new Set()
+      const reorderedAddons = []
+      orderedManifestUrls.forEach(url => {
+        const addonsList = manifestToAddons.get(url) || []
+        for (const addon of addonsList) {
+          // Use JSON.stringify to create a unique key for the addon
+          const addonKey = JSON.stringify({
+            url,
+            id: addon.manifest?.id,
+            name: addon.manifest?.name
+          })
+          if (!processedUrls.has(addonKey)) {
+            processedUrls.add(addonKey)
+            reorderedAddons.push(addon)
+            break // Only add one instance per unique URL+ID combination
+          }
+        }
+      })
       
       // Set the reordered collection
       await apiClient.request('addonCollectionSet', { addons: reorderedAddons })

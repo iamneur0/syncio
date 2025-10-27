@@ -15,6 +15,7 @@ interface SortableAddonItemProps {
   isUnsafeMode?: boolean
   showProtectButton?: boolean
   className?: string
+  uniqueId?: string // Override the generated ID to ensure uniqueness
 }
 
 export default function SortableAddonItem({ 
@@ -25,14 +26,15 @@ export default function SortableAddonItem({
   isDefault = false,
   isUnsafeMode = false,
   showProtectButton = false,
-  className = ''
+  className = '',
+  uniqueId
 }: SortableAddonItemProps) {
   const { isDark, isMono } = useTheme()
 
   // Extract data from the addon format (handles both Stremio and group addon formats)
   const manifest = addon?.manifest || addon
   // For group addons, use database ID; for Stremio addons, use transportUrl (this is what the protect function expects)
-  const addonId = addon?.id || addon?.transportUrl || addon?.manifestUrl || addon?.url || manifest?.id || 'unknown'
+  const addonId = uniqueId || addon?.id || addon?.transportUrl || addon?.manifestUrl || addon?.url || manifest?.id || 'unknown'
   
   // Use database fields for display (name, description, version, iconUrl)
   const name = addon?.name || manifest?.name || addon?.transportName || 'Unknown'

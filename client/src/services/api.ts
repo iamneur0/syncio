@@ -287,8 +287,8 @@ export const usersAPI = {
   },
 
   // Reorder Stremio addons for a user
-  reorderStremioAddons: async (id: string, orderedManifestUrls: string[]): Promise<any> => {
-    const response: AxiosResponse<any> = await api.post(`/users/${id}/stremio-addons/reorder`, { orderedManifestUrls })
+  reorderStremioAddons: async (id: string, orderedAddons: any[]): Promise<any> => {
+    const response: AxiosResponse<any> = await api.post(`/users/${id}/stremio-addons/reorder`, { orderedAddons })
     return response.data
   },
 
