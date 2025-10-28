@@ -115,11 +115,20 @@ async function getDesiredAddons(user, req, { prisma, getAccountId, decrypt, pars
     console.log('🔍 getDesiredAddons - groupAddonsFiltered count:', groupAddonsFiltered.length)
     
     // Strip database fields from filtered group addons for clean JSON
-    const cleanGroupAddons = groupAddonsFiltered.map(addon => ({
-      transportUrl: addon.transportUrl,
-      transportName: addon.transportName,
-      manifest: addon.manifest
-    }))
+    // Ensure manifest.name matches the addon name from DB
+    const cleanGroupAddons = groupAddonsFiltered.map(addon => {
+      const manifestObj = (addon && addon.manifest && typeof addon.manifest === 'object')
+        ? { ...addon.manifest }
+        : addon?.manifest ? addon.manifest : {}
+      if (addon && typeof addon.name === 'string' && manifestObj && typeof manifestObj === 'object') {
+        manifestObj.name = addon.name
+      }
+      return {
+        transportUrl: addon.transportUrl,
+        transportName: addon.transportName,
+        manifest: manifestObj
+      }
+    })
 
     // 2) Keep only protected addons from userAddons
     const protectedUserAddons = (userAddons || []).filter(addon => isProtected(addon))
