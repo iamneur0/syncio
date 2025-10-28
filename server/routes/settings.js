@@ -56,6 +56,66 @@ module.exports = ({ prisma, AUTH_ENABLED, getAccountDek, getDecryptedManifestUrl
     })
   }
 
+  // Sync settings endpoints - available in all modes
+  const { 
+    readSyncFrequencyMinutes,
+    writeSyncFrequencyMinutes,
+    scheduleSyncs,
+    performSyncOnce 
+  } = require('../utils/syncScheduler');
+
+  // Get sync frequency setting
+  router.get('/sync-frequency', async (req, res) => {
+    try {
+      return res.json({ minutes: readSyncFrequencyMinutes() })
+    } catch {
+      return res.status(500).json({ message: 'Failed to read sync frequency' })
+    }
+  })
+
+  // Update sync frequency setting
+  router.put('/sync-frequency', async (req, res) => {
+    try {
+      const minutes = Number(req.body?.minutes || 0)
+      if (!Number.isFinite(minutes) || minutes < 0) return res.status(400).json({ message: 'Invalid minutes' })
+      writeSyncFrequencyMinutes(minutes)
+      
+      // Reinitialize sync schedule with new frequency
+      const { reloadGroupAddons } = require('../routes/users');
+      const scopedWhere = require('../utils/helpers').scopedWhere;
+      const { getAccountId } = require('../utils/helpers');
+      const decrypt = require('../utils/encryption').decrypt;
+      const { AUTH_ENABLED, DEFAULT_ACCOUNT_ID } = require('../utils/config');
+      
+      const schedulerReq = {
+        appAccountId: AUTH_ENABLED ? undefined : DEFAULT_ACCOUNT_ID
+      };
+      scheduleSyncs(minutes, prisma, getAccountId, scopedWhere, decrypt, reloadGroupAddons, schedulerReq, AUTH_ENABLED)
+      
+      return res.json({ message: 'Sync frequency updated', minutes })
+    } catch (e) {
+      return res.status(500).json({ message: 'Failed to update sync frequency', error: e?.message })
+    }
+  })
+
+  // Manual sync trigger
+  router.post('/sync-now', async (req, res) => {
+    try {
+      const { reloadGroupAddons } = require('../routes/users');
+      const scopedWhere = require('../utils/helpers').scopedWhere;
+      const { getAccountId } = require('../utils/helpers');
+      const decrypt = require('../utils/encryption').decrypt;
+      
+      const schedulerReq = {
+        appAccountId: AUTH_ENABLED ? req.appAccountId : DEFAULT_ACCOUNT_ID
+      };
+      const result = await performSyncOnce(prisma, getAccountId, scopedWhere, decrypt, reloadGroupAddons, schedulerReq, AUTH_ENABLED)
+      return res.json({ message: 'Sync started', result })
+    } catch (e) {
+      return res.status(500).json({ message: 'Failed to start sync', error: e?.message })
+    }
+  })
+
   // Repair addons metadata (fill missing stremioAddonId and iconUrl from manifest)
   // Scopes to current account when AUTH is enabled
   router.post('/repair-addons', async (req, res) => {

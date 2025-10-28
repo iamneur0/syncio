@@ -223,6 +223,8 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, issueAccessToken, issueR
         }),
         prisma.addon.findMany({ where: whereScope, include: { groupAddons: true } })
       ])
+      // Build addon id -> name map for user excludedAddons name resolution
+      const addonIdToName = new Map(addons.map(a => [a.id, a.name]))
       
       // Decrypt stremioAuthKey for each user before exporting
       const decryptedUsers = users.map(user => {
@@ -235,6 +237,24 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, issueAccessToken, issueR
             decryptedUser.stremioAuthKey = null
           }
         }
+        // Normalize excludedAddons to addon NAMES for export (keep JSON string format for compatibility)
+        try {
+          const parsedExcluded = user.excludedAddons ? JSON.parse(user.excludedAddons) : []
+          if (Array.isArray(parsedExcluded)) {
+            const names = parsedExcluded
+              .map(id => addonIdToName.get(id))
+              .filter(Boolean)
+            decryptedUser.excludedAddons = JSON.stringify(names)
+          }
+        } catch {}
+        // Ensure protectedAddons remains a JSON string of names
+        try {
+          if (Array.isArray(user.protectedAddons)) {
+            decryptedUser.protectedAddons = JSON.stringify(user.protectedAddons)
+          } else if (typeof user.protectedAddons !== 'string' && user.protectedAddons) {
+            decryptedUser.protectedAddons = JSON.stringify([])
+          }
+        } catch {}
         // Omit internal fields
         delete decryptedUser.id
         delete decryptedUser.accountId
@@ -490,7 +510,7 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, issueAccessToken, issueR
         return responseUtils.badRequest(res, 'Invalid config format');
       }
 
-      const { users, groups, addons, groupAddons } = configData;
+      const { users, groups, addons } = configData;
       const accountId = req.appAccountId || 'default';
 
       // Reset existing data for this account using shared function
@@ -502,7 +522,7 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, issueAccessToken, issueR
       const importedGroups = [];
       if (groups && Array.isArray(groups)) {
         for (const groupData of groups) {
-          const { id: _exportGroupId, addons, userIds: exportUserIds, addonIds, users, ...groupFields } = groupData;
+          const { id: _exportGroupId, addons, userIds: _legacyUserIds, users, ...groupFields } = groupData;
           const group = await prisma.group.create({
             data: {
               ...groupFields,
@@ -510,18 +530,10 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, issueAccessToken, issueR
               // do not include userIds yet; we will remap after users are created
             }
           });
-          // keep original userIds (string or array) for later remap
-          let exportUserIdsArr = []
-          try {
-            if (Array.isArray(exportUserIds)) exportUserIdsArr = exportUserIds
-            else if (typeof exportUserIds === 'string' && exportUserIds.trim()) exportUserIdsArr = JSON.parse(exportUserIds)
-          } catch {}
           const groupWithAddons = { 
             ...group, 
-            addons: addons || [], 
-            users: users || exportUserIdsArr, // Store username array from export
-            _exportUserIds: exportUserIdsArr,
-            _exportAddonIds: addonIds || []
+            addons: Array.isArray(addons) ? addons : [],
+            users: Array.isArray(users) ? users : [] // Expect usernames only
           };
           console.log(`🔍 Storing group "${groupWithAddons.name}" with addons:`, groupWithAddons.addons);
           importedGroups.push(groupWithAddons);
@@ -576,19 +588,13 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, issueAccessToken, issueR
 
             const transportName = addonData.name || addonData.transportName || originalManifestObj.name || 'Unknown';
 
-            // Check if addon already exists using per-account HMAC of manifestUrl
-            const existingAddon = await prisma.addon.findFirst({
+            // Check if addon already exists BY NAME ONLY
+            let existingAddon = await prisma.addon.findFirst({
               where: {
                 accountId: getAccountId(req),
-                manifestUrlHash: manifestUrlHmac(req, transportUrl)
+                name: transportName
               }
-            });
-
-            if (existingAddon) {
-              console.log(`Addon already exists: ${transportName}`);
-              importedAddons.push(existingAddon);
-              continue;
-            }
+            })
 
             // Get selected resources and catalogs from export data
             const selectedResources = (() => {
@@ -673,28 +679,49 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, issueAccessToken, issueR
               } catch { return [] }
             })()
 
-            // Create new addon with both original and filtered manifests
-            const newAddon = await prisma.addon.create({
-              data: {
-                accountId: getAccountId(req),
-                name: transportName,
-                description: originalManifestObj.description || '',
-                version: originalManifestObj.version || null,
-                iconUrl: originalManifestObj.logo || null,
-                stremioAddonId: originalManifestObj.id || null,
-                isActive: true,
-                manifestUrl: encrypt(transportUrl, req),
-                manifestUrlHash: manifestUrlHmac(req, transportUrl),
-                originalManifest: encrypt(JSON.stringify(originalManifestObj), req), // Full manifest
-                manifest: encrypt(JSON.stringify(filteredManifest), req), // Filtered manifest
-                manifestHash: manifestHash(filteredManifest),
-                resources: JSON.stringify(selectedResources), // Just names: ["stream", "catalog"]
-                catalogs: JSON.stringify(simplifiedCatalogs), // Just (type,id,search) pairs: [{"type":"movie","id":"123","search":false}]
-              }
-            });
-
-            console.log(`Successfully imported addon: ${transportName}`);
-            importedAddons.push(newAddon);
+            // If addon exists by name, update it, else create
+            if (existingAddon) {
+              const updated = await prisma.addon.update({
+                where: { id: existingAddon.id },
+                data: {
+                  description: addonData.description || existingAddon.description || '',
+                  version: originalManifestObj.version || existingAddon.version || null,
+                  iconUrl: addonData.iconUrl || originalManifestObj.logo || existingAddon.iconUrl || null,
+                  stremioAddonId: originalManifestObj.id || existingAddon.stremioAddonId || null,
+                  isActive: addonData.isActive !== false,
+                  manifestUrl: encrypt(transportUrl, req),
+                  manifestUrlHash: manifestUrlHmac(req, transportUrl),
+                  originalManifest: encrypt(JSON.stringify(originalManifestObj), req),
+                  manifest: encrypt(JSON.stringify(filteredManifest), req),
+                  manifestHash: manifestHash(filteredManifest),
+                  resources: JSON.stringify(selectedResources),
+                  catalogs: JSON.stringify(simplifiedCatalogs)
+                }
+              })
+              console.log(`Successfully updated existing addon: ${transportName}`)
+              importedAddons.push(updated)
+            } else {
+              const newAddon = await prisma.addon.create({
+                data: {
+                  accountId: getAccountId(req),
+                  name: transportName,
+                  description: originalManifestObj.description || '',
+                  version: originalManifestObj.version || null,
+                  iconUrl: originalManifestObj.logo || null,
+                  stremioAddonId: originalManifestObj.id || null,
+                  isActive: true,
+                  manifestUrl: encrypt(transportUrl, req),
+                  manifestUrlHash: manifestUrlHmac(req, transportUrl),
+                  originalManifest: encrypt(JSON.stringify(originalManifestObj), req),
+                  manifest: encrypt(JSON.stringify(filteredManifest), req),
+                  manifestHash: manifestHash(filteredManifest),
+                  resources: JSON.stringify(selectedResources),
+                  catalogs: JSON.stringify(simplifiedCatalogs)
+                }
+              });
+              console.log(`Successfully imported addon: ${transportName}`);
+              importedAddons.push(newAddon);
+            }
 
           } catch (addonError) {
             console.error(`Failed to import addon ${addonData.name}:`, addonError);
@@ -708,39 +735,81 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, issueAccessToken, issueR
       const importedUsers = [];
       const exportUserIdToNewId = new Map();
       if (users && Array.isArray(users)) {
+        // Build addon lookup maps for normalization
+        const nameToAddonId = new Map();
+        const stremioIdToAddonId = new Map();
+        for (const a of importedAddons) {
+          if (a?.name && a?.id) nameToAddonId.set(a.name, a.id)
+          if (a?.stremioAddonId && a?.id) stremioIdToAddonId.set(a.stremioAddonId, a.id)
+        }
+
         for (const userData of users) {
           const { id: _exportUserId, stremioAuthKey, protectedAddons, excludedAddons, ...userFields } = userData;
-          
-            // Parse protectedAddons and excludedAddons if they're JSON strings
-            const parsedProtectedAddons = (() => {
-              try {
-                if (typeof protectedAddons === 'string') {
-                  return JSON.parse(protectedAddons);
-                }
-                return Array.isArray(protectedAddons) ? protectedAddons : [];
-              } catch {
-                return [];
+
+          // Parse protectedAddons and excludedAddons if they're JSON strings
+          const parsedProtectedAddons = (() => {
+            try {
+              if (typeof protectedAddons === 'string') {
+                return JSON.parse(protectedAddons);
               }
-            })();
-            
-            const parsedExcludedAddons = (() => {
-              try {
-                if (typeof excludedAddons === 'string') {
-                  return JSON.parse(excludedAddons);
-                }
-                return Array.isArray(excludedAddons) ? excludedAddons : [];
-              } catch {
-                return [];
+              return Array.isArray(protectedAddons) ? protectedAddons : [];
+            } catch {
+              return [];
+            }
+          })();
+
+          const parsedExcludedAddons = (() => {
+            try {
+              if (typeof excludedAddons === 'string') {
+                return JSON.parse(excludedAddons);
               }
-            })();
-          
+              return Array.isArray(excludedAddons) ? excludedAddons : [];
+            } catch {
+              return [];
+            }
+          })();
+
+          // Normalize protectedAddons to plaintext addon names present in DB
+          const normalizedProtectedNames = parsedProtectedAddons
+            .map(x => (typeof x === 'string' ? x : null))
+            .filter(Boolean)
+            .filter(name => nameToAddonId.has(name));
+
+          // Normalize excludedAddons to current DB addon IDs
+          const normalizedExcludedIds = []
+          for (const raw of parsedExcludedAddons) {
+            const val = typeof raw === 'string' ? raw : null
+            if (!val) continue
+            // If looks like an existing DB id, keep as-is (we don't know format, but try fast path by lookup)
+            let resolvedId = null
+            if (nameToAddonId.has(val)) {
+              resolvedId = nameToAddonId.get(val)
+            } else if (stremioIdToAddonId.has(val)) {
+              resolvedId = stremioIdToAddonId.get(val)
+            } else {
+              // Try DB lookup by name within account scope
+              try {
+                const byName = await prisma.addon.findFirst({ where: { accountId: getAccountId(req), name: val }, select: { id: true } })
+                if (byName?.id) resolvedId = byName.id
+              } catch {}
+              // As a last resort, if val corresponds to an addon id in DB, accept it
+              if (!resolvedId) {
+                try {
+                  const byId = await prisma.addon.findFirst({ where: { accountId: getAccountId(req), id: val }, select: { id: true } })
+                  if (byId?.id) resolvedId = byId.id
+                } catch {}
+              }
+            }
+            if (resolvedId) normalizedExcludedIds.push(resolvedId)
+          }
+
           const user = await prisma.user.create({
             data: {
               ...userFields,
               accountId,
               stremioAuthKey: stremioAuthKey ? encrypt(stremioAuthKey, req) : null,
-                protectedAddons: parsedProtectedAddons.length > 0 ? JSON.stringify(parsedProtectedAddons.map(url => encrypt(url, req))) : null,
-                excludedAddons: parsedExcludedAddons.length > 0 ? JSON.stringify(parsedExcludedAddons.map(url => encrypt(url, req))) : null
+              protectedAddons: normalizedProtectedNames.length > 0 ? JSON.stringify(normalizedProtectedNames) : null,
+              excludedAddons: normalizedExcludedIds.length > 0 ? JSON.stringify(normalizedExcludedIds) : null
             }
           });
           importedUsers.push(user);
@@ -756,16 +825,10 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, issueAccessToken, issueR
         }
       }
 
-      // 3b. Update groups.userIds with new user IDs
+      // 3b. Update groups.userIds with new user IDs (from usernames only)
       for (const g of importedGroups) {
         let newUserIds = []
-        
-        // Try mapping from export user IDs
-        if (Array.isArray(g._exportUserIds) && g._exportUserIds.length > 0) {
-          newUserIds = g._exportUserIds.map(uid => exportUserIdToNewId.get(uid)).filter(Boolean)
-        }
-        // Try mapping from username array (from new export format)
-        else if (Array.isArray(g.users) && g.users.length > 0) {
+        if (Array.isArray(g.users) && g.users.length > 0) {
           newUserIds = g.users.map(username => usernameToUserId.get(username)).filter(Boolean)
         }
         
@@ -781,32 +844,11 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, issueAccessToken, issueR
         }
       }
 
-      // Build quick-lookup maps for reliable linking between exported addon IDs and newly created IDs
-      const exportAddonIdToNewId = new Map(); // map: exportAddon.id -> dbAddon.id
-      const exportStremioIdToNewId = new Map(); // map: stremioAddonId -> dbAddon.id
-      const exportManifestUrlHmacToNewId = new Map(); // map: hmac(manifestUrl) -> dbAddon.id
-      const exportAddonNameToNewId = new Map(); // map: addon.name -> dbAddon.id (names are unique per your rule)
+      // Build quick-lookup map by NAME ONLY for linking between exported and imported addons
+      const exportAddonNameToNewId = new Map(); // map: addon.name -> dbAddon.id
       for (const a of addons || []) {
-        // Find the created addon by stremioAddonId first, then manifestUrl, then name
-        const byStremio = a.stremioAddonId
-          ? importedAddons.find(x => x.stremioAddonId === a.stremioAddonId)
-          : null
-        const byUrlHmac = (!byStremio && a.manifestUrl)
-          ? importedAddons.find(x => {
-              try { return x.manifestUrlHash && manifestUrlHmac(req, a.manifestUrl) === x.manifestUrlHash } catch { return false }
-            })
-          : null
-        const byName = (!byStremio && !byUrlHmac)
-          ? importedAddons.find(x => x.name === a.name)
-          : null
-
-        const matched = byStremio || byUrlHmac || byName
-        if (matched) {
-          if (a.id) exportAddonIdToNewId.set(a.id, matched.id)
-          if (a.stremioAddonId) exportStremioIdToNewId.set(a.stremioAddonId, matched.id)
-          if (a.manifestUrl) exportManifestUrlHmacToNewId.set(manifestUrlHmac(req, a.manifestUrl), matched.id)
-          if (a.name) exportAddonNameToNewId.set(a.name, matched.id)
-        }
+        const matched = importedAddons.find(x => x.name === a.name)
+        if (matched && a.name) exportAddonNameToNewId.set(a.name, matched.id)
       }
 
       // Repair newly imported addons before linking users/groups
@@ -814,35 +856,11 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, issueAccessToken, issueR
         await repairAddonsForAccount(importedAddons, req)
       }
 
-      // Import group-addon relationships from groups
+      // Import group-addon relationships from groups (addons by name only)
       let importedGroupAddons = 0;
       for (const group of importedGroups) {
         const addedAddonIds = new Set()
-        // Use addonIds array for proper ordering if available, otherwise fall back to addons array
-        const addonsToImport = group._exportAddonIds && Array.isArray(group._exportAddonIds) && group._exportAddonIds.length > 0
-          ? group._exportAddonIds.map((addonId, index) => ({ 
-              id: addonId, 
-              position: index,
-              isEnabled: true // Default to enabled, will be overridden if found in addons array
-            }))
-          : (group.addons && Array.isArray(group.addons) ? group.addons : []);
-
-        // If using addonIds, try to get isEnabled from the addons array
-        if (group._exportAddonIds && group.addons) {
-          const addonsMap = new Map();
-          for (const addonRef of group.addons) {
-            const ref = addonRef && addonRef.addon ? addonRef.addon : addonRef;
-            if (ref?.id) {
-              addonsMap.set(ref.id, addonRef.isEnabled !== undefined ? addonRef.isEnabled : true);
-            }
-          }
-          // Update isEnabled from addons array
-          for (const addon of addonsToImport) {
-            if (addonsMap.has(addon.id)) {
-              addon.isEnabled = addonsMap.get(addon.id);
-            }
-          }
-        }
+        const addonsToImport = Array.isArray(group.addons) ? group.addons : []
 
         for (let index = 0; index < addonsToImport.length; index++) {
           try {
@@ -852,75 +870,11 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, issueAccessToken, issueR
             let position = addonRef.position !== undefined ? addonRef.position : index;
             let isEnabled = addonRef.isEnabled !== undefined ? addonRef.isEnabled : true;
 
-            // Handle new format: just { name, isEnabled } from group.addons array
-            if (addonRef.name && !addonRef.id && !addonRef.addon) {
-              resolvedAddonId = exportAddonNameToNewId.get(addonRef.name);
-            }
-            
-            // If using addonIds array, the ID should be directly mappable
-            if (!resolvedAddonId && group._exportAddonIds && addonRef.id) {
-              resolvedAddonId = exportAddonIdToNewId.get(addonRef.id);
-              // Fallback: resolve by name when id mapping is missing
-              if (!resolvedAddonId && Array.isArray(group.addons)) {
-                try {
-                  const named = group.addons.find((ga) => {
-                    const ref = ga && ga.addon ? ga.addon : ga
-                    return ref && ref.id === addonRef.id && ref.name
-                  })
-                  const addonName = named && (named.addon ? named.addon.name : named.name)
-                  if (addonName && exportAddonNameToNewId.has(addonName)) {
-                    resolvedAddonId = exportAddonNameToNewId.get(addonName)
-                  }
-                } catch {}
-              }
-              // Extra fallback: try importedAddons by name directly
-              if (!resolvedAddonId && Array.isArray(group.addons)) {
-                try {
-                  const named = group.addons.find((ga) => {
-                    const ref = ga && ga.addon ? ga.addon : ga
-                    return ref && ref.id === addonRef.id && ref.name
-                  })
-                  const addonName = named && (named.addon ? named.addon.name : named.name)
-                  if (addonName) {
-                    const found = importedAddons.find(x => x.name === addonName)
-                    if (found) resolvedAddonId = found.id
-                  }
-                } catch {}
-              }
-            } else {
-              // Fallback to old logic for backward compatibility
-              const ref = addonRef && addonRef.addon ? addonRef.addon : addonRef;
-              
-              // 1) Try explicit export ID map
-              if (ref?.id && exportAddonIdToNewId.has(ref.id)) {
-                resolvedAddonId = exportAddonIdToNewId.get(ref.id);
-              }
-              // 2) Try stremioAddonId map
-              if (!resolvedAddonId && ref?.stremioAddonId && exportStremioIdToNewId.has(ref.stremioAddonId)) {
-                resolvedAddonId = exportStremioIdToNewId.get(ref.stremioAddonId);
-              }
-              // 3) Try manifestUrl HMAC map
-              if (!resolvedAddonId && ref?.manifestUrl) {
-                try {
-                  const h = manifestUrlHmac(req, ref.manifestUrl)
-                  if (exportManifestUrlHmacToNewId.has(h)) resolvedAddonId = exportManifestUrlHmacToNewId.get(h)
-                } catch {}
-              }
-              // 4) Try name map (explicit per your rule that names are unique)
-              if (!resolvedAddonId && ref?.name && exportAddonNameToNewId.has(ref.name)) {
-                resolvedAddonId = exportAddonNameToNewId.get(ref.name)
-              }
-              // 4) Last resort: relaxed match on stremioAddonId or name
-              if (!resolvedAddonId) {
-                const loose = importedAddons.find(x => (ref?.stremioAddonId && x.stremioAddonId === ref.stremioAddonId))
-                  || importedAddons.find(x => ref?.name && x.name === ref.name);
-                resolvedAddonId = loose ? loose.id : null;
-              }
-              
-              // For old format, position will be null (no ordering preserved)
-              if (addonRef.isEnabled !== undefined) {
-                isEnabled = addonRef.isEnabled;
-              }
+            // Resolve by NAME ONLY
+            if (addonRef.name) {
+              resolvedAddonId = exportAddonNameToNewId.get(addonRef.name)
+            } else if (addonRef.addon && addonRef.addon.name) {
+              resolvedAddonId = exportAddonNameToNewId.get(addonRef.addon.name)
             }
             
             if (resolvedAddonId) {
@@ -955,14 +909,7 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, issueAccessToken, issueR
           addons: importedAddons.length,
           groupAddons: importedGroupAddons
         },
-        // Backward-compatible alias for older UIs expecting `created`
-        created: {
-          users: importedUsers.length,
-          groups: importedGroups.length,
-          addons: importedAddons.length,
-          groupAddons: importedGroupAddons
-        },
-        // Legacy top-level fields for older clients expecting { addons: { created, reused }, users: { created }, groups: { created } }
+        // Backward-compatible aliases expected by older clients
         addons: { created: importedAddons.length, reused: 0 },
         users: { created: importedUsers.length },
         groups: { created: importedGroups.length }

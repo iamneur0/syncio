@@ -139,7 +139,12 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
       
       excludedAddons = parseAddonIds(user.excludedAddons)
       
-      protectedAddons = parseProtectedAddons(user.protectedAddons, req)
+      // protectedAddons are stored as plaintext names (JSON array)
+      try {
+        protectedAddons = user.protectedAddons ? JSON.parse(user.protectedAddons) : []
+      } catch {
+        protectedAddons = []
+      }
 
       // Transform for frontend
       const transformedUser = {
@@ -711,94 +716,26 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
     }
   });
 
-  // Sync user addons (UI endpoint) – simple implementation using getDesiredAddons
+  // Sync user addons - delegate to shared syncUserAddons to keep behavior consistent everywhere
   router.post('/:id/sync', async (req, res) => {
     try {
       const { id } = req.params
-      const { unsafe } = req.body
+      // sync mode comes from header, defaults to normal
+      const headerMode = (req.headers['x-sync-mode'] || '').toString().toLowerCase()
+      const syncMode = headerMode === 'advanced' ? 'advanced' : 'normal'
+      const unsafeMode = req.query?.unsafe === 'true' || req.body?.unsafe === true
 
-      // Get user
-      const user = await prisma.user.findUnique({
-        where: { 
-          id,
-          accountId: getAccountId(req)
-        },
-        select: { 
-          id: true,
-          stremioAuthKey: true,
-          isActive: true,
-          excludedAddons: true,
-          protectedAddons: true
-        }
-      })
-
-      if (!user) {
-        return responseUtils.notFound(res, 'User')
-      }
-
-      if (!user.isActive) {
-        return res.status(400).json({ message: 'User is disabled' })
-      }
-
-      if (!user.stremioAuthKey) {
-        return res.status(400).json({ message: 'User not connected to Stremio' })
-      }
-
-      // Get desired addons
-      const { getDesiredAddons } = require('../utils/sync')
-      const result = await getDesiredAddons(user, req, {
-        prisma,
-        getAccountId,
-        decrypt,
-        parseAddonIds,
-        parseProtectedAddons,
-        canonicalizeManifestUrl,
-        StremioAPIClient,
-        unsafeMode: unsafe === true
-      })
+      const result = await syncUserAddons(id, [], syncMode, unsafeMode, req, decrypt, getAccountId)
 
       if (!result.success) {
-        return res.status(500).json({ message: 'Failed to get desired addons', error: result.error })
+        return res.status(400).json({ message: result.error || 'Failed to sync user' })
       }
 
-      
-      // Note: We still need to sync even when desired is empty to clear current addons
-
-      // Use Stremio API client to manage addons
-      const authKeyPlain = decrypt(user.stremioAuthKey, req)
-      const apiClient = new StremioAPIClient({ endpoint: 'https://api.strem.io', authKey: authKeyPlain })
-      
-      // Convert desired addons to the exact format expected by Stremio API
-      // Prefer collection-style objects coming from getDesiredAddons: { transportUrl, transportName, manifest }
-      const addonsForSync = result.addons.map((item) => {
-        if (item && (item.transportUrl || item.transportName || item.manifest)) {
-          return {
-            transportUrl: item.transportUrl,
-            transportName: item.transportName || (item.manifest && item.manifest.name) || item.name || 'Addon',
-            manifest: item.manifest || item,
-          }
-        }
-        // Fallback if an entry is a raw manifest object (legacy)
-        const fallbackUrl = item?.manifestUrl || item?.url || item?.transportUrl || ''
-        const fallbackName = item?.name || item?.manifest?.name || 'Addon'
-        return {
-          transportUrl: fallbackUrl,
-          transportName: fallbackName,
-          manifest: item?.manifest || item,
-        }
-      })
-
-      // Set the entire desired collection (this replaces the current collection)
-      try {
-        await apiClient.request('addonCollectionSet', { addons: addonsForSync })
-      } catch (error) {
-        console.error('❌ Failed to set addon collection:', error.message)
-        return res.status(500).json({ message: 'Failed to sync addons', error: error.message })
-      }
-
-      res.json({ 
-        message: 'User synced successfully', 
-        addonsCount: result.addons.length
+      return res.json({
+        message: 'User synced successfully',
+        addonsCount: result.totalAddons ?? result.addonsCount ?? 0,
+        ...(result.reloadedCount !== undefined ? { reloadedCount: result.reloadedCount } : {}),
+        ...(result.totalAddons !== undefined ? { totalAddons: result.totalAddons } : {})
       })
     } catch (error) {
       console.error('Error in sync endpoint:', error)
@@ -836,7 +773,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
           debug.log(`🔄 Syncing user: ${user.username || user.email}`)
           
           // Use the reusable sync function
-          const syncResult = await syncUserAddons(user.id, [], 'normal', false, req, decrypt)
+          const syncResult = await syncUserAddons(user.id, [], 'normal', false, req, decrypt, getAccountId)
           
           if (syncResult.success) {
             syncedCount++
@@ -931,51 +868,18 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
     }
   })
 
-  // Toggle protect status for a single addon
+  // Toggle protect status for a single addon (BY NAME ONLY)
   router.post('/:id/protect-addon', async (req, res) => {
     try {
       const { id } = req.params
-      const { addonId, manifestUrl } = req.body
+      const { name } = req.body
       const { unsafe } = req.query
-      
-      
-      // Resolve target URL to protect/unprotect
-      let targetUrl = null
-      try {
-        if (typeof manifestUrl === 'string' && manifestUrl.trim()) {
-          targetUrl = manifestUrl.trim()
-        } else if (typeof addonId === 'string' && /^https?:\/\//i.test(addonId)) {
-          targetUrl = addonId.trim()
-        } else if (typeof addonId === 'string' && addonId.trim()) {
-          const found = await prisma.addon.findFirst({
-            where: { id: addonId.trim(), accountId: getAccountId(req) }
-          })
-          if (found && found.manifestUrl) {
-            try { targetUrl = decrypt(found.manifestUrl, req) } catch { targetUrl = found.manifestUrl }
-          }
-        }
-      } catch {}
 
-      // Default Stremio addons that should be ignored in sync checks
-      const defaultAddons = {
-        names: [
-          'Cinemeta',
-          'Local Files'
-        ],
-        ids: [
-          'com.linvo.cinemeta',
-          'org.stremio.local'
-        ],
-        manifestUrls: [
-          'http://127.0.0.1:11470/local-addon/manifest.json',
-          'https://v3-cinemeta.strem.io/manifest.json'
-        ]
-      }
+      // Default Stremio addons (name-based) in safe mode
+      const defaultAddons = { names: ['Cinemeta', 'Local Files', 'Local Files (without catalog support)'] }
 
-      // Check if this is a default addon in safe mode (match by ID or URL)
-      const isDefaultAddon = (typeof addonId === 'string' && defaultAddons.ids.includes(addonId)) ||
-                             (typeof targetUrl === 'string' && defaultAddons.manifestUrls.includes(targetUrl)) ||
-                             (typeof addonId === 'string' && defaultAddons.names.some(name => addonId.includes(name)))
+      // Check if this is a default addon in safe mode (match by name)
+      const isDefaultAddon = typeof name === 'string' && defaultAddons.names.some((n) => (name || '').includes(n))
       
       if (isDefaultAddon && unsafe !== 'true') {
         return res.status(403).json({ 
@@ -997,7 +901,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
         return res.status(404).json({ error: 'User not found' })
       }
       
-      // Parse current protected addons (stored as encrypted manifest URLs)
+      // Parse current protected addons (encrypted strings of names)
       let currentEncrypted = []
       try {
         currentEncrypted = user.protectedAddons ? JSON.parse(user.protectedAddons) : []
@@ -1005,29 +909,36 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
         console.warn('Failed to parse protected addons:', e)
         currentEncrypted = []
       }
-      // Decrypt existing to URLs for comparison
-      const currentUrls = currentEncrypted.map((enc) => { try { return decrypt(enc, req) } catch { return null } }).filter((u) => typeof u === 'string' && u.trim())
+      // Read current list of plaintext names from DB (already plaintext as of latest changes)
+      const currentList = Array.isArray(user.protectedAddons) ? user.protectedAddons : (user.protectedAddons ? (() => { try { return JSON.parse(user.protectedAddons) } catch { return [] } })() : [])
 
-      if (!targetUrl || !/^https?:\/\//i.test(String(targetUrl))) {
-        return res.status(400).json({ error: 'manifestUrl required or resolvable' })
+      if (!name || typeof name !== 'string' || !name.trim()) {
+        return res.status(400).json({ error: 'name is required' })
       }
 
-      const isCurrentlyProtected = currentUrls.includes(targetUrl)
-      const nextUrls = isCurrentlyProtected ? currentUrls.filter((u) => u !== targetUrl) : [...currentUrls, targetUrl]
-      const nextEncrypted = nextUrls.map((u) => { try { return encrypt(u, req) } catch { return null } }).filter(Boolean)
+      const targetName = name.trim()
+      const targetNorm = targetName.toLowerCase()
+      const nextList = Array.isArray(currentList) ? [...currentList] : []
+      const idx = nextList.findIndex((n) => typeof n === 'string' && n.trim().toLowerCase() === targetNorm)
+      if (idx >= 0) {
+        nextList.splice(idx, 1)
+      } else {
+        nextList.push(targetName)
+      }
+      const nextPlain = nextList
 
-      // Update user (store encrypted URLs)
+      // Update user (store plaintext names)
       await prisma.user.update({
         where: { id },
         data: {
-          protectedAddons: JSON.stringify(nextEncrypted)
+          protectedAddons: JSON.stringify(nextPlain)
         }
       })
       
       res.json({ 
-        message: `Addon ${isCurrentlyProtected ? 'unprotected' : 'protected'} successfully`,
-        isProtected: !isCurrentlyProtected,
-        protectedAddons: nextUrls
+        message: `Addon protected list updated`,
+        protectedAddons: nextPlain,
+        isProtected: nextList.findIndex((n) => typeof n === 'string' && n.trim().toLowerCase() === targetNorm) >= 0
       })
     } catch (error) {
       console.error('Error toggling protect addon:', error)
@@ -1614,24 +1525,17 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
     }
   })
 
-  // Reorder Stremio addons for a user
+  // Reorder Stremio addons for a user (by manifest.name ONLY)
   router.post('/:id/stremio-addons/reorder', async (req, res) => {
     try {
       const { id: userId } = req.params
-      const { orderedManifestUrls, orderedAddons } = req.body || {}
+      const { orderedNames } = req.body || {}
       
-      // Support both orderedAddons (new) and orderedManifestUrls (legacy)
-      if (orderedAddons && Array.isArray(orderedAddons) && orderedAddons.length > 0) {
-        // Use the full addon objects directly
-        const apiClient = new StremioAPIClient({ endpoint: 'https://api.strem.io', authKey: decrypt((await prisma.user.findUnique({ where: { id: userId, accountId: getAccountId(req) } })).stremioAuthKey, req) })
-        await apiClient.request('addonCollectionSet', { addons: orderedAddons })
-        return res.json({ message: 'Addons reordered successfully', reorderedCount: orderedAddons.length })
+      // Require orderedNames strictly
+      if (!Array.isArray(orderedNames) || orderedNames.length === 0) {
+        return res.status(400).json({ message: 'orderedNames array is required' })
       }
-      
-      if (!Array.isArray(orderedManifestUrls) || orderedManifestUrls.length === 0) {
-        return res.status(400).json({ message: 'orderedAddons or orderedManifestUrls array is required' })
-      }
-      
+
       // Get the user
       const user = await prisma.user.findUnique({
         where: { 
@@ -1660,53 +1564,40 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
       const apiClient = new StremioAPIClient({ endpoint: 'https://api.strem.io', authKey: authKeyPlain })
       const current = await apiClient.request('addonCollectionGet', {})
       const currentAddons = current?.addons || []
-      
-      // Create a map of manifest URLs to arrays of addon objects (handles duplicates)
-      const manifestToAddons = new Map()
-      currentAddons.forEach(addon => {
-        const manifestUrl = addon.transportUrl
-        if (manifestUrl) {
-          if (!manifestToAddons.has(manifestUrl)) {
-            manifestToAddons.set(manifestUrl, [])
-          }
-          manifestToAddons.get(manifestUrl).push(addon)
-        }
-      })
-      
-      // Validate that all provided URLs exist in the user's addons
-      const invalidUrls = orderedManifestUrls.filter(url => !manifestToAddons.has(url))
-      if (invalidUrls.length > 0) {
-        return res.status(400).json({ 
-          message: 'Some URLs are not in the user\'s current addons', 
-          invalidUrls 
-        })
+
+      // Build a map name -> queue of addons with that name to handle duplicates
+      const nameToAddons = new Map()
+      for (const addon of currentAddons) {
+        const name = addon?.manifest?.name || addon?.transportName || 'Addon'
+        if (!nameToAddons.has(name)) nameToAddons.set(name, [])
+        nameToAddons.get(name).push(addon)
       }
-      
-      // Create reordered addons array, handling duplicates by taking the first occurrence for each URL
-      const processedUrls = new Set()
+
+      // Validate all names exist
+      const invalidNames = orderedNames.filter((n) => !nameToAddons.has(n))
+      if (invalidNames.length > 0) {
+        return res.status(400).json({ message: 'Some addon names not found in current collection', invalidNames })
+      }
+
+      // Build reordered list by consuming from queues to preserve duplicates order
       const reorderedAddons = []
-      orderedManifestUrls.forEach(url => {
-        const addonsList = manifestToAddons.get(url) || []
-        for (const addon of addonsList) {
-          // Use JSON.stringify to create a unique key for the addon
-          const addonKey = JSON.stringify({
-            url,
-            id: addon.manifest?.id,
-            name: addon.manifest?.name
-          })
-          if (!processedUrls.has(addonKey)) {
-            processedUrls.add(addonKey)
-            reorderedAddons.push(addon)
-            break // Only add one instance per unique URL+ID combination
-          }
+      for (const n of orderedNames) {
+        const q = nameToAddons.get(n)
+        if (q && q.length > 0) {
+          reorderedAddons.push(q.shift())
         }
-      })
-      
+      }
+
+      // Append any remaining addons (names not specified) after the ordered ones, preserving original order
+      for (const [_, q] of nameToAddons.entries()) {
+        while (q.length > 0) reorderedAddons.push(q.shift())
+      }
+
       // Set the reordered collection
       await apiClient.request('addonCollectionSet', { addons: reorderedAddons })
-      
+
       res.json({ 
-        message: 'Addons reordered successfully',
+        message: 'Addons reordered successfully (by name)',
         reorderedCount: reorderedAddons.length
       })
     } catch (error) {
@@ -2500,7 +2391,7 @@ async function reloadGroupAddons(prisma, getAccountId, groupId, req, decrypt) {
   }
 }
 
-async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'normal', unsafeMode = false, req, decrypt) {
+async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'normal', unsafeMode = false, req, decrypt, getAccountIdParam) {
   try {
     console.log('🚀 Syncing user addons:', userId)
 
@@ -2557,10 +2448,10 @@ async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'nor
     let reloadedCount = 0
     let totalAddons = groupAddons.length
     
-    if (syncMode === 'advanced') {
+    if (syncMode === 'advanced' && primaryGroup) {
       
       // Use the existing reload addon functionality
-      const reloadResult = await reloadGroupAddons(prisma, getAccountId, primaryGroup.id, req, decrypt)
+      const reloadResult = await reloadGroupAddons(prisma, (typeof getAccountIdParam === 'function' ? getAccountIdParam : getAccountId), primaryGroup.id, req, decrypt)
       reloadedCount = reloadResult.reloadedCount
       
       // Reload the group addons from database to get updated data
@@ -2577,20 +2468,36 @@ async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'nor
       const updatedFamilyAddons = Array.isArray(updatedFamilyGroup?.addons)
         ? updatedFamilyGroup.addons
             .filter((ga) => (ga?.isEnabled !== false) && (ga?.addon?.isActive !== false) && (ga?.addon?.accountId === user.accountId))
-            .map((ga) => ({
-              id: ga.addon.id,
-              name: ga.addon.name,
-              version: ga.addon.version,
-              description: ga.addon.description,
-              manifestUrl: ga.addon.manifestUrl,
-              manifest: ga.addon.manifest,
-            }))
-            .filter((fa) => fa?.manifestUrl && !excludedSet.has(fa.manifestUrl))
+            .map((ga) => {
+              let manifestObj = null
+              try {
+                if (ga.addon.manifest && typeof ga.addon.manifest === 'string') {
+                  const decrypted = (typeof decrypt === 'function' ? decrypt : require('../utils/encryption').decrypt)(ga.addon.manifest, req)
+                  manifestObj = JSON.parse(decrypted)
+                } else if (ga.addon.manifest && typeof ga.addon.manifest === 'object') {
+                  manifestObj = ga.addon.manifest
+                }
+              } catch {}
+              return {
+                id: ga.addon.id,
+                name: ga.addon.name,
+                version: ga.addon.version,
+                description: ga.addon.description,
+                // Use decrypted manifest URL for Stremio
+                manifestUrl: (typeof getDecryptedManifestUrl === 'function' ? getDecryptedManifestUrl : require('../utils/encryption').getDecryptedManifestUrl)(ga.addon, req),
+                manifest: manifestObj,
+              }
+            })
+            // Exclusions are stored as addon IDs, not URLs
+            .filter((fa) => fa?.manifestUrl && !excludedSet.has(String(fa.id)))
         : []
       
       
       // Use updated addons for sync
       groupAddons.splice(0, groupAddons.length, ...updatedFamilyAddons)
+    } else if (syncMode === 'advanced' && !primaryGroup) {
+      // No group found for this user; nothing to reload, proceed with current groupAddons (likely empty)
+      console.warn('Advanced sync requested but user has no primary group; skipping reload step')
     }
 
     // Decrypt auth using account-scoped key (no req in this scope)
@@ -2606,6 +2513,59 @@ async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'nor
 
     // Create StremioAPIClient for this user
     const apiClient = new StremioAPIClient({ endpoint: 'https://api.strem.io', authKey: authKeyPlain })
+
+    // Build desired addons using the shared getDesiredAddons logic and push exactly that
+    try {
+      // In advanced mode, refresh group addons first to ensure getDesiredAddons sees latest
+      if (syncMode === 'advanced') {
+        // Find a group containing this user (same as earlier lookup)
+        const groupsForUser = await prisma.group.findMany({
+          where: { accountId: user.accountId, userIds: { contains: user.id } },
+          select: { id: true }
+        })
+        const primary = groupsForUser[0]
+        if (primary && primary.id) {
+          await reloadGroupAddons(prisma, (typeof getAccountIdParam === 'function' ? getAccountIdParam : getAccountId), primary.id, req, decrypt)
+        }
+      }
+
+      const { getDesiredAddons } = require('../utils/sync')
+      const parseAddonIdsFn = (typeof parseAddonIds === 'function' ? parseAddonIds : parseAddonIdsUtil)
+      const parseProtectedAddonsFn = (typeof parseProtectedAddons === 'function' ? parseProtectedAddons : require('../utils/validation').parseProtectedAddons)
+      const canonicalizeFn = (typeof canonicalizeManifestUrl === 'function' ? canonicalizeManifestUrl : canonicalizeManifestUrlUtil)
+      const desiredRes = await getDesiredAddons(user, req, {
+        prisma,
+        getAccountId: (typeof getAccountIdParam === 'function' ? getAccountIdParam : getAccountId),
+        decrypt,
+        parseAddonIds: parseAddonIdsFn,
+        parseProtectedAddons: parseProtectedAddonsFn,
+        canonicalizeManifestUrl: canonicalizeFn,
+        StremioAPIClient,
+        unsafeMode
+      })
+
+      if (!desiredRes?.success) {
+        return { success: false, error: desiredRes?.error || 'Failed to compute desired addons' }
+      }
+
+      const desired = Array.isArray(desiredRes.addons) ? desiredRes.addons : []
+
+      await apiClient.request('addonCollectionSet', { addons: desired })
+
+      // In advanced mode, optionally verify count
+      let total
+      if (syncMode === 'advanced') {
+        const after = await apiClient.request('addonCollectionGet', {})
+        total = Array.isArray(after?.addons) ? after.addons.length : (after?.addons ? Object.keys(after.addons).length : 0)
+      } else {
+        total = desired.length
+      }
+
+      return { success: true, total }
+    } catch (e) {
+      console.error('❌ Failed to push desired addons via getDesiredAddons:', e?.message)
+      return { success: false, error: e?.message || 'Failed to sync addons' }
+    }
 
     // Protected addons logic:
     // 1. Default Stremio addons: protected in safe mode, not protected in unsafe mode
@@ -2650,6 +2610,13 @@ async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'nor
       }
     })
 
+    const isProtected = (a) => {
+      const aid = a?.id || a?.manifest?.id || ''
+      const rawUrl = (a?.manifestUrl || a?.transportUrl || a?.url || '').toString().trim()
+      const canonUrl = (typeof canonicalizeManifestUrl === 'function' ? canonicalizeManifestUrl : canonicalizeManifestUrlUtil)(rawUrl)
+      return protectedAddonIds.has(aid) || protectedUrls.has(rawUrl) || protectedCanonicalUrls.has(canonUrl)
+    }
+
     // Derive any protected IDs visible in this run (from desired group manifests)
     const protectedIdsFromDesired = (() => {
       try {
@@ -2671,13 +2638,6 @@ async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'nor
       canonicalCount: protectedCanonicalUrls.size
     })
     
-    const isProtected = (a) => {
-      const aid = a?.id || a?.manifest?.id || ''
-      const rawUrl = (a?.manifestUrl || a?.transportUrl || a?.url || '').toString().trim()
-      const canonUrl = (typeof canonicalizeManifestUrl === 'function' ? canonicalizeManifestUrl : canonicalizeManifestUrlUtil)(rawUrl)
-      return protectedAddonIds.has(aid) || protectedUrls.has(rawUrl) || protectedCanonicalUrls.has(canonUrl)
-    }
-
     // Use the same canonicalization used elsewhere for URL set equality checks only
     const normalize = (s) => (typeof canonicalizeManifestUrl === 'function' ? canonicalizeManifestUrl : canonicalizeManifestUrlUtil)(s)
 
@@ -2758,90 +2718,8 @@ async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'nor
       }
     }
 
-    // Don't filter out any group addons here - the "locked positions" approach
-    // will handle protected addons by preserving their positions. We will only
-    // use non-protected group addons for filling.
-    const nonProtectedGroupAddons = desiredGroup.filter((a) => !isProtected(a))
-
-    // Build initial desired collection using the locked positions approach:
-    // 1) Lock protected addons at their original indices from currentAddons
-    // 2) Fill remaining holes with non-protected group addons in order
-    // Build locked map by canonical URL to preserve position even if Stremio returns reordered list
-    const lockedByUrl = new Map()
-    for (let i = 0; i < currentAddons.length; i++) {
-      const cur = currentAddons[i]
-      if (isProtected(cur)) {
-        lockedByUrl.set(normalize(cur?.transportUrl || cur?.manifestUrl || cur?.url), i)
-      }
-    }
-
-    const baseResult = new Array(currentAddons.length).fill(null)
-    for (let i = 0; i < currentAddons.length; i++) {
-      const cur = currentAddons[i]
-      const url = normalize(cur?.transportUrl || cur?.manifestUrl || cur?.url)
-      if (lockedByUrl.has(url)) {
-        baseResult[lockedByUrl.get(url)] = cur
-      }
-    }
-
-    let fillerIdx = 0
-    for (let i = 0; i < baseResult.length && fillerIdx < nonProtectedGroupAddons.length; i++) {
-      if (baseResult[i] === null) {
-        baseResult[i] = nonProtectedGroupAddons[fillerIdx++]
-      }
-    }
-    while (fillerIdx < nonProtectedGroupAddons.length) {
-      baseResult.push(nonProtectedGroupAddons[fillerIdx++])
-    }
-
-    // Dedupe by canonical URL and drop nulls
-    const seenUrls = new Set()
-    const initialDesired = baseResult.filter((addon) => {
-      if (!addon) return false
-      const url = normalize(addon?.transportUrl || addon?.manifestUrl || addon?.url)
-      if (!url) return true
-      if (seenUrls.has(url)) return false
-      seenUrls.add(url)
-      return true
-    })
-
-    // Final lock enforcement pass: if any protected addon from currentAddons is
-    // not at its original index in initialDesired, re-place it back to that index.
-    // Only non-protected entries can shift as a result.
-    const desiredByUrl = new Map(initialDesired.map((a) => [
-      normalize(a?.transportUrl || a?.manifestUrl || a?.url),
-      a
-    ]))
-
-    // Build a list of non-protected entries from initialDesired to use as fillers
-    const nonProtectedQueue = initialDesired.filter((a) => !isProtected(a))
-
-    // Start with an array sized to max of current length and initialDesired
-    const finalLength = Math.max(currentAddons.length, initialDesired.length)
-    const finalDesiredCollection = new Array(finalLength).fill(null)
-
-    // Place protected addons at their original positions
-    for (const addon of currentAddons) {
-      if (!isProtected(addon)) continue
-      const pos = lockedByUrl.get(normalize(addon?.transportUrl || addon?.manifestUrl || addon?.url))
-      if (pos != null && pos < finalLength) finalDesiredCollection[pos] = addon
-    }
-
-    // Fill remaining positions with non-protected addons
-    let queueIdx = 0
-    for (let i = 0; i < finalLength && queueIdx < nonProtectedQueue.length; i++) {
-      if (finalDesiredCollection[i] === null) {
-        finalDesiredCollection[i] = nonProtectedQueue[queueIdx++]
-      }
-    }
-
-    // Add any remaining non-protected addons at the end
-    while (queueIdx < nonProtectedQueue.length) {
-      finalDesiredCollection.push(nonProtectedQueue[queueIdx++])
-    }
-
-    // Remove nulls
-    const finalDesired = finalDesiredCollection.filter(Boolean)
+    // Send desiredGroup exactly as computed (including duplicates and order)
+    const finalDesired = desiredGroup
 
     // Check if already synced (same addons in same order)
     const toUrl = (a) => normalize(a?.transportUrl || a?.manifestUrl || a?.url)
@@ -2868,7 +2746,7 @@ async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'nor
 
     // Set the addon collection using the proper format (replaces, removes extras not included)
     try {
-      finalDesiredCollection.forEach((a, idx) => {
+      finalDesired.forEach((a, idx) => {
         const name = a?.manifest?.name || a?.name || a?.transportName || 'Unknown'
         const prot = isProtected(a) ? ' (protected)' : ''
         console.log(`${idx + 1} - ${name}${prot}`)

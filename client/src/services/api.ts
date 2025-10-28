@@ -286,9 +286,9 @@ export const usersAPI = {
     return response.data
   },
 
-  // Reorder Stremio addons for a user
-  reorderStremioAddons: async (id: string, orderedAddons: any[]): Promise<any> => {
-    const response: AxiosResponse<any> = await api.post(`/users/${id}/stremio-addons/reorder`, { orderedAddons })
+  // Reorder Stremio addons for a user (by manifest.name)
+  reorderStremioAddons: async (id: string, orderedNames: string[]): Promise<any> => {
+    const response: AxiosResponse<any> = await api.post(`/users/${id}/stremio-addons/reorder`, { orderedNames })
     return response.data
   },
 
@@ -317,9 +317,9 @@ export const usersAPI = {
     return response.data
   },
 
-  // Toggle protect status for a single addon
-  toggleProtectAddon: async (id: string, addonId: string, unsafe: boolean = false): Promise<any> => {
-    const response: AxiosResponse<any> = await api.post(`/users/${id}/protect-addon?unsafe=${unsafe}`, { addonId })
+  // Toggle protect status for a single addon (by name)
+  toggleProtectAddon: async (id: string, name: string, unsafe: boolean = false): Promise<any> => {
+    const response: AxiosResponse<any> = await api.post(`/users/${id}/protect-addon?unsafe=${unsafe}`, { name })
     return response.data
   },
 
@@ -435,6 +435,12 @@ export const groupsAPI = {
     return response.data
   },
 
+  // Sync all groups
+  syncAll: async (): Promise<any> => {
+    const response: AxiosResponse<any> = await api.post('/groups/sync-all')
+    return response.data
+  },
+
   // Get group addons directly
   getGroupAddons: async (id: string): Promise<any> => {
     const response: AxiosResponse<any> = await api.get(`/groups/${id}/addons`)
@@ -516,6 +522,12 @@ export const addonsAPI = {
     if (tag && tag !== 'all') params.append('tag', tag)
     
     const response: AxiosResponse<Addon[]> = await api.get(`/addons/search?${params}`)
+    return response.data
+  },
+
+  // Reload all addons
+  reloadAll: async (): Promise<any> => {
+    const response: AxiosResponse<any> = await api.post('/addons/reload-all')
     return response.data
   },
 }

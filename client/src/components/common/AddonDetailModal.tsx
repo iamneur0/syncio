@@ -182,6 +182,7 @@ export default function AddonDetailModal({
               const hasSearch = manifestCatalog.extra?.some((extra: any) => extra.name === 'search')
               const hasOtherExtras = manifestCatalog.extra?.some((extra: any) => extra.name !== 'search')
               const isEmbeddedSearch = hasSearch && hasOtherExtras
+              const isStandaloneSearch = hasSearch && !hasOtherExtras
               
               if (isEmbeddedSearch) {
                 // For embedded search catalogs, use the database state to determine search functionality
@@ -203,6 +204,14 @@ export default function AddonDetailModal({
                     extraSupported: manifestCatalog.extraSupported?.filter((extra: any) => extra !== 'search') || []
                   }
                 }
+              } else if (isStandaloneSearch) {
+                // Standalone search catalog: include only if stored says search=true
+                const storedHasSearch = storedCatalog.search === true
+                if (storedHasSearch) {
+                  return manifestCatalog
+                }
+                // Unselected in DB → omit from merged list
+                return null
               } else {
                 // Regular catalog, use as-is
                 return manifestCatalog
@@ -227,12 +236,10 @@ export default function AddonDetailModal({
           // For new addons (stored is null), initialize search state based on manifest
           const manifestCatalogs = Array.isArray(detailManifest?.catalogs) ? detailManifest.catalogs : []
           const searchStateMap = new Map<string, boolean>()
-          
+          // For new addons, default all search states to false (unselected) to reflect DB = none
           manifestCatalogs.forEach((catalog: any) => {
             const key = `${catalog.id}:${catalog.type}`
-            const hasSearch = catalog.extra?.some((extra: any) => extra.name === 'search')
-            // For new addons, assume all search functionality is enabled by default
-            searchStateMap.set(key, hasSearch)
+            searchStateMap.set(key, false)
           })
           
           setCatalogSearchState(searchStateMap)
@@ -347,11 +354,12 @@ export default function AddonDetailModal({
           
           const newCatalogs = [...prev]
           newCatalogs[mainCatalogIndex] = updatedMainCatalog
-          
-          // Update search state map
+
+          // Update search state map synchronously with the modeled state
+          const nextEnabled = !hasSearchExtra
           setCatalogSearchState(prevState => {
             const newState = new Map(prevState)
-            newState.set(key, !hasSearchExtra)
+            newState.set(key, nextEnabled)
             return newState
           })
           
@@ -973,7 +981,7 @@ export default function AddonDetailModal({
                 getIsSelected={isCatalogSelected}
                 renderItem={(catalog: any, index: number) => (
                   <CatalogItem
-                    key={index}
+                    key={`${catalog?.id || catalog?.name}:${catalog?.type || 'unknown'}`}
                     catalog={catalog}
                     isSelected={isCatalogSelected(catalog)}
                     onToggle={handleCatalogToggle}
@@ -1034,9 +1042,16 @@ export default function AddonDetailModal({
               const catalogId = catalog?.id || catalog?.name
               const catalogType = catalog?.type || 'unknown'
               const key = `${catalogId}:${catalogType}`
-              
-              // Use the search state map to determine if search is enabled
-              return catalogSearchState.get(key) || false
+              // Prefer DB-derived state
+              if (catalogSearchState.get(key) === true) return true
+              // Optimistic reflect: if the catalog was just toggled on (embedded) and now includes search in editCatalogs
+              const existsWithSearch = editCatalogs.some((selected: any) => {
+                const selectedId = selected?.id || selected
+                const selectedType = selected?.type || 'unknown'
+                if (selectedId !== catalogId || selectedType !== catalogType) return false
+                return Array.isArray(selected?.extra) && selected.extra.some((e: any) => e?.name === 'search')
+              })
+              return existsWithSearch
             }
 
             const isSearchCatalogDisabled = (catalog: any) => {
@@ -1053,7 +1068,7 @@ export default function AddonDetailModal({
                 getIsSelected={isSearchCatalogSelected}
                 renderItem={(searchCatalog: any, index: number) => (
                   <CatalogItem
-                    key={index}
+                    key={`${searchCatalog?.id || searchCatalog?.name}:${searchCatalog?.type || 'unknown'}`}
                     catalog={searchCatalog}
                     isSelected={isSearchCatalogSelected(searchCatalog)}
                     onToggle={handleSearchCatalogToggle}

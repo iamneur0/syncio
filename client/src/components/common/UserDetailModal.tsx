@@ -87,11 +87,23 @@ export default function UserDetailModal({
   useEffect(() => {
     if (user && isOpen) {
       const excludedArray = Array.isArray(userExcludedSet) ? userExcludedSet : Array.from(userExcludedSet)
-      const protectedArray = Array.isArray(userProtectedSet) ? userProtectedSet : Array.from(userProtectedSet)
+      // Prefer names coming from currentUser.protectedAddons if available
+      const protectedFromUser = (currentUser as any)?.protectedAddons
+      const protectedArray = Array.isArray(protectedFromUser)
+        ? protectedFromUser
+        : (Array.isArray(userProtectedSet) ? userProtectedSet : Array.from(userProtectedSet))
       setLocalExcludedSet(new Set(excludedArray))
       setLocalProtectedSet(new Set(protectedArray))
     }
   }, [isOpen, user?.id])
+
+  // Build a protected name set sourced from DB, with local optimistic overlay
+  const protectedNameSet: Set<string> = (() => {
+    const base = new Set<string>(Array.isArray((currentUser as any)?.protectedAddons) ? (currentUser as any).protectedAddons : [])
+    // Overlay local changes
+    for (const n of Array.from(localProtectedSet)) base.add(n)
+    return base
+  })()
 
   // Handle escape key
   useEffect(() => {
@@ -315,10 +327,10 @@ export default function UserDetailModal({
         addons: reordered
       }))
       
-      // Persist order in backend using the FULL addon objects (not just URLs)
-      // This is important because addons with the same URL might have different configurations
+      // Persist order in backend by sending only names in order
       if (currentUser) {
-        usersAPI.reorderStremioAddons?.(currentUser.id, reordered)
+        const orderedNames = reordered.map((a: any) => (a?.manifest?.name || a?.transportName || 'Addon'))
+        usersAPI.reorderStremioAddons?.(currentUser.id, orderedNames)
           .then(() => {
             // Refresh the data from the server to ensure consistency
             queryClient.invalidateQueries({ queryKey: ['user', currentUser.id, 'stremio-addons'] })
@@ -367,19 +379,25 @@ export default function UserDetailModal({
            (addonName && defaultNames.some(name => addonName.includes(name)))
   }
 
-  const handleProtectStremioAddon = (addonId: string) => {
+  const handleProtectStremioAddon = (nameOrId: string) => {
     if (currentUser) {
       
       // Use the single addon toggle endpoint
-      // addonId is the manifest URL, but we'll use it as the addon identifier
-      usersAPI.toggleProtectAddon(currentUser.id, addonId, isUnsafeMode)
+      // nameOrId may be a name already; if it's a URL, try to resolve to name
+      let name = nameOrId
+      if (/^https?:\/\//i.test(nameOrId)) {
+        const currentAddons = stremioAddonsData?.addons || []
+        const match = currentAddons.find((a: any) => (a?.transportUrl || a?.manifestUrl) === nameOrId)
+        name = match?.manifest?.name || match?.transportName || 'Addon'
+      }
+      usersAPI.toggleProtectAddon(currentUser.id, name, isUnsafeMode)
         .then((response) => {
           // Update local state immediately for better UX
           const newProtectedSet = new Set(localProtectedSet)
           if (response.isProtected) {
-            newProtectedSet.add(addonId)
+            newProtectedSet.add(name)
           } else {
-            newProtectedSet.delete(addonId)
+            newProtectedSet.delete(name)
           }
           setLocalProtectedSet(newProtectedSet)
           // Invalidate user queries to refresh the data
@@ -623,7 +641,7 @@ export default function UserDetailModal({
             renderItem={(addon: any, index: number) => {
               const addonId = addon.transportUrl || addon.manifestUrl || addon.url || addon.id
               const addonName = addon.manifest?.name || addon.transportName || addon.name || 'Unknown Addon'
-              const isProtected = localProtectedSet.has(addonId)
+              const isProtected = protectedNameSet.has(addonName)
               const isDefault = isDefaultAddon(addonId, addonName)
               
               
@@ -632,7 +650,7 @@ export default function UserDetailModal({
                   key={addonId || index}
                   addon={addon}
                   onRemove={handleDeleteStremioAddon}
-                  onProtect={handleProtectStremioAddon}
+                  onProtect={() => handleProtectStremioAddon(addonName)}
                   isProtected={isProtected}
                   isDefault={!!isDefault}
                   isUnsafeMode={isUnsafeMode}
@@ -658,7 +676,7 @@ export default function UserDetailModal({
                     const addonId = addon.transportUrl || addon.manifestUrl || addon.url || addon.id
                     const uniqueId = `${index}-${addonId}`
                     const addonName = addon.manifest?.name || addon.transportName || addon.name || 'Unknown Addon'
-                    const isProtected = localProtectedSet.has(addonId)
+                    const isProtected = protectedNameSet.has(addonName)
                     const isDefault = isDefaultAddon(addonId, addonName)
                     
                     return (
@@ -666,7 +684,7 @@ export default function UserDetailModal({
                         key={uniqueId}
                         addon={addon}
                         onRemove={handleDeleteStremioAddon}
-                        onProtect={handleProtectStremioAddon}
+                        onProtect={() => handleProtectStremioAddon(addonName)}
                         isProtected={isProtected}
                         isDefault={!!isDefault}
                         isUnsafeMode={isUnsafeMode}

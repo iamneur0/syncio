@@ -1216,6 +1216,59 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
     }
   });
 
+  // Reload all addons
+  router.post('/reload-all', async (req, res) => {
+    try {
+      const whereScope = AUTH_ENABLED && req.appAccountId ? { accountId: req.appAccountId } : {}
+      const addons = await prisma.addon.findMany({
+        where: {
+          ...whereScope,
+          isActive: true,
+          manifestUrl: { not: null }
+        }
+      });
+
+      if (addons.length === 0) {
+        return res.json({
+          message: 'No active addons found to reload',
+          reloadedCount: 0,
+          failedCount: 0,
+          total: 0
+        });
+      }
+
+      let reloadedCount = 0;
+      let failedCount = 0;
+
+      for (const addon of addons) {
+        try {
+          await reloadAddon(prisma, getAccountId, addon.id, req, {
+            filterManifestByResources,
+            filterManifestByCatalogs,
+            encrypt,
+            decrypt,
+            getDecryptedManifestUrl,
+            manifestHash
+          });
+          reloadedCount++;
+        } catch (error) {
+          console.error(`Failed to reload addon ${addon.id}:`, error);
+          failedCount++;
+        }
+      }
+
+      res.json({
+        message: `Reloaded ${reloadedCount} addons successfully, ${failedCount} failed`,
+        reloaded: reloadedCount,
+        failed: failedCount,
+        total: addons.length
+      });
+    } catch (error) {
+      console.error('Error reloading all addons:', error);
+      res.status(500).json({ message: 'Failed to reload all addons', error: error?.message });
+    }
+  });
+
   return router;
 };
 
