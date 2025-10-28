@@ -36,6 +36,7 @@ const { parseAddonIds, parseProtectedAddons, canonicalizeManifestUrl, normalizeU
 const { sha256Hex, hmacHex, manifestUrlHash, manifestUrlHmac, getAccountHmacKey, normalizeManifestObject, manifestHash, manifestHmac } = require('./utils/hashing');
 const { validateStremioAuthKey, filterDefaultAddons, buildAddonDbData } = require('./utils/stremio');
 const { ensureBackupDir, readBackupFrequencyDays, writeBackupFrequencyDays, performBackupOnce, clearBackupSchedule, scheduleBackups } = require('./utils/backup');
+const { scheduleSyncs, readSyncFrequencyMinutes } = require('./utils/syncScheduler');
 const { pathIsAllowlisted, extractBearerToken, parseCookies, cookieName, issueAccessToken, issueRefreshToken, issuePublicToken, randomCsrfToken } = require('./utils/auth');
 const { getAccountId: getAccountIdHelper, scopedWhere, convertManifestUrlsToAddonIds, ensureUserInAccount, ensureGroupInAccount, assignUserToGroup } = require('./utils/helpers');
 const { selectKeyForRequest, encrypt, decrypt, getAccountHmacKey: getAccountHmacKeyEnc, encryptIf, decryptIf, getDecryptedManifestUrl, decryptWithFallback } = require('./utils/encryption');
@@ -137,6 +138,26 @@ app.use((error, req, res, next) => {
 // Shutdown
 process.on('SIGINT', async () => { console.log('🛑 Shutting down gracefully...'); await prisma.$disconnect(); process.exit(0); });
 process.on('SIGTERM', async () => { console.log('🛑 Shutting down gracefully...'); await prisma.$disconnect(); process.exit(0); });
+
+// Initialize sync schedule on startup (works in all modes)
+const { reloadGroupAddons } = require('./routes/users');
+
+// Create a mock request object for scheduler context
+const schedulerReq = {
+  appAccountId: AUTH_ENABLED ? undefined : DEFAULT_ACCOUNT_ID
+};
+
+// Initialize sync schedule
+scheduleSyncs(
+  readSyncFrequencyMinutes(),
+  prisma,
+  getAccountId,
+  scopedWhere,
+  decrypt,
+  reloadGroupAddons,
+  schedulerReq,
+  AUTH_ENABLED
+);
 
 // Start
 app.listen(PORT, '0.0.0.0', () => {

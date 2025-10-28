@@ -908,15 +908,10 @@ export default function SettingsPage() {
             onDrop={onDropAddonsButton}
             onDragEnter={onButtonDragEnterAddons}
             onDragLeave={onButtonDragLeaveAddons}
-            className={`accent-bg accent-text hover:opacity-90 flex items-center px-4 py-2 rounded-lg transition-colors border-2 ${
-              isDraggingAddonsOver ? `border-dashed ${isDark ? 'border-gray-400' : 'border-gray-600'}` : 'border-transparent'
-            }`}
+            className="accent-bg accent-text hover:opacity-90 flex items-center px-4 py-2 rounded-lg transition-colors"
           >
             <Upload className="w-5 h-5 mr-2" />
-            <span className="relative inline-block">
-              <span className={isDraggingAddonsOver ? 'opacity-0' : 'opacity-100'}>Import Addons</span>
-              <span className={`absolute left-0 top-0 ${isDraggingAddonsOver ? 'opacity-100' : 'opacity-0'}`}>Drag Addons</span>
-            </span>
+            {isDraggingAddonsOver ? 'Drop Addons' : 'Import Addons'}
           </button>
           <button
             onClick={exportAddons}
@@ -951,15 +946,10 @@ export default function SettingsPage() {
             onDrop={onDropConfigButton}
             onDragEnter={onButtonDragEnterConfig}
             onDragLeave={onButtonDragLeaveConfig}
-            className={`accent-bg accent-text hover:opacity-90 flex items-center px-4 py-2 rounded-lg transition-colors border-2 ${
-              isDraggingConfigOver ? `border-dashed ${isDark ? 'border-gray-400' : 'border-gray-600'}` : 'border-transparent'
-            }`}
+            className="accent-bg accent-text hover:opacity-90 flex items-center px-4 py-2 rounded-lg transition-colors"
           >
             <Upload className="w-5 h-5 mr-2" />
-            <span className="relative inline-block">
-              <span className={isDraggingConfigOver ? 'opacity-0' : 'opacity-100'}>Import Configuration</span>
-              <span className={`absolute left-0 top-0 ${isDraggingConfigOver ? 'opacity-100' : 'opacity-0'}`}>Drag Configuration</span>
-            </span>
+            {isDraggingConfigOver ? 'Drop Configuration' : 'Import Configuration'}
           </button>
           <button onClick={exportConfig} className="accent-bg accent-text hover:opacity-90 flex items-center px-4 py-2 rounded-lg transition-colors">
             <Download className="w-5 h-5 mr-2" /> Export Configuration
@@ -1001,77 +991,41 @@ export default function SettingsPage() {
         <p className={`text-sm mt-1 ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
           Delete all items of a specific type or perform bulk operations. These operations cannot be undone.
         </p>
-        <div className={`mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4`}>
+        <div className="mt-4 flex gap-4 flex-wrap">
             <button 
               onClick={deleteAllAddons} 
-              className={`flex items-center justify-center px-4 py-3 rounded-lg transition-colors ${
-                (theme as any) === 'mono' 
-                  ? 'bg-gray-700 hover:bg-gray-600 text-white' 
-                  : isDark 
-                    ? 'bg-red-800 hover:bg-red-700 text-white' 
-                    : 'bg-red-100 hover:bg-red-200 text-red-800'
-              }`}
+              className="accent-bg accent-text hover:opacity-90 flex items-center px-4 py-2 rounded-lg transition-colors"
             >
               <Trash2 className="w-5 h-5 mr-2" /> Delete All Addons
             </button>
           <button 
             onClick={deleteAllUsers} 
-            className={`flex items-center justify-center px-4 py-3 rounded-lg transition-colors ${
-              (theme as any) === 'mono' 
-                ? 'bg-gray-700 hover:bg-gray-600 text-white' 
-                : isDark 
-                  ? 'bg-red-800 hover:bg-red-700 text-white' 
-                  : 'bg-red-100 hover:bg-red-200 text-red-800'
-            }`}
+            className="accent-bg accent-text hover:opacity-90 flex items-center px-4 py-2 rounded-lg transition-colors"
           >
             <User className="w-5 h-5 mr-2" /> Delete All Users
           </button>
           <button 
             onClick={deleteAllGroups} 
-            className={`flex items-center justify-center px-4 py-3 rounded-lg transition-colors ${
-              (theme as any) === 'mono' 
-                ? 'bg-gray-700 hover:bg-gray-600 text-white' 
-                : isDark 
-                  ? 'bg-red-800 hover:bg-red-700 text-white' 
-                  : 'bg-red-100 hover:bg-red-200 text-red-800'
-            }`}
+            className="accent-bg accent-text hover:opacity-90 flex items-center px-4 py-2 rounded-lg transition-colors"
           >
             <Users className="w-5 h-5 mr-2" /> Delete All Groups
           </button>
           <button 
             onClick={clearAllUserAddons} 
-            className={`flex items-center justify-center px-4 py-3 rounded-lg transition-colors ${
-              (theme as any) === 'mono' 
-                ? 'bg-gray-700 hover:bg-gray-600 text-white' 
-                : isDark 
-                  ? 'bg-red-800 hover:bg-red-700 text-white' 
-                  : 'bg-red-100 hover:bg-red-200 text-red-800'
-            }`}
+            className="accent-bg accent-text hover:opacity-90 flex items-center px-4 py-2 rounded-lg transition-colors"
           >
             <RefreshCcw className="w-5 h-5 mr-2" /> Clear User Addons
           </button>
           <button 
             onClick={resetConfig} 
-            className={`flex items-center justify-center px-4 py-3 rounded-lg transition-colors ${
-              (theme as any) === 'mono' 
-                ? 'bg-gray-700 hover:bg-gray-600 text-white' 
-                : isDark 
-                  ? 'bg-red-800 hover:bg-red-700 text-white' 
-                  : 'bg-red-100 hover:bg-red-200 text-red-800'
-            }`}
+            className="accent-bg accent-text hover:opacity-90 flex items-center px-4 py-2 rounded-lg transition-colors"
           >
             <RefreshCcw className="w-5 h-5 mr-2" /> Reset Configuration
           </button>
           {AUTH_ENABLED && (
             <button 
               onClick={deleteAccount} 
-              className={`flex items-center justify-center px-4 py-3 rounded-lg transition-colors ${
-                (theme as any) === 'mono' 
-                  ? 'bg-gray-700 hover:bg-gray-600 text-white' 
-                  : isDark 
-                    ? 'bg-red-800 hover:bg-red-700 text-white' 
-                    : 'bg-red-100 hover:bg-red-200 text-red-800'
-              }`}
+              className="accent-bg accent-text hover:opacity-90 flex items-center px-4 py-2 rounded-lg transition-colors"
             >
               <Trash2 className="w-5 h-5 mr-2" /> Delete Account
             </button>

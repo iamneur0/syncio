@@ -716,7 +716,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
     }
   });
 
-  // Sync group (placeholder - would implement actual sync logic)
+  // Sync group - iterate users in this group and call the shared user sync function
   router.post('/:id/sync', async (req, res) => {
     try {
       const { id: groupId } = req.params
@@ -726,8 +726,9 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
           id: groupId,
           accountId: getAccountId(req)
         },
-        include: {
-          addons: { include: { addon: true } }
+        select: {
+          id: true,
+          userIds: true
         }
       })
       
@@ -735,11 +736,43 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
         return responseUtils.notFound(res, 'Group')
       }
 
-      // Placeholder sync logic - in practice this would sync addons with Stremio
+      // Parse userIds array from stored JSON
+      let userIds = []
+      try { userIds = Array.isArray(group.userIds) ? group.userIds : JSON.parse(group.userIds || '[]') } catch {}
+
+      if (!Array.isArray(userIds) || userIds.length === 0) {
+        return res.json({ message: 'Group has no users to sync', syncedUsers: 0 })
+      }
+
+      // Respect sync mode header and unsafe flag
+      const headerMode = (req.headers['x-sync-mode'] || '').toString().toLowerCase()
+      const syncMode = headerMode === 'advanced' ? 'advanced' : 'normal'
+      const unsafeMode = req.query?.unsafe === 'true' || req.body?.unsafe === true
+
+      // In advanced mode, reload group addons first (shared helper)
+      if (syncMode === 'advanced') {
+        const { reloadGroupAddons } = require('./users')
+        try { await reloadGroupAddons(prisma, getAccountId, groupId, req, decrypt) } catch (e) {
+          console.warn('Group reload before sync failed:', e?.message)
+        }
+      }
+
+      // Sync each user via the same helper used by user endpoint
+      const { syncUserAddons: _ } = require('./users')
+      let synced = 0
+      let failed = 0
+      for (const uid of userIds) {
+        try {
+          const result = await (typeof _.name === 'string' ? _ : require('./users').syncUserAddons)(uid, [], syncMode, unsafeMode, req, decrypt, getAccountId)
+          if (result?.success) synced++; else failed++
+        } catch (e) { failed++ }
+      }
+
       res.json({ 
-        message: 'Group sync completed',
-        groupId: groupId,
-        addonsCount: group.addons?.length || 0
+        message: `Group sync completed: ${synced}/${userIds.length} users synced`,
+        groupId,
+        syncedUsers: synced,
+        failedUsers: failed
       })
     } catch (error) {
       console.error('Error syncing group:', error)
@@ -1065,6 +1098,52 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
       res.status(500).json({ message: 'Failed to fetch group addons', error: error?.message })
     }
   })
+
+  // Sync all groups
+  router.post('/sync-all', async (req, res) => {
+    try {
+      const whereScope = AUTH_ENABLED && req.appAccountId ? { accountId: req.appAccountId } : {}
+      const groups = await prisma.group.findMany({
+        where: scopedWhere(req, {}),
+        select: { id: true }
+      });
+
+      if (groups.length === 0) {
+        return res.json({
+          message: 'No groups found to sync',
+          syncedCount: 0,
+          failedCount: 0,
+          total: 0
+        });
+      }
+
+      let syncedCount = 0;
+      let failedCount = 0;
+
+      // Import the reload function from users.js
+      const { reloadGroupAddons } = require('./users');
+
+      for (const group of groups) {
+        try {
+          await reloadGroupAddons(prisma, getAccountId, group.id, req, decrypt);
+          syncedCount++;
+        } catch (error) {
+          console.error(`Failed to sync group ${group.id}:`, error);
+          failedCount++;
+        }
+      }
+
+      res.json({
+        message: `Synced ${syncedCount} groups successfully, ${failedCount} failed`,
+        syncedCount,
+        failedCount,
+        total: groups.length
+      });
+    } catch (error) {
+      console.error('Error syncing all groups:', error);
+      res.status(500).json({ message: 'Failed to sync all groups', error: error?.message });
+    }
+  });
 
   return router;
 };

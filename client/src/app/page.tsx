@@ -9,7 +9,8 @@ import {
   Settings, 
   Menu, 
   X,
-  ScrollText
+  ScrollText,
+  ListTodo
 } from 'lucide-react'
 
 // Import page components
@@ -18,6 +19,7 @@ import UsersPage from '@/components/pages/UsersPage'
 import GroupsPage from '@/components/pages/GroupsPage'
 import SettingsPage from '@/components/pages/SettingsPage'
 import ChangelogPage from '@/components/pages/ChangelogPage'
+import TasksPage from '@/components/pages/TasksPage'
 import AccountMenuButton from '@/components/auth/AccountMenuButton'
 
 const navigation = [
@@ -25,6 +27,7 @@ const navigation = [
   { name: 'Groups', icon: Users, id: 'groups' },
   { name: 'Addons', icon: Puzzle, id: 'addons' },
   { name: 'Changelog', icon: ScrollText, id: 'changelog' },
+  { name: 'Tasks', icon: ListTodo, id: 'tasks' },
   { name: 'Settings', icon: Settings, id: 'settings' },
 ]
 
@@ -56,6 +59,8 @@ export default function HomePage() {
         return <GroupsPage />
       case 'changelog':
         return <ChangelogPage />
+      case 'tasks':
+        return <TasksPage />
       case 'settings':
         return <SettingsPage />
       default:

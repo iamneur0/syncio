@@ -69,34 +69,31 @@ async function getDesiredAddons(user, req, { prisma, getAccountId, decrypt, pars
     // Extract the addons array from the complete response (collection shape)
     const userAddons = userAddonsResponse?.addons || userAddonsResponse || []
 
-    // Parse excluded and protected addons
+    // Parse excluded addons (DB addon IDs)
     const excludedAddons = parseAddonIds(user.excludedAddons)
-    const protectedAddons = parseProtectedAddons(user.protectedAddons, req)
-    
-    
-    // Include default addons as protected addons (only in safe mode)
-    const { defaultAddons } = require('../utils/config')
-    const normalizeUrl = (u) => {
-      try {
-        return canonicalizeManifestUrl ? canonicalizeManifestUrl(u) : String(u || '').trim().toLowerCase()
-      } catch (e) {
-        return String(u || '').trim().toLowerCase()
-      }
+    // Parse protected addons as PLAINTEXT NAMES from DB
+    let protectedNames = []
+    try {
+      protectedNames = user.protectedAddons ? JSON.parse(user.protectedAddons) : []
+    } catch {
+      protectedNames = []
     }
     
-    // Only include default addons as protected in safe mode (not in unsafe/advanced mode)
-    const defaultProtectedUrls = unsafeMode ? [] : defaultAddons.manifestUrls.map(normalizeUrl)
-    const allProtectedUrls = [
-      ...(Array.isArray(protectedAddons) ? protectedAddons : []).filter(Boolean).map(normalizeUrl),
-      ...defaultProtectedUrls
-    ]
-    const protectedUrlSet = new Set(allProtectedUrls)
+    
+    // Include default addons as protected addons (names, only in safe mode)
+    const { defaultAddons } = require('../utils/config')
+    const normalizeName = (n) => String(n || '').trim().toLowerCase()
+    const defaultProtectedNames = unsafeMode ? [] : (defaultAddons.names || [])
+    const protectedNameSet = new Set([
+      ...protectedNames.map(normalizeName),
+      ...defaultProtectedNames.map(normalizeName)
+    ])
     
 
-    // Helper function to check if an addon is protected
+    // Helper function to check if an addon is protected (by name)
     const isProtected = (addon) => {
-      const addonUrl = normalizeUrl(addon.transportUrl || addon.manifestUrl || addon?.manifest?.manifestUrl)
-      return addonUrl && protectedUrlSet.has(addonUrl)
+      const n = addon?.manifest?.name || addon?.transportName || addon?.name
+      return n && protectedNameSet.has(normalizeName(n))
     }
 
     // Parse excluded addons - these are database IDs stored in the database
@@ -133,29 +130,28 @@ async function getDesiredAddons(user, req, { prisma, getAccountId, decrypt, pars
     // 2) Keep only protected addons from userAddons
     const protectedUserAddons = (userAddons || []).filter(addon => isProtected(addon))
 
-    // Build a protected URL set from userAddons (normalized)
-    const protectedUserUrlSet = new Set(
+    // Build a protected NAME set from userAddons (normalized)
+    const protectedUserNameSet = new Set(
       protectedUserAddons
-        .map(a => normalizeUrl(a.transportUrl || a.manifestUrl))
+        .map(a => normalizeName(a?.manifest?.name || a?.transportName || a?.name))
         .filter(Boolean)
     )
 
-    // 3) If an addon is protected and also present in groupAddons, remove it from groupAddons (compare by URL)
+    // 3) If an addon is protected and also present in groupAddons, remove it from groupAddons (compare by NAME)
     const nonProtectedGroupAddons = cleanGroupAddons.filter(groupAddon => {
-      const url = normalizeUrl(groupAddon.transportUrl || groupAddon.manifestUrl || groupAddon?.manifest?.manifestUrl)
-      return url && !protectedUserUrlSet.has(url)
+      const n = normalizeName(groupAddon?.manifest?.name || groupAddon?.transportName || groupAddon?.name)
+      return n && !protectedUserNameSet.has(n)
     })
     
 
-    // Build locked positions map for protected addons from current Stremio account
-    // IMPORTANT: positions must be taken from the FULL userAddons list, not the filtered protected subset
+    // Build locked positions map for protected addons from current Stremio account (by name)
+    // IMPORTANT: positions must be taken from the FULL userAddons list
     const lockedByUrl = new Map()
     for (let i = 0; i < userAddons.length; i++) {
       const cur = userAddons[i]
-      if (!isProtected(cur)) continue
-      const url = normalizeUrl(cur.transportUrl || cur.manifestUrl)
-      if (url) {
-        lockedByUrl.set(url, i)
+      const name = normalizeName(cur?.manifest?.name || cur?.transportName || cur?.name)
+      if (name && isProtected(cur)) {
+        lockedByUrl.set(name, i)
       }
     }
 
@@ -165,9 +161,9 @@ async function getDesiredAddons(user, req, { prisma, getAccountId, decrypt, pars
 
     // Place protected addons at their original positions
     for (const addon of protectedUserAddons) {
-      const url = normalizeUrl(addon.transportUrl || addon.manifestUrl)
-      if (url && lockedByUrl.has(url)) {
-        const pos = lockedByUrl.get(url)
+      const name = normalizeName(addon?.manifest?.name || addon?.transportName || addon?.name)
+      if (name && lockedByUrl.has(name)) {
+        const pos = lockedByUrl.get(name)
         if (pos < finalLength) {
           finalDesiredCollection[pos] = addon
         }
