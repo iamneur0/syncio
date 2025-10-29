@@ -21,14 +21,28 @@ export default function TasksPage() {
   const [syncingUsers, setSyncingUsers] = React.useState<boolean>(false)
   const [syncingGroups, setSyncingGroups] = React.useState<boolean>(false)
   const [reloadingAddons, setReloadingAddons] = React.useState<boolean>(false)
-  const [syncMinutes, setSyncMinutes] = React.useState<number>(0)
+  const [syncFrequency, setSyncFrequency] = React.useState<string>('0')
   
   const addonsDragDepth = React.useRef<number>(0)
   const configDragDepth = React.useRef<number>(0)
 
   React.useEffect(() => {
-    api.get('/settings/sync-frequency')
-      .then(r => setSyncMinutes(Number(r.data?.minutes || 0)))
+    api.get('/settings/account-sync')
+      .then(r => {
+        const enabled = !!r.data?.enabled
+        const f = r.data?.frequency
+        if (!enabled) { setSyncFrequency('0'); return }
+        if (typeof f === 'string' && f.trim()) { setSyncFrequency(f.trim()); return }
+        if (typeof f === 'number') {
+          if (f === 0) setSyncFrequency('0')
+          else if (f === 1) setSyncFrequency('1m')
+          else if (f >= 1440) setSyncFrequency(`${Math.round(f/1440)}d`)
+          else setSyncFrequency(`${f}m`)
+          return
+        }
+        // Default to 1d if enabled but frequency missing
+        setSyncFrequency('1d')
+      })
       .catch(() => {})
   }, [])
 
@@ -251,26 +265,17 @@ export default function TasksPage() {
   const syncAllGroups = async () => {
     try {
       setSyncingGroups(true)
-      const groupsRes = await api.get('/groups')
-      const groups = groupsRes.data || []
+      // Backend uses per-account DB settings for mode/safe; no headers/localStorage
+      const res = await api.post('/groups/sync-all')
+      const syncedGroups = res.data?.syncedGroups ?? 0
+      const failedGroups = res.data?.failedGroups ?? 0
+      const totalUsersSynced = res.data?.totalUsersSynced ?? 0
+      const totalUsersFailed = res.data?.totalUsersFailed ?? 0
       
-      let successCount = 0
-      let errorCount = 0
-      
-      for (const group of groups) {
-        try {
-          await api.post(`/groups/${group.id}/sync`)
-          successCount++
-        } catch (error) {
-          console.error(`Failed to sync group ${group.id}:`, error)
-          errorCount++
-        }
-      }
-
-      if (errorCount === 0) {
-        toast.success(`Synced ${successCount} groups successfully`)
+      if (failedGroups === 0) {
+        toast.success(`Synced ${syncedGroups} groups successfully (${totalUsersSynced} users synced)`)
       } else {
-        toast.success(`Synced ${successCount} groups, ${errorCount} failed`)
+        toast.success(`Synced ${syncedGroups} groups, ${failedGroups} failed (${totalUsersSynced} users synced, ${totalUsersFailed} failed)`)
       }
     } catch (e: any) {
       toast.error(e?.response?.data?.message || 'Failed to sync groups')
@@ -596,21 +601,21 @@ export default function TasksPage() {
         </p>
         <div className="mt-4 flex items-center gap-3">
           <select
-            value={syncMinutes}
+            value={syncFrequency}
             onChange={(e) => {
-              const minutes = Number(e.target.value)
-              setSyncMinutes(minutes)
-              api.put('/settings/sync-frequency', { minutes })
-                .then(() => toast.success('Sync schedule updated'))
+              const freq = e.target.value
+              setSyncFrequency(freq)
+              api.put('/settings/account-sync', { enabled: freq !== '0', frequency: freq })
+                .then(() => toast.success('Sync schedule updated for this account'))
                 .catch((err) => toast.error(err?.response?.data?.message || 'Failed to update sync schedule'))
             }}
             className={`${isDark ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'} border rounded px-3 py-2`}
           >
-            <option value={0}>Disabled</option>
-            <option value={15}>Every 15 minutes</option>
-            <option value={30}>Every 30 minutes</option>
-            <option value={60}>Every hour</option>
-            <option value={1440}>Every day</option>
+            <option value={'0'}>Disabled</option>
+            <option value={'1m'}>Every minute</option>
+            <option value={'1d'}>Every day</option>
+            <option value={'3d'}>Every 3 days</option>
+            <option value={'7d'}>Every 7 days</option>
           </select>
           <button
             onClick={async () => {

@@ -89,6 +89,8 @@ model AppAccount {
   id           String   @id @default(cuid())
   uuid         String   @unique
   passwordHash String
+  // SQLite does not support Prisma Json type; store as TEXT (stringified JSON)
+  sync         String?
 
   @@map("app_accounts")
 }

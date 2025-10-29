@@ -424,29 +424,15 @@ export default function GroupDetailModal({
                         groupId={group.id} 
                         onSync={async () => {
                           try {
-                            // Get sync mode and unsafe mode from localStorage
-                            const syncMode = localStorage.getItem('sfm_sync_mode') === 'advanced' ? 'advanced' : 'normal'
-                            const isUnsafeMode = localStorage.getItem('sfm_delete_mode') === 'unsafe'
-                            
-                            // Advanced mode: reload group addons first
-                            if (syncMode === 'advanced') {
-                              await groupsAPI.reloadGroupAddons(group.id)
-                            }
-                            
-                            // Placeholder group sync call (doesn't do anything but maintains API consistency)
+                            // Sync the group (backend reads DB config for mode/safe)
                             await groupsAPI.sync(group.id)
                             
-                            // Then sync all users in the group with the appropriate sync mode
-                            const users = groupDetails?.users || []
-                            if (Array.isArray(users) && users.length > 0) {
-                              await Promise.all(users.map((u: any) => usersAPI.sync(u.id, [], syncMode, isUnsafeMode)))
-                            }
                             // Invalidate and refresh
                             queryClient.invalidateQueries({ queryKey: ['group'] })
                             queryClient.invalidateQueries({ queryKey: ['group', group.id, 'details'] })
                             queryClient.invalidateQueries({ queryKey: ['users'] })
                             refreshAllSyncStatus(group.id)
-                            toast.success('Group and users sync completed')
+                            toast.success('Group sync completed')
                           } catch (error: any) {
                             toast.error(error?.response?.data?.message || 'Failed to sync group')
                           }

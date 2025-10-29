@@ -143,9 +143,7 @@ function filterManifestByCatalogs(manifestObj, selectedCatalogIds) {
       
       // Check if this catalog is selected
       const selectedCatalog = selectedCatalogs.get(catalogKey)
-      console.log(`🔍 Looking for catalog key: ${catalogKey}`)
-      console.log(`🔍 Available keys:`, Array.from(selectedCatalogs.keys()))
-      console.log(`🔍 Found selected catalog:`, selectedCatalog)
+      // catalog selection debug removed (noise)
       if (!selectedCatalog) return false
       
       // If this catalog has search functionality, check if search is enabled
@@ -156,29 +154,26 @@ function filterManifestByCatalogs(manifestObj, selectedCatalogIds) {
         
         if (isEmbeddedSearch) {
           // For embedded search catalogs, check if search is enabled in the tuple
-          console.log(`🔍 Catalog ${catalogId}:${catalogType} - selectedSearch:`, selectedCatalog.search)
-          console.log(`🔍 Selected catalog object:`, selectedCatalog)
-          console.log(`🔍 Catalog type match: ${selectedCatalog.type} === ${catalogType}`, selectedCatalog.type === catalogType)
+          // embedded search selection debug removed
           
           if (!selectedCatalog.search) {
             // Remove search functionality from this catalog
-            console.log(`🔍 Removing search from ${catalogId}:${catalogType}`)
+            // removing search flag (no log)
             // Only remove the extra object with name: "search", keep extraSupported intact
             catalog.extra = catalog.extra.filter((extra) => extra.name !== 'search')
             // Don't modify extraSupported - keep it as is
           } else {
-            console.log(`🔍 Keeping search for ${catalogId}:${catalogType}`)
+          // keep search
           }
         } else if (hasSearch && !hasOtherExtras) {
           // For standalone search catalogs, check if search is enabled
-          console.log(`🔍 Standalone search catalog ${catalogId}:${catalogType} - selectedSearch:`, selectedCatalog.search)
+          // standalone search selection
           
           if (!selectedCatalog.search) {
-            // Remove search functionality from this catalog
-            console.log(`🔍 Removing search from standalone ${catalogId}:${catalogType}`)
+            // Remove search functionality from this catalog (silent)
             catalog.extra = catalog.extra.filter((extra) => extra.name !== 'search')
           } else {
-            console.log(`🔍 Keeping search for standalone ${catalogId}:${catalogType}`)
+            // keep search for standalone
           }
         }
       }

@@ -91,6 +91,7 @@ model AppAccount {
   id           String   @id @default(cuid())
   uuid         String   @unique
   passwordHash String
+  sync         Json?
 
   @@map("app_accounts")
 }

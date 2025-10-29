@@ -94,7 +94,6 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
     try {
       const { id } = req.params
       const { basic } = req.query
-      debug.log(`🔍 GET /api/users/${id} called${basic ? ' (basic mode)' : ''}`)
       
       const user = await findUserById(prisma, id, getAccountId(req), {})
       if (!user) {
@@ -720,12 +719,10 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
   router.post('/:id/sync', async (req, res) => {
     try {
       const { id } = req.params
-      // sync mode comes from header, defaults to normal
-      const headerMode = (req.headers['x-sync-mode'] || '').toString().toLowerCase()
-      const syncMode = headerMode === 'advanced' ? 'advanced' : 'normal'
       const unsafeMode = req.query?.unsafe === 'true' || req.body?.unsafe === true
 
-      const result = await syncUserAddons(id, [], syncMode, unsafeMode, req, decrypt, getAccountId)
+      // Individual user sync - no reload needed, just sync
+      const result = await syncUserAddons(prisma, id, [], unsafeMode, req, decrypt, getAccountId)
 
       if (!result.success) {
         return res.status(400).json({ message: result.error || 'Failed to sync user' })
@@ -2297,6 +2294,9 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
 // Export the reloadGroupAddons helper function for use by other modules
 module.exports.reloadGroupAddons = reloadGroupAddons;
 
+// Export the syncUserAddons helper function for use by other modules
+module.exports.syncUserAddons = syncUserAddons;
+
 // Helper function to get sync mode from request headers
 function getSyncMode(req) {
   const syncMode = req?.headers?.['x-sync-mode'] || 'normal'
@@ -2346,6 +2346,12 @@ async function reloadGroupAddons(prisma, getAccountId, groupId, req, decrypt) {
     .filter(ga => ga.addon && ga.addon.isActive !== false)
     .map(ga => ga.addon)
 
+  // Single-line summary of addons to be reloaded
+  try {
+    const names = groupAddons.map(a => a.name).filter(Boolean)
+    if (names.length > 0) console.log(`🔄 Reloading addons: ${names.join(', ')}`)
+  } catch {}
+
   
   for (const addon of groupAddons) {
     try {
@@ -2367,7 +2373,8 @@ async function reloadGroupAddons(prisma, getAccountId, groupId, req, decrypt) {
         encrypt, 
         decrypt,  // Use the same decrypt function as individual reload
         getDecryptedManifestUrl, 
-        manifestHash 
+        manifestHash,
+        silent: true 
       }, true) // Auto-select truly new elements for bulk reload
       
       if (result.success) {
@@ -2391,12 +2398,23 @@ async function reloadGroupAddons(prisma, getAccountId, groupId, req, decrypt) {
   }
 }
 
-async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'normal', unsafeMode = false, req, decrypt, getAccountIdParam) {
+async function syncUserAddons(prismaClient, userId, excludedManifestUrls = [], unsafeMode = false, req, decrypt, getAccountIdParam) {
   try {
-    console.log('🚀 Syncing user addons:', userId)
+    // Ensure req has appAccountId for account scoping
+    if (!req.appAccountId) {
+      req.appAccountId = getAccountIdParam(req)
+    }
+    
+    // Load user to get name for logging
+    const userForLog = await prismaClient.user.findUnique({
+      where: { id: userId },
+      select: { username: true }
+    })
+    const userName = userForLog?.username || userId
+    console.log(`🚀 Syncing user addons: ${userName}`)
 
     // Load user
-    const user = await prisma.user.findUnique({
+    const user = await prismaClient.user.findUnique({
       where: { id: userId },
       select: {
         id: true,
@@ -2412,93 +2430,7 @@ async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'nor
     if (!user.isActive) return { success: false, error: 'User is disabled' }
     if (!user.stremioAuthKey) return { success: false, error: 'User is not connected to Stremio' }
 
-    // Find groups that contain this user
-    const groups = await prisma.group.findMany({
-      where: {
-        accountId: user.accountId,
-        userIds: {
-          contains: user.id
-        }
-      },
-      include: {
-        addons: {
-          include: {
-            addon: true
-          }
-        }
-      }
-    })
-
-    // Get excluded addons from user's database record (like sync status check does)
-    let excludedAddons = []
-    try {
-      excludedAddons = (typeof parseAddonIds === 'function' ? parseAddonIds : parseAddonIdsUtil)(user.excludedAddons)
-    } catch (e) {
-      console.error('Error parsing excluded addons in sync:', e)
-    }
-    
-    const excludedSet = new Set(excludedAddons.map(id => String(id).trim()))
-
-    // Get ordered, decrypted addons via shared helper
-    const { getGroupAddons } = require('../utils/helpers')
-    const primaryGroup = groups[0]
-    const groupAddons = primaryGroup ? (await getGroupAddons(prisma, primaryGroup.id, req)).filter((a) => a?.manifestUrl && !excludedSet.has(a.id)) : []
-
-    // Advanced sync: reload all group addons first
-    let reloadedCount = 0
-    let totalAddons = groupAddons.length
-    
-    if (syncMode === 'advanced' && primaryGroup) {
-      
-      // Use the existing reload addon functionality
-      const reloadResult = await reloadGroupAddons(prisma, (typeof getAccountIdParam === 'function' ? getAccountIdParam : getAccountId), primaryGroup.id, req, decrypt)
-      reloadedCount = reloadResult.reloadedCount
-      
-      // Reload the group addons from database to get updated data
-      const updatedFamilyGroup = await prisma.group.findUnique({
-        where: { id: primaryGroup.id },
-        include: {
-          addons: { 
-            include: { addon: true },
-            where: { isEnabled: { not: false } }
-          }
-        }
-      })
-      
-      const updatedFamilyAddons = Array.isArray(updatedFamilyGroup?.addons)
-        ? updatedFamilyGroup.addons
-            .filter((ga) => (ga?.isEnabled !== false) && (ga?.addon?.isActive !== false) && (ga?.addon?.accountId === user.accountId))
-            .map((ga) => {
-              let manifestObj = null
-              try {
-                if (ga.addon.manifest && typeof ga.addon.manifest === 'string') {
-                  const decrypted = (typeof decrypt === 'function' ? decrypt : require('../utils/encryption').decrypt)(ga.addon.manifest, req)
-                  manifestObj = JSON.parse(decrypted)
-                } else if (ga.addon.manifest && typeof ga.addon.manifest === 'object') {
-                  manifestObj = ga.addon.manifest
-                }
-              } catch {}
-              return {
-                id: ga.addon.id,
-                name: ga.addon.name,
-                version: ga.addon.version,
-                description: ga.addon.description,
-                // Use decrypted manifest URL for Stremio
-                manifestUrl: (typeof getDecryptedManifestUrl === 'function' ? getDecryptedManifestUrl : require('../utils/encryption').getDecryptedManifestUrl)(ga.addon, req),
-                manifest: manifestObj,
-              }
-            })
-            // Exclusions are stored as addon IDs, not URLs
-            .filter((fa) => fa?.manifestUrl && !excludedSet.has(String(fa.id)))
-        : []
-      
-      
-      // Use updated addons for sync
-      groupAddons.splice(0, groupAddons.length, ...updatedFamilyAddons)
-    } else if (syncMode === 'advanced' && !primaryGroup) {
-      // No group found for this user; nothing to reload, proceed with current groupAddons (likely empty)
-      console.warn('Advanced sync requested but user has no primary group; skipping reload step')
-    }
+    // syncUserAddons only handles the actual syncing - no mode handling
 
     // Decrypt auth using account-scoped key (no req in this scope)
     let authKeyPlain
@@ -2514,27 +2446,14 @@ async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'nor
     // Create StremioAPIClient for this user
     const apiClient = new StremioAPIClient({ endpoint: 'https://api.strem.io', authKey: authKeyPlain })
 
-    // Build desired addons using the shared getDesiredAddons logic and push exactly that
+    // Compute plan (shared logic); short-circuit if already synced
     try {
-      // In advanced mode, refresh group addons first to ensure getDesiredAddons sees latest
-      if (syncMode === 'advanced') {
-        // Find a group containing this user (same as earlier lookup)
-        const groupsForUser = await prisma.group.findMany({
-          where: { accountId: user.accountId, userIds: { contains: user.id } },
-          select: { id: true }
-        })
-        const primary = groupsForUser[0]
-        if (primary && primary.id) {
-          await reloadGroupAddons(prisma, (typeof getAccountIdParam === 'function' ? getAccountIdParam : getAccountId), primary.id, req, decrypt)
-        }
-      }
-
-      const { getDesiredAddons } = require('../utils/sync')
+      const { computeUserSyncPlan } = require('../utils/sync')
       const parseAddonIdsFn = (typeof parseAddonIds === 'function' ? parseAddonIds : parseAddonIdsUtil)
       const parseProtectedAddonsFn = (typeof parseProtectedAddons === 'function' ? parseProtectedAddons : require('../utils/validation').parseProtectedAddons)
       const canonicalizeFn = (typeof canonicalizeManifestUrl === 'function' ? canonicalizeManifestUrl : canonicalizeManifestUrlUtil)
-      const desiredRes = await getDesiredAddons(user, req, {
-        prisma,
+      const plan = await computeUserSyncPlan(user, req, {
+        prisma: prismaClient,
         getAccountId: (typeof getAccountIdParam === 'function' ? getAccountIdParam : getAccountId),
         decrypt,
         parseAddonIds: parseAddonIdsFn,
@@ -2543,242 +2462,28 @@ async function syncUserAddons(userId, excludedManifestUrls = [], syncMode = 'nor
         StremioAPIClient,
         unsafeMode
       })
+      if (!plan.success) return { success: false, error: plan.error || 'Failed to compute plan' }
 
-      if (!desiredRes?.success) {
-        return { success: false, error: desiredRes?.error || 'Failed to compute desired addons' }
+      // Log concise names
+      try {
+        const currentNames = (plan.current || []).map(a => a?.manifest?.name || a?.transportName || 'Unknown').filter(Boolean)
+        const desiredNames = (plan.desired || []).map(a => a?.manifest?.name || a?.name || a?.transportName || 'Unknown').filter(Boolean)
+        console.log(`📥 Current addons (${currentNames.length}):`, currentNames.join(', '))
+        console.log(`🎯 Desired addons (${desiredNames.length}):`, desiredNames.join(', '))
+      } catch {}
+
+      if (plan.alreadySynced) {
+        console.log(`✅ User already synced`)
+        return { success: true, total: (plan.desired || []).length, alreadySynced: true }
       }
 
-      const desired = Array.isArray(desiredRes.addons) ? desiredRes.addons : []
-
-      await apiClient.request('addonCollectionSet', { addons: desired })
-
-      // In advanced mode, optionally verify count
-      let total
-      if (syncMode === 'advanced') {
-        const after = await apiClient.request('addonCollectionGet', {})
-        total = Array.isArray(after?.addons) ? after.addons.length : (after?.addons ? Object.keys(after.addons).length : 0)
-      } else {
-        total = desired.length
-      }
-
-      return { success: true, total }
+      await apiClient.request('addonCollectionSet', { addons: plan.desired || [] })
+      console.log('✅ User now synced')
+      return { success: true, total: (plan.desired || []).length }
     } catch (e) {
-      console.error('❌ Failed to push desired addons via getDesiredAddons:', e?.message)
+      console.error('❌ Failed to apply sync plan:', e?.message)
       return { success: false, error: e?.message || 'Failed to sync addons' }
     }
-
-    // Protected addons logic:
-    // 1. Default Stremio addons: protected in safe mode, not protected in unsafe mode
-    // 2. User-defined protected addons: ALWAYS protected regardless of mode
-    
-    // Load default protected addons config
-    const { defaultAddons: defaultCfg } = require('../utils/config')
-    const protectedAddonIds = unsafeMode ? new Set() : new Set(defaultCfg.ids)
-    // IMPORTANT: match by RAW manifestUrl string (as stored) + canonical URL + default IDs
-    const protectedUrls = unsafeMode ? new Set() : new Set(defaultCfg.manifestUrls.map((u) => (u || '').toString().trim()))
-    const protectedCanonicalUrls = unsafeMode ? new Set() : new Set(defaultCfg.manifestUrls.map((u) => (typeof canonicalizeManifestUrl === 'function' ? canonicalizeManifestUrl : canonicalizeManifestUrlUtil)(u)))
-
-    // Parse user-defined protected addons (ALWAYS protected regardless of mode)
-    let userProtectedAddons = []
-    try {
-      const encryptedUrls = user.protectedAddons ? JSON.parse(user.protectedAddons) : []
-      if (Array.isArray(encryptedUrls)) {
-        // Decrypt using account-derived key (no req context here)
-        let key = null
-        try { key = (typeof getAccountDek === 'function' ? getAccountDek : getAccountDekUtil)(user.accountId) } catch {}
-        if (!key) { key = (typeof getServerKey === 'function' ? getServerKey : getServerKeyUtil)() }
-        userProtectedAddons = encryptedUrls.map(encryptedUrl => {
-          try {
-            return (typeof aesGcmDecrypt === 'function' ? aesGcmDecrypt : aesGcmDecryptUtil)(key, encryptedUrl)
-          } catch (e) {
-            console.warn('Failed to decrypt protected addon URL in sync:', e.message)
-            return null
-          }
-        }).filter(url => url !== null)
-      }
-    } catch (e) {
-      console.warn('Failed to parse user protected addons in sync:', e)
-      userProtectedAddons = []
-    }
-    
-    // Add user-defined protected addons to the protected URL set (ALWAYS)
-    userProtectedAddons.forEach(url => {
-      if (url && typeof url === 'string') {
-        const raw = url.toString().trim()
-        protectedUrls.add(raw)
-        protectedCanonicalUrls.add((typeof canonicalizeManifestUrl === 'function' ? canonicalizeManifestUrl : canonicalizeManifestUrlUtil)(raw))
-      }
-    })
-
-    const isProtected = (a) => {
-      const aid = a?.id || a?.manifest?.id || ''
-      const rawUrl = (a?.manifestUrl || a?.transportUrl || a?.url || '').toString().trim()
-      const canonUrl = (typeof canonicalizeManifestUrl === 'function' ? canonicalizeManifestUrl : canonicalizeManifestUrlUtil)(rawUrl)
-      return protectedAddonIds.has(aid) || protectedUrls.has(rawUrl) || protectedCanonicalUrls.has(canonUrl)
-    }
-
-    // Derive any protected IDs visible in this run (from desired group manifests)
-    const protectedIdsFromDesired = (() => {
-      try {
-        const ids = new Set()
-        ;(desiredGroup || []).forEach((a) => {
-          if (isProtected(a)) {
-            const pid = a?.manifest?.id || a?.id
-            if (pid) ids.add(pid)
-          }
-        })
-        return Array.from(ids)
-      } catch { return [] }
-    })()
-
-    console.error('🔒 Protected sets summary:', {
-      defaultIds: Array.from(protectedAddonIds),
-      userProtectedIdsFromDesired: protectedIdsFromDesired,
-      urlCount: protectedUrls.size,
-      canonicalCount: protectedCanonicalUrls.size
-    })
-    
-    // Use the same canonicalization used elsewhere for URL set equality checks only
-    const normalize = (s) => (typeof canonicalizeManifestUrl === 'function' ? canonicalizeManifestUrl : canonicalizeManifestUrlUtil)(s)
-
-    // Pull current collection
-    const current = await apiClient.request('addonCollectionGet', {})
-    const currentAddonsRaw = current?.addons || current || []
-    const currentAddons = Array.isArray(currentAddonsRaw) ? currentAddonsRaw : (typeof currentAddonsRaw === 'object' ? Object.values(currentAddonsRaw) : [])
-    console.error('📥 Current addons from Stremio:', currentAddons?.length || 0)
-
-    // Build desired group addon objects (fetch manifests with fallback to stored data)
-    const desiredGroup = []
-    for (const fa of groupAddons) {
-      try {
-        // Use the stored manifest directly instead of fetching from URL
-        // This preserves the user's resource selections and customizations
-        if (fa.manifest && typeof fa.manifest === 'object') {
-          desiredGroup.push({
-            transportUrl: fa.manifestUrl,
-            transportName: fa.manifest.name || fa.name,
-            manifest: fa.manifest,
-          })
-        } else {
-          // Fallback: fetch from URL only if no stored manifest
-        const resp = await fetch(fa.manifestUrl)
-        if (!resp.ok) {
-          throw new Error(`HTTP ${resp.status}: ${resp.statusText}`)
-        }
-        const manifest = await resp.json()
-        
-        // Ensure manifest has required fields
-        const safeManifest = {
-          id: manifest?.id || 'unknown',
-          name: manifest?.name || fa.name || 'Unknown',
-          version: manifest?.version || '1.0.0', // Default version if null
-          description: manifest?.description || fa.description || '',
-          ...manifest // Include all other manifest fields
-        }
-        
-        desiredGroup.push({
-          transportUrl: fa.manifestUrl,
-          transportName: safeManifest.name,
-          manifest: safeManifest,
-        })
-        }
-      } catch (e) {
-        console.warn(`⚠️ Failed to fetch manifest for ${fa.manifestUrl}:`, e.message)
-        
-        // Always include the addon, even if we can't fetch the live manifest
-        // Use stored manifest from the database as fallback
-        let fallbackManifest
-        if (fa.manifest && typeof fa.manifest === 'object') {
-          // Use the stored manifest JSON directly - no need to reconstruct it
-          fallbackManifest = fa.manifest
-        } else {
-          // Fallback to database fields if no stored manifest
-          fallbackManifest = {
-            id: fa.id || 'unknown',
-            name: fa.name || 'Unknown',
-            version: fa.version || '1.0.0',
-            description: fa.description || '',
-            types: ['other'],
-            resources: [],
-            catalogs: []
-          }
-        }
-        
-        desiredGroup.push({ 
-          transportUrl: fa.manifestUrl,
-          transportName: fallbackManifest.name,
-          manifest: fallbackManifest
-        })
-        
-        if (e.message.includes('429') || e.message.includes('Too Many Requests')) {
-          console.warn(`⏭️ Using stored manifest due to rate limiting: ${fallbackManifest.name}`)
-        } else {
-          console.warn(`⏭️ Using stored manifest due to fetch error: ${fallbackManifest.name}`)
-        }
-      }
-    }
-
-    // Send desiredGroup exactly as computed (including duplicates and order)
-    const finalDesired = desiredGroup
-
-    // Check if already synced (same addons in same order)
-    const toUrl = (a) => normalize(a?.transportUrl || a?.manifestUrl || a?.url)
-    const toUrlSet = (list) => new Set(list.map(toUrl))
-    const currentUrls = toUrlSet(currentAddons)
-    const desiredUrls = toUrlSet(finalDesired)
-    
-    const alreadySynced = currentUrls.size === desiredUrls.size && 
-      [...currentUrls].every(url => desiredUrls.has(url)) &&
-      JSON.stringify(currentAddons.map(toUrl)) === JSON.stringify(finalDesired.map(toUrl))
-
-    if (alreadySynced) {
-      if (syncMode === 'advanced') {
-        return { 
-          success: true, 
-          total: finalDesired.length, 
-          alreadySynced: true, 
-          reloadedCount, 
-          totalAddons 
-        }
-      }
-      return { success: true, total: finalDesired.length, alreadySynced: true }
-    }
-
-    // Set the addon collection using the proper format (replaces, removes extras not included)
-    try {
-      finalDesired.forEach((a, idx) => {
-        const name = a?.manifest?.name || a?.name || a?.transportName || 'Unknown'
-        const prot = isProtected(a) ? ' (protected)' : ''
-        console.log(`${idx + 1} - ${name}${prot}`)
-      })
-      
-      await apiClient.request('addonCollectionSet', { addons: finalDesired })
-      // Skip propagation wait to speed up normal sync
-      if (syncMode === 'advanced') {
-        await new Promise((r) => setTimeout(r, 1200))
-      }
-    } catch (e) {
-      console.error('❌ Failed to set addon collection:', e.message)
-      return { success: false, error: `Failed to sync addons: ${e?.message}` }
-    }
-
-    // For speed, avoid a second collection fetch in normal mode; compute from desired
-    let total
-    if (syncMode === 'advanced') {
-      const after = await apiClient.request('addonCollectionGet', {})
-      total = Array.isArray(after?.addons) ? after.addons.length : (after?.addons ? Object.keys(after.addons).length : 0)
-    } else {
-      total = finalDesired.length
-    }
-
-    // Note: stremioAddons field was removed from User schema
-    // No database update needed for connect
-    console.log('💾 Connect completed (stremioAddons field removed from schema)')
-
-    if (syncMode === 'advanced') {
-      return { success: true, total, reloadedCount, totalAddons }
-    }
-    return { success: true, total }
   } catch (error) {
     console.error('Error in syncUserAddons:', error)
     return { success: false, error: error?.message || 'Unknown error' }

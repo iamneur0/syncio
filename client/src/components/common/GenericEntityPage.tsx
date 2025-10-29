@@ -417,8 +417,6 @@ export default function GenericEntityPage({ config }: GenericEntityPageProps) {
   const handleSync = async (id: string) => {
     if (finalConfig.api.sync) {
       // Get sync mode and unsafe mode from localStorage
-      const syncMode = localStorage.getItem('sfm_sync_mode') === 'advanced' ? 'advanced' : 'normal'
-      const isUnsafeMode = localStorage.getItem('sfm_delete_mode') === 'unsafe'
       
       // For users, check if they need to reconnect first
       if (finalConfig.entityType === 'user') {
@@ -450,26 +448,11 @@ export default function GenericEntityPage({ config }: GenericEntityPageProps) {
       try {
         // Sync the group or user itself
         if (finalConfig.entityType === 'user') {
-          // User sync with sync mode and unsafe mode
-          await usersAPI.sync(id, [], syncMode, isUnsafeMode)
+          // User sync (backend reads DB config for behavior)
+          await usersAPI.sync(id)
         } else if (finalConfig.entityType === 'group') {
-          // Group sync: reload addons first if advanced mode, then sync all users
-          if (syncMode === 'advanced') {
-            // Advanced mode: reload group addons first
-            await groupsAPI.reloadGroupAddons(id)
-          }
-          
-          // Placeholder group sync call (doesn't do anything but maintains API consistency)
-          await groupsAPI.sync(id, [])
-          
-          // Cascade to all users in the group with the appropriate sync mode
-          try {
-            const groupDetails = await groupsAPI.getById(id as any)
-            const usersInGroup = Array.isArray(groupDetails?.users) ? groupDetails.users : []
-            if (usersInGroup.length > 0) {
-              await Promise.all(usersInGroup.map((u: any) => usersAPI.sync(u.id, [], syncMode, isUnsafeMode)))
-            }
-          } catch {}
+          // Sync the group (backend reads DB config for behavior)
+          await groupsAPI.sync(id)
         } else {
           // Fallback for other entity types
           await finalConfig.api.sync(id)

@@ -40,11 +40,14 @@ export default function SettingsPage() {
   }
 
   React.useEffect(() => {
-    const savedSyncMode = localStorage.getItem('sfm_sync_mode')
-    setSyncMode(savedSyncMode === 'advanced' ? 'advanced' : 'normal')
-    
-    const savedDeleteMode = localStorage.getItem('sfm_delete_mode')
-    setDeleteMode(savedDeleteMode === 'unsafe' ? 'unsafe' : 'safe')
+    api.get('/settings/account-sync')
+      .then(r => {
+        const mode = (r.data?.mode === 'advanced') ? 'advanced' : 'normal'
+        const safe = (r.data?.safe !== undefined) ? !!r.data.safe : !(!!r.data?.unsafe)
+        setSyncMode(mode)
+        setDeleteMode(safe ? 'safe' : 'unsafe')
+      })
+      .catch(() => {})
   }, [])
 
   // Global file-drag detection to hint buttons
@@ -116,16 +119,16 @@ export default function SettingsPage() {
 
   const onSyncModeChange = (mode: 'normal' | 'advanced') => {
     setSyncMode(mode)
-    localStorage.setItem('sfm_sync_mode', mode)
-    // notify other tabs/components if needed
-    window.dispatchEvent(new CustomEvent('sfm:settings:changed'))
+    api.put('/settings/account-sync', { mode })
+      .then(() => window.dispatchEvent(new CustomEvent('sfm:settings:changed')))
+      .catch(() => {})
   }
 
   const onDeleteModeChange = (mode: 'safe' | 'unsafe') => {
     setDeleteMode(mode)
-    localStorage.setItem('sfm_delete_mode', mode)
-    // notify other tabs/components if needed
-    window.dispatchEvent(new CustomEvent('sfm:settings:changed'))
+    api.put('/settings/account-sync', { safe: mode === 'safe' })
+      .then(() => window.dispatchEvent(new CustomEvent('sfm:settings:changed')))
+      .catch(() => {})
   }
 
   // Import addons mutation (uses axios client to include CSRF header)
