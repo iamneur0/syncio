@@ -274,8 +274,8 @@ export const usersAPI = {
   },
 
   // Remove a Stremio addon from user's account
-  removeStremioAddon: async (id: string, addonId: string, unsafe: boolean = false): Promise<any> => {
-    const response: AxiosResponse<any> = await api.delete(`/users/${id}/stremio-addons/${encodeURIComponent(addonId)}${unsafe ? '?unsafe=true' : ''}`)
+  removeStremioAddon: async (id: string, addonName: string, unsafe: boolean = false): Promise<any> => {
+    const response: AxiosResponse<any> = await api.delete(`/users/${id}/stremio-addons/${encodeURIComponent(addonName)}${unsafe ? '?unsafe=true' : ''}`)
     return response.data
   },
 

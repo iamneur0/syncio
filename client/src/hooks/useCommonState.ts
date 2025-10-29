@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import api from '@/services/api'
 
 /**
  * Common state management hooks to reduce duplication
@@ -145,19 +147,28 @@ export const useSelectionState = <T = string>(initialSelection: T[] = []) => {
 }
 
 /**
- * Hook for managing unsafe mode state
+ * Hook for managing unsafe mode state (reads from DB)
  */
 export const useUnsafeMode = () => {
-  const [isUnsafeMode, setIsUnsafeMode] = useState(false)
+  // Fetch account sync settings from DB
+  const { data: syncSettings } = useQuery({
+    queryKey: ['account-sync'],
+    queryFn: async () => {
+      try {
+        const resp = await api.get('/settings/account-sync')
+        return resp.data
+      } catch {
+        return null
+      }
+    },
+    refetchOnMount: 'always',
+    staleTime: 0,
+  })
 
-  useEffect(() => {
-    try {
-      const mode = localStorage.getItem('sfm_delete_mode')
-      setIsUnsafeMode(mode === 'unsafe')
-    } catch {
-      setIsUnsafeMode(false)
-    }
-  }, [])
+  // Extract unsafe mode from DB (safe=false means unsafe)
+  const isUnsafeMode = syncSettings && typeof syncSettings.safe === 'boolean' 
+    ? !syncSettings.safe 
+    : false
 
-  return { isUnsafeMode, setIsUnsafeMode }
+  return { isUnsafeMode }
 }
