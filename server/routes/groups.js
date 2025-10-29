@@ -28,10 +28,26 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
       return { groupId, syncedUsers: 0, failedUsers: 0, message: 'Group has no users to sync' }
     }
 
-    // Respect sync mode header and unsafe flag (same behavior as single group endpoint)
-    const headerMode = (req.headers['x-sync-mode'] || '').toString().toLowerCase()
-    const syncMode = headerMode === 'advanced' ? 'advanced' : 'normal'
-    const unsafeMode = req.query?.unsafe === 'true' || req.body?.unsafe === true
+    // Read account-backed sync settings; fallback to headers only if unavailable
+    let syncMode = 'normal'
+    let unsafeMode = false
+    try {
+      const acct = await prisma.appAccount.findUnique({ where: { id: getAccountId(req) }, select: { sync: true } })
+      let cfg = acct?.sync
+      if (typeof cfg === 'string') { try { cfg = JSON.parse(cfg) } catch { cfg = null } }
+      if (cfg && typeof cfg === 'object') {
+        if (cfg.mode === 'advanced') syncMode = 'advanced'
+        if (typeof cfg.safe === 'boolean') unsafeMode = !cfg.safe
+      } else {
+        const headerMode = (req.headers['x-sync-mode'] || '').toString().toLowerCase()
+        syncMode = headerMode === 'advanced' ? 'advanced' : 'normal'
+        unsafeMode = req.query?.unsafe === 'true' || req.body?.unsafe === true
+      }
+    } catch {
+      const headerMode = (req.headers['x-sync-mode'] || '').toString().toLowerCase()
+      syncMode = headerMode === 'advanced' ? 'advanced' : 'normal'
+      unsafeMode = req.query?.unsafe === 'true' || req.body?.unsafe === true
+    }
 
     // Remove duplicates from userIds to prevent double syncing
     const uniqueUserIds = [...new Set(userIds)]

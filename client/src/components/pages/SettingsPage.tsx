@@ -4,7 +4,7 @@ import React from 'react'
 import { useTheme } from '@/contexts/ThemeContext'
 import { useMutation } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
-import { Upload, RotateCcw, Sun, Moon, Sparkles, User, Users, Download, Trash2, RefreshCcw, SunMoon } from 'lucide-react'
+import { RotateCcw, Sun, Moon, Sparkles, Trash2, RefreshCcw, SunMoon } from 'lucide-react'
 import AccountMenuButton from '@/components/auth/AccountMenuButton'
 import ConfirmDialog from '@/components/common/ConfirmDialog'
 import api from '@/services/api'
@@ -898,95 +898,10 @@ export default function SettingsPage() {
         </div>
       )}
 
-      {/* Addon Import/Export */}
-      <div className={`p-4 rounded-lg border mt-6 ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
-        <h2 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>Addon Import/Export</h2>
-        <p className={`text-sm mt-1 ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
-          Import addons from a JSON file or paste JSON content directly. Duplicate addons will be skipped. You can also export current addons.
-        </p>
-        <div className="mt-4 flex gap-4 flex-wrap">
-          <button
-            onClick={handleUploadClick}
-            onDragOver={onButtonDragOver}
-            onDrop={onDropAddonsButton}
-            onDragEnter={onButtonDragEnterAddons}
-            onDragLeave={onButtonDragLeaveAddons}
-            className="accent-bg accent-text hover:opacity-90 flex items-center px-4 py-2 rounded-lg transition-colors"
-          >
-            <Upload className="w-5 h-5 mr-2" />
-            {isDraggingAddonsOver ? 'Drop Addons' : 'Import Addons'}
-          </button>
-          <button
-            onClick={exportAddons}
-            className="accent-bg accent-text hover:opacity-90 flex items-center px-4 py-2 rounded-lg transition-colors"
-          >
-            <Download className="w-5 h-5 mr-2" /> Export Addons
-          </button>
-        </div>
+      {/* Addon Import/Export - moved to Tasks page */}
+      {/* Configuration Import/Export - moved to Tasks page */}
 
-        {/* Drag-and-drop and text import removed per request */}
-
-        {/* Hidden file input */}
-        <input
-          id="import-file"
-          type="file"
-          accept=".json"
-          onChange={handleFileChange}
-          className="hidden"
-        />
-
-        {/* (Replaced by single Import UI above) */}
-      </div>
-
-      {/* Configuration Import/Export */}
-      <div className={`p-4 rounded-lg border mt-6 ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
-        <h2 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>Configuration Import/Export</h2>
-        <p className={`text-sm mt-1 ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>Export full configuration or reset-and-import a configuration file/JSON.</p>
-        <div className="mt-4 flex gap-4 flex-wrap">
-          <button
-            onClick={() => (document.getElementById('import-config-file') as HTMLInputElement)?.click()}
-            onDragOver={onButtonDragOver}
-            onDrop={onDropConfigButton}
-            onDragEnter={onButtonDragEnterConfig}
-            onDragLeave={onButtonDragLeaveConfig}
-            className="accent-bg accent-text hover:opacity-90 flex items-center px-4 py-2 rounded-lg transition-colors"
-          >
-            <Upload className="w-5 h-5 mr-2" />
-            {isDraggingConfigOver ? 'Drop Configuration' : 'Import Configuration'}
-          </button>
-          <button onClick={exportConfig} className="accent-bg accent-text hover:opacity-90 flex items-center px-4 py-2 rounded-lg transition-colors">
-            <Download className="w-5 h-5 mr-2" /> Export Configuration
-          </button>
-        </div>
-
-        {/* Hidden file input for configuration import */}
-        <input id="import-config-file" type="file" accept=".json" onChange={handleConfigFileChange} className="hidden" />
-      </div>
-
-      {/* Maintenance */}
-      <div className={`p-4 rounded-lg border mt-6 ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
-        <h2 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>Maintenance</h2>
-        <p className={`text-sm mt-1 ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
-          Repair addons by filling missing fields from their manifests.
-        </p>
-        <div className="mt-4 flex gap-4 flex-wrap">
-          <button
-            onClick={async () => {
-              try {
-                const res = await api.post('/settings/repair-addons')
-                const inspected = res.data?.inspected ?? 0
-                const updated = res.data?.updated ?? 0
-                toast.success(`Repaired ${updated} of ${inspected} addons`)
-              } catch (e: any) {
-                toast.error(e?.response?.data?.message || 'Failed to repair addons')
-              }
-            }}
-            className="accent-bg accent-text hover:opacity-90 flex items-center px-4 py-2 rounded-lg transition-colors"
-          >
-            <RotateCcw className="w-5 h-5 mr-2" /> Repair Addons
-          </button>
-        </div>
-      </div>
+      {/* Maintenance moved to Tasks page */}
 
       {/* Account Management */}
       <div className={`p-4 rounded-lg border mt-6 ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
@@ -995,24 +910,6 @@ export default function SettingsPage() {
           Delete all items of a specific type or perform bulk operations. These operations cannot be undone.
         </p>
         <div className="mt-4 flex gap-4 flex-wrap">
-            <button 
-              onClick={deleteAllAddons} 
-              className="accent-bg accent-text hover:opacity-90 flex items-center px-4 py-2 rounded-lg transition-colors"
-            >
-              <Trash2 className="w-5 h-5 mr-2" /> Delete All Addons
-            </button>
-          <button 
-            onClick={deleteAllUsers} 
-            className="accent-bg accent-text hover:opacity-90 flex items-center px-4 py-2 rounded-lg transition-colors"
-          >
-            <User className="w-5 h-5 mr-2" /> Delete All Users
-          </button>
-          <button 
-            onClick={deleteAllGroups} 
-            className="accent-bg accent-text hover:opacity-90 flex items-center px-4 py-2 rounded-lg transition-colors"
-          >
-            <Users className="w-5 h-5 mr-2" /> Delete All Groups
-          </button>
           <button 
             onClick={clearAllUserAddons} 
             className="accent-bg accent-text hover:opacity-90 flex items-center px-4 py-2 rounded-lg transition-colors"

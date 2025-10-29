@@ -418,7 +418,22 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
   router.get('/:id/sync-status', async (req, res) => {
     try {
       const { id } = req.params
-      const { groupId, unsafe } = req.query
+      const { groupId } = req.query
+
+      // Read account-backed sync settings; fallback to query param only if unavailable
+      let unsafeMode = false
+      try {
+        const acct = await prisma.appAccount.findUnique({ where: { id: getAccountId(req) }, select: { sync: true } })
+        let cfg = acct?.sync
+        if (typeof cfg === 'string') { try { cfg = JSON.parse(cfg) } catch { cfg = null } }
+        if (cfg && typeof cfg === 'object' && typeof cfg.safe === 'boolean') {
+          unsafeMode = !cfg.safe
+        } else {
+          unsafeMode = req.query?.unsafe === 'true' || req.body?.unsafe === true
+        }
+      } catch {
+        unsafeMode = req.query?.unsafe === 'true' || req.body?.unsafe === true
+      }
 
       const { createGetUserSyncStatus } = require('../utils/sync')
       const getUserSyncStatus = createGetUserSyncStatus({
@@ -432,7 +447,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
         StremioAPIClient,
       })
 
-      const result = await getUserSyncStatus(id, { groupId, unsafe }, req)
+      const result = await getUserSyncStatus(id, { groupId, unsafe: unsafeMode }, req)
       return res.json(result)
     } catch (error) {
       console.error('Error getting sync status:', error)
@@ -719,7 +734,20 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
   router.post('/:id/sync', async (req, res) => {
     try {
       const { id } = req.params
-      const unsafeMode = req.query?.unsafe === 'true' || req.body?.unsafe === true
+      // Read account-backed sync settings; fallback to query/body only if unavailable
+      let unsafeMode = false
+      try {
+        const acct = await prisma.appAccount.findUnique({ where: { id: getAccountId(req) }, select: { sync: true } })
+        let cfg = acct?.sync
+        if (typeof cfg === 'string') { try { cfg = JSON.parse(cfg) } catch { cfg = null } }
+        if (cfg && typeof cfg === 'object' && typeof cfg.safe === 'boolean') {
+          unsafeMode = !cfg.safe
+        } else {
+          unsafeMode = req.query?.unsafe === 'true' || req.body?.unsafe === true
+        }
+      } catch {
+        unsafeMode = req.query?.unsafe === 'true' || req.body?.unsafe === true
+      }
 
       // Individual user sync - no reload needed, just sync
       const result = await syncUserAddons(prisma, id, [], unsafeMode, req, decrypt, getAccountId)
@@ -1137,9 +1165,9 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
   })
 
   // Delete Stremio addon from user's account
-  router.delete('/:id/stremio-addons/:addonId', async (req, res) => {
+  router.delete('/:id/stremio-addons/:addonName', async (req, res) => {
     try {
-      const { id, addonId } = req.params
+      const { id, addonName } = req.params
       const { unsafe } = req.query
       
       // Get user to check for user-defined protected addons and Stremio auth
@@ -1167,41 +1195,37 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
         return res.status(400).json({ message: 'User is disabled' })
       }
 
-      // Protected addons logic (matching old implementation):
+      // Protected addons logic (name-based):
       // 1. Default Stremio addons: protected in safe mode, not protected in unsafe mode
       // 2. User-defined protected addons: ALWAYS protected regardless of mode
       const { defaultAddons } = require('../utils/config')
-      const protectedAddonIds = unsafe === 'true' ? [] : defaultAddons.ids
-      const protectedManifestUrls = unsafe === 'true' ? [] : defaultAddons.manifestUrls
+      const normalizeName = (n) => String(n || '').trim().toLowerCase()
+      const targetNameNormalized = normalizeName(addonName)
       
-      // Parse user-defined protected addons (ALWAYS protected regardless of mode)
-      let userProtectedAddons = []
+      // Default protected addon names (only in safe mode)
+      const defaultProtectedNames = unsafe === 'true' ? [] : (defaultAddons.names || [])
+      const defaultProtectedNameSet = new Set(defaultProtectedNames.map(normalizeName))
+      
+      // Parse user-defined protected addons (ALWAYS protected regardless of mode) - stored as plaintext names
+      let userProtectedNames = []
       try {
-        const encryptedUrls = user.protectedAddons ? JSON.parse(user.protectedAddons) : []
-        if (Array.isArray(encryptedUrls)) {
-          userProtectedAddons = encryptedUrls.map(encryptedUrl => {
-            try {
-              return decrypt(encryptedUrl, req)
-            } catch (e) {
-              console.warn('Failed to decrypt protected addon URL in delete:', e.message)
-              return null
-            }
-          }).filter(url => url !== null)
+        const parsed = user.protectedAddons ? JSON.parse(user.protectedAddons) : []
+        if (Array.isArray(parsed)) {
+          userProtectedNames = parsed.map(n => normalizeName(n)).filter(Boolean)
         }
       } catch (e) {
         console.warn('Failed to parse user protected addons in delete:', e)
-        userProtectedAddons = []
+        userProtectedNames = []
       }
       
-      // Add user-defined protected addons to the protected URLs list (ALWAYS)
-      const allProtectedUrls = [...protectedManifestUrls, ...userProtectedAddons]
+      const userProtectedNameSet = new Set(userProtectedNames)
+      const allProtectedNameSet = new Set([...defaultProtectedNameSet, ...userProtectedNameSet])
       
-      // Check if the addon being deleted is protected
-      const isProtected = protectedAddonIds.some(protectedId => addonId.includes(protectedId)) ||
-                         allProtectedUrls.some(protectedUrl => addonId === protectedUrl)
+      // Check if the addon being deleted is protected (by name)
+      const isProtected = allProtectedNameSet.has(targetNameNormalized)
       
       // In unsafe mode, allow deletion of default Stremio addons but not user-defined protected addons
-      if (isProtected && unsafe !== 'true') {
+      if (isProtected && (unsafe !== 'true' || userProtectedNameSet.has(targetNameNormalized))) {
         return res.status(403).json({ message: 'This addon is protected and cannot be deleted' })
       }
 
@@ -1223,17 +1247,12 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
         ? currentAddonsRaw
         : (typeof currentAddonsRaw === 'object' ? Object.values(currentAddonsRaw) : [])
 
-      // Find the target by manifestUrl since all addons have id: "unknown"
-      const target = currentAddons.find((a) => (a?.manifestUrl || a?.transportUrl || a?.url || '') === addonId)
-      const targetUrl = target?.transportUrl || target?.manifestUrl || target?.url
-
-      // Use proper format to remove the addon
+      // Filter out the target addon by matching name (normalized)
       let filteredAddons = currentAddons
       try {
-        // Filter out the target addon (if not found, keep list as-is)
         filteredAddons = currentAddons.filter((a) => {
-          const curUrl = a?.manifestUrl || a?.transportUrl || a?.url || ''
-          return curUrl !== addonId
+          const addonName = a?.manifest?.name || a?.transportName || a?.name || ''
+          return normalizeName(addonName) !== targetNameNormalized
         })
 
         // Set the filtered addons using the proper format

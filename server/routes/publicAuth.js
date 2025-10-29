@@ -213,7 +213,7 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, issueAccessToken, issueR
           if (dek) req.accountDek = dek
         }
       } catch {}
-      const [users, groups, addons] = await Promise.all([
+      const [users, groups, addons, accountRec] = await Promise.all([
         prisma.user.findMany({ where: whereScope }),
         prisma.group.findMany({ 
           where: whereScope, 
@@ -221,7 +221,8 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, issueAccessToken, issueR
             addons: { include: { addon: true } }
           } 
         }),
-        prisma.addon.findMany({ where: whereScope, include: { groupAddons: true } })
+        prisma.addon.findMany({ where: whereScope, include: { groupAddons: true } }),
+        AUTH_ENABLED ? prisma.appAccount.findUnique({ where: { id: req.appAccountId }, select: { sync: true } }) : null
       ])
       // Build addon id -> name map for user excludedAddons name resolution
       const addonIdToName = new Map(addons.map(a => [a.id, a.name]))
@@ -381,7 +382,20 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, issueAccessToken, issueR
         }
       }))
 
-      const payload = { users: decryptedUsers, groups: cleanedGroups, addons: exportedAddons }
+      // Normalize account sync for export
+      let accountSync = null
+      try {
+        const rawSync = accountRec?.sync
+        if (rawSync != null) {
+          if (typeof rawSync === 'string') {
+            try { accountSync = JSON.parse(rawSync) } catch { accountSync = { frequency: '0' } }
+          } else if (typeof rawSync === 'object') {
+            accountSync = rawSync
+          }
+        }
+      } catch {}
+
+      const payload = { users: decryptedUsers, groups: cleanedGroups, addons: exportedAddons, sync: accountSync }
       res.setHeader('Content-Disposition', 'attachment; filename="syncio-export.json"')
       return res.json(payload)
     } catch (e) {
@@ -510,11 +524,29 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, issueAccessToken, issueR
         return responseUtils.badRequest(res, 'Invalid config format');
       }
 
-      const { users, groups, addons } = configData;
+      const { users, groups, addons, sync: importedSync } = configData;
       const accountId = req.appAccountId || 'default';
 
       // Reset existing data for this account using shared function
       await resetAccountData(accountId);
+
+      // Apply account sync settings if provided
+      try {
+        if (importedSync && (typeof importedSync === 'object' || typeof importedSync === 'string')) {
+          const acct = await prisma.appAccount.findUnique({ where: { id: accountId }, select: { sync: true } })
+          let valueToStore = importedSync
+          if (typeof acct?.sync === 'string') {
+            // DB expects string (SQLite)
+            valueToStore = (typeof importedSync === 'string') ? importedSync : JSON.stringify(importedSync)
+          } else {
+            // DB expects JSON (Postgres)
+            valueToStore = (typeof importedSync === 'string') ? (() => { try { return JSON.parse(importedSync) } catch { return { enabled: true, frequency: '0' } } })() : importedSync
+          }
+          await prisma.appAccount.update({ where: { id: accountId }, data: { sync: valueToStore } })
+        }
+      } catch (e) {
+        console.warn('Failed to apply imported sync settings:', e?.message)
+      }
 
       // Import in correct order: groups → addons → users
       
@@ -1013,19 +1045,21 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, issueAccessToken, issueR
 
           const transportName = addonData.name || addonData.transportName || originalManifestObj.name || 'Unknown';
 
-          // Check if addon already exists using per-account HMAC of manifestUrl
-          const existingAddon = await prisma.addon.findFirst({
-            where: {
-              accountId: getAccountId(req),
-              manifestUrlHash: manifestUrlHmac(req, transportUrl)
+          // Resolve a unique name within this account (allow duplicate URLs)
+          let finalName = transportName || 'Unknown'
+          try {
+            const existingByName = await prisma.addon.findFirst({ where: { accountId: getAccountId(req), name: finalName }, select: { id: true } })
+            if (existingByName) {
+              const base = finalName
+              let copyNumber = 1
+              while (true) {
+                const candidate = copyNumber === 1 ? `${base} (Copy)` : `${base} (Copy #${copyNumber})`
+                const exists = await prisma.addon.findFirst({ where: { accountId: getAccountId(req), name: candidate }, select: { id: true } })
+                if (!exists) { finalName = candidate; break }
+                copyNumber++
+              }
             }
-          });
-
-          if (existingAddon) {
-            console.log(`Addon already exists: ${transportName}`);
-            redundant++;
-            continue;
-          }
+          } catch {}
 
           // Get selected resources and catalogs from export data
           const selectedResources = (() => {
@@ -1079,7 +1113,7 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, issueAccessToken, issueR
           const newAddon = await prisma.addon.create({
             data: {
               accountId: getAccountId(req),
-              name: transportName,
+              name: finalName,
               description: originalManifestObj.description || '',
               version: originalManifestObj.version || null,
               iconUrl: originalManifestObj.logo || null,

@@ -65,10 +65,19 @@ export default function TasksPage() {
       const formData = new FormData()
       formData.append('file', file)
       setConfigImporting(true)
-      api.post('/public-auth/config-import', formData)
+      api.post('/public-auth/config-import', formData, { headers: { 'Content-Type': 'multipart/form-data' } })
         .then((resp) => {
-          const { addons, users, groups } = resp.data
-          toast.success(`Imported ${addons} addons, ${users} users, ${groups} groups`)
+          const addonsBlock = resp.data?.addons || resp.data?.created || resp.data?.imported || {}
+          const usersBlock = resp.data?.users || {}
+          const groupsBlock = resp.data?.groups || {}
+          const totalAddons = (addonsBlock.created || 0) + (addonsBlock.reused || 0)
+          const usersCreated = usersBlock.created || 0
+          const groupsCreated = groupsBlock.created || 0
+          const msgParts: string[] = []
+          if (usersCreated > 0) msgParts.push(`${usersCreated} users`)
+          if (groupsCreated > 0) msgParts.push(`${groupsCreated} groups`)
+          if (totalAddons > 0) msgParts.push(`${totalAddons} addons`)
+          toast.success(`Configuration imported${msgParts.length ? `: ${msgParts.join(', ')}` : ''}`)
         })
         .catch((e) => {
           const msg = e?.response?.data?.message || e?.message || 'Import configuration failed'
@@ -86,12 +95,16 @@ export default function TasksPage() {
         const formData = new FormData()
         formData.append('file', data.file)
         setAddonImporting(true)
-        return api.post('/public-auth/addon-import', formData)
+        const resp = await api.post('/public-auth/addon-import', formData, { headers: { 'Content-Type': 'multipart/form-data' } })
+        return resp.data
       }
       throw new Error('Invalid import data')
     },
     onSuccess: (data: any) => {
-      toast.success(`Import complete! ${data.successful} successful, ${data.failed} failed, ${data.redundant} redundant`)
+      const successful = data?.successful ?? 0
+      const failed = data?.failed ?? 0
+      const redundant = data?.redundant ?? 0
+      toast.success(`Import complete! ${successful} successful, ${failed} failed, ${redundant} redundant`)
       setAddonImporting(false)
       setImportFile(null)
     },
@@ -170,10 +183,19 @@ export default function TasksPage() {
       const formData = new FormData()
       formData.append('file', file)
       setConfigImporting(true)
-      api.post('/config/import', formData)
+      api.post('/public-auth/config-import', formData, { headers: { 'Content-Type': 'multipart/form-data' } })
         .then((resp) => {
-          const { addons, users, groups } = resp.data
-          toast.success(`Imported ${addons} addons, ${users} users, ${groups} groups`)
+          const addonsBlock = resp.data?.addons || resp.data?.created || resp.data?.imported || {}
+          const usersBlock = resp.data?.users || {}
+          const groupsBlock = resp.data?.groups || {}
+          const totalAddons = (addonsBlock.created || 0) + (addonsBlock.reused || 0)
+          const usersCreated = usersBlock.created || 0
+          const groupsCreated = groupsBlock.created || 0
+          const msgParts: string[] = []
+          if (usersCreated > 0) msgParts.push(`${usersCreated} users`)
+          if (groupsCreated > 0) msgParts.push(`${groupsCreated} groups`)
+          if (totalAddons > 0) msgParts.push(`${totalAddons} addons`)
+          toast.success(`Configuration imported${msgParts.length ? `: ${msgParts.join(', ')}` : ''}`)
         })
         .catch((e) => {
           const msg = e?.response?.data?.message || e?.message || 'Import configuration failed'
@@ -469,11 +491,13 @@ export default function TasksPage() {
         </div>
       </div>
 
+      <div className="max-w-3xl">
+
       {/* Users */}
       <div className={`p-4 rounded-lg border ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
         <h2 className={`text-lg font-semibold ${textColor}`}>Users</h2>
         <p className={`text-sm mt-1 ${mutedTextColor}`}>
-          Sync all users or delete all users.
+          Manage users.
         </p>
         <div className="mt-4 flex gap-4 flex-wrap">
           <button 
@@ -496,7 +520,7 @@ export default function TasksPage() {
       <div className={`p-4 rounded-lg border mt-6 ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
         <h2 className={`text-lg font-semibold ${textColor}`}>Groups</h2>
         <p className={`text-sm mt-1 ${mutedTextColor}`}>
-          Sync all groups or delete all groups.
+          Manage groups.
         </p>
         <div className="mt-4 flex gap-4 flex-wrap">
           <button 
@@ -519,7 +543,7 @@ export default function TasksPage() {
       <div className={`p-4 rounded-lg border mt-6 ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
         <h2 className={`text-lg font-semibold ${textColor}`}>Addons</h2>
         <p className={`text-sm mt-1 ${mutedTextColor}`}>
-          Import, export, reload, or delete addons.
+          Import, export and manage addons.
         </p>
         <div className="mt-4 flex gap-4 flex-wrap">
           <button
@@ -547,6 +571,21 @@ export default function TasksPage() {
           >
             <RefreshCw className={`w-5 h-5 mr-2 ${reloadingAddons ? 'animate-spin' : ''}`} /> Reload All Addons
           </button>
+          <button
+            onClick={async () => {
+              try {
+                const res = await api.post('/settings/repair-addons')
+                const inspected = res.data?.inspected ?? 0
+                const updated = res.data?.updated ?? 0
+                toast.success(`Repaired ${updated} of ${inspected} addons`)
+              } catch (e: any) {
+                toast.error(e?.response?.data?.message || 'Failed to repair addons')
+              }
+            }}
+            className="accent-bg accent-text hover:opacity-90 flex items-center px-4 py-2 rounded-lg transition-colors"
+          >
+            <RotateCcw className="w-5 h-5 mr-2" /> Repair Addons
+          </button>
           <button 
             onClick={deleteAllAddons} 
             className="accent-bg accent-text hover:opacity-90 flex items-center px-4 py-2 rounded-lg transition-colors"
@@ -569,7 +608,7 @@ export default function TasksPage() {
       <div className={`p-4 rounded-lg border mt-6 ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
         <h2 className={`text-lg font-semibold ${textColor}`}>Configuration</h2>
         <p className={`text-sm mt-1 ${mutedTextColor}`}>
-          Import or export full configuration.
+          Import or export configuration.
         </p>
         <div className="mt-4 flex gap-4 flex-wrap">
           <button
@@ -597,7 +636,7 @@ export default function TasksPage() {
       <div className={`p-4 rounded-lg border mt-6 ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
         <h2 className={`text-lg font-semibold ${textColor}`}>Automatic Sync</h2>
         <p className={`text-sm mt-1 ${mutedTextColor}`}>
-          Automatically reload all group addons on a schedule.
+          Automatically sync groups.
         </p>
         <div className="mt-4 flex items-center gap-3">
           <select
@@ -617,18 +656,10 @@ export default function TasksPage() {
             <option value={'3d'}>Every 3 days</option>
             <option value={'7d'}>Every 7 days</option>
           </select>
-          <button
-            onClick={async () => {
-              try {
-                await api.post('/settings/sync-now')
-                toast.success('Sync started')
-              } catch (e: any) {
-                toast.error(e?.response?.data?.message || 'Failed to start sync')
-              }
-            }}
-            className={`${isDark ? 'bg-gray-700 hover:bg-gray-600 text-white' : 'bg-gray-100 hover:bg-gray-200 text-gray-900'} px-3 py-2 rounded`}
-          >Run now</button>
+          {/* Run now button removed per request */}
         </div>
+      </div>
+
       </div>
 
       <ConfirmDialog

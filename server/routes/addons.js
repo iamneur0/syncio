@@ -1198,14 +1198,11 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
   // Reload all addons
   router.post('/reload-all', async (req, res) => {
     try {
-      const whereScope = AUTH_ENABLED && req.appAccountId ? { accountId: req.appAccountId } : {}
-      const addons = await prisma.addon.findMany({
-        where: {
-          ...whereScope,
-          isActive: true,
-          manifestUrl: { not: null }
-        }
+      const allAddons = await prisma.addon.findMany({
+        where: scopedWhere(req, {}),
+        select: { id: true, isActive: true, manifestUrl: true }
       });
+      const addons = allAddons.filter(a => a.isActive && !!a.manifestUrl)
 
       if (addons.length === 0) {
         return res.json({
@@ -1227,7 +1224,8 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
             encrypt,
             decrypt,
             getDecryptedManifestUrl,
-            manifestHash
+            manifestHash,
+            silent: true
           });
           reloadedCount++;
         } catch (error) {

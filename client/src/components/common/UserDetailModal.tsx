@@ -351,10 +351,10 @@ export default function UserDetailModal({
   }
 
   // Handle Stremio addon actions
-  const handleDeleteStremioAddon = (addonId: string) => {
+  const handleDeleteStremioAddon = (addonName: string) => {
     if (!currentUser) return
     const id = currentUser.id
-    usersAPI.removeStremioAddon(id, addonId, isUnsafeMode)
+    usersAPI.removeStremioAddon(id, addonName, isUnsafeMode)
       .then(() => {
         // Refresh the data from the server instead of local state manipulation
         queryClient.invalidateQueries({ queryKey: ['user', id, 'stremio-addons'] })
@@ -652,7 +652,7 @@ export default function UserDetailModal({
                 <SortableAddonItem
                   key={addonId || index}
                   addon={addon}
-                  onRemove={handleDeleteStremioAddon}
+                  onRemove={() => handleDeleteStremioAddon(addonName)}
                   onProtect={() => handleProtectStremioAddon(addonName)}
                   isProtected={isProtected}
                   isDefault={!!isDefault}
@@ -686,7 +686,7 @@ export default function UserDetailModal({
                       <SortableAddonItem
                         key={uniqueId}
                         addon={addon}
-                        onRemove={handleDeleteStremioAddon}
+                        onRemove={() => handleDeleteStremioAddon(addonName)}
                         onProtect={() => handleProtectStremioAddon(addonName)}
                         isProtected={isProtected}
                         isDefault={!!isDefault}
