@@ -6,12 +6,7 @@ const { canonicalizeManifestUrl } = require('../utils/validation');
 const { responseUtils, dbUtils } = require('../utils/routeUtils');
 
 // Shared helper function to reload a single addon
-async function reloadAddon(prisma, getAccountId, addonId, req, { filterManifestByResources, filterManifestByCatalogs, encrypt, decrypt, getDecryptedManifestUrl, manifestHash }, autoSelectNewElements = true) {
-  console.log(`🔄 Starting reload for addon ${addonId}`)
-  console.log(`🔍 Request context - URL: ${req.url}, Method: ${req.method}`)
-  console.log(`🔍 Account ID from req: ${getAccountId(req)}`)
-  console.log(`🔍 Auto-select new elements: ${autoSelectNewElements}`)
-  
+async function reloadAddon(prisma, getAccountId, addonId, req, { filterManifestByResources, filterManifestByCatalogs, encrypt, decrypt, getDecryptedManifestUrl, manifestHash, silent = false }, autoSelectNewElements = true) {
   // Find the addon (scope to account to avoid cross-account mismatches)
   const addon = await prisma.addon.findFirst({
     where: { id: addonId, accountId: getAccountId(req) }
@@ -19,6 +14,10 @@ async function reloadAddon(prisma, getAccountId, addonId, req, { filterManifestB
 
   if (!addon) {
     throw new Error('Addon not found');
+  }
+
+  if (!silent) {
+    console.log(`🔄 Reload addon ${addon.name}`)
   }
 
   if (!addon.isActive) {
@@ -29,8 +28,7 @@ async function reloadAddon(prisma, getAccountId, addonId, req, { filterManifestB
     throw new Error('Addon has no manifest URL');
   }
 
-  console.log(`📦 Found addon: ${addon.name}`)
-  console.log(`🔗 Manifest URL: ${addon.manifestUrl}`)
+  // Found addon
 
   // Resolve decrypted transport URL
   const transportUrl = getDecryptedManifestUrl(addon, req)
@@ -38,18 +36,16 @@ async function reloadAddon(prisma, getAccountId, addonId, req, { filterManifestB
     throw new Error('Failed to resolve addon URL')
   }
 
-  console.log(`🌐 Transport URL: ${transportUrl}`)
+  // Decrypted transport URL resolved
 
   // Fetch the latest manifest
   let manifestData = null;
   try {
-    console.log(`📥 Fetching manifest from: ${transportUrl}`)
+    // Fetch manifest
     const manifestResponse = await fetch(transportUrl);
     if (manifestResponse.ok) {
       manifestData = await manifestResponse.json();
-      console.log(`✅ Successfully fetched manifest`)
-      console.log(`📋 Manifest resources:`, manifestData?.resources)
-      console.log(`📋 Manifest catalogs count:`, manifestData?.catalogs?.length || 0)
+      // Manifest fetched
     } else {
       throw new Error(`HTTP ${manifestResponse.status}: ${manifestResponse.statusText}`);
     }
@@ -59,16 +55,12 @@ async function reloadAddon(prisma, getAccountId, addonId, req, { filterManifestB
   }
 
   // 1. Save current selections from DB
-  console.log(`💾 Loading current selections from DB`)
-  console.log(`🔍 Addon ID: ${addon.id}`)
-  console.log(`🔍 Addon resources field:`, addon.resources)
-  console.log(`🔍 Addon catalogs field:`, addon.catalogs)
-  console.log(`🔍 Account ID: ${getAccountId(req)}`)
+  // Load current selections from DB
   
   const savedResources = (() => { 
     try { 
       const parsed = addon.resources ? JSON.parse(addon.resources) : []
-      console.log(`📦 Saved resources from DB:`, parsed)
+      // Saved resources parsed
       return parsed
     } catch (e) { 
       console.log(`❌ Error parsing saved resources:`, e.message)
@@ -78,8 +70,7 @@ async function reloadAddon(prisma, getAccountId, addonId, req, { filterManifestB
   const savedCatalogs = (() => { 
     try { 
       const parsed = addon.catalogs ? JSON.parse(addon.catalogs) : []
-      console.log(`📦 Saved catalogs from DB:`, parsed.length, 'items')
-      console.log(`📦 Saved catalogs details:`, parsed)
+      // Saved catalogs parsed
       return parsed
     } catch (e) { 
       console.log(`❌ Error parsing saved catalogs:`, e.message)
@@ -88,43 +79,37 @@ async function reloadAddon(prisma, getAccountId, addonId, req, { filterManifestB
   })()
 
   // 2. Get all available resources and catalogs from fresh manifest
-  console.log(`🔄 Processing fresh manifest data`)
+  // Process fresh manifest
   const manifestResources = Array.isArray(manifestData?.resources) ? manifestData.resources : []
   const manifestCatalogs = Array.isArray(manifestData?.catalogs) ? manifestData.catalogs : []
   
-  console.log(`📋 Fresh manifest resources:`, manifestResources)
-  console.log(`📋 Fresh manifest catalogs:`, manifestCatalogs.length, 'items')
+  // Fresh manifest parsed
   
   // Check if there are any search catalogs
   const hasSearchCatalogs = manifestCatalogs.some((catalog) => 
     catalog.extra?.some((extra) => extra.name === 'search')
   )
-  console.log(`🔍 Has search catalogs:`, hasSearchCatalogs)
+  // Has search catalogs computed
   
   // 3. RESET FIRST: Select all resources and catalogs (like reset button)
-  console.log(`🔄 Step 3: RESET FIRST - Creating reset selections`)
+  // Create reset selections
   const resetResources = [...manifestResources.map(r => 
     typeof r === 'string' ? r : r.name  // Handle both strings and objects
   )]
   if (hasSearchCatalogs && !resetResources.includes('search')) {
     resetResources.push('search')
   }
-  console.log(`🔄 Reset resources:`, resetResources)
+  // Reset resources computed
   
   const resetCatalogs = manifestCatalogs.map((c) => ({
     type: c.type,
     id: c.id,
     search: c.extra?.some((extra) => extra.name === 'search') || false
   }))
-  console.log(`🔄 Reset catalogs:`, resetCatalogs.length, 'items')
+  // Reset catalogs computed
   
   // 4. REAPPLY: Preserve user selections and only auto-select truly new items
-  console.log('🔍 Reload Debug:')
-  console.log('  Saved resources:', savedResources)
-  console.log('  Fresh manifest resources:', resetResources)
-  console.log('  Saved catalogs:', savedCatalogs.length, 'items')
-  console.log('  Fresh manifest catalogs:', resetCatalogs.length, 'items')
-  console.log('  Auto-select new elements:', autoSelectNewElements)
+  // Debug summary removed (noise)
   
   // Get original manifest to determine what was available before
   let originalResources = []
@@ -152,9 +137,7 @@ async function reloadAddon(prisma, getAccountId, addonId, req, { filterManifestB
     console.log('⚠️ Could not parse original manifest:', e.message)
   }
   
-  console.log('  Original resources:', originalResources)
-  console.log('  Original catalogs:', originalCatalogs.length, 'items')
-  console.log('  Original catalog details:', originalCatalogs.map(c => `${c.type}:${c.id}`))
+  // Original manifest summary removed
   
   // Keep only saved selections that still exist in the fresh manifest
   const validResources = savedResources.filter(r => resetResources.includes(r))
@@ -164,39 +147,35 @@ async function reloadAddon(prisma, getAccountId, addonId, req, { filterManifestB
     )
   )
   
-  console.log('  Valid resources (preserved):', validResources)
-  console.log('  Valid catalogs (preserved):', validCatalogs.length, 'items')
-  console.log('  Valid catalog details:', validCatalogs.map(c => `${c.type}:${c.id}`))
+  // Valid preserved selections computed
   
   // 5. Handle auto-selection of truly new elements
   let finalResources = validResources
   let finalCatalogs = validCatalogs
   
   if (autoSelectNewElements) {
-    console.log(`🔄 Auto-selecting truly new elements`)
+    // Auto-selecting new elements
     
     // Find resources that exist in fresh manifest but were NOT in original manifest
     // This excludes items that were previously unselected by the user
     const trulyNewResources = resetResources.filter(r => 
       !originalResources.includes(r) && !savedResources.includes(r)
     )
-    console.log('  Truly new resources to auto-select:', trulyNewResources)
+    // New resources auto-selected
     
     // Find catalogs that exist in fresh manifest but were NOT in original manifest
     // This excludes catalogs that were previously unselected by the user
     const trulyNewCatalogs = resetCatalogs.filter(fresh => 
       !originalCatalogs.some(orig => orig.type === fresh.type && orig.id === fresh.id)
     )
-    console.log('  Truly new catalogs to auto-select:', trulyNewCatalogs.length, 'items')
-    console.log('  Truly new catalog details:', trulyNewCatalogs.map(c => `${c.type}:${c.id}`))
+    // New catalogs auto-selected
     
     // Combine preserved + truly new selections
     finalResources = [...validResources, ...trulyNewResources]
     finalCatalogs = [...validCatalogs, ...trulyNewCatalogs]
   }
   
-  console.log(`✅ Final resources to save:`, finalResources)
-  console.log(`✅ Final catalogs to save:`, finalCatalogs.length, 'items')
+  // Final selections computed
   
   // Apply filtering using final resources/catalogs
   let filtered = manifestData

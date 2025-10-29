@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { useTheme } from '@/contexts/ThemeContext'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { usersAPI, groupsAPI } from '@/services/api'
+import api, { usersAPI, groupsAPI } from '@/services/api'
 import { getColorBgClass, getColorHexValue } from '@/utils/colorMapping'
 import { invalidateUserQueries, invalidateSyncStatusQueries } from '@/utils/queryUtils'
 import { userSuccessHandlers } from '@/utils/toastUtils'
@@ -121,12 +121,15 @@ export default function UserDetailModal({
 
   // Mounted state is handled by useModalState hook
 
-  // Read delete mode from localStorage (set in SettingsPage)
+  // Read delete mode from DB-backed account sync settings
   useEffect(() => {
-    try {
-      const mode = localStorage.getItem('sfm_delete_mode')
-      setIsUnsafeMode(mode === 'unsafe')
-    } catch {}
+    if (!isOpen) return
+    api.get('/settings/account-sync')
+      .then(r => {
+        const safe = (r.data?.safe !== undefined) ? !!r.data.safe : !(!!r.data?.unsafe)
+        setIsUnsafeMode(!safe)
+      })
+      .catch(() => {})
   }, [isOpen])
 
   // Drag and drop sensors

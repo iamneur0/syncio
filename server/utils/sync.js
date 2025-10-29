@@ -100,16 +100,11 @@ async function getDesiredAddons(user, req, { prisma, getAccountId, decrypt, pars
     const excludedAddonIds = (excludedAddons || []).map(id => String(id).trim()).filter(Boolean)
     const excludedAddonIdSet = new Set(excludedAddonIds)
 
-    // 1) Remove excluded addons from groupAddons
-    console.log('🔍 getDesiredAddons - excludedAddonIdSet:', Array.from(excludedAddonIdSet))
-    console.log('🔍 getDesiredAddons - groupAddons count:', groupAddons.length)
     const groupAddonsFiltered = groupAddons.filter(groupAddon => {
       const addonId = groupAddon?.id
       const isExcluded = addonId && excludedAddonIdSet.has(addonId)
-      console.log('🔍 getDesiredAddons - addon:', groupAddon?.transportName, 'addonId:', addonId, 'isExcluded:', isExcluded)
       return !isExcluded
     })
-    console.log('🔍 getDesiredAddons - groupAddonsFiltered count:', groupAddonsFiltered.length)
     
     // Strip database fields from filtered group addons for clean JSON
     // Ensure manifest.name matches the addon name from DB
@@ -285,11 +280,36 @@ function createGetGroupSyncStatus(deps) {
   }
 }
 
+/**
+ * Compute a user's sync plan (shared by sync-status and actual sync)
+ * Returns: { alreadySynced, current, desired }
+ */
+async function computeUserSyncPlan(user, req, { prisma, getAccountId, decrypt, parseAddonIds, parseProtectedAddons, canonicalizeManifestUrl, StremioAPIClient, unsafeMode = false }) {
+  // 1) Current
+  const currentRes = await getUserAddons(user, req, { decrypt, StremioAPIClient })
+  if (!currentRes.success) return { success: false, error: currentRes.error, alreadySynced: false, current: [], desired: [] }
+  const current = currentRes.addons?.addons || currentRes.addons || []
+  // 2) Desired
+  const desiredRes = await getDesiredAddons(user, req, { prisma, getAccountId, decrypt, parseAddonIds, parseProtectedAddons, canonicalizeManifestUrl, StremioAPIClient, unsafeMode })
+  if (!desiredRes.success) return { success: false, error: desiredRes.error, alreadySynced: false, current, desired: [] }
+  const desired = desiredRes.addons || []
+  // 3) Compare (set + order) using canonical URL or fallback to manifest.name
+  const normalizeUrl = (u) => {
+    try { return canonicalizeManifestUrl ? canonicalizeManifestUrl(u) : String(u || '').trim().toLowerCase() } catch { return String(u || '').trim().toLowerCase() }
+  }
+  const toKey = (a) => normalizeUrl(a?.transportUrl || a?.manifestUrl || a?.url || '') + '|' + String(a?.manifest?.name || a?.name || a?.transportName || '')
+  const aKeys = current.map(toKey)
+  const bKeys = desired.map(toKey)
+  const alreadySynced = aKeys.length === bKeys.length && aKeys.every((k, i) => k === bKeys[i])
+  return { success: true, alreadySynced, current, desired }
+}
+
 module.exports = {
   getUserAddons,
   getDesiredAddons,
   createGetUserSyncStatus,
   createGetGroupSyncStatus,
+  computeUserSyncPlan,
 }
 
 

@@ -122,7 +122,7 @@ app.use('/api/addons', addonsRouter({ prisma, getAccountId, decrypt, encrypt, ge
 app.use('/api/groups', groupsRouter({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserToGroup, getDecryptedManifestUrl, manifestUrlHmac, decrypt }));
 app.use('/api/users', usersRouter({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, encrypt, parseAddonIds, parseProtectedAddons, getDecryptedManifestUrl, StremioAPIClient, StremioAPIStore, assignUserToGroup, debug, defaultAddons, canonicalizeManifestUrl, getAccountDek, getServerKey, aesGcmDecrypt, validateStremioAuthKey, manifestUrlHmac, manifestHash }));
 app.use('/api/stremio', stremioRouter({ prisma, getAccountId, encrypt, decrypt, assignUserToGroup, AUTH_ENABLED }));
-app.use('/api/settings', settingsRouter({ prisma, AUTH_ENABLED, getAccountDek, getDecryptedManifestUrl }));
+app.use('/api/settings', settingsRouter({ prisma, AUTH_ENABLED, getAccountDek, getDecryptedManifestUrl, getAccountId }));
 // Debug routes - only available in private mode (when AUTH is disabled)
 if (!AUTH_ENABLED) {
   app.use('/', debugRouter({ prisma, getDecryptedManifestUrl, getAccountId }));

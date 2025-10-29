@@ -161,11 +161,10 @@ export const usersAPI = {
   },
 
   // Sync one user via the dedicated endpoint
-  sync: async (id: string, excludedManifestUrls: string[] = [], syncMode: 'normal' | 'advanced' = 'normal', unsafeMode?: boolean): Promise<any> => {
+  sync: async (id: string, excludedManifestUrls: string[] = [], unsafeMode?: boolean): Promise<any> => {
     const response: AxiosResponse<any> = await api.post(
       `/users/${id}/sync`,
-      { excludedManifestUrls, unsafe: unsafeMode },
-      { headers: { 'x-sync-mode': syncMode } }
+      { excludedManifestUrls, unsafe: unsafeMode }
     )
     return response.data
   },
@@ -424,8 +423,12 @@ export const groupsAPI = {
   },
 
   // Sync group
-  sync: async (id: string, excludedManifestUrls: string[] = []): Promise<any> => {
-    const response: AxiosResponse<any> = await api.post(`/groups/${id}/sync`, { excludedManifestUrls })
+  sync: async (id: string, excludedManifestUrls: string[] = [], syncMode: 'normal' | 'advanced' = 'normal', unsafeMode?: boolean): Promise<any> => {
+    const response: AxiosResponse<any> = await api.post(
+      `/groups/${id}/sync`, 
+      { excludedManifestUrls, unsafe: unsafeMode },
+      { headers: { 'x-sync-mode': syncMode } }
+    )
     return response.data
   },
 

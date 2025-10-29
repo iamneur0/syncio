@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const { decrypt } = require('../utils/encryption')
 
-module.exports = ({ prisma, AUTH_ENABLED, getAccountDek, getDecryptedManifestUrl }) => {
+module.exports = ({ prisma, AUTH_ENABLED, getAccountDek, getDecryptedManifestUrl, getAccountId }) => {
   const router = express.Router();
 
   // Backup settings endpoints - only available in private mode
@@ -64,37 +64,85 @@ module.exports = ({ prisma, AUTH_ENABLED, getAccountDek, getDecryptedManifestUrl
     performSyncOnce 
   } = require('../utils/syncScheduler');
 
-  // Get sync frequency setting
-  router.get('/sync-frequency', async (req, res) => {
+  // Per-account sync settings (AUTH mode)
+  router.get('/account-sync', async (req, res) => {
     try {
-      return res.json({ minutes: readSyncFrequencyMinutes() })
-    } catch {
-      return res.status(500).json({ message: 'Failed to read sync frequency' })
+      if (!AUTH_ENABLED) {
+        // Private mode: return global file-based schedule for backward compat
+        return res.json({
+          enabled: readSyncFrequencyMinutes() > 0,
+          frequency: readSyncFrequencyMinutes() === 1 ? '1m' : (readSyncFrequencyMinutes() >= 1440 ? `${Math.round(readSyncFrequencyMinutes()/1440)}d` : `${readSyncFrequencyMinutes()}m`),
+          safe: true,
+          mode: 'normal'
+        })
+      }
+      const acc = await prisma.appAccount.findUnique({ where: { id: req.appAccountId }, select: { sync: true } })
+      let syncCfg = acc?.sync || null
+      if (syncCfg && typeof syncCfg === 'string') {
+        try { syncCfg = JSON.parse(syncCfg) } catch { syncCfg = null }
+      }
+      if (syncCfg && typeof syncCfg === 'object') {
+        const safe = (typeof syncCfg.safe === 'boolean') ? syncCfg.safe : !syncCfg.unsafe
+        const mode = syncCfg.mode === 'advanced' ? 'advanced' : 'normal'
+        const frequency = (typeof syncCfg.frequency === 'string' && syncCfg.frequency.trim())
+          ? syncCfg.frequency.trim()
+          : '0'
+        const resp = { enabled: syncCfg.enabled !== false, safe, mode, frequency, lastRunAt: syncCfg.lastRunAt }
+        return res.json(resp)
+      }
+      return res.json({ enabled: false, frequency: 0, safe: true, mode: 'normal' })
+    } catch (e) {
+      return res.status(500).json({ message: 'Failed to read account sync settings' })
     }
   })
 
-  // Update sync frequency setting
-  router.put('/sync-frequency', async (req, res) => {
+  router.put('/account-sync', async (req, res) => {
     try {
-      const minutes = Number(req.body?.minutes || 0)
-      if (!Number.isFinite(minutes) || minutes < 0) return res.status(400).json({ message: 'Invalid minutes' })
-      writeSyncFrequencyMinutes(minutes)
-      
-      // Reinitialize sync schedule with new frequency
+      const { enabled, frequency, mode, unsafe, safe } = req.body || {}
+      if (!AUTH_ENABLED) {
+        // Private mode: update global schedule
+        const minutes = Number(frequencyMinutes || 0)
+        if (!Number.isFinite(minutes) || minutes < 0) return res.status(400).json({ message: 'Invalid minutes' })
+        writeSyncFrequencyMinutes(enabled === false ? 0 : minutes)
+        const { reloadGroupAddons } = require('../routes/users');
+        const scopedWhere = require('../utils/helpers').scopedWhere;
+        const decrypt = require('../utils/encryption').decrypt;
+        const { DEFAULT_ACCOUNT_ID } = require('../utils/config');
+        const schedulerReq = { appAccountId: DEFAULT_ACCOUNT_ID }
+        scheduleSyncs(enabled === false ? 0 : minutes, prisma, getAccountId, scopedWhere, decrypt, reloadGroupAddons, schedulerReq, false)
+        return res.json({ message: 'Sync settings updated' })
+      }
+      // Load current config to preserve unspecified fields
+      const acc = await prisma.appAccount.findUnique({ where: { id: req.appAccountId }, select: { sync: true } })
+      let current = acc?.sync || null
+      if (current && typeof current === 'string') { try { current = JSON.parse(current) } catch { current = null } }
+      const base = (current && typeof current === 'object') ? current : {}
+
+      // Build partial update only for provided fields
+      const partial = {}
+      if (enabled !== undefined) partial.enabled = !!enabled
+      if (frequency !== undefined) partial.frequency = String(frequency)
+      if (mode !== undefined) partial.mode = (mode === 'advanced') ? 'advanced' : 'normal'
+      if (safe !== undefined) partial.safe = !!safe
+      else if (unsafe !== undefined) partial.safe = !unsafe
+
+      const nextCfg = { ...base, ...partial }
+
+      // Persist JSON (Postgres) or stringified (SQLite)
+      try {
+        await prisma.appAccount.update({ where: { id: req.appAccountId }, data: { sync: nextCfg } })
+      } catch {
+        await prisma.appAccount.update({ where: { id: req.appAccountId }, data: { sync: JSON.stringify(nextCfg) } })
+      }
+      // Reschedule heap with new config (scheduler will re-seed on next scheduleSyncs call)
       const { reloadGroupAddons } = require('../routes/users');
       const scopedWhere = require('../utils/helpers').scopedWhere;
-      const { getAccountId } = require('../utils/helpers');
       const decrypt = require('../utils/encryption').decrypt;
-      const { AUTH_ENABLED, DEFAULT_ACCOUNT_ID } = require('../utils/config');
-      
-      const schedulerReq = {
-        appAccountId: AUTH_ENABLED ? undefined : DEFAULT_ACCOUNT_ID
-      };
-      scheduleSyncs(minutes, prisma, getAccountId, scopedWhere, decrypt, reloadGroupAddons, schedulerReq, AUTH_ENABLED)
-      
-      return res.json({ message: 'Sync frequency updated', minutes })
+      scheduleSyncs(0, prisma, getAccountId, scopedWhere, decrypt, reloadGroupAddons, req, true) // clear
+      scheduleSyncs(1, prisma, getAccountId, scopedWhere, decrypt, reloadGroupAddons, req, true) // re-seed; minutes ignored in AUTH mode
+      return res.json({ message: 'Account sync settings updated' })
     } catch (e) {
-      return res.status(500).json({ message: 'Failed to update sync frequency', error: e?.message })
+      return res.status(500).json({ message: 'Failed to update account sync settings', error: e?.message })
     }
   })
 
@@ -103,7 +151,6 @@ module.exports = ({ prisma, AUTH_ENABLED, getAccountDek, getDecryptedManifestUrl
     try {
       const { reloadGroupAddons } = require('../routes/users');
       const scopedWhere = require('../utils/helpers').scopedWhere;
-      const { getAccountId } = require('../utils/helpers');
       const decrypt = require('../utils/encryption').decrypt;
       
       const schedulerReq = {

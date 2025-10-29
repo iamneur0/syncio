@@ -10,6 +10,69 @@ const { responseUtils, dbUtils } = require('../utils/routeUtils');
 module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserToGroup, getDecryptedManifestUrl, manifestUrlHmac, decrypt }) => {
   const router = express.Router();
 
+  // Shared helper: reload (advanced mode) then sync all users in a group
+  async function syncGroupUsers(groupId, req) {
+    // Load group with scoped account
+    const group = await prisma.group.findUnique({
+      where: { id: groupId, accountId: getAccountId(req) },
+      select: { id: true, userIds: true, name: true }
+    })
+    if (!group) {
+      return { error: 'Group not found', groupId }
+    }
+
+    // Parse userIds array from stored JSON
+    let userIds = []
+    try { userIds = Array.isArray(group.userIds) ? group.userIds : JSON.parse(group.userIds || '[]') } catch {}
+    if (!Array.isArray(userIds) || userIds.length === 0) {
+      return { groupId, syncedUsers: 0, failedUsers: 0, message: 'Group has no users to sync' }
+    }
+
+    // Respect sync mode header and unsafe flag (same behavior as single group endpoint)
+    const headerMode = (req.headers['x-sync-mode'] || '').toString().toLowerCase()
+    const syncMode = headerMode === 'advanced' ? 'advanced' : 'normal'
+    const unsafeMode = req.query?.unsafe === 'true' || req.body?.unsafe === true
+
+    // Remove duplicates from userIds to prevent double syncing
+    const uniqueUserIds = [...new Set(userIds)]
+    if (uniqueUserIds.length !== userIds.length) {
+      console.log(`⚠️ Group ${groupId} had duplicate user IDs, deduplicated: ${userIds.length} -> ${uniqueUserIds.length}`)
+    }
+    
+    console.log(`\nSyncing group ${group.name || groupId}`)
+    console.log(`🔄 Syncing ${uniqueUserIds.length} users in group`)
+
+    // In advanced mode, reload group addons first (shared helper from users router)
+    if (syncMode === 'advanced') {
+      const { reloadGroupAddons } = require('./users')
+      try { await reloadGroupAddons(prisma, getAccountId, groupId, req, decrypt) } catch (e) {
+        console.warn('Group reload before sync failed:', e?.message)
+      }
+    }
+
+    // Sync each user in the group (like individual user sync)
+    const { syncUserAddons } = require('./users')
+    let synced = 0
+    let failed = 0
+    
+    for (const uid of uniqueUserIds) {
+      try {
+        // Sync each user (reload already done by group sync if needed)
+        const result = await syncUserAddons(prisma, uid, [], unsafeMode, req, decrypt, getAccountId)
+        if (result?.success) synced++; else failed++
+      } catch (e) { 
+        failed++ 
+      }
+    }
+
+    return {
+      groupId,
+      syncedUsers: synced,
+      failedUsers: failed,
+      message: `Group sync completed: ${synced}/${userIds.length} users synced`
+    }
+  }
+
   // Get all groups
   router.get('/', async (req, res) => {
     try {
@@ -720,60 +783,9 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
   router.post('/:id/sync', async (req, res) => {
     try {
       const { id: groupId } = req.params
-      
-      const group = await prisma.group.findUnique({
-        where: { 
-          id: groupId,
-          accountId: getAccountId(req)
-        },
-        select: {
-          id: true,
-          userIds: true
-        }
-      })
-      
-      if (!group) {
-        return responseUtils.notFound(res, 'Group')
-      }
-
-      // Parse userIds array from stored JSON
-      let userIds = []
-      try { userIds = Array.isArray(group.userIds) ? group.userIds : JSON.parse(group.userIds || '[]') } catch {}
-
-      if (!Array.isArray(userIds) || userIds.length === 0) {
-        return res.json({ message: 'Group has no users to sync', syncedUsers: 0 })
-      }
-
-      // Respect sync mode header and unsafe flag
-      const headerMode = (req.headers['x-sync-mode'] || '').toString().toLowerCase()
-      const syncMode = headerMode === 'advanced' ? 'advanced' : 'normal'
-      const unsafeMode = req.query?.unsafe === 'true' || req.body?.unsafe === true
-
-      // In advanced mode, reload group addons first (shared helper)
-      if (syncMode === 'advanced') {
-        const { reloadGroupAddons } = require('./users')
-        try { await reloadGroupAddons(prisma, getAccountId, groupId, req, decrypt) } catch (e) {
-          console.warn('Group reload before sync failed:', e?.message)
-        }
-      }
-
-      // Sync each user via the same helper used by user endpoint
-      const { syncUserAddons: _ } = require('./users')
-      let synced = 0
-      let failed = 0
-      for (const uid of userIds) {
-        try {
-          const result = await (typeof _.name === 'string' ? _ : require('./users').syncUserAddons)(uid, [], syncMode, unsafeMode, req, decrypt, getAccountId)
-          if (result?.success) synced++; else failed++
-        } catch (e) { failed++ }
-      }
-
-      res.json({ 
-        message: `Group sync completed: ${synced}/${userIds.length} users synced`,
-        groupId,
-        syncedUsers: synced,
-        failedUsers: failed
-      })
+      const result = await syncGroupUsers(groupId, req)
+      if (result?.error) return responseUtils.notFound(res, 'Group')
+      return res.json(result)
     } catch (error) {
       console.error('Error syncing group:', error)
       res.status(500).json({ message: 'Failed to sync group', error: error?.message })
@@ -820,7 +832,6 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
     try {
       const { id: groupId } = req.params
       const { orderedManifestUrls, orderedAddonIds } = req.body || {}
-      console.log('Reorder addons request:', { groupId, orderedManifestUrls, orderedAddonIds })
 
       // Support both orderedManifestUrls (legacy) and orderedAddonIds (new)
       const orderedIds = orderedAddonIds || orderedManifestUrls
@@ -834,6 +845,8 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
         include: { addons: { include: { addon: true } } }
       })
       if (!group) return responseUtils.notFound(res, 'Group')
+      
+      console.log(`Reordering group ${group.name}:`)
 
       // Validate addon IDs against current addons list
       const currentAddonIds = new Set((group.addons || []).map(ga => ga.addonId))
@@ -850,20 +863,27 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
         }
         
         let pos = 0
-        const positionUpdates = []
+        const oldOrder = []
+        const newOrder = []
         
+        // Build old order from current positions
+        const sortedByPosition = [...group.addons].sort((a, b) => (a.position || 0) - (b.position || 0))
+        for (const ga of sortedByPosition) {
+          oldOrder.push(ga.addon.name)
+        }
+        
+        // Update positions and build new order
         for (const addonId of orderedIds) {
           const ga = addonIdToGroupAddon.get(addonId)
           if (!ga) continue
-          positionUpdates.push({ 
-            addon: ga.addon.name, 
-            addonId: ga.addonId,
-            oldPosition: ga.position, 
-            newPosition: pos 
-          })
+          newOrder.push(ga.addon.name)
           await prisma.groupAddon.update({ where: { id: ga.id }, data: { position: pos++ } })
         }
-        console.log('Addon positions updated:', positionUpdates)
+        
+        console.log('Current order:')
+        oldOrder.forEach(name => console.log(`- ${name}`))
+        console.log('New order:')
+        newOrder.forEach(name => console.log(`- ${name}`))
       } catch (e) {
         console.warn('Order persistence failed (position):', e?.message)
       }
@@ -896,7 +916,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
     try {
       const { id } = req.params
       const { orderedManifestUrls, addonIds, orderedAddonIds } = req.body || {}
-      console.log('Reorder addons request (alias):', { groupId: id, orderedManifestUrls, addonIds, orderedAddonIds })
+      
       // Use orderedAddonIds first, then orderedManifestUrls, then addonIds
       const urls = orderedAddonIds || (Array.isArray(orderedManifestUrls) && orderedManifestUrls.length > 0
         ? orderedManifestUrls
@@ -915,6 +935,8 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
         include: { addons: { include: { addon: true } } }
       })
       if (!group) return responseUtils.notFound(res, 'Group')
+      
+      console.log(`Reordering group ${group.name}:`)
 
       // Check if urlsNorm contains addon IDs (from orderedAddonIds) or URLs (from orderedManifestUrls)
       const isAddonIds = urlsNorm[0] && /^[a-zA-Z0-9]+$/.test(urlsNorm[0])
@@ -936,7 +958,14 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
 
       // Persist order via position as above
       try {
-        const positionUpdates = []
+        const oldOrder = []
+        const newOrder = []
+        
+        // Build old order from current positions
+        const sortedByPosition = [...group.addons].sort((a, b) => (a.position || 0) - (b.position || 0))
+        for (const ga of sortedByPosition) {
+          oldOrder.push(ga.addon.name)
+        }
         
         if (isAddonIds) {
           // Map by addon ID
@@ -949,12 +978,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
           for (const addonId of urlsNorm) {
             const ga = addonIdToGroupAddon.get(addonId)
             if (!ga) continue
-            positionUpdates.push({ 
-              addon: ga.addon.name, 
-              addonId: ga.addonId,
-              oldPosition: ga.position, 
-              newPosition: pos 
-            })
+            newOrder.push(ga.addon.name)
             await prisma.groupAddon.update({ where: { id: ga.id }, data: { position: pos++ } })
           }
         } else {
@@ -977,19 +1001,18 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
             // For each URL, try to find an unprocessed group addon
             for (const ga of groupAddons) {
               if (processedGroupAddonIds.has(ga.id)) continue
-              positionUpdates.push({ 
-                addon: ga.addon.name, 
-                addonId: ga.addonId,
-                oldPosition: ga.position, 
-                newPosition: pos 
-              })
+              newOrder.push(ga.addon.name)
               await prisma.groupAddon.update({ where: { id: ga.id }, data: { position: pos++ } })
               processedGroupAddonIds.add(ga.id)
               break // Only process one addon per URL in the order
             }
           }
         }
-        console.log('Addon positions updated:', positionUpdates)
+        
+        console.log('Current order:')
+        oldOrder.forEach(name => console.log(`- ${name}`))
+        console.log('New order:')
+        newOrder.forEach(name => console.log(`- ${name}`))
       } catch (e) {
         console.error('Order persistence failed (position):', e?.message)
       }
@@ -1102,7 +1125,6 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
   // Sync all groups
   router.post('/sync-all', async (req, res) => {
     try {
-      const whereScope = AUTH_ENABLED && req.appAccountId ? { accountId: req.appAccountId } : {}
       const groups = await prisma.group.findMany({
         where: scopedWhere(req, {}),
         select: { id: true }
@@ -1111,39 +1133,99 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
       if (groups.length === 0) {
         return res.json({
           message: 'No groups found to sync',
-          syncedCount: 0,
-          failedCount: 0,
-          total: 0
+          syncedGroups: 0,
+          failedGroups: 0,
+          totalGroups: 0
         });
       }
 
-      let syncedCount = 0;
-      let failedCount = 0;
-
-      // Import the reload function from users.js
-      const { reloadGroupAddons } = require('./users');
+      let syncedGroups = 0;
+      let failedGroups = 0;
+      let totalUsersSynced = 0;
+      let totalUsersFailed = 0;
 
       for (const group of groups) {
         try {
-          await reloadGroupAddons(prisma, getAccountId, group.id, req, decrypt);
-          syncedCount++;
+          const result = await syncGroupUsers(group.id, req)
+          if (result?.error) {
+            failedGroups++
+          } else {
+            syncedGroups++
+            totalUsersSynced += (result.syncedUsers || 0)
+            totalUsersFailed += (result.failedUsers || 0)
+            console.log(result.message)
+          }
         } catch (error) {
           console.error(`Failed to sync group ${group.id}:`, error);
-          failedCount++;
+          failedGroups++;
         }
       }
 
       res.json({
-        message: `Synced ${syncedCount} groups successfully, ${failedCount} failed`,
-        syncedCount,
-        failedCount,
-        total: groups.length
+        message: `Synced ${syncedGroups} groups successfully, ${failedGroups} failed. Total users: ${totalUsersSynced} synced, ${totalUsersFailed} failed`,
+        syncedGroups,
+        failedGroups,
+        totalGroups: groups.length,
+        totalUsersSynced,
+        totalUsersFailed
       });
     } catch (error) {
       console.error('Error syncing all groups:', error);
       res.status(500).json({ message: 'Failed to sync all groups', error: error?.message });
     }
   });
+  // Exportable helper to sync one group's users (used by scheduler)
+  async function externalSyncGroupUsers(prismaDep, getAccountIdDep, scopedWhereDep, decryptDep, groupId, reqDep) {
+    // Load group
+    const group = await prismaDep.group.findUnique({ where: { id: groupId, accountId: getAccountIdDep(reqDep) }, select: { id: true, userIds: true, name: true } })
+    if (!group) return { error: 'Group not found', groupId }
+    // Parse users
+    let userIds = []
+    try { userIds = Array.isArray(group.userIds) ? group.userIds : JSON.parse(group.userIds || '[]') } catch {}
+    const uniqueUserIds = [...new Set(userIds)]
+    // Mode/unsafe: prefer DB account sync config; fallback to request header/body
+    let syncMode = 'normal'
+    let unsafeMode = false
+    try {
+      const accountId = reqDep.appAccountId
+      if (accountId) {
+        const acc = await prismaDep.appAccount.findUnique({ where: { id: accountId }, select: { sync: true } })
+        let cfg = acc?.sync || null
+        if (cfg && typeof cfg === 'string') { try { cfg = JSON.parse(cfg) } catch { cfg = null } }
+        if (cfg && typeof cfg === 'object') {
+          syncMode = cfg.mode === 'advanced' ? 'advanced' : 'normal'
+          unsafeMode = (typeof cfg.safe === 'boolean') ? !cfg.safe : !!cfg.unsafe
+        }
+      }
+    } catch {}
+    if (!syncMode) syncMode = 'normal'
+    // Final fallback to request if DB not present
+    if (!reqDep.appAccountId) {
+      const headerMode = (reqDep.headers?.['x-sync-mode'] || '').toString().toLowerCase()
+      syncMode = headerMode === 'advanced' ? 'advanced' : 'normal'
+      unsafeMode = reqDep.body?.unsafe === true
+    }
+    // Log before any reload
+    console.log(`\nSyncing group ${group.name || groupId}`)
+    // Advanced: reload
+    if (syncMode === 'advanced') {
+      const { reloadGroupAddons } = require('./users')
+      try { await reloadGroupAddons(prismaDep, getAccountIdDep, groupId, reqDep, decryptDep) } catch {}
+    }
+    // Sync users
+    const { syncUserAddons } = require('./users')
+    let synced = 0, failed = 0
+    for (const uid of uniqueUserIds) {
+      try {
+        const r = await syncUserAddons(prismaDep, uid, [], unsafeMode, reqDep, decryptDep, getAccountIdDep)
+        if (r?.success) synced++; else failed++
+      } catch { failed++ }
+    }
+    return { groupId, syncedUsers: synced, failedUsers: failed }
+  }
+
+  // Attach export
+  module.exports.syncGroupUsers = externalSyncGroupUsers;
 
   return router;
 };
