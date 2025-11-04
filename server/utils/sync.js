@@ -99,7 +99,7 @@ async function getDesiredAddons(user, req, { prisma, getAccountId, decrypt, pars
     // Parse excluded addons - these are database IDs stored in the database
     const excludedAddonIds = (excludedAddons || []).map(id => String(id).trim()).filter(Boolean)
     const excludedAddonIdSet = new Set(excludedAddonIds)
-
+    
     const groupAddonsFiltered = groupAddons.filter(groupAddon => {
       const addonId = groupAddon?.id
       const isExcluded = addonId && excludedAddonIdSet.has(addonId)
@@ -210,6 +210,14 @@ function createGetUserSyncStatus({ prisma, getAccountId, decrypt, parseAddonIds,
     if (!user) return { status: 'error', isSynced: false, message: 'User not found' }
     if (!user.stremioAuthKey) return { isSynced: false, status: 'connect', message: 'User not connected to Stremio' }
 
+    // Derive unsafe from DB-backed account sync (single source of truth)
+    try {
+      const acc = await prisma.appAccount.findUnique({ where: { id: getAccountId(req) }, select: { sync: true } })
+      let cfg = acc?.sync
+      if (typeof cfg === 'string') { try { cfg = JSON.parse(cfg) } catch { cfg = null } }
+      if (cfg && typeof cfg.safe === 'boolean') unsafe = !cfg.safe
+    } catch {}
+
     // Get user's current Stremio addons
     const { success: userAddonsSuccess, addons: userAddonsResponse, error: userAddonsError } = await getUserAddons(user, req, { decrypt, StremioAPIClient })
     if (!userAddonsSuccess) {
@@ -244,8 +252,11 @@ function createGetUserSyncStatus({ prisma, getAccountId, decrypt, parseAddonIds,
       return { isSynced: false, status: 'error', message: desiredAddonsError }
     }
 
-    // Simple comparison: are the two JSON arrays equal?
-    const isSynced = JSON.stringify(userAddons) === JSON.stringify(desiredAddons)
+    // Unified comparison using manifest fingerprint (order-sensitive)
+    const fingerprint = createManifestFingerprint(canonicalizeManifestUrl)
+    const currentKeys = userAddons.map(fingerprint)
+    const desiredKeys = desiredAddons.map(fingerprint)
+    const isSynced = currentKeys.length === desiredKeys.length && currentKeys.every((k, i) => k === desiredKeys[i])
 
     return {
       isSynced,
@@ -293,15 +304,49 @@ async function computeUserSyncPlan(user, req, { prisma, getAccountId, decrypt, p
   const desiredRes = await getDesiredAddons(user, req, { prisma, getAccountId, decrypt, parseAddonIds, parseProtectedAddons, canonicalizeManifestUrl, StremioAPIClient, unsafeMode })
   if (!desiredRes.success) return { success: false, error: desiredRes.error, alreadySynced: false, current, desired: [] }
   const desired = desiredRes.addons || []
-  // 3) Compare (set + order) using canonical URL or fallback to manifest.name
+  // 3) Compare (set + order) using manifest fingerprint
+  const fingerprint = createManifestFingerprint(canonicalizeManifestUrl)
+  const aKeys = current.map(fingerprint)
+  const bKeys = desired.map(fingerprint)
+  const alreadySynced = aKeys.length === bKeys.length && aKeys.every((k, i) => k === bKeys[i])
+  return { success: true, alreadySynced, current, desired }
+}
+
+// Build a stable fingerprint for an addon entry based on its manifest and canonical URL
+function createManifestFingerprint(canonicalizeManifestUrl) {
   const normalizeUrl = (u) => {
     try { return canonicalizeManifestUrl ? canonicalizeManifestUrl(u) : String(u || '').trim().toLowerCase() } catch { return String(u || '').trim().toLowerCase() }
   }
-  const toKey = (a) => normalizeUrl(a?.transportUrl || a?.manifestUrl || a?.url || '') + '|' + String(a?.manifest?.name || a?.name || a?.transportName || '')
-  const aKeys = current.map(toKey)
-  const bKeys = desired.map(toKey)
-  const alreadySynced = aKeys.length === bKeys.length && aKeys.every((k, i) => k === bKeys[i])
-  return { success: true, alreadySynced, current, desired }
+  const normalizeManifest = (m) => {
+    try {
+      if (!m || typeof m !== 'object') return {}
+      const {
+        name,
+        id,
+        resources,
+        catalogs,
+        types,
+        behaviorHints,
+        idPrefixes
+      } = m
+      return {
+        name: String(name || ''),
+        id: String(id || ''),
+        resources: Array.isArray(resources) ? resources : [],
+        catalogs: Array.isArray(catalogs) ? catalogs.map(c => ({ type: c?.type, id: c?.id, name: c?.name })).sort((a,b)=>String(a.type+a.id).localeCompare(String(b.type+b.id))) : [],
+        types: Array.isArray(types) ? types.slice().sort() : [],
+        behaviorHints: behaviorHints && typeof behaviorHints === 'object' ? behaviorHints : {},
+        idPrefixes: Array.isArray(idPrefixes) ? idPrefixes.slice().sort() : []
+      }
+    } catch {
+      return {}
+    }
+  }
+  return (addon) => {
+    const url = normalizeUrl(addon?.transportUrl || addon?.manifestUrl || addon?.url || '')
+    const manifestNorm = normalizeManifest(addon?.manifest || addon)
+    return url + '|' + JSON.stringify(manifestNorm)
+  }
 }
 
 module.exports = {

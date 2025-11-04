@@ -25,6 +25,7 @@ const groupsRouter = require('./routes/groups');
 const usersRouter = require('./routes/users');
 const stremioRouter = require('./routes/stremio');
 const settingsRouter = require('./routes/settings');
+const externalApiRouter = require('./routes/externalApi');
 const debugRouter = require('./routes/debug');
 const publicAuthRouter = require('./routes/publicAuth');
 
@@ -123,6 +124,14 @@ app.use('/api/groups', groupsRouter({ prisma, getAccountId, scopedWhere, AUTH_EN
 app.use('/api/users', usersRouter({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, encrypt, parseAddonIds, parseProtectedAddons, getDecryptedManifestUrl, StremioAPIClient, StremioAPIStore, assignUserToGroup, debug, defaultAddons, canonicalizeManifestUrl, getAccountDek, getServerKey, aesGcmDecrypt, validateStremioAuthKey, manifestUrlHmac, manifestHash }));
 app.use('/api/stremio', stremioRouter({ prisma, getAccountId, encrypt, decrypt, assignUserToGroup, AUTH_ENABLED }));
 app.use('/api/settings', settingsRouter({ prisma, AUTH_ENABLED, getAccountDek, getDecryptedManifestUrl, getAccountId }));
+// External API (API key protected, account-scoped)
+app.use('/api/ext', externalApiRouter({
+  prisma,
+  getAccountId,
+  scopedWhere,
+  reloadDeps: { decrypt, encrypt, getDecryptedManifestUrl, filterManifestByResources, filterManifestByCatalogs, manifestHash },
+  syncGroupUsers: require('./routes/groups')({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserToGroup, getDecryptedManifestUrl, manifestUrlHmac, decrypt }).syncGroupUsers
+}))
 // Debug routes - only available in private mode (when AUTH is disabled)
 if (!AUTH_ENABLED) {
   app.use('/', debugRouter({ prisma, getDecryptedManifestUrl, getAccountId }));
