@@ -5,6 +5,20 @@ const { findAddonById, sanitizeUrl, validateAccountContext } = require('../utils
 const { canonicalizeManifestUrl } = require('../utils/validation');
 const { responseUtils, dbUtils } = require('../utils/routeUtils');
 
+// In-memory manifest cache (short TTL) to avoid hammering when multiple addons share a URL
+const _manifestCache = new Map() // key: url, value: { data, ts }
+const CACHE_TTL_MS = 60 * 1000
+
+function getCachedManifest(url) {
+  const rec = _manifestCache.get(url)
+  if (!rec) return null
+  if (Date.now() - rec.ts > CACHE_TTL_MS) { _manifestCache.delete(url); return null }
+  return rec.data
+}
+function setCachedManifest(url, data) {
+  _manifestCache.set(url, { data, ts: Date.now() })
+}
+
 // Shared helper function to reload a single addon
 async function reloadAddon(prisma, getAccountId, addonId, req, { filterManifestByResources, filterManifestByCatalogs, encrypt, decrypt, getDecryptedManifestUrl, manifestHash, silent = false }, autoSelectNewElements = true) {
   // Find the addon (scope to account to avoid cross-account mismatches)
@@ -40,18 +54,26 @@ async function reloadAddon(prisma, getAccountId, addonId, req, { filterManifestB
 
   // Fetch the latest manifest
   let manifestData = null;
-  try {
-    // Fetch manifest
-    const manifestResponse = await fetch(transportUrl);
-    if (manifestResponse.ok) {
+  // Prepare diff containers to return
+  let addedRes = []
+  let removedRes = []
+  let addedCat = []
+  let removedCat = []
+  // Module-level cache to avoid hammering same manifest URL
+  const cacheKey = transportUrl
+  const cached = getCachedManifest(cacheKey)
+  if (cached) {
+    manifestData = cached
+  } else {
+    try {
+      const manifestResponse = await fetch(transportUrl);
+      if (!manifestResponse.ok) throw new Error(`HTTP ${manifestResponse.status}: ${manifestResponse.statusText}`)
       manifestData = await manifestResponse.json();
-      // Manifest fetched
-    } else {
-      throw new Error(`HTTP ${manifestResponse.status}: ${manifestResponse.statusText}`);
+      setCachedManifest(cacheKey, manifestData)
+    } catch (e) {
+      console.error(`❌ Failed to fetch manifest:`, e.message);
+      throw new Error(`Failed to fetch addon manifest: ${e.message}`);
     }
-  } catch (e) {
-    console.error(`❌ Failed to fetch manifest:`, e.message);
-    throw new Error(`Failed to fetch addon manifest: ${e.message}`);
   }
 
   // 1. Save current selections from DB
@@ -127,15 +149,52 @@ async function reloadAddon(prisma, getAccountId, addonId, req, { filterManifestB
         typeof r === 'string' ? r : r.name
       )
       
-      // Extract catalog info
+      // Extract catalog info (preserve name so removals can show it)
       originalCatalogs = originalManifestCatalogs.map(c => ({
         type: c.type,
-        id: c.id
+        id: c.id,
+        name: c.name
       }))
     }
   } catch (e) {
     console.log('⚠️ Could not parse original manifest:', e.message)
   }
+  
+  // Diff logs (availability changes between original manifest and freshly fetched manifest)
+  try {
+    // IMPORTANT: compare raw manifest resources, not our derived selections
+    const freshResourcesRaw = (Array.isArray(manifestResources) ? manifestResources : []).map(r => typeof r === 'string' ? r : r?.name).filter(Boolean)
+    const originalResSet = new Set((originalResources || []).filter(Boolean))
+    const newResSet = new Set(freshResourcesRaw)
+    addedRes = [...newResSet].filter(k => !originalResSet.has(k))
+    removedRes = [...originalResSet].filter(k => !newResSet.has(k))
+
+    // Compare catalogs on raw manifest too (ignore our computed search flag)
+    const toKey = (c) => `${c?.type || ''}:${c?.id || ''}`
+    const originalCatalogsRaw = (Array.isArray(manifestCatalogs) ? [] : []) // placeholder to keep structure clear
+    const originalCatSet = new Set((originalCatalogs || []).map(toKey))
+    const freshCatalogsRaw = (Array.isArray(manifestCatalogs) ? manifestCatalogs : []).map(c => ({ type: c?.type, id: c?.id, name: c?.name }))
+    const newCatSet = new Set(freshCatalogsRaw.map(toKey))
+    const addedCatKeys = [...newCatSet].filter(k => !originalCatSet.has(k))
+    const removedCatKeys = [...originalCatSet].filter(k => !newCatSet.has(k))
+
+    // Pretty labels: show type:name for catalogs
+    // Prefer "Name (type)" label
+    const labelFor = (c) => `${(c?.name || c?.id || '').toString()} (${c?.type || ''})`
+    const freshLabelByKey = new Map(freshCatalogsRaw.map(c => [toKey(c), labelFor(c)]))
+    const originalLabelByKey = new Map((Array.isArray(originalCatalogs) ? originalCatalogs : []).map(c => [toKey(c), labelFor(c)]))
+    addedCat = addedCatKeys.map(k => freshLabelByKey.get(k) || k)
+    removedCat = removedCatKeys.map(k => originalLabelByKey.get(k) || k)
+
+    if ((addedRes.length || removedRes.length || addedCat.length || removedCat.length) && !silent) {
+      const parts = []
+      if (addedRes.length) parts.push(`+resources: ${addedRes.join(', ')}`)
+      if (removedRes.length) parts.push(`-resources: ${removedRes.join(', ')}`)
+      if (addedCat.length) parts.push(`+catalogs: ${addedCat.join(', ')}`)
+      if (removedCat.length) parts.push(`-catalogs: ${removedCat.join(', ')}`)
+      if (parts.length) console.log(`🧩 ${addon.name} diffs → ${parts.join(' | ')}`)
+    }
+  } catch {}
   
   // Original manifest summary removed
   
@@ -236,6 +295,12 @@ async function reloadAddon(prisma, getAccountId, addonId, req, { filterManifestB
       version: updatedAddon.version,
       iconUrl: updatedAddon.iconUrl,
       status: updatedAddon.isActive ? 'active' : 'inactive'
+    },
+    diffs: {
+      addedResources: addedRes,
+      removedResources: removedRes,
+      addedCatalogs: addedCat,
+      removedCatalogs: removedCat
     }
   };
 }
