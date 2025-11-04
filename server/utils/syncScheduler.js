@@ -1,6 +1,7 @@
 // Sync scheduler functions
 const fs = require('fs')
 const path = require('path')
+const { postDiscord } = require('./notify')
 
 // Persist sync schedule under data/sync so Docker mount ./data captures it
 const SYNC_DIR = path.join(process.cwd(), 'data', 'sync')
@@ -180,13 +181,45 @@ function scheduleSyncs(frequency, prisma, getAccountId, scopedWhere, decrypt, re
           let msg = '🗓️ Scheduled '
           if (mode === 'advanced') msg += 'advanced '
           msg += 'sync'
-          if (unsafe) msg += ' (unsafe mode)'
           const freq = String(syncCfg?.frequency || '').trim()
           if (freq) msg += ` (frequency: ${freq})`
           if (!QUIET) console.log(msg)
         } catch {}
+        // Import syncGroupUsers - it's exported from groups router
         const { syncGroupUsers } = require('../routes/groups')
-        for (const g of groups) { try { await syncGroupUsers(prisma, getAccountId, scopedWhere, decrypt, g.id, accountReq) } catch (e) { if (!QUIET) console.warn('Group sync failed:', e?.message) } }
+        let totalSynced = 0
+        let totalFailed = 0
+        let reloadedGroupsCount = 0
+        const syncedGroupIds = []
+        
+        for (const g of groups) {
+          try {
+            const result = await syncGroupUsers(prisma, getAccountId, scopedWhere, decrypt, g.id, accountReq)
+            if (result && !result.error) {
+              totalSynced += result.syncedUsers || 0
+              totalFailed += result.failedUsers || 0
+              syncedGroupIds.push(g.id)
+              if (mode === 'advanced') reloadedGroupsCount++
+            } else {
+              totalFailed++
+            }
+          } catch (e) {
+            totalFailed++
+            if (!QUIET) console.warn('Group sync failed:', e?.message)
+          }
+        }
+
+        // Count total addons from synced groups
+        let totalAddons = 0
+        if (syncedGroupIds.length > 0) {
+          try {
+            const groupAddons = await prisma.groupAddon.findMany({
+              where: { groupId: { in: syncedGroupIds } },
+              select: { addonId: true }
+            })
+            totalAddons = new Set(groupAddons.map(ga => ga.addonId)).size
+          } catch {}
+        }
 
         // Update lastRunAt
         try {
@@ -196,6 +229,35 @@ function scheduleSyncs(frequency, prisma, getAccountId, scopedWhere, decrypt, re
             try { await prisma.appAccount.update({ where: { id: accountIdOrNull }, data: { sync: nextCfg } }) } catch { await prisma.appAccount.update({ where: { id: accountIdOrNull }, data: { sync: JSON.stringify(nextCfg) } }) }
           }
         } catch {}
+
+        // Send webhook notification
+        const webhookUrl = syncCfg?.webhookUrl
+        if (webhookUrl && groups.length > 0) {
+          try {
+            const fields = []
+            fields.push(
+              { name: 'Groups', value: `\`\`\`${syncedGroupIds.length}\`\`\``, inline: true },
+              { name: 'Users', value: `\`\`\`${totalSynced}\`\`\``, inline: true },
+              { name: 'Addons', value: `\`\`\`${totalAddons}\`\`\``, inline: true }
+            )
+            
+            // Optional description for advanced mode
+            let description = undefined
+            if (mode === 'advanced') {
+              description = 'All Group Addons Reloaded'
+            }
+
+            const embed = {
+              title: '🗓️ Scheduled sync completed',
+              color: 0x808080,
+              fields: fields,
+              timestamp: new Date().toISOString()
+            }
+            if (description) embed.description = description
+            
+            await postDiscord(webhookUrl, null, { embeds: [embed], avatar_url: 'https://raw.githubusercontent.com/iamneur0/syncio/refs/heads/main/client/public/logo-black.png' })
+          } catch {}
+        }
       } else {
         const mode = (req?.headers?.['x-sync-mode'] === 'advanced') ? 'advanced' : 'normal'
         const unsafe = req?.body?.unsafe === true || req?.body?.safe === false
