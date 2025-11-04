@@ -59,23 +59,55 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
     console.log(`🔄 Syncing ${uniqueUserIds.length} users in group`)
 
     // In advanced mode, reload group addons first (shared helper from users router)
+    let reloadInfo = null
     if (syncMode === 'advanced') {
       const { reloadGroupAddons } = require('./users')
-      try { await reloadGroupAddons(prisma, getAccountId, groupId, req, decrypt) } catch (e) {
+      try { reloadInfo = await reloadGroupAddons(prisma, getAccountId, groupId, req, decrypt) } catch (e) {
         console.warn('Group reload before sync failed:', e?.message)
       }
     }
 
     // Sync each user in the group (like individual user sync)
     const { syncUserAddons } = require('./users')
+    const { computeUserSyncPlan } = require('../utils/sync')
     let synced = 0
     let failed = 0
     
     for (const uid of uniqueUserIds) {
       try {
-        // Sync each user (reload already done by group sync if needed)
+        // Pre-compute current/desired and alreadySynced using the same comparator as the badge
+        const userRec = await prisma.user.findUnique({
+          where: { id: uid, accountId: getAccountId(req) },
+          select: { id: true, stremioAuthKey: true, excludedAddons: true, protectedAddons: true, isActive: true }
+        })
+        if (!userRec || userRec.isActive === false) { failed++; continue }
+
+        const plan = await computeUserSyncPlan(userRec, req, {
+          prisma,
+          getAccountId,
+          decrypt,
+          parseAddonIds,
+          parseProtectedAddons,
+          canonicalizeManifestUrl,
+          StremioAPIClient,
+          unsafeMode
+        })
+
+        // If already synced, count and skip pushing
+        if (plan?.success && plan.alreadySynced) {
+          console.log('✅ User already synced')
+          synced++
+          continue
+        }
+
+        // Otherwise perform sync (reload already handled above if advanced)
         const result = await syncUserAddons(prisma, uid, [], unsafeMode, req, decrypt, getAccountId)
-        if (result?.success) synced++; else failed++
+        if (result?.success) {
+          synced++
+          console.log('✅ User now synced')
+        } else {
+          failed++
+        }
       } catch (e) { 
         failed++ 
       }
@@ -85,7 +117,8 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
       groupId,
       syncedUsers: synced,
       failedUsers: failed,
-      message: `Group sync completed: ${synced}/${userIds.length} users synced`
+      message: `Group sync completed: ${synced}/${userIds.length} users synced`,
+      reloadDiffs: reloadInfo?.diffsByAddon || []
     }
   }
 
@@ -1223,10 +1256,11 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
     }
     // Log before any reload
     console.log(`\nSyncing group ${group.name || groupId}`)
-    // Advanced: reload
+    // Advanced: reload and capture diffs
+    let reloadInfo = null
     if (syncMode === 'advanced') {
       const { reloadGroupAddons } = require('./users')
-      try { await reloadGroupAddons(prismaDep, getAccountIdDep, groupId, reqDep, decryptDep) } catch {}
+      try { reloadInfo = await reloadGroupAddons(prismaDep, getAccountIdDep, groupId, reqDep, decryptDep) } catch {}
     }
     // Sync users
     const { syncUserAddons } = require('./users')
@@ -1237,11 +1271,13 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
         if (r?.success) synced++; else failed++
       } catch { failed++ }
     }
-    return { groupId, syncedUsers: synced, failedUsers: failed }
+    return { groupId, syncedUsers: synced, failedUsers: failed, reloadDiffs: reloadInfo?.diffsByAddon || [] }
   }
 
   // Attach export
   module.exports.syncGroupUsers = externalSyncGroupUsers;
+  // Also attach to the returned router instance for factory consumers
+  router.syncGroupUsers = externalSyncGroupUsers;
 
   return router;
 };
