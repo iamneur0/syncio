@@ -252,7 +252,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
             }
           }
         } else {
-          await assignUserToGroup(id, groupId, req)
+        await assignUserToGroup(id, groupId, req)
         }
       }
 
@@ -757,7 +757,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
       }
 
       return res.json({
-        message: 'User synced successfully',
+        message: 'User synced successfully', 
         addonsCount: result.totalAddons ?? result.addonsCount ?? 0,
         ...(result.reloadedCount !== undefined ? { reloadedCount: result.reloadedCount } : {}),
         ...(result.totalAddons !== undefined ? { totalAddons: result.totalAddons } : {})
@@ -899,7 +899,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
       const { id } = req.params
       const { name } = req.body
       const { unsafe } = req.query
-
+      
       // Default Stremio addons (name-based) in safe mode
       const defaultAddons = { names: ['Cinemeta', 'Local Files', 'Local Files (without catalog support)'] }
 
@@ -1551,7 +1551,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
       if (!Array.isArray(orderedNames) || orderedNames.length === 0) {
         return res.status(400).json({ message: 'orderedNames array is required' })
       }
-
+      
       // Get the user
       const user = await prisma.user.findUnique({
         where: { 
@@ -1580,21 +1580,21 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
       const apiClient = new StremioAPIClient({ endpoint: 'https://api.strem.io', authKey: authKeyPlain })
       const current = await apiClient.request('addonCollectionGet', {})
       const currentAddons = current?.addons || []
-
+      
       // Build a map name -> queue of addons with that name to handle duplicates
       const nameToAddons = new Map()
       for (const addon of currentAddons) {
         const name = addon?.manifest?.name || addon?.transportName || 'Addon'
         if (!nameToAddons.has(name)) nameToAddons.set(name, [])
         nameToAddons.get(name).push(addon)
-      }
-
+        }
+      
       // Validate all names exist
       const invalidNames = orderedNames.filter((n) => !nameToAddons.has(n))
       if (invalidNames.length > 0) {
         return res.status(400).json({ message: 'Some addon names not found in current collection', invalidNames })
       }
-
+      
       // Build reordered list by consuming from queues to preserve duplicates order
       const reorderedAddons = []
       for (const n of orderedNames) {
@@ -1608,10 +1608,10 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
       for (const [_, q] of nameToAddons.entries()) {
         while (q.length > 0) reorderedAddons.push(q.shift())
       }
-
+      
       // Set the reordered collection
       await apiClient.request('addonCollectionSet', { addons: reorderedAddons })
-
+      
       res.json({ 
         message: 'Addons reordered successfully (by name)',
         reorderedCount: reorderedAddons.length
@@ -2346,6 +2346,7 @@ const { reloadAddon } = require('./addons')
 async function reloadGroupAddons(prisma, getAccountId, groupId, req, decrypt) {
   let reloadedCount = 0
   let failedCount = 0
+  const diffsByAddon = [] // { id, name, diffs }
   
   // Get all active addons in the group
   const group = await prisma.group.findUnique({
@@ -2398,6 +2399,9 @@ async function reloadGroupAddons(prisma, getAccountId, groupId, req, decrypt) {
       
       if (result.success) {
         reloadedCount++
+        if (result.diffs && (result.diffs.addedResources?.length || result.diffs.removedResources?.length || result.diffs.addedCatalogs?.length || result.diffs.removedCatalogs?.length)) {
+          diffsByAddon.push({ id: freshAddon.id, name: freshAddon.name, diffs: result.diffs })
+        }
       } else {
         console.warn(`⚠️ Failed to reload ${addon.name}`)
         failedCount++
@@ -2413,7 +2417,8 @@ async function reloadGroupAddons(prisma, getAccountId, groupId, req, decrypt) {
   return {
     reloadedCount,
     failedCount,
-    total: groupAddons.length
+    total: groupAddons.length,
+    diffsByAddon
   }
 }
 
@@ -2499,7 +2504,7 @@ async function syncUserAddons(prismaClient, userId, excludedManifestUrls = [], u
       await apiClient.request('addonCollectionSet', { addons: plan.desired || [] })
       console.log('✅ User now synced')
       return { success: true, total: (plan.desired || []).length }
-    } catch (e) {
+      } catch (e) {
       console.error('❌ Failed to apply sync plan:', e?.message)
       return { success: false, error: e?.message || 'Failed to sync addons' }
     }
