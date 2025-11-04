@@ -91,6 +91,7 @@ model AppAccount {
   passwordHash String
   // SQLite does not support Prisma Json type; store as TEXT (stringified JSON)
   sync         String?
+  apiKeyHash     String?  // Encrypted API key
 
   @@map("app_accounts")
 }

@@ -1,9 +1,11 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { User as UserIcon, Users as GroupIcon, Eye, Edit, Trash2, Copy, Download, RefreshCw, Puzzle } from 'lucide-react'
 import { useTheme } from '@/contexts/ThemeContext'
 import { getColorBgClass, getColorTextClass, getColorBorderClass, getColorHexValue } from '@/utils/colorMapping'
 import AddonIcon from './AddonIcon'
 import SyncBadge from './SyncBadge'
+import ConfirmDialog from './ConfirmDialog'
+import { groupsAPI } from '@/services/api'
 import { ToggleSwitch, VersionChip } from './MicroUI'
 
 type Variant = 'user' | 'group' | 'addon'
@@ -120,8 +122,42 @@ export default function EntityCard({
     onClone?.(entity)
   }
 
-  const handleSync = (e: React.MouseEvent) => {
-    e.stopPropagation()
+  const [confirmOpen, setConfirmOpen] = useState(false)
+  const [pendingSync, setPendingSync] = useState<string | null>(null)
+
+  const handleSync = async (e?: React.MouseEvent) => {
+    if (e && typeof e.stopPropagation === 'function') e.stopPropagation()
+    // Group card: confirm when no addons
+    if (variant === 'group') {
+      const addonsCount = groupAddonsCount
+      if (addonsCount === 0) {
+        setPendingSync(entity.id)
+        setConfirmOpen(true)
+        return
+      }
+      onSync?.(entity.id)
+      return
+    }
+    // User card: confirm when user's group has zero addons
+    if (variant === 'user') {
+      const gid = (entity as any).groupId
+      if (!gid) {
+        setPendingSync(entity.id)
+        setConfirmOpen(true)
+        return
+      }
+      try {
+        const resp = await groupsAPI.getGroupAddons(gid)
+        const count = Array.isArray(resp?.addons) ? resp.addons.length : 0
+        if (count === 0) {
+          setPendingSync(entity.id)
+          setConfirmOpen(true)
+          return
+        }
+      } catch {}
+      onSync?.(entity.id)
+      return
+    }
     onSync?.(entity.id)
   }
 
@@ -201,6 +237,7 @@ export default function EntityCard({
   ) : 0
 
   return (
+    <>
     <div 
       onClick={handleCardClick}
       className={isListMode ? 
@@ -272,7 +309,7 @@ export default function EntityCard({
                   <SyncBadge
                     userId={entity.id}
                     groupId={(entity as any).groupId}
-                    onSync={onSync}
+                    onSync={() => handleSync()}
                     isSyncing={isSyncing || false}
                     userExcludedSet={userExcludedSet}
                     userProtectedSet={userProtectedSet}
@@ -282,7 +319,7 @@ export default function EntityCard({
                 {variant === 'group' && onSync && (
                   <SyncBadge
                     groupId={entity.id}
-                    onSync={onSync}
+                    onSync={() => handleSync()}
                     isSyncing={isSyncing || false}
                     isListMode={true}
                   />
@@ -536,7 +573,7 @@ export default function EntityCard({
               <div className="mt-1 mb-0">
                 <SyncBadge
                   groupId={entity.id}
-                  onSync={onSync}
+                  onSync={() => handleSync()}
                   isSyncing={isSyncing || false}
                 />
               </div>
@@ -559,7 +596,7 @@ export default function EntityCard({
               <div className="mt-1 mb-0">
                 <SyncBadge
                   userId={entity.id}
-                  onSync={onSync}
+                  onSync={() => handleSync()}
                   isSyncing={isSyncing || false}
                   userExcludedSet={userExcludedSet}
                   userProtectedSet={userProtectedSet}
@@ -756,5 +793,16 @@ export default function EntityCard({
         </div>
       )}
     </div>
+    <ConfirmDialog
+      open={confirmOpen}
+      title={variant === 'group' ? "Sync will remove all users' addons" : "Sync will remove all this user's addons"}
+      description={variant === 'group' ? "This group has no addons. Syncing will delete all Stremio addons from its users. Continue?" : "This user belongs to a group with no addons. Syncing will delete all addons from this user's Stremio account. Continue?"}
+      confirmText="Delete all and Sync"
+      cancelText="Cancel"
+      isDanger={true}
+      onCancel={() => { setConfirmOpen(false); setPendingSync(null) }}
+      onConfirm={() => { if (pendingSync) onSync?.(pendingSync); setConfirmOpen(false); setPendingSync(null) }}
+    />
+    </>
   )
 }

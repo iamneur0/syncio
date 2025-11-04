@@ -1,7 +1,7 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
-const { decrypt } = require('../utils/encryption')
+const { decrypt, encrypt } = require('../utils/encryption')
 
 module.exports = ({ prisma, AUTH_ENABLED, getAccountDek, getDecryptedManifestUrl, getAccountId }) => {
   const router = express.Router();
@@ -87,7 +87,7 @@ module.exports = ({ prisma, AUTH_ENABLED, getAccountDek, getDecryptedManifestUrl
         const frequency = (typeof syncCfg.frequency === 'string' && syncCfg.frequency.trim())
           ? syncCfg.frequency.trim()
           : '0'
-        const resp = { enabled: syncCfg.enabled !== false, safe, mode, frequency, lastRunAt: syncCfg.lastRunAt }
+        const resp = { enabled: syncCfg.enabled !== false, safe, mode, frequency, lastRunAt: syncCfg.lastRunAt, webhookUrl: syncCfg.webhookUrl || '' }
         return res.json(resp)
       }
       return res.json({ enabled: false, frequency: 0, safe: true, mode: 'normal' })
@@ -98,7 +98,7 @@ module.exports = ({ prisma, AUTH_ENABLED, getAccountDek, getDecryptedManifestUrl
 
   router.put('/account-sync', async (req, res) => {
     try {
-      const { enabled, frequency, mode, unsafe, safe } = req.body || {}
+      const { enabled, frequency, mode, unsafe, safe, webhookUrl } = req.body || {}
       if (!AUTH_ENABLED) {
         // Private mode: update global schedule
         const minutes = Number(frequencyMinutes || 0)
@@ -125,6 +125,7 @@ module.exports = ({ prisma, AUTH_ENABLED, getAccountDek, getDecryptedManifestUrl
       if (mode !== undefined) partial.mode = (mode === 'advanced') ? 'advanced' : 'normal'
       if (safe !== undefined) partial.safe = !!safe
       else if (unsafe !== undefined) partial.safe = !unsafe
+      if (webhookUrl !== undefined) partial.webhookUrl = webhookUrl || null
 
       const nextCfg = { ...base, ...partial }
 
@@ -160,6 +161,59 @@ module.exports = ({ prisma, AUTH_ENABLED, getAccountDek, getDecryptedManifestUrl
       return res.json({ message: 'Sync started', result })
     } catch (e) {
       return res.status(500).json({ message: 'Failed to start sync', error: e?.message })
+    }
+  })
+
+  // API Key management (generate/revoke)
+  router.get('/account-api', async (req, res) => {
+    try {
+      const acc = await prisma.appAccount.findUnique({ where: { id: req.appAccountId }, select: { apiKeyHash: true } })
+      if (!acc?.apiKeyHash) {
+        return res.json({ hasKey: false, apiKey: null })
+      }
+      // Decrypt using account-specific key (accountId + server key)
+      try {
+        const { getServerKey, aesGcmDecrypt } = require('../utils/encryption')
+        const serverKey = getServerKey()
+        const accountKey = require('crypto').createHash('sha256').update(Buffer.concat([Buffer.from(req.appAccountId || ''), serverKey])).digest()
+        const decrypted = aesGcmDecrypt(accountKey, acc.apiKeyHash)
+        return res.json({ hasKey: true, apiKey: decrypted })
+      } catch (e) {
+        // If decryption fails, key might be in old format - treat as no key
+        return res.json({ hasKey: false, apiKey: null })
+      }
+    } catch {
+      return res.status(500).json({ message: 'Failed to read API key status' })
+    }
+  })
+
+  router.post('/account-api-key', async (req, res) => {
+    try {
+      if (!req.appAccountId) {
+        return res.status(401).json({ message: 'Unauthorized' })
+      }
+      const { generateApiKey } = require('../utils/apiKey')
+      const { getServerKey, aesGcmEncrypt } = require('../utils/encryption')
+      const key = generateApiKey()
+      // Encrypt using account-specific key (accountId + server key)
+      const serverKey = getServerKey()
+      const accountKey = require('crypto').createHash('sha256').update(Buffer.concat([Buffer.from(req.appAccountId || ''), serverKey])).digest()
+      const encrypted = aesGcmEncrypt(accountKey, key)
+      await prisma.appAccount.update({ where: { id: req.appAccountId }, data: { apiKeyHash: encrypted } })
+      // Return the full key ONCE
+      return res.json({ apiKey: key })
+    } catch (e) {
+      console.error('Error generating API key:', e)
+      return res.status(500).json({ message: 'Failed to generate API key', error: e?.message })
+    }
+  })
+
+  router.delete('/account-api-key', async (req, res) => {
+    try {
+      await prisma.appAccount.update({ where: { id: req.appAccountId }, data: { apiKeyHash: null } })
+      return res.json({ message: 'API key revoked' })
+    } catch (e) {
+      return res.status(500).json({ message: 'Failed to revoke API key' })
     }
   })
 

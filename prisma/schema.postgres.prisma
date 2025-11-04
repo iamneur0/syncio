@@ -92,6 +92,7 @@ model AppAccount {
   uuid         String   @unique
   passwordHash String
   sync         Json?
+  apiKeyHash     String?  // Encrypted API key
 
   @@map("app_accounts")
 }
