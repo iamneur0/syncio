@@ -181,23 +181,23 @@ export default function SyncBadge({
       }
 
       if (userSyncStatus) {
-        const status = (userSyncStatus as any).status
-        // If status is 'error' but it's an authentication error, show 'connect' instead
-        if (status === 'error') {
-          const message = (userSyncStatus as any).message || ''
-          if (message.includes('Stremio connection invalid') || 
-              message.includes('authentication') || 
-              message.includes('auth') || 
-              message.includes('invalid') || 
-              message.includes('corrupted')) {
-            setSmartStatus('connect')
-          } else {
-            setSmartStatus('error')
-          }
+      const status = (userSyncStatus as any).status
+      // If status is 'error' but it's an authentication error, show 'connect' instead
+      if (status === 'error') {
+        const message = (userSyncStatus as any).message || ''
+        if (message.includes('Stremio connection invalid') || 
+            message.includes('authentication') || 
+            message.includes('auth') || 
+            message.includes('invalid') || 
+            message.includes('corrupted')) {
+          setSmartStatus('connect')
         } else {
-          setSmartStatus(status || 'checking')
+          setSmartStatus('error')
         }
-        setIsLoading(false)
+      } else {
+        setSmartStatus(status || 'checking')
+      }
+      setIsLoading(false)
       }
     } else if (groupId) {
       if (!groupUsers || groupUsers.length === 0) {

@@ -4,7 +4,7 @@ import React from 'react'
 import { useTheme } from '@/contexts/ThemeContext'
 import { useMutation } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
-import { RotateCcw, Sun, Moon, Sparkles, Trash2, RefreshCcw, SunMoon } from 'lucide-react'
+import { RotateCcw, Sun, Moon, Sparkles, Trash2, RefreshCcw, SunMoon, Repeat } from 'lucide-react'
 import AccountMenuButton from '@/components/auth/AccountMenuButton'
 import ConfirmDialog from '@/components/common/ConfirmDialog'
 import api from '@/services/api'
@@ -27,6 +27,10 @@ export default function SettingsPage() {
   const addonsDragDepth = React.useRef<number>(0)
   const configDragDepth = React.useRef<number>(0)
   const containerRef = React.useRef<HTMLDivElement | null>(null)
+  const [apiKeyStatus, setApiKeyStatus] = React.useState<{ hasKey: boolean }>({ hasKey: false })
+  const [currentApiKey, setCurrentApiKey] = React.useState<string | null>(null)
+  const [webhookUrl, setWebhookUrl] = React.useState<string>('')
+  const autoGenAttemptedRef = React.useRef<boolean>(false)
   
   // Account management confirmation modals
   const [confirmOpen, setConfirmOpen] = React.useState(false)
@@ -46,6 +50,36 @@ export default function SettingsPage() {
         const safe = (r.data?.safe !== undefined) ? !!r.data.safe : !(!!r.data?.unsafe)
         setSyncMode(mode)
         setDeleteMode(safe ? 'safe' : 'unsafe')
+        // Extract webhook URL from sync config
+        const whUrl = r.data?.webhookUrl || ''
+        setWebhookUrl(whUrl)
+      })
+      .catch(() => {})
+      // Fetch API key - decrypt and show if exists, auto-generate if missing
+    api.get('/settings/account-api')
+      .then(async r => {
+        const hasKey = r.data?.hasKey || false
+        const apiKey = r.data?.apiKey || null
+        setApiKeyStatus({ hasKey })
+        if (hasKey && apiKey) {
+          setCurrentApiKey(apiKey)
+        }
+        // Auto-generate if missing
+        if (!hasKey && !autoGenAttemptedRef.current) {
+          autoGenAttemptedRef.current = true
+          try {
+            const resp = await api.post('/settings/account-api-key')
+            const newKey = resp.data?.apiKey
+            if (newKey) {
+              setCurrentApiKey(newKey)
+              setApiKeyStatus({ hasKey: true })
+              toast.success('API key auto-generated!')
+              navigator.clipboard.writeText(newKey).catch(() => {})
+            }
+          } catch (e: any) {
+            toast.error(e?.response?.data?.message || 'Failed to auto-generate API key')
+          }
+        }
       })
       .catch(() => {})
   }, [])
@@ -902,6 +936,87 @@ export default function SettingsPage() {
       {/* Configuration Import/Export - moved to Tasks page */}
 
       {/* Maintenance moved to Tasks page */}
+
+      {/* Discord Webhook */}
+      <div className={`p-4 rounded-lg border mt-6 ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
+        <h2 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>Discord Webhook</h2>
+        <p className={`text-sm mt-1 ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
+          Receive notifications when automatic syncs or API-triggered syncs complete.
+        </p>
+        <div className="mt-4">
+          <label className={`block text-sm font-medium mb-2 ${isDark ? 'text-white' : 'text-gray-900'}`}>
+            Webhook URL
+          </label>
+          <input
+            type="text"
+            value={webhookUrl}
+            onChange={(e) => setWebhookUrl(e.target.value)}
+            onBlur={() => {
+              api.put('/settings/account-sync', { webhookUrl: webhookUrl.trim() || undefined })
+                .then(() => toast.success('Webhook URL updated'))
+                .catch(() => toast.error('Failed to update webhook URL'))
+            }}
+            placeholder="https://discord.com/api/webhooks/..."
+            className={`w-full border rounded px-3 py-2 ${
+              isDark ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' : 'bg-white border-gray-300 text-gray-900'
+            }`}
+          />
+        </div>
+      </div>
+
+      {/* API Access */}
+      <div className={`p-4 rounded-lg border mt-6 ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
+        <h2 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>API Access</h2>
+        <p className={`text-sm mt-1 ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
+          Generate an API key to access your account via external API endpoints.
+        </p>
+        <div className="mt-4 flex gap-2 items-center">
+          <div className="flex-1">
+            <input
+              type="text"
+              value={currentApiKey || (apiKeyStatus.hasKey ? 'Loading...' : 'Generating...')}
+              readOnly
+              onClick={() => {
+                if (currentApiKey) {
+                  navigator.clipboard.writeText(currentApiKey)
+                  toast.success('API key copied to clipboard')
+                } else {
+                  toast.error('API key not available. Click rotate to generate a new one.')
+                }
+              }}
+              className={`w-full border rounded px-3 py-2 cursor-pointer ${
+                isDark ? 'bg-gray-700 border-gray-600 text-white' : 'bg-gray-50 border-gray-300 text-gray-900'
+              }`}
+              title={currentApiKey ? 'Click to copy API key' : 'API key only shown once after generation. Click rotate to generate a new one.'}
+            />
+          </div>
+          <button
+            onClick={async () => {
+              try {
+                const resp = await api.post('/settings/account-api-key')
+                const newKey = resp.data?.apiKey
+                if (newKey) {
+                  setCurrentApiKey(newKey)
+                  setApiKeyStatus({ hasKey: true })
+                  toast.success('New API key generated!')
+                  navigator.clipboard.writeText(newKey).catch(() => {})
+                }
+              } catch (e: any) {
+                toast.error(e?.response?.data?.message || 'Failed to generate API key')
+              }
+            }}
+            className={`flex items-center justify-center w-10 h-10 rounded ${
+              isDark ? 'bg-gray-700 hover:bg-gray-600 text-white' : 'bg-gray-100 hover:bg-gray-200 text-gray-900'
+            }`}
+            title="Rotate API key (revoke old and generate new)"
+          >
+            <Repeat className="w-4 h-4" />
+          </button>
+        </div>
+        <p className={`text-xs mt-2 ${isDark ? 'text-gray-500' : 'text-gray-500'}`}>
+          Use this key in the Authorization header: <code className="px-1 py-0.5 bg-gray-100 dark:bg-gray-700 rounded">Bearer {currentApiKey || '••••••••••••••••••••••••••••••••'}</code>
+        </p>
+      </div>
 
       {/* Account Management */}
       <div className={`p-4 rounded-lg border mt-6 ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>

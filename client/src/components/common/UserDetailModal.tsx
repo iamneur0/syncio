@@ -8,7 +8,7 @@ import { invalidateUserQueries, invalidateSyncStatusQueries } from '@/utils/quer
 import { userSuccessHandlers } from '@/utils/toastUtils'
 import { useModalState } from '@/hooks/useCommonState'
 import toast from 'react-hot-toast'
-import { VersionChip, EntityList, SyncBadge, InlineEdit, ColorPicker } from './'
+import { VersionChip, EntityList, SyncBadge, InlineEdit, ColorPicker, ConfirmDialog } from './'
 import AddonIcon from './AddonIcon'
 import SortableAddonItem from './SortableAddonItem'
 import { useSyncStatusRefresh } from '@/hooks/useSyncStatusRefresh'
@@ -82,6 +82,7 @@ export default function UserDetailModal({
   const [currentAddonsData, setCurrentAddonsData] = useState<any>({})
   const [desiredAddonsData, setDesiredAddonsData] = useState<any>({})
   const [groupAddonsData, setGroupAddonsData] = useState<any>({})
+  const [confirmDeleteAllOpen, setConfirmDeleteAllOpen] = useState(false)
 
   // Initialize local state when opening the modal or switching user
   useEffect(() => {
@@ -526,7 +527,14 @@ export default function UserDetailModal({
                   />
                   <SyncBadge 
                     userId={currentUser.id} 
-                    onSync={() => onSync(currentUser.id)}
+                    onSync={() => {
+                      const groupAddonCount = userGroupAddons?.addons?.length || 0
+                      if (groupAddonCount === 0) {
+                        setConfirmDeleteAllOpen(true)
+                        return
+                      }
+                      onSync(currentUser.id)
+                    }}
                     isSyncing={isSyncing}
                   />
                 </div>
@@ -841,6 +849,21 @@ export default function UserDetailModal({
           </div>
         </div>
       )}
+
+      {/* Confirm deletion of all user's addons when group has no addons */}
+      <ConfirmDialog
+        open={confirmDeleteAllOpen}
+        title="Sync will remove all this user's addons"
+        description="This user belongs to a group with no addons. Syncing will delete all addons from this user's Stremio account. Continue?"
+        confirmText="Delete all and Sync"
+        cancelText="Cancel"
+        isDanger={true}
+        onCancel={() => setConfirmDeleteAllOpen(false)}
+        onConfirm={() => {
+          setConfirmDeleteAllOpen(false)
+          onSync(currentUser.id)
+        }}
+      />
     </div>,
     document.body
   )

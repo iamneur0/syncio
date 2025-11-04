@@ -9,7 +9,7 @@ import { invalidateGroupQueries, invalidateSyncStatusQueries } from '@/utils/que
 import { groupSuccessHandlers } from '@/utils/toastUtils'
 import { useModalState } from '@/hooks/useCommonState'
 import toast from 'react-hot-toast'
-import { VersionChip, SyncBadge, EntityList, UserItem, AddonItem, UserSelectModal, AddonSelectModal, InlineEdit, ColorPicker } from './'
+import { VersionChip, SyncBadge, EntityList, UserItem, AddonItem, UserSelectModal, AddonSelectModal, InlineEdit, ColorPicker, ConfirmDialog } from './'
 import AddonIcon from './AddonIcon'
 import SortableAddonItem from './SortableAddonItem'
 import { Users, Puzzle, Plus, X } from 'lucide-react'
@@ -45,6 +45,7 @@ export default function GroupDetailModal({
   const [refreshKey, setRefreshKey] = useState(0)
   const [showUserSelectModal, setShowUserSelectModal] = useState(false)
   const [showAddonSelectModal, setShowAddonSelectModal] = useState(false)
+  const [confirmGroupDeleteAllOpen, setConfirmGroupDeleteAllOpen] = useState(false)
   const [showColorPicker, setShowColorPicker] = useState(false)
   const logoRef = useRef<HTMLDivElement>(null)
 
@@ -423,11 +424,13 @@ export default function GroupDetailModal({
                         key={`group-sync-${group.id}-${refreshKey}`}
                         groupId={group.id} 
                         onSync={async () => {
+                          const addonCount = groupAddonsData?.addons?.length || 0
+                          if (addonCount === 0) {
+                            setConfirmGroupDeleteAllOpen(true)
+                            return
+                          }
                           try {
-                            // Sync the group (backend reads DB config for mode/safe)
                             await groupsAPI.sync(group.id)
-                            
-                            // Invalidate and refresh
                             queryClient.invalidateQueries({ queryKey: ['group'] })
                             queryClient.invalidateQueries({ queryKey: ['group', group.id, 'details'] })
                             queryClient.invalidateQueries({ queryKey: ['users'] })
@@ -490,6 +493,13 @@ export default function GroupDetailModal({
                 groupId={group.id}
                 onRemove={handleRemoveUser}
                 onSync={async (userId: string, groupIdStr: string) => {
+                  const addonCount = groupAddonsData?.addons?.length || 0
+                  if (addonCount === 0) {
+                    setConfirmGroupDeleteAllOpen(true)
+                    // store a pending action
+                    ;(window as any).__pendingUserSync = { userId, groupIdStr }
+                    return
+                  }
                   try {
                     await usersAPI.sync(userId, [], 'normal', false)
                     queryClient.invalidateQueries({ queryKey: ['users'] })
@@ -579,6 +589,46 @@ export default function GroupDetailModal({
           excludeAddonIds={addons.map((a: any) => a.id)}
         />
       )}
+
+      {/* Confirm deletion when syncing with no group addons */}
+      <ConfirmDialog
+        open={confirmGroupDeleteAllOpen}
+        title="Sync will remove all users' addons"
+        description="This group has no addons. Syncing will delete all Stremio addons from its users. Continue?"
+        confirmText="Delete all and Sync"
+        cancelText="Cancel"
+        isDanger={true}
+        onCancel={() => { setConfirmGroupDeleteAllOpen(false); (window as any).__pendingUserSync = null }}
+        onConfirm={async () => {
+          setConfirmGroupDeleteAllOpen(false)
+          const pending = (window as any).__pendingUserSync
+          if (pending && pending.userId) {
+            try {
+              await usersAPI.sync(pending.userId, [], 'normal', false)
+              queryClient.invalidateQueries({ queryKey: ['users'] })
+              queryClient.invalidateQueries({ queryKey: ['group', pending.groupIdStr, 'details'] })
+              refreshAllSyncStatus(pending.groupIdStr, pending.userId)
+              ;(window as any).__pendingUserSync = null
+              toast.success('User sync completed')
+            } catch (error: any) {
+              toast.error(error?.response?.data?.message || 'Failed to sync user')
+            }
+            return
+          }
+          if (group?.id) {
+            try {
+              await groupsAPI.sync(group.id)
+              queryClient.invalidateQueries({ queryKey: ['group'] })
+              queryClient.invalidateQueries({ queryKey: ['group', group.id, 'details'] })
+              queryClient.invalidateQueries({ queryKey: ['users'] })
+              refreshAllSyncStatus(group.id)
+              toast.success('Group sync completed')
+            } catch (error: any) {
+              toast.error(error?.response?.data?.message || 'Failed to sync group')
+            }
+          }
+        }}
+      />
     </div>,
     document.body
   )
