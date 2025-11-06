@@ -14,9 +14,12 @@ interface Release {
   miscChores?: string[]
 }
 
+// Export latest version for use in other components
+export const LATEST_VERSION = '0.1.5'
+
 const releases: Release[] = [
   {
-    version: '0.1.5',
+    version: LATEST_VERSION,
     date: '2025-10-26',
     features: [
       'reset addon/resources/catalogs',
@@ -165,6 +168,11 @@ export default function ChangelogPage() {
   const [expandedVersions, setExpandedVersions] = React.useState<Set<string>>(new Set([releases[0].version]))
   const [copied, setCopied] = React.useState(false)
 
+  const capitalizeFirst = (text: string): string => {
+    if (!text) return text
+    return text.charAt(0).toUpperCase() + text.slice(1)
+  }
+
   const copyUpdateCommand = () => {
     const command = 'docker compose pull syncio && docker compose up -d syncio'
     navigator.clipboard.writeText(command).then(() => {
@@ -234,7 +242,15 @@ export default function ChangelogPage() {
                     <Tag className={`w-5 h-5 ${textColor}`} />
                   <div className="flex items-baseline gap-3">
                     <div className="flex items-center gap-2">
-                      <span className="text-xl font-semibold">v{release.version}</span>
+                      <a
+                        href={`https://github.com/iamneur0/syncio/releases/tag/v${release.version}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className="text-xl font-semibold hover:opacity-80 transition-opacity"
+                      >
+                        v{release.version}
+                      </a>
                       {isLatest && (
                         <button
                           onClick={(e) => {
@@ -276,7 +292,7 @@ export default function ChangelogPage() {
                         <ul className="space-y-2 pl-0">
                           {release.features.map((feature, idx) => (
                             <li key={idx} className={`text-sm ${mutedTextColor} list-disc list-inside`}>
-                              {feature}
+                              {capitalizeFirst(feature)}
                             </li>
                           ))}
                         </ul>
@@ -292,7 +308,7 @@ export default function ChangelogPage() {
                         <ul className="space-y-2 pl-0">
                           {release.bugFixes.map((fix, idx) => (
                             <li key={idx} className={`text-sm ${mutedTextColor} list-disc list-inside`}>
-                              {fix}
+                              {capitalizeFirst(fix)}
                             </li>
                           ))}
                         </ul>
