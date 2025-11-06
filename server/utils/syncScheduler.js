@@ -13,6 +13,8 @@ let scheduleHeap = []
 let isSchedulerRunning = false
 // Track last configured global frequency (private mode)
 let globalFrequencyStr = '0'
+// De-dup guard: last run timestamp per account
+const lastRunAtByAccount = new Map()
 
 const DAY_MS = 24 * 60 * 60 * 1000
 const MINUTE_MS = 60 * 1000
@@ -170,7 +172,13 @@ function scheduleSyncs(frequency, prisma, getAccountId, scopedWhere, decrypt, re
       if (accountIdOrNull) {
         const accountReq = { appAccountId: accountIdOrNull, headers: {}, body: {} }
         let syncCfg = null
-        try { const acc = await prisma.appAccount.findUnique({ where: { id: accountIdOrNull }, select: { sync: true } }); syncCfg = acc?.sync || null; if (typeof syncCfg === 'string') syncCfg = JSON.parse(syncCfg) } catch {}
+        let accountUuid = null
+        try {
+          const acc = await prisma.appAccount.findUnique({ where: { id: accountIdOrNull }, select: { sync: true, uuid: true } })
+          syncCfg = acc?.sync || null
+          accountUuid = acc?.uuid || null
+          if (typeof syncCfg === 'string') syncCfg = JSON.parse(syncCfg)
+        } catch {}
         const mode = (syncCfg && syncCfg.mode === 'advanced') ? 'advanced' : 'normal'
         const unsafe = (syncCfg && typeof syncCfg.safe === 'boolean') ? !syncCfg.safe : !!(syncCfg && syncCfg.unsafe)
         accountReq.headers = { 'x-sync-mode': mode }
@@ -256,7 +264,8 @@ function scheduleSyncs(frequency, prisma, getAccountId, scopedWhere, decrypt, re
               syncMode: mode,
               diffs: allReloadDiffs,
               sourceLabel: 'Auto-Sync',
-              sourceLogo: 'https://raw.githubusercontent.com/iamneur0/syncio/refs/heads/main/client/public/logo-black.png'
+              sourceLogo: 'https://raw.githubusercontent.com/iamneur0/syncio/refs/heads/main/client/public/logo-black.png',
+              accountUuid: accountUuid || undefined
             })
           } catch {}
         }
@@ -290,8 +299,16 @@ function scheduleSyncs(frequency, prisma, getAccountId, scopedWhere, decrypt, re
         const delay = Math.max(0, next.nextRunAt - Date.now())
         await new Promise((r) => setTimeout(r, delay))
         const due = popHeap(); if (!due) continue
-        await runOnceAccount(due.accountId)
-        const jitterMs = Math.floor((Math.random() * 10000) - 5000)
+        // De-dup guard: avoid accidental double runs within a short window
+        const accountKey = String(due.accountId || 'global')
+        const prev = lastRunAtByAccount.get(accountKey) || 0
+        if (Date.now() - prev < Math.min(due.intervalMs / 2, 30000)) {
+          // Skip duplicate trigger
+        } else {
+          await runOnceAccount(due.accountId)
+          lastRunAtByAccount.set(accountKey, Date.now())
+        }
+        const jitterMs = 0 // eliminate jitter to keep schedule predictable
         let nextRun
         if (due.intervalMs >= DAY_MS) {
           nextRun = nextMidnight(Date.now() + due.intervalMs)

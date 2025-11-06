@@ -48,7 +48,7 @@ async function postDiscord(webhookUrl, content, options = {}) {
  * @param {string} [options.sourceLogo] - Optional source logo URL
  * @returns {Object} Discord embed object
  */
-function createSyncEmbed({ groupsCount, usersCount, syncMode, diffs = [], sourceLabel, sourceLogo }) {
+function createSyncEmbed({ groupsCount, usersCount, syncMode, diffs = [], sourceLabel, sourceLogo, accountUuid }) {
   const fields = []
   
   // Format diffs as one code block per addon (Resources / Catalogs)
@@ -96,6 +96,20 @@ function createSyncEmbed({ groupsCount, usersCount, syncMode, diffs = [], source
     if (sourceLogo) {
       embed.author.icon_url = sourceLogo
     }
+  }
+  // Add account as a dedicated field (copy-friendly, no spoiler)
+  if (accountUuid) {
+    // Use code block for easy copy on all clients
+    fields.unshift({ name: 'Account', value: '```' + accountUuid + '```', inline: false })
+  }
+
+  // Footer: Syncio version (use same source as UI; fall back to package.json)
+  let appVersion = process.env.NEXT_PUBLIC_APP_VERSION || process.env.APP_VERSION || ''
+  if (!appVersion) {
+    try { appVersion = require('../../package.json')?.version || '' } catch {}
+  }
+  if (appVersion) {
+    embed.footer = { text: `Syncio v${appVersion}` }
   }
 
   return embed
