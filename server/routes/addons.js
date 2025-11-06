@@ -77,15 +77,15 @@ async function reloadAddon(prisma, getAccountId, addonId, req, { filterManifestB
   if (cached) {
     manifestData = cached
   } else {
-    try {
-      const manifestResponse = await fetch(transportUrl);
+  try {
+    const manifestResponse = await fetch(transportUrl);
       if (!manifestResponse.ok) throw new Error(`HTTP ${manifestResponse.status}: ${manifestResponse.statusText}`)
       manifestData = await manifestResponse.json();
       setCachedManifest(cacheKey, manifestData)
-    } catch (e) {
-      console.error(`❌ Failed to fetch manifest:`, e.message);
-      throw new Error(`Failed to fetch addon manifest: ${e.message}`);
-    }
+  } catch (e) {
+    console.error(`❌ Failed to fetch manifest:`, e.message);
+    throw new Error(`Failed to fetch addon manifest: ${e.message}`);
+  }
   }
 
   // 1. Save current selections from DB
@@ -180,7 +180,7 @@ async function reloadAddon(prisma, getAccountId, addonId, req, { filterManifestB
     const newResSet = new Set(freshResourcesRaw)
     addedRes = [...newResSet].filter(k => !originalResSet.has(k))
     removedRes = [...originalResSet].filter(k => !newResSet.has(k))
-
+  
     // Compare catalogs on raw manifest too (ignore our computed search flag)
     const toKey = (c) => `${c?.type || ''}:${c?.id || ''}`
     const originalCatalogsRaw = (Array.isArray(manifestCatalogs) ? [] : []) // placeholder to keep structure clear
@@ -1107,10 +1107,10 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
           if (original) {
             // Always set filtered when we have original manifest
             if (Array.isArray(original.resources)) {
-              const selected = Array.isArray(resources) ? resources : []
-              console.log('🔍 Filtering from original manifest with selected resources:', selected)
-              filtered = filterManifestByResources(original, selected) || { ...original, catalogs: [], addonCatalogs: [] }
-              console.log('🔍 Filtered manifest has catalogs:', Array.isArray(filtered?.catalogs) ? filtered.catalogs.length : 'no catalogs')
+            const selected = Array.isArray(resources) ? resources : []
+            console.log('🔍 Filtering from original manifest with selected resources:', selected)
+            filtered = filterManifestByResources(original, selected) || { ...original, catalogs: [], addonCatalogs: [] }
+            console.log('🔍 Filtered manifest has catalogs:', Array.isArray(filtered?.catalogs) ? filtered.catalogs.length : 'no catalogs')
             } else {
               // No resources in original, use original as base
               filtered = original

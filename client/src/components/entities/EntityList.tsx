@@ -1,7 +1,7 @@
 import React from 'react'
 import { useTheme } from '@/contexts/ThemeContext'
-import SyncBadge from './SyncBadge'
-import ConfirmDialog from './ConfirmDialog'
+import { SyncBadge } from '@/components/ui'
+import { ConfirmDialog } from '@/components/modals'
 
 interface ButtonConfig {
   type: 'exclude' | 'protect' | 'delete' | 'remove' | 'sync'

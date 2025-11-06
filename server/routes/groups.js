@@ -636,20 +636,20 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
 
       // If relation already exists by addonId, return idempotently
       const existingById = await prisma.groupAddon.findUnique({
-        where: {
+          where: {
           groupId_addonId: { groupId: groupId, addonId: addonId }
         }
-      })
+          })
       if (existingById) {
         return res.json({ message: 'Addon already in group', groupId, addonId })
       }
 
       // Add addon to group at bottom (no URL-based replacement)
       await prisma.$transaction(async (tx) => {
-        const maxPosition = await tx.groupAddon.aggregate({
-          where: { groupId: groupId },
-          _max: { position: true }
-        })
+          const maxPosition = await tx.groupAddon.aggregate({
+            where: { groupId: groupId },
+            _max: { position: true }
+          })
         const nextPosition = (maxPosition._max.position ?? -1) + 1
 
         await tx.groupAddon.create({
@@ -660,7 +660,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
             position: nextPosition
           }
         })
-
+        
         console.log(`🔢 Added addon to group ${groupId} at position ${nextPosition}`)
       })
 
@@ -844,7 +844,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
         include: { addons: { include: { addon: true } } }
       })
       if (!group) return responseUtils.notFound(res, 'Group')
-      
+
       console.log(`Reordering group ${group.name}:`)
 
       // Validate addon IDs against current addons list
@@ -930,7 +930,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
         include: { addons: { include: { addon: true } } }
       })
       if (!group) return responseUtils.notFound(res, 'Group')
-      
+
       console.log(`Reordering group ${group.name}:`)
 
       // Detect whether payload items are addon IDs or URLs
@@ -944,9 +944,9 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
           return res.status(400).json({ message: 'Some addon IDs are not in group addons', invalid })
         }
       } else {
-        const currentUrls = (group.addons || [])
-          .map(ga => { try { return getDecryptedManifestUrl(ga.addon, req) } catch { return ga.addon?.manifestUrl } })
-          .filter(Boolean)
+      const currentUrls = (group.addons || [])
+        .map(ga => { try { return getDecryptedManifestUrl(ga.addon, req) } catch { return ga.addon?.manifestUrl } })
+        .filter(Boolean)
         const invalid = urls.filter(u => !currentUrls.includes(u))
         if (invalid.length) {
           return res.status(400).json({ message: 'Some URLs are not in group addons', invalid })
@@ -972,20 +972,20 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
           }
         } else {
           const urlToGroupAddons = new Map()
-          for (const ga of group.addons) {
-            const url = (() => { try { return getDecryptedManifestUrl(ga.addon, req) } catch { return ga.addon?.manifestUrl } })()
+        for (const ga of group.addons) {
+          const url = (() => { try { return getDecryptedManifestUrl(ga.addon, req) } catch { return ga.addon?.manifestUrl } })()
             if (!url) continue
             if (!urlToGroupAddons.has(url)) urlToGroupAddons.set(url, [])
             urlToGroupAddons.get(url).push(ga)
-          }
-          let pos = 0
+        }
+        let pos = 0
           const processed = new Set()
           for (const url of urls) {
             const list = urlToGroupAddons.get(url) || []
             for (const ga of list) {
               if (processed.has(ga.id)) continue
               newOrder.push(ga.addon.name)
-              await prisma.groupAddon.update({ where: { id: ga.id }, data: { position: pos++ } })
+          await prisma.groupAddon.update({ where: { id: ga.id }, data: { position: pos++ } })
               processed.add(ga.id)
               break
             }

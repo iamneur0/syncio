@@ -2,7 +2,7 @@ import React from 'react'
 import { useTheme } from '@/contexts/ThemeContext'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { VersionChip } from './'
+import { VersionChip } from '@/components/ui'
 import AddonIcon from './AddonIcon'
 import { X, LockKeyhole, Unlock } from 'lucide-react'
 

@@ -6,7 +6,7 @@ import { useMutation } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import { RotateCcw, Sun, Moon, Sparkles, Trash2, RefreshCcw, SunMoon, Repeat } from 'lucide-react'
 import AccountMenuButton from '@/components/auth/AccountMenuButton'
-import ConfirmDialog from '@/components/common/ConfirmDialog'
+import { ConfirmDialog } from '@/components/modals'
 import api from '@/services/api'
 
 export default function SettingsPage() {

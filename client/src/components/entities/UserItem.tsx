@@ -1,6 +1,6 @@
 import React from 'react'
 import { useTheme } from '@/contexts/ThemeContext'
-import { SyncBadge } from './'
+import { SyncBadge } from '@/components/ui'
 import { getColorBgClass, getColorHexValue } from '@/utils/colorMapping'
 import { X } from 'lucide-react'
 

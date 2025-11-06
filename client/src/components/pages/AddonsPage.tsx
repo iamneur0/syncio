@@ -2,7 +2,7 @@
 
 import React from 'react'
 import { useTheme } from '@/contexts/ThemeContext'
-import { GenericEntityPage, createEntityPageConfig } from '../common'
+import { GenericEntityPage, createEntityPageConfig } from '@/components/layout'
 
 export default function AddonsPage() {
   const { isDark, isModern, isModernDark, isMono } = useTheme()

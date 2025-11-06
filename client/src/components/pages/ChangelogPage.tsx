@@ -209,7 +209,7 @@ export default function ChangelogPage() {
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4 gap-4">
             <div>
               <h1 className={`hidden sm:block text-xl sm:text-2xl font-bold ${textColor}`}>
-                Changelog
+                What's New
               </h1>
               <p className={`text-sm sm:text-base ${mutedTextColor}`}>
                 All notable changes to this project will be documented here.

@@ -1,7 +1,7 @@
 'use client'
 
 import React from 'react'
-import { GenericEntityPage, createEntityPageConfig } from '../common'
+import { GenericEntityPage, createEntityPageConfig } from '@/components/layout'
 
 export default function GroupsPage() {
   // Create the group page configuration

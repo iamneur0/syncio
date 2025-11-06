@@ -1,6 +1,6 @@
 import React from 'react'
 import { useTheme } from '@/contexts/ThemeContext'
-import { VersionChip } from './'
+import { VersionChip } from '@/components/ui'
 import AddonIcon from './AddonIcon'
 import { Puzzle, X } from 'lucide-react'
 

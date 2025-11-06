@@ -29,11 +29,9 @@ interface BaseEntity {
 
 // Components
 import PageHeader from './PageHeader'
-import EntityCard from './EntityCard'
-import AddonDetailModal from './AddonDetailModal'
-import UserDetailModal from './UserDetailModal'
-import GroupDetailModal from './GroupDetailModal'
-import { LoadingSkeleton, EmptyState, ConfirmDialog, AddonAddModal, UserAddModal, GroupAddModal } from './'
+import { EntityCard } from '@/components/entities'
+import { AddonDetailModal, UserDetailModal, GroupDetailModal, AddonAddModal, UserAddModal, GroupAddModal, ConfirmDialog } from '@/components/modals'
+import { LoadingSkeleton, EmptyState } from '@/components/ui'
 
 // Types
 export type EntityType = 'addon' | 'user' | 'group'

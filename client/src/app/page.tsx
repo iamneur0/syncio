@@ -26,8 +26,8 @@ const navigation = [
   { name: 'Users', icon: User, id: 'users' },
   { name: 'Groups', icon: Users, id: 'groups' },
   { name: 'Addons', icon: Puzzle, id: 'addons' },
-  { name: 'Changelog', icon: ScrollText, id: 'changelog' },
   { name: 'Tasks', icon: ListTodo, id: 'tasks' },
+  { name: "What's New", icon: ScrollText, id: 'changelog' },
   { name: 'Settings', icon: Settings, id: 'settings' },
 ]
 
@@ -133,7 +133,7 @@ export default function HomePage() {
             )})}
         </nav>
         {/* Version badge */}
-        <div className="px-3 pb-4">
+        <div className="px-3 pb-0 mt-auto">
           <button
             onClick={() => activateTab('changelog', true)}
             className={`text-xs font-medium w-full py-2 hover:opacity-80 transition-opacity flex items-center justify-center gap-1.5 ${
@@ -150,8 +150,8 @@ export default function HomePage() {
         </div>
       </div>
 
-      {/* Desktop sidebar */}
-      <div className={`hidden lg:flex lg:flex-col lg:h-screen lg:sticky lg:top-0 transition-all duration-300 ${sidebarCollapsed ? 'lg:w-16' : 'lg:w-64'} ${
+        {/* Desktop sidebar */}
+      <div className={`hidden lg:flex lg:flex-col lg:h-[100dvh] lg:sticky lg:top-0 transition-all duration-300 ${sidebarCollapsed ? 'lg:w-16' : 'lg:w-64'} ${
         isDark ? 'lg:bg-gray-800 lg:border-gray-700' : 'lg:bg-white lg:border-gray-200'
       } ${isMono ? '' : (!sidebarCollapsed ? 'lg:border-r' : '')}`}>
         <button
@@ -205,7 +205,7 @@ export default function HomePage() {
             )})}
         </nav>
         {/* Version badge */}
-        <div className={`${sidebarCollapsed ? 'px-1' : 'px-3'} pb-4 flex-shrink-0`}>
+        <div className={`${sidebarCollapsed ? 'px-1' : 'px-3'} pb-0 flex-shrink-0 mt-auto`}>
           <button
             onClick={() => activateTab('changelog')}
             className={`text-xs font-medium w-full ${sidebarCollapsed ? 'py-1' : 'py-2'} hover:opacity-80 transition-opacity flex items-center justify-center ${

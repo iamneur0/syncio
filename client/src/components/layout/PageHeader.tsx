@@ -5,7 +5,7 @@ import { Search, Plus, RefreshCw, Trash2, Grip, List, Square, CheckSquare } from
 import { useTheme } from '@/contexts/ThemeContext'
 import { getTextClasses } from '@/utils/themeUtils'
 // Inline search input (replaces deprecated ./Input component)
-import { IconButton, ToggleButton } from './MicroUI'
+import { IconButton, ToggleButton } from '@/components/ui'
 import AccountMenuButton from '../auth/AccountMenuButton'
 
 interface PageHeaderProps {

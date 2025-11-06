@@ -154,10 +154,10 @@ export const useUnsafeMode = () => {
   const { data: syncSettings } = useQuery({
     queryKey: ['account-sync'],
     queryFn: async () => {
-      try {
+    try {
         const resp = await api.get('/settings/account-sync')
         return resp.data
-      } catch {
+    } catch {
         return null
       }
     },
