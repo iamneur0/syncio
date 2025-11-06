@@ -1,7 +1,7 @@
 'use client'
 
 import React from 'react'
-import { GenericEntityPage, createEntityPageConfig } from '../common'
+import { GenericEntityPage, createEntityPageConfig } from '@/components/layout'
 
 export default function UsersPage() {
   // Create the user page configuration

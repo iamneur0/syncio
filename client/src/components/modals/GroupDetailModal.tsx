@@ -9,9 +9,10 @@ import { invalidateGroupQueries, invalidateSyncStatusQueries } from '@/utils/que
 import { groupSuccessHandlers } from '@/utils/toastUtils'
 import { useModalState } from '@/hooks/useCommonState'
 import toast from 'react-hot-toast'
-import { VersionChip, SyncBadge, EntityList, UserItem, AddonItem, UserSelectModal, AddonSelectModal, InlineEdit, ColorPicker, ConfirmDialog } from './'
-import AddonIcon from './AddonIcon'
-import SortableAddonItem from './SortableAddonItem'
+import { VersionChip, SyncBadge } from '@/components/ui'
+import { EntityList, UserItem, AddonItem, InlineEdit, AddonIcon, SortableAddonItem } from '@/components/entities'
+import { ColorPicker } from '@/components/layout'
+import { UserSelectModal, AddonSelectModal, ConfirmDialog } from '@/components/modals'
 import { Users, Puzzle, Plus, X } from 'lucide-react'
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors } from '@dnd-kit/core'
 import { restrictToParentElement } from '@dnd-kit/modifiers'
@@ -501,7 +502,7 @@ export default function GroupDetailModal({
                     return
                   }
                   try {
-                    await usersAPI.sync(userId, [], 'normal', false)
+                    await usersAPI.sync(userId, [], false)
                     queryClient.invalidateQueries({ queryKey: ['users'] })
                     queryClient.invalidateQueries({ queryKey: ['group', groupIdStr, 'details'] })
                     refreshAllSyncStatus(groupIdStr, userId)
@@ -604,7 +605,7 @@ export default function GroupDetailModal({
           const pending = (window as any).__pendingUserSync
           if (pending && pending.userId) {
             try {
-              await usersAPI.sync(pending.userId, [], 'normal', false)
+              await usersAPI.sync(pending.userId, [], false)
               queryClient.invalidateQueries({ queryKey: ['users'] })
               queryClient.invalidateQueries({ queryKey: ['group', pending.groupIdStr, 'details'] })
               refreshAllSyncStatus(pending.groupIdStr, pending.userId)

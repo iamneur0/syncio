@@ -4,7 +4,7 @@ import { X } from 'lucide-react'
 import { useTheme } from '@/contexts/ThemeContext'
 import { getColorBgClass, getColorHexValue } from '@/utils/colorMapping'
 import { addonsAPI } from '@/services/api'
-import { VersionChip } from './MicroUI'
+import { VersionChip } from '@/components/ui'
 
 interface AddonAddModalProps {
   isOpen: boolean

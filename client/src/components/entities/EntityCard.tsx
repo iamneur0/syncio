@@ -3,10 +3,10 @@ import { User as UserIcon, Users as GroupIcon, Eye, Edit, Trash2, Copy, Download
 import { useTheme } from '@/contexts/ThemeContext'
 import { getColorBgClass, getColorTextClass, getColorBorderClass, getColorHexValue } from '@/utils/colorMapping'
 import AddonIcon from './AddonIcon'
-import SyncBadge from './SyncBadge'
-import ConfirmDialog from './ConfirmDialog'
+import { SyncBadge, ToggleSwitch, VersionChip } from '@/components/ui'
+import { ConfirmDialog } from '@/components/modals'
 import { groupsAPI } from '@/services/api'
-import { ToggleSwitch, VersionChip } from './MicroUI'
+// ToggleSwitch and VersionChip are imported from '@/components/ui' above
 
 type Variant = 'user' | 'group' | 'addon'
 

@@ -5,7 +5,7 @@ import { useTheme } from '@/contexts/ThemeContext'
 import { useQuery } from '@tanstack/react-query'
 import { usersAPI } from '@/services/api'
 import { getColorBgClass, getColorHexValue } from '@/utils/colorMapping'
-import EntityList from './EntityList'
+import { EntityList } from '@/components/entities'
 
 interface UserSelectModalProps {
   isOpen: boolean

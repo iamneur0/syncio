@@ -4,8 +4,7 @@ import { X, Search, Puzzle } from 'lucide-react'
 import { useTheme } from '@/contexts/ThemeContext'
 import { useQuery } from '@tanstack/react-query'
 import { addonsAPI } from '@/services/api'
-import EntityList from './EntityList'
-import AddonIcon from './AddonIcon'
+import { EntityList, AddonIcon } from '@/components/entities'
 
 interface AddonSelectModalProps {
   isOpen: boolean

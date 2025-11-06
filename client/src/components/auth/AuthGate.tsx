@@ -4,7 +4,7 @@ import React, { useEffect, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useTheme } from '@/contexts/ThemeContext'
 import api, { publicAuthAPI } from '@/services/api'
-import ConfirmDialog from '@/components/common/ConfirmDialog'
+import { ConfirmDialog } from '@/components/modals'
 import { Eye, EyeOff, LogIn, User, Lock } from 'lucide-react'
 
 export default function AuthGate({ children }: { children: React.ReactNode }) {

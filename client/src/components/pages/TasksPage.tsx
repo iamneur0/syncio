@@ -6,7 +6,7 @@ import { useMutation } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import { Upload, Download, RotateCcw, AlertTriangle, Trash2, User, Users, RefreshCcw, RefreshCw } from 'lucide-react'
 import AccountMenuButton from '@/components/auth/AccountMenuButton'
-import ConfirmDialog from '@/components/common/ConfirmDialog'
+import { ConfirmDialog } from '@/components/modals'
 import api from '@/services/api'
 
 export default function TasksPage() {
