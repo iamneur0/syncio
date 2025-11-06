@@ -634,84 +634,34 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
         return responseUtils.notFound(res, 'Addon')
       }
 
-      // Get the addon's manifest URL for comparison
-      const addonUrl = addon.manifestUrl ? decrypt(addon.manifestUrl, req) : null
-      
-      let existingGroupAddon = null
-      if (addonUrl) {
-        const targetHash = manifestUrlHmac(req, addonUrl)
-        
-        // Check if addon with same manifest URL already exists in group
-        existingGroupAddon = await prisma.groupAddon.findFirst({
-          where: {
-            groupId: groupId,
-            addon: {
-              manifestUrlHash: targetHash,
-              accountId: getAccountId(req)
-            }
-          },
-          include: { addon: true }
-        })
-        
-        
-        // If not found by hash, try to find by URL (for corrupted data)
-        if (!existingGroupAddon) {
-          const allGroupAddons = await prisma.groupAddon.findMany({
-            where: { groupId: groupId },
-            include: { addon: true }
-          })
-          
-          for (const ga of allGroupAddons) {
-            const existingUrl = ga.addon.manifestUrl ? decrypt(ga.addon.manifestUrl, req) : null
-            if (existingUrl === addonUrl) {
-              existingGroupAddon = ga
-              break
-            }
-          }
+      // If relation already exists by addonId, return idempotently
+      const existingById = await prisma.groupAddon.findUnique({
+        where: {
+          groupId_addonId: { groupId: groupId, addonId: addonId }
         }
+      })
+      if (existingById) {
+        return res.json({ message: 'Addon already in group', groupId, addonId })
       }
 
-      // If addon with same URL exists, remove it first and preserve its position
-      let preservedPosition = null
-      if (existingGroupAddon) {
-        preservedPosition = existingGroupAddon.position
-        await prisma.groupAddon.delete({
-          where: {
-            groupId_addonId: {
-              groupId: groupId,
-              addonId: existingGroupAddon.addonId
-            }
-          }
-        })
-        console.log(`🗑️ Removed existing addon with same URL: ${existingGroupAddon.addon.name} (position: ${preservedPosition})`)
-      }
-
-      // Add addon to group
+      // Add addon to group at bottom (no URL-based replacement)
       await prisma.$transaction(async (tx) => {
-        let position
-        if (preservedPosition !== null) {
-          // Use the preserved position from the replaced addon
-          position = preservedPosition
-        } else {
-          // Add at the bottom (highest position + 1)
-          const maxPosition = await tx.groupAddon.aggregate({
-            where: { groupId: groupId },
-            _max: { position: true }
-          })
-          position = (maxPosition._max.position ?? -1) + 1
-        }
+        const maxPosition = await tx.groupAddon.aggregate({
+          where: { groupId: groupId },
+          _max: { position: true }
+        })
+        const nextPosition = (maxPosition._max.position ?? -1) + 1
 
-        // Add new addon at the determined position
         await tx.groupAddon.create({
           data: {
             groupId: groupId,
             addonId: addonId,
             isEnabled: true,
-            position: position
+            position: nextPosition
           }
         })
-        
-        console.log(`🔢 Added addon to group ${groupId} at position ${preservedPosition !== null ? preservedPosition : 'bottom'}`)
+
+        console.log(`🔢 Added addon to group ${groupId} at position ${nextPosition}`)
       })
 
       res.json({ message: 'Addon added to group successfully' })
@@ -970,13 +920,9 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
       const urls = orderedAddonIds || (Array.isArray(orderedManifestUrls) && orderedManifestUrls.length > 0
         ? orderedManifestUrls
         : Array.isArray(addonIds) ? addonIds : [])
-      // Forward to primary handler shape by replacing req.body then calling next middleware stack manually is complex here;
-      // so we re-run the same logic inline by crafting a request to the same endpoint.
-      req.body = { orderedManifestUrls: urls }
-      // Call the canonical handler logic by invoking the same function body
-      const { orderedManifestUrls: urlsNorm } = req.body
-      if (!Array.isArray(urlsNorm) || urlsNorm.length === 0) {
-        return res.status(400).json({ message: 'orderedManifestUrls array is required' })
+      
+      if (!Array.isArray(urls) || urls.length === 0) {
+        return res.status(400).json({ message: 'orderedAddonIds or orderedManifestUrls array is required' })
       }
 
       const group = await prisma.group.findUnique({
@@ -987,77 +933,65 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
       
       console.log(`Reordering group ${group.name}:`)
 
-      // Check if urlsNorm contains addon IDs (from orderedAddonIds) or URLs (from orderedManifestUrls)
-      const isAddonIds = urlsNorm[0] && /^[a-zA-Z0-9]+$/.test(urlsNorm[0])
-      
-      // Validate IDs/URLs against current addons list
-      if (isAddonIds) {
-        // Handle as addon IDs
+      // Detect whether payload items are addon IDs or URLs
+      const looksLikeId = urls[0] && /^[a-zA-Z0-9]+$/.test(urls[0])
+
+      // Validate
+      if (looksLikeId) {
         const currentAddonIds = new Set((group.addons || []).map(ga => ga.addonId))
-        const invalid = urlsNorm.filter(id => !currentAddonIds.has(id))
-        if (invalid.length) return res.status(400).json({ message: 'Some addon IDs are not in group addons', invalid })
+        const invalid = urls.filter(id2 => !currentAddonIds.has(id2))
+        if (invalid.length) {
+          return res.status(400).json({ message: 'Some addon IDs are not in group addons', invalid })
+        }
       } else {
-        // Handle as URLs (legacy)
         const currentUrls = (group.addons || [])
           .map(ga => { try { return getDecryptedManifestUrl(ga.addon, req) } catch { return ga.addon?.manifestUrl } })
           .filter(Boolean)
-        const invalid = urlsNorm.filter(u => !currentUrls.includes(u))
-        if (invalid.length) return res.status(400).json({ message: 'Some URLs are not in group addons', invalid })
+        const invalid = urls.filter(u => !currentUrls.includes(u))
+        if (invalid.length) {
+          return res.status(400).json({ message: 'Some URLs are not in group addons', invalid })
+        }
       }
 
-      // Persist order via position as above
+      // Persist order
       try {
         const oldOrder = []
         const newOrder = []
-        
-        // Build old order from current positions
         const sortedByPosition = [...group.addons].sort((a, b) => (a.position || 0) - (b.position || 0))
-        for (const ga of sortedByPosition) {
-          oldOrder.push(ga.addon.name)
-        }
-        
-        if (isAddonIds) {
-          // Map by addon ID
+        for (const ga of sortedByPosition) oldOrder.push(ga.addon.name)
+
+        if (looksLikeId) {
           const addonIdToGroupAddon = new Map()
-          for (const ga of group.addons) {
-            addonIdToGroupAddon.set(ga.addonId, ga)
-          }
-          
+          for (const ga of group.addons) addonIdToGroupAddon.set(ga.addonId, ga)
           let pos = 0
-          for (const addonId of urlsNorm) {
+          for (const addonId of urls) {
             const ga = addonIdToGroupAddon.get(addonId)
             if (!ga) continue
             newOrder.push(ga.addon.name)
             await prisma.groupAddon.update({ where: { id: ga.id }, data: { position: pos++ } })
           }
         } else {
-          // Map by URL (legacy)
           const urlToGroupAddons = new Map()
           for (const ga of group.addons) {
             const url = (() => { try { return getDecryptedManifestUrl(ga.addon, req) } catch { return ga.addon?.manifestUrl } })()
-            if (url) {
-              if (!urlToGroupAddons.has(url)) {
-                urlToGroupAddons.set(url, [])
-              }
-              urlToGroupAddons.get(url).push(ga)
-            }
+            if (!url) continue
+            if (!urlToGroupAddons.has(url)) urlToGroupAddons.set(url, [])
+            urlToGroupAddons.get(url).push(ga)
           }
-          
           let pos = 0
-          const processedGroupAddonIds = new Set()
-          for (const url of urlsNorm) {
-            const groupAddons = urlToGroupAddons.get(url) || []
-            // For each URL, try to find an unprocessed group addon
-            for (const ga of groupAddons) {
-              if (processedGroupAddonIds.has(ga.id)) continue
+          const processed = new Set()
+          for (const url of urls) {
+            const list = urlToGroupAddons.get(url) || []
+            for (const ga of list) {
+              if (processed.has(ga.id)) continue
               newOrder.push(ga.addon.name)
               await prisma.groupAddon.update({ where: { id: ga.id }, data: { position: pos++ } })
-              processedGroupAddonIds.add(ga.id)
-              break // Only process one addon per URL in the order
+              processed.add(ga.id)
+              break
             }
           }
         }
-        
+
         console.log('Current order:')
         oldOrder.forEach(name => console.log(`- ${name}`))
         console.log('New order:')
@@ -1066,7 +1000,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
         console.error('Order persistence failed (position):', e?.message)
       }
 
-      res.json({ message: 'Addons reordered successfully', groupId: id, reorderedCount: urlsNorm.length })
+      res.json({ message: 'Addons reordered successfully', groupId: id, reorderedCount: urls.length })
     } catch (error) {
       console.error('Error reordering addons (alias):', error)
       res.status(500).json({ message: 'Failed to reorder addons', error: error?.message })

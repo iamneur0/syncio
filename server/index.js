@@ -39,7 +39,7 @@ const { validateStremioAuthKey, filterDefaultAddons, buildAddonDbData } = requir
 const { ensureBackupDir, readBackupFrequencyDays, writeBackupFrequencyDays, performBackupOnce, clearBackupSchedule, scheduleBackups } = require('./utils/backup');
 const { scheduleSyncs, readSyncFrequencyMinutes } = require('./utils/syncScheduler');
 const { pathIsAllowlisted, extractBearerToken, parseCookies, cookieName, issueAccessToken, issueRefreshToken, issuePublicToken, randomCsrfToken } = require('./utils/auth');
-const { getAccountId: getAccountIdHelper, scopedWhere, convertManifestUrlsToAddonIds, ensureUserInAccount, ensureGroupInAccount, assignUserToGroup } = require('./utils/helpers');
+const { getAccountId: getAccountIdHelper, scopedWhere, assignUserToGroup } = require('./utils/helpers');
 const { selectKeyForRequest, encrypt, decrypt, getAccountHmacKey: getAccountHmacKeyEnc, encryptIf, decryptIf, getDecryptedManifestUrl, decryptWithFallback } = require('./utils/encryption');
 
 // Optional quiet mode: suppress non-error console output when QUIET=true or DEBUG is not enabled

@@ -10,7 +10,7 @@ import { VersionChip, EntityList, InlineEdit } from './'
 import ResourceItem from './ResourceItem'
 import CatalogItem from './CatalogItem'
 import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query'
-import { addonsAPI } from '@/services/api'
+import { addonsAPI, groupsAPI } from '@/services/api'
 import toast from 'react-hot-toast'
 
 interface AddonDetailModalProps {
@@ -254,7 +254,7 @@ export default function AddonDetailModal({
 
 
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     
     const updateData: any = {}
@@ -263,7 +263,7 @@ export default function AddonDetailModal({
       updateData.name = editName.trim()
     }
     
-    updateData.groupIds = editGroupIds
+    // Groups are managed via groups API to unify behavior with GroupDetailModal
     if (Array.isArray(editResources)) updateData.resources = editResources
     
     // Convert catalogs to tuple format: [type, id, search]
@@ -282,7 +282,33 @@ export default function AddonDetailModal({
       })
     }
 
-    onSave(updateData)
+    try {
+      // Determine current associated groups from addonData (supports both shapes)
+      const currentIds: string[] = (() => {
+        try {
+          if (Array.isArray(currentAddon?.groupIds) && currentAddon.groupIds.length > 0) return currentAddon.groupIds
+          if (Array.isArray(currentAddon?.groups)) return currentAddon.groups.map((g: any) => g.id).filter(Boolean)
+        } catch {}
+        return []
+      })()
+
+      const toAdd = editGroupIds.filter(id => !currentIds.includes(id))
+      const toRemove = currentIds.filter(id => !editGroupIds.includes(id))
+
+      // Apply group changes using canonical endpoints
+      for (const gid of toAdd) {
+        await groupsAPI.addAddon(gid, currentAddon.id)
+      }
+      for (const gid of toRemove) {
+        await groupsAPI.removeAddon(gid, currentAddon.id)
+      }
+
+      // Update other addon fields (name/resources/catalogs)
+      await updateAddonMutation.mutateAsync({ addonId: currentAddon.id, addonData: updateData })
+      onSave(updateData)
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'Failed to save changes')
+    }
   }
 
   const handleGroupToggle = (groupId: string) => {
