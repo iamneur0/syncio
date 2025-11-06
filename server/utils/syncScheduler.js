@@ -1,7 +1,7 @@
 // Sync scheduler functions
 const fs = require('fs')
 const path = require('path')
-const { postDiscord } = require('./notify')
+const { sendSyncNotification } = require('./notify')
 
 // Persist sync schedule under data/sync so Docker mount ./data captures it
 const SYNC_DIR = path.join(process.cwd(), 'data', 'sync')
@@ -176,7 +176,7 @@ function scheduleSyncs(frequency, prisma, getAccountId, scopedWhere, decrypt, re
         accountReq.headers = { 'x-sync-mode': mode }
         accountReq.body = { unsafe }
 
-        const groups = await prisma.group.findMany({ where: scopedWhere(accountReq, {}), select: { id: true, name: true } })
+        const groups = await prisma.group.findMany({ where: scopedWhere(accountReq, {}), select: { id: true, name: true, userIds: true } })
         try {
           let msg = '🗓️ Scheduled '
           if (mode === 'advanced') msg += 'advanced '
@@ -189,8 +189,8 @@ function scheduleSyncs(frequency, prisma, getAccountId, scopedWhere, decrypt, re
         const { syncGroupUsers } = require('../routes/groups')
         let totalSynced = 0
         let totalFailed = 0
-        let reloadedGroupsCount = 0
         const syncedGroupIds = []
+        const allReloadDiffs = []
         
         for (const g of groups) {
           try {
@@ -199,7 +199,13 @@ function scheduleSyncs(frequency, prisma, getAccountId, scopedWhere, decrypt, re
               totalSynced += result.syncedUsers || 0
               totalFailed += result.failedUsers || 0
               syncedGroupIds.push(g.id)
-              if (mode === 'advanced') reloadedGroupsCount++
+              // Collect reload diffs if available
+              if (Array.isArray(result.reloadDiffs) && result.reloadDiffs.length > 0) {
+                if (!QUIET) console.log(`📊 Collected ${result.reloadDiffs.length} reload diff(s) from group ${g.id}`)
+                allReloadDiffs.push(...result.reloadDiffs)
+              } else if (mode === 'advanced' && (!result.reloadDiffs || result.reloadDiffs.length === 0)) {
+                if (!QUIET) console.log(`⚠️ No reload diffs found for group ${g.id} (advanced mode enabled)`)
+              }
             } else {
               totalFailed++
             }
@@ -208,18 +214,25 @@ function scheduleSyncs(frequency, prisma, getAccountId, scopedWhere, decrypt, re
             if (!QUIET) console.warn('Group sync failed:', e?.message)
           }
         }
-
-        // Count total addons from synced groups
-        let totalAddons = 0
-        if (syncedGroupIds.length > 0) {
-          try {
-            const groupAddons = await prisma.groupAddon.findMany({
-              where: { groupId: { in: syncedGroupIds } },
-              select: { addonId: true }
-            })
-            totalAddons = new Set(groupAddons.map(ga => ga.addonId)).size
-          } catch {}
+        
+        if (!QUIET && mode === 'advanced') {
+          console.log(`📊 Total reload diffs collected: ${allReloadDiffs.length}`)
         }
+
+        // Count total users across all attempted groups
+        let totalUsers = 0
+        const allUserIds = new Set()
+        for (const g of groups) {
+          if (g.userIds) {
+            try {
+              const userIds = Array.isArray(g.userIds) ? g.userIds : JSON.parse(g.userIds || '[]')
+              if (Array.isArray(userIds)) {
+                userIds.forEach(id => allUserIds.add(id))
+              }
+            } catch {}
+          }
+        }
+        totalUsers = allUserIds.size
 
         // Update lastRunAt
         try {
@@ -234,28 +247,17 @@ function scheduleSyncs(frequency, prisma, getAccountId, scopedWhere, decrypt, re
         const webhookUrl = syncCfg?.webhookUrl
         if (webhookUrl && groups.length > 0) {
           try {
-            const fields = []
-            fields.push(
-              { name: 'Groups', value: `\`\`\`${syncedGroupIds.length}\`\`\``, inline: true },
-              { name: 'Users', value: `\`\`\`${totalSynced}\`\`\``, inline: true },
-              { name: 'Addons', value: `\`\`\`${totalAddons}\`\`\``, inline: true }
-            )
-            
-            // Optional description for advanced mode
-            let description = undefined
-            if (mode === 'advanced') {
-              description = 'All Group Addons Reloaded'
+            if (!QUIET && mode === 'advanced') {
+              console.log(`📤 Sending webhook notification with ${allReloadDiffs.length} diff(s)`)
             }
-
-            const embed = {
-              title: '🗓️ Scheduled sync completed',
-              color: 0x808080,
-              fields: fields,
-              timestamp: new Date().toISOString()
-            }
-            if (description) embed.description = description
-            
-            await postDiscord(webhookUrl, null, { embeds: [embed], avatar_url: 'https://raw.githubusercontent.com/iamneur0/syncio/refs/heads/main/client/public/logo-black.png' })
+            await sendSyncNotification(webhookUrl, {
+              groupsCount: groups.length,
+              usersCount: totalUsers,
+              syncMode: mode,
+              diffs: allReloadDiffs,
+              sourceLabel: 'Auto-Sync',
+              sourceLogo: 'https://raw.githubusercontent.com/iamneur0/syncio/refs/heads/main/client/public/logo-black.png'
+            })
           } catch {}
         }
       } else {

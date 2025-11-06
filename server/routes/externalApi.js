@@ -2,7 +2,7 @@ const express = require('express')
 const { parsePresentedKey } = require('../utils/apiKey')
 const crypto = require('crypto')
 const { getServerKey, aesGcmDecrypt } = require('../utils/encryption')
-const { postDiscord } = require('../utils/notify')
+const { sendSyncNotification } = require('../utils/notify')
 
 module.exports = ({ prisma, getAccountId, scopedWhere, reloadDeps, syncGroupUsers }) => {
   const router = express.Router()
@@ -192,59 +192,16 @@ module.exports = ({ prisma, getAccountId, scopedWhere, reloadDeps, syncGroupUser
         if (webhookUrl && (groupIds.length > 0 || diffsByAddon.length > 0)) {
           const syncSource = req.headers['source'] || req.headers['x-sync-source'] || req.headers['x-app-name'] || null
           const sourceLogo = req.headers['source-logo'] || req.headers['x-source-logo'] || null
-          const sourceLabel = syncSource || 'API'
+          const sourceLabel = syncSource || null
           
-          const fields = []
-          
-          // Description line: since we reloaded addons before syncing, show this
-          const description = undefined
-
-          const embed = {
-            title: `Sync Succeeded on ${groups.length} Groups (${totalUsers} Users)`,
-            color: 0x808080,
-            description: description,
-            fields: fields,
-            timestamp: new Date().toISOString()
-          }
-          // Add diffs as one code block per addon (Resources / Catalogs)
-          if (Array.isArray(diffsByAddon) && diffsByAddon.length) {
-            for (const item of diffsByAddon) {
-              const addonName = item?.name || item?.id
-              const d = item?.diffs || {}
-              const sections = []
-              const resLines = []
-              const catLines = []
-              if (Array.isArray(d.addedResources)) d.addedResources.forEach(r => resLines.push(`+ ${r}`))
-              if (Array.isArray(d.removedResources)) d.removedResources.forEach(r => resLines.push(`- ${r}`))
-              if (Array.isArray(d.addedCatalogs)) d.addedCatalogs.forEach(label => catLines.push(`+ ${label}`))
-              if (Array.isArray(d.removedCatalogs)) d.removedCatalogs.forEach(label => catLines.push(`- ${label}`))
-              if (resLines.length) {
-                sections.push('Resources:')
-                sections.push(...resLines)
-              }
-              if (catLines.length) {
-                if (resLines.length) sections.push('')
-                sections.push('Catalogs:')
-                sections.push(...catLines)
-              }
-              if (sections.length) {
-                embed.fields.push({ name: addonName, value: '```' + sections.join('\n') + '```', inline: false })
-              }
-            }
-          }
-          
-          // Add author block if source/logo provided
-          if (sourceLabel !== 'API' || sourceLogo) {
-            embed.author = {
-              name: sourceLabel
-            }
-            if (sourceLogo) {
-              embed.author.icon_url = sourceLogo
-            }
-          }
-          
-          // Always use Syncio logo as avatar; author icon (when provided) comes from Source-Logo
-          await postDiscord(webhookUrl, null, { embeds: [embed], avatar_url: 'https://raw.githubusercontent.com/iamneur0/syncio/refs/heads/main/client/public/logo-black.png' })
+          await sendSyncNotification(webhookUrl, {
+            groupsCount: groups.length,
+            usersCount: totalUsers,
+            syncMode: 'normal', // addons/sync always uses normal mode
+            diffs: diffsByAddon,
+            sourceLabel: sourceLabel,
+            sourceLogo: sourceLogo
+          })
         }
       } catch {}
 
@@ -324,63 +281,20 @@ module.exports = ({ prisma, getAccountId, scopedWhere, reloadDeps, syncGroupUser
         let syncCfg = account?.sync
         if (syncCfg && typeof syncCfg === 'string') { try { syncCfg = JSON.parse(syncCfg) } catch { syncCfg = null } }
         const webhookUrl = syncCfg?.webhookUrl
-        const unsafe = (syncCfg && typeof syncCfg.safe === 'boolean') ? !syncCfg.safe : !!(syncCfg && syncCfg.unsafe)
         
         if (webhookUrl && groups.length > 0) {
           const syncSource = req.headers['source'] || req.headers['x-sync-source'] || req.headers['x-app-name'] || null
           const sourceLogo = req.headers['source-logo'] || req.headers['x-source-logo'] || null
-          const sourceLabel = syncSource || 'API'
+          const sourceLabel = syncSource || null
           
-          const fields = []
-          
-          // Optional description line for advanced mode
-          const description = syncMode === 'advanced' ? 'All Group Addons Reloaded' : undefined
-
-          const embed = {
-            title: `Sync Succeeded on ${groups.length} Groups (${totalUsers} Users)`,
-            color: 0x808080,
-            fields: fields,
-            timestamp: new Date().toISOString()
-          }
-          if (description) embed.description = description
-          if (syncMode === 'advanced' && allReloadDiffs.length) {
-            for (const item of allReloadDiffs) {
-              const addonName = item?.name || item?.id
-              const d = item?.diffs || {}
-              const sections = []
-              const resLines = []
-              const catLines = []
-              if (Array.isArray(d.addedResources)) d.addedResources.forEach(r => resLines.push(`+ ${r}`))
-              if (Array.isArray(d.removedResources)) d.removedResources.forEach(r => resLines.push(`- ${r}`))
-              if (Array.isArray(d.addedCatalogs)) d.addedCatalogs.forEach(label => catLines.push(`+ ${label}`))
-              if (Array.isArray(d.removedCatalogs)) d.removedCatalogs.forEach(label => catLines.push(`- ${label}`))
-              if (resLines.length) {
-                sections.push('Resources:')
-                sections.push(...resLines)
-              }
-              if (catLines.length) {
-                if (resLines.length) sections.push('')
-                sections.push('Catalogs:')
-                sections.push(...catLines)
-              }
-              if (sections.length) {
-                embed.fields.push({ name: addonName, value: '```' + sections.join('\n') + '```', inline: false })
-              }
-            }
-          }
-          
-          // Add author block if source/logo provided
-          if (sourceLabel !== 'API' || sourceLogo) {
-            embed.author = {
-              name: sourceLabel
-            }
-            if (sourceLogo) {
-              embed.author.icon_url = sourceLogo
-            }
-          }
-          
-          // Always use Syncio logo as avatar; author icon (when provided) comes from Source-Logo
-          await postDiscord(webhookUrl, null, { embeds: [embed], avatar_url: 'https://raw.githubusercontent.com/iamneur0/syncio/refs/heads/main/client/public/logo-black.png' })
+          await sendSyncNotification(webhookUrl, {
+            groupsCount: groups.length,
+            usersCount: totalUsers,
+            syncMode: syncMode,
+            diffs: allReloadDiffs,
+            sourceLabel: sourceLabel,
+            sourceLogo: sourceLogo
+          })
         }
       } catch {}
       
