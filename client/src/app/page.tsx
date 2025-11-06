@@ -18,7 +18,7 @@ import AddonsPage from '@/components/pages/AddonsPage'
 import UsersPage from '@/components/pages/UsersPage'
 import GroupsPage from '@/components/pages/GroupsPage'
 import SettingsPage from '@/components/pages/SettingsPage'
-import ChangelogPage from '@/components/pages/ChangelogPage'
+import ChangelogPage, { LATEST_VERSION } from '@/components/pages/ChangelogPage'
 import TasksPage from '@/components/pages/TasksPage'
 import AccountMenuButton from '@/components/auth/AccountMenuButton'
 
@@ -36,6 +36,8 @@ export default function HomePage() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const { isDark, isMono } = useTheme()
+  const appVersion = (process.env.NEXT_PUBLIC_APP_VERSION as string) || 'dev'
+  const isUpToDate = appVersion === LATEST_VERSION || appVersion === 'dev'
 
   const activateTab = (id: string, closeSidebar?: boolean) => {
     setActiveTab(id)
@@ -102,44 +104,59 @@ export default function HomePage() {
             </button>
           </div>
           {/* Reuse desktop navigation with mobile styling */}
-          <nav className="flex-1 px-3 py-4 space-y-2">
-            {navigation.map((item) => {
-              const isActive = activeTab === item.id
-              return (
-                <button
-                  key={item.id}
-                  onClick={() => activateTab(item.id, true)}
-                  className={`w-full flex items-center py-5 pl-4 pr-6 text-left rounded transition-all duration-200 relative focus:outline-none focus:ring-0 focus:border-0 active:outline-none active:ring-0 active:border-0 ${
-                    isActive
-                      ? (isDark || isMono)
-                        ? 'text-white font-bold'
-                        : 'text-gray-900 font-bold'
-                      : isDark 
-                        ? 'text-gray-300 hover:bg-gray-600 hover:text-white font-medium'
-                        : 'text-gray-700 hover:bg-gray-100 hover:text-gray-900 font-medium'
-                  }`}
-                >
-                  <div className="flex items-center justify-center w-8 h-8 flex-shrink-0 absolute left-1 top-1/2 transform -translate-y-1/2">
-                    <item.icon className={`w-5 h-5 transition-all duration-200 ${
-                      isActive ? 'fill-current' : ''
-                    }`} />
-                  </div>
-                  <span className={`absolute left-11 top-1/2 transform -translate-y-1/2 text-sm transition-all duration-200 ${
-                    isActive ? 'font-bold' : 'font-medium'
-                  }`}>{item.name}</span>
-                </button>
-              )})}
-          </nav>
+        <nav className="flex-1 px-3 py-4 space-y-2">
+          {navigation.map((item) => {
+            const isActive = activeTab === item.id
+            return (
+              <button
+                key={item.id}
+                onClick={() => activateTab(item.id, true)}
+                className={`w-full flex items-center py-5 pl-4 pr-6 text-left rounded transition-all duration-200 relative focus:outline-none focus:ring-0 focus:border-0 active:outline-none active:ring-0 active:border-0 ${
+                  isActive
+                    ? (isDark || isMono)
+                      ? 'text-white font-bold'
+                      : 'text-gray-900 font-bold'
+                    : isDark 
+                      ? 'text-gray-300 hover:bg-gray-600 hover:text-white font-medium'
+                      : 'text-gray-700 hover:bg-gray-100 hover:text-gray-900 font-medium'
+                }`}
+              >
+                <div className="flex items-center justify-center w-8 h-8 flex-shrink-0 absolute left-1 top-1/2 transform -translate-y-1/2">
+                  <item.icon className={`w-5 h-5 transition-all duration-200 ${
+                    isActive ? 'fill-current' : ''
+                  }`} />
+                </div>
+                <span className={`absolute left-11 top-1/2 transform -translate-y-1/2 text-sm transition-all duration-200 ${
+                  isActive ? 'font-bold' : 'font-medium'
+                }`}>{item.name}</span>
+              </button>
+            )})}
+        </nav>
+        {/* Version badge */}
+        <div className="px-3 pb-4">
+          <button
+            onClick={() => activateTab('changelog', true)}
+            className={`text-xs font-medium w-full py-2 hover:opacity-80 transition-opacity flex items-center justify-center gap-1.5 ${
+              isDark || isMono ? 'text-gray-400' : 'text-gray-500'
+            }`}
+            title={isUpToDate ? 'Up to date' : 'Update available'}
+          >
+            {appVersion !== 'dev' && (
+              <div className={`w-2 h-2 rounded-full ${isUpToDate ? 'bg-green-500' : 'bg-red-500'}`} />
+            )}
+            v{appVersion}
+          </button>
+        </div>
         </div>
       </div>
 
       {/* Desktop sidebar */}
-      <div className={`hidden lg:flex lg:flex-col transition-all duration-300 ${sidebarCollapsed ? 'lg:w-16' : 'lg:w-64'} ${
+      <div className={`hidden lg:flex lg:flex-col lg:h-screen lg:sticky lg:top-0 transition-all duration-300 ${sidebarCollapsed ? 'lg:w-16' : 'lg:w-64'} ${
         isDark ? 'lg:bg-gray-800 lg:border-gray-700' : 'lg:bg-white lg:border-gray-200'
-      } ${isMono ? '' : 'lg:border-r'}`}>
+      } ${isMono ? '' : (!sidebarCollapsed ? 'lg:border-r' : '')}`}>
         <button
           onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-          className={`w-full flex items-center justify-center h-16 px-4 ${
+          className={`w-full flex items-center justify-center h-16 px-4 flex-shrink-0 ${
             isDark ? 'hover:bg-gray-700' : 'hover:bg-gray-100'
           } transition-colors relative`}
           title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
@@ -158,7 +175,7 @@ export default function HomePage() {
             isDark ? 'text-white' : 'text-gray-900'
           }`}>Syncio</h1>}
         </button>
-        <nav className="flex-1 px-3 py-4 space-y-2">
+        <nav className="flex-1 px-3 py-4 space-y-2 overflow-y-auto scrollbar-hide">
           {navigation.map((item) => {
             const isActive = activeTab === item.id
             return (
@@ -187,6 +204,32 @@ export default function HomePage() {
               </button>
             )})}
         </nav>
+        {/* Version badge */}
+        <div className={`${sidebarCollapsed ? 'px-1' : 'px-3'} pb-4 flex-shrink-0`}>
+          <button
+            onClick={() => activateTab('changelog')}
+            className={`text-xs font-medium w-full ${sidebarCollapsed ? 'py-1' : 'py-2'} hover:opacity-80 transition-opacity flex items-center justify-center ${
+              sidebarCollapsed ? 'flex-col gap-1' : 'gap-1.5'
+            } ${isDark || isMono ? 'text-gray-400' : 'text-gray-500'}`}
+            title={isUpToDate ? 'Up to date' : 'Update available'}
+          >
+            {sidebarCollapsed ? (
+              <>
+                {appVersion !== 'dev' && (
+                  <div className={`w-2 h-2 rounded-full flex-shrink-0 ${isUpToDate ? 'bg-green-500' : 'bg-red-500'}`} />
+                )}
+                <span className="leading-tight break-all text-center">v{appVersion}</span>
+              </>
+            ) : (
+              <>
+                {appVersion !== 'dev' && (
+                  <div className={`w-2 h-2 rounded-full flex-shrink-0 ${isUpToDate ? 'bg-green-500' : 'bg-red-500'}`} />
+                )}
+                <span>v{appVersion}</span>
+              </>
+            )}
+          </button>
+        </div>
       </div>
 
       {/* Main content */}

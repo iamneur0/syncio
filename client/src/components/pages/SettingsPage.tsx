@@ -31,6 +31,7 @@ export default function SettingsPage() {
   const [currentApiKey, setCurrentApiKey] = React.useState<string | null>(null)
   const [webhookUrl, setWebhookUrl] = React.useState<string>('')
   const autoGenAttemptedRef = React.useRef<boolean>(false)
+  const [revealedFields, setRevealedFields] = React.useState<Set<string>>(new Set())
   
   // Account management confirmation modals
   const [confirmOpen, setConfirmOpen] = React.useState(false)
@@ -674,7 +675,7 @@ export default function SettingsPage() {
         <div className="mt-4 flex items-center justify-between">
           <div>
             <div className={`font-medium ${isDark ? 'text-white' : 'text-gray-900'}`}>Hide sensitive information</div>
-            <div className={`${isDark ? 'text-gray-400' : 'text-gray-500'} text-sm`}>Mask username and email in user details.</div>
+            <div className={`${isDark ? 'text-gray-400' : 'text-gray-500'} text-sm`}>Mask username, email, webhook URL, and API key.</div>
           </div>
           <button
             onClick={toggleHideSensitive}
@@ -947,20 +948,40 @@ export default function SettingsPage() {
           <label className={`block text-sm font-medium mb-2 ${isDark ? 'text-white' : 'text-gray-900'}`}>
             Webhook URL
           </label>
-          <input
-            type="text"
-            value={webhookUrl}
-            onChange={(e) => setWebhookUrl(e.target.value)}
-            onBlur={() => {
-              api.put('/settings/account-sync', { webhookUrl: webhookUrl.trim() || undefined })
-                .then(() => toast.success('Webhook URL updated'))
-                .catch(() => toast.error('Failed to update webhook URL'))
-            }}
-            placeholder="https://discord.com/api/webhooks/..."
-            className={`w-full border rounded px-3 py-2 ${
-              isDark ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' : 'bg-white border-gray-300 text-gray-900'
-            }`}
-          />
+          <div className="relative">
+            <input
+              type={hideSensitive && !revealedFields.has('webhook') ? "password" : "text"}
+              value={hideSensitive && !revealedFields.has('webhook') ? (webhookUrl ? '••••••••••••••••••••••••••••••••' : '') : webhookUrl}
+              onChange={(e) => {
+                if (!hideSensitive || revealedFields.has('webhook')) {
+                  setWebhookUrl(e.target.value)
+                }
+              }}
+              onClick={() => {
+                if (hideSensitive && !revealedFields.has('webhook')) {
+                  setRevealedFields(prev => new Set(prev).add('webhook'))
+                }
+              }}
+              onBlur={() => {
+                if (webhookUrl && (!hideSensitive || revealedFields.has('webhook'))) {
+                  api.put('/settings/account-sync', { webhookUrl: webhookUrl.trim() || undefined })
+                    .then(() => toast.success('Webhook URL updated'))
+                    .catch(() => toast.error('Failed to update webhook URL'))
+                }
+                if (hideSensitive) {
+                  setRevealedFields(prev => {
+                    const next = new Set(prev)
+                    next.delete('webhook')
+                    return next
+                  })
+                }
+              }}
+              placeholder="https://discord.com/api/webhooks/..."
+              className={`w-full border rounded px-3 py-2 ${
+                isDark ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' : 'bg-white border-gray-300 text-gray-900'
+              } ${hideSensitive && !revealedFields.has('webhook') ? 'blur-sm' : ''}`}
+            />
+          </div>
         </div>
       </div>
 
@@ -973,21 +994,41 @@ export default function SettingsPage() {
         <div className="mt-4 flex gap-2 items-center">
           <div className="flex-1">
             <input
-              type="text"
-              value={currentApiKey || (apiKeyStatus.hasKey ? 'Loading...' : 'Generating...')}
+              type={hideSensitive && !revealedFields.has('apikey') ? "password" : "text"}
+              value={hideSensitive && !revealedFields.has('apikey')
+                ? (currentApiKey ? '••••••••••••••••••••••••••••••••' : (apiKeyStatus.hasKey ? 'Loading...' : 'Generating...'))
+                : (currentApiKey || (apiKeyStatus.hasKey ? 'Loading...' : 'Generating...'))
+              }
               readOnly
               onClick={() => {
-                if (currentApiKey) {
+                if (hideSensitive && !revealedFields.has('apikey')) {
+                  setRevealedFields(prev => new Set(prev).add('apikey'))
+                } else if (!hideSensitive && currentApiKey) {
+                  navigator.clipboard.writeText(currentApiKey)
+                  toast.success('API key copied to clipboard')
+                } else if (hideSensitive && revealedFields.has('apikey') && currentApiKey) {
                   navigator.clipboard.writeText(currentApiKey)
                   toast.success('API key copied to clipboard')
                 } else {
                   toast.error('API key not available. Click rotate to generate a new one.')
                 }
               }}
+              onBlur={() => {
+                if (hideSensitive && revealedFields.has('apikey')) {
+                  setRevealedFields(prev => {
+                    const next = new Set(prev)
+                    next.delete('apikey')
+                    return next
+                  })
+                }
+              }}
               className={`w-full border rounded px-3 py-2 cursor-pointer ${
                 isDark ? 'bg-gray-700 border-gray-600 text-white' : 'bg-gray-50 border-gray-300 text-gray-900'
-              }`}
-              title={currentApiKey ? 'Click to copy API key' : 'API key only shown once after generation. Click rotate to generate a new one.'}
+              } ${hideSensitive && !revealedFields.has('apikey') ? 'blur-sm' : ''}`}
+              title={hideSensitive && !revealedFields.has('apikey')
+                ? 'Click to reveal API key'
+                : (currentApiKey ? 'Click to copy API key' : 'API key only shown once after generation. Click rotate to generate a new one.')
+              }
             />
           </div>
           <button
@@ -1014,7 +1055,24 @@ export default function SettingsPage() {
           </button>
         </div>
         <p className={`text-xs mt-2 ${isDark ? 'text-gray-500' : 'text-gray-500'}`}>
-          Use this key in the Authorization header: <code className="px-1 py-0.5 bg-gray-100 dark:bg-gray-700 rounded">Bearer {currentApiKey || '••••••••••••••••••••••••••••••••'}</code>
+          Use this key in the Authorization header:{' '}
+          <code 
+            onClick={() => {
+              if (currentApiKey) {
+                const fullHeader = `Bearer ${currentApiKey}`
+                navigator.clipboard.writeText(fullHeader)
+                toast.success('Authorization header copied to clipboard')
+              } else {
+                toast.error('API key not available')
+              }
+            }}
+            className={`px-1 py-0.5 bg-gray-100 dark:bg-gray-700 rounded cursor-pointer hover:opacity-80 transition-opacity ${
+              hideSensitive && !revealedFields.has('apikey') ? 'blur-sm' : ''
+            }`}
+            title={currentApiKey ? 'Click to copy "Bearer {key}"' : 'API key not available'}
+          >
+            Bearer {hideSensitive && !revealedFields.has('apikey') ? '••••••••••••••••••••••••••••••••' : (currentApiKey || '••••••••••••••••••••••••••••••••')}
+          </code>
         </p>
       </div>
 
@@ -1063,16 +1121,6 @@ export default function SettingsPage() {
         onConfirm={() => { setConfirmOpen(false); confirmConfig.onConfirm?.() }}
       />
       
-      {/* Version badge */}
-      <div className="fixed bottom-3 right-3 text-xs px-2 py-1 rounded-md opacity-80 select-none pointer-events-none"
-        style={{
-          backgroundColor: isDark ? 'rgba(31,41,55,0.8)' : 'rgba(243,244,246,0.9)',
-          color: isDark ? '#d1d5db' : '#111827',
-          border: isDark ? '1px solid #374151' : '1px solid #e5e7eb'
-        }}
-      >
-        Syncio v{appVersion}
-      </div>
     </div>
   )
 }
