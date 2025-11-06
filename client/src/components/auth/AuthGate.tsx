@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useTheme } from '@/contexts/ThemeContext'
 import api, { publicAuthAPI } from '@/services/api'
+import ConfirmDialog from '@/components/common/ConfirmDialog'
 import { Eye, EyeOff, LogIn, User, Lock } from 'lucide-react'
 
 export default function AuthGate({ children }: { children: React.ReactNode }) {
@@ -69,6 +70,7 @@ function LoginForm({ setAuthed }: { setAuthed: (authed: boolean) => void }) {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState('')
   const [isRegisterMode, setIsRegisterMode] = useState(false)
+  const [showUuidNotice, setShowUuidNotice] = useState(false)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -83,21 +85,34 @@ function LoginForm({ setAuthed }: { setAuthed: (authed: boolean) => void }) {
     try {
       let response
       if (isRegisterMode) {
-        response = await publicAuthAPI.register({ uuid: uuid.trim(), password })
+        // Do NOT register yet; show UUID save dialog first
+        setShowUuidNotice(true)
+        setIsLoading(false)
+        return
       } else {
         response = await publicAuthAPI.login({ uuid: uuid.trim(), password })
       }
       
       if (response.message) {
-        // Trigger auth change event
-        window.dispatchEvent(new CustomEvent('sfm:auth:changed', { detail: { authed: true } }))
-        // Also update local state immediately
-        setAuthed(true)
+        if (isRegisterMode) {
+          // Registration deferred; handled on confirm
+        } else {
+          // Trigger auth change event
+          window.dispatchEvent(new CustomEvent('sfm:auth:changed', { detail: { authed: true } }))
+          // Also update local state immediately
+          setAuthed(true)
+        }
       } else {
         setError(response.message || `${isRegisterMode ? 'Registration' : 'Login'} failed`)
       }
     } catch (err: any) {
-      setError(err.message || `${isRegisterMode ? 'Registration' : 'Login'} failed`)
+      const status = err?.response?.status
+      const apiMsg = err?.response?.data?.message
+      if (!isRegisterMode && status === 401) {
+        setError('Wrong credentials')
+      } else {
+        setError(apiMsg || err?.message || `${isRegisterMode ? 'Registration' : 'Login'} failed`)
+      }
     } finally {
       setIsLoading(false)
     }
@@ -135,7 +150,7 @@ function LoginForm({ setAuthed }: { setAuthed: (authed: boolean) => void }) {
         </div>
 
         {/* Login/Register Form */}
-        <form onSubmit={handleSubmit} className="space-y-6">
+        <form onSubmit={handleSubmit} className="space-y-6" autoComplete="on">
           {/* UUID Field */}
           <div>
             <label htmlFor="uuid" className={`block text-sm font-medium ${
@@ -151,11 +166,12 @@ function LoginForm({ setAuthed }: { setAuthed: (authed: boolean) => void }) {
               </div>
               <input
                 id="uuid"
-                name="uuid"
+                name="username"
                 type="text"
                 required
                 value={uuid}
                 onChange={(e) => setUuid(e.target.value)}
+                autoComplete="username"
                 className={`block w-full pl-10 pr-3 py-2 border rounded-md shadow-sm placeholder-gray-400 focus:outline-none sm:text-sm ${
                   isDark 
                     ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
@@ -186,6 +202,7 @@ function LoginForm({ setAuthed }: { setAuthed: (authed: boolean) => void }) {
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
+                autoComplete={isRegisterMode ? 'new-password' : 'current-password'}
                 className={`block w-full pl-10 pr-10 py-2 border rounded-md shadow-sm placeholder-gray-400 focus:outline-none sm:text-sm ${
                   isDark 
                     ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
@@ -291,6 +308,53 @@ function LoginForm({ setAuthed }: { setAuthed: (authed: boolean) => void }) {
           </p>
         </div>
       </div>
+
+      {/* UUID Save Notice */}
+      <ConfirmDialog
+        open={showUuidNotice}
+        title="Save your UUID"
+        body={(
+          <div className={`${isMono ? 'text-white' : (isDark ? 'text-gray-200' : 'text-gray-800')}`}>
+            <p>Please save your UUID now, it cannot be retrieved later.</p>
+            <div className="mt-3">
+              <code
+                onClick={() => { try { navigator.clipboard.writeText(uuid) } catch {} }}
+                className={`px-1 py-0.5 bg-gray-100 dark:bg-gray-700 rounded cursor-pointer hover:opacity-80 transition-opacity`}
+                title="Click to copy UUID"
+              >
+                {uuid}
+              </code>
+            </div>
+          </div>
+        )}
+        confirmText="I saved it"
+        cancelText="Copy UUID"
+        isDanger={false}
+        onCancel={(reason) => {
+          if (reason === 'cancel') {
+            try { navigator.clipboard.writeText(uuid) } catch {}
+            // Keep dialog open after copying
+            return
+          }
+          // Close on escape/backdrop
+          setShowUuidNotice(false)
+        }}
+        onConfirm={async () => {
+          setShowUuidNotice(false)
+          // Complete registration after acknowledgement
+          try {
+            const response = await publicAuthAPI.register({ uuid: uuid.trim(), password })
+            if (response?.message) {
+              window.dispatchEvent(new CustomEvent('sfm:auth:changed', { detail: { authed: true } }))
+              setAuthed(true)
+            } else {
+              setError(response?.message || 'Registration failed')
+            }
+          } catch (err: any) {
+            setError(err?.response?.data?.message || err?.message || 'Registration failed')
+          }
+        }}
+      />
     </div>
   )
 }

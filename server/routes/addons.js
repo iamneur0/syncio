@@ -50,6 +50,18 @@ async function reloadAddon(prisma, getAccountId, addonId, req, { filterManifestB
     throw new Error('Failed to resolve addon URL')
   }
 
+  // Skip reloading for local development addons
+  if (transportUrl === 'http://127.0.0.1:11470/local-addon/manifest.json') {
+    if (!silent) {
+      console.log(`⏭️  Skipping reload for local addon URL: ${transportUrl}`)
+    }
+    return {
+      skipped: true,
+      message: 'Skipped local addon reload',
+      diffs: { addedResources: [], removedResources: [], addedCatalogs: [], removedCatalogs: [] }
+    }
+  }
+
   // Decrypted transport URL resolved
 
   // Fetch the latest manifest
