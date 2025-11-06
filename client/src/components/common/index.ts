@@ -1,5 +1,4 @@
 // Reusable components exports
-export { default as BaseModal } from './BaseModal'
 
 // UI Enhancement Components
 export { default as LoadingSkeleton } from './LoadingSkeleton'

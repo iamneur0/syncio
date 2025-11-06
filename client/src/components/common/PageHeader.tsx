@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { Search, Plus, RefreshCw, Trash2, Grip, List, Square, CheckSquare } from 'lucide-react'
 import { useTheme } from '@/contexts/ThemeContext'
 import { getTextClasses } from '@/utils/themeUtils'
-import { SearchInput } from './Input'
+// Inline search input (replaces deprecated ./Input component)
 import { IconButton, ToggleButton } from './MicroUI'
 import AccountMenuButton from '../auth/AccountMenuButton'
 
@@ -95,13 +95,28 @@ export default function PageHeader({
         
         {/* Search Bar */}
         <div className="flex-1">
-          <SearchInput
-            placeholder={searchPlaceholder}
-            value={searchTerm}
-            onChange={(e) => onSearchChange(e.target.value)}
-            showClear={!!searchTerm}
-            onClear={() => onSearchChange('')}
-          />
+          <div className="relative">
+            <div className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500">
+              <Search className="w-4 h-4" />
+            </div>
+            <input
+              type="text"
+              placeholder={searchPlaceholder}
+              value={searchTerm}
+              onChange={(e) => onSearchChange(e.target.value)}
+              className="w-full pl-9 pr-10 py-2 rounded-lg border bg-white text-gray-900 placeholder-gray-500 border-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-300 dark:bg-gray-700 dark:text-white dark:placeholder-gray-400 dark:border-gray-600 dark:focus:ring-gray-600"
+            />
+            {searchTerm && (
+              <button
+                type="button"
+                onClick={() => onSearchChange('')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-xs px-2 py-1 rounded bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-600 dark:text-white dark:hover:bg-gray-500"
+                title="Clear"
+              >
+                Clear
+              </button>
+            )}
+          </div>
         </div>
         
         {/* Action Buttons */}

@@ -7,17 +7,19 @@ interface ConfirmDialogProps {
   open: boolean
   title?: string
   description?: string
+  body?: React.ReactNode
   confirmText?: string
   cancelText?: string
   isDanger?: boolean
   onConfirm: () => void
-  onCancel: () => void
+  onCancel: (reason?: 'cancel' | 'escape' | 'backdrop') => void
 }
 
 export default function ConfirmDialog({
   open,
   title = 'Are you sure?',
   description = 'This action cannot be undone.',
+  body,
   confirmText = 'Yes',
   cancelText = 'Cancel',
   isDanger = true,
@@ -37,7 +39,7 @@ export default function ConfirmDialog({
       if (e.key === 'Escape') {
         e.stopPropagation()
         e.preventDefault()
-        onCancel()
+        onCancel('escape')
       }
     }
     window.addEventListener('keydown', onKey, { capture: true })
@@ -60,7 +62,7 @@ export default function ConfirmDialog({
 
   return createPortal(
     <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/60" onClick={onCancel} />
+      <div className="absolute inset-0 bg-black/60" onClick={() => onCancel('backdrop')} />
       <div
         role="dialog"
         aria-modal="true"
@@ -78,17 +80,21 @@ export default function ConfirmDialog({
           <h3 id="confirm-title" className={`text-base sm:text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>{title}</h3>
         </div>
 
-        {hasDescription && (
-          <div className="px-6 py-4">
-            <p className={`text-sm ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>{description}</p>
-          </div>
-        )}
+        <div className="px-6 py-4">
+          {body ? (
+            body
+          ) : (
+            hasDescription && (
+              <p className={`text-sm ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>{description}</p>
+            )
+          )}
+        </div>
 
         <div className={`px-6 py-4`}>
           <div className="flex flex-col sm:flex-row sm:justify-end gap-2 sm:gap-3">
             <button
               autoFocus
-              onClick={onCancel}
+              onClick={() => onCancel('cancel')}
               className={`px-3 py-2 text-sm rounded-lg border-0 focus:outline-none focus:ring-0 ${
                 isDark 
                   ? 'text-gray-300 hover:text-white hover:bg-gray-700' 
