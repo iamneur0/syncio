@@ -11,7 +11,15 @@ async function validateStremioAuthKey(authKey) {
     if (client && typeof client.request === 'function') {
       const userRes = await client.request('getUser')
       if (userRes && userRes.email) {
-        return { user: userRes }
+        let addons = []
+        try {
+          const addonsRes = await client.request('addonCollectionGet', {})
+          const rawAddons = addonsRes?.addons ?? addonsRes ?? []
+          addons = Array.isArray(rawAddons) ? rawAddons : Object.values(rawAddons || {})
+        } catch {
+          addons = []
+        }
+        return { user: userRes, addons }
       }
       const err = new Error('Missing user email')
       err.code = 1
@@ -45,7 +53,7 @@ async function validateStremioAuthKey(authKey) {
     throw err
   }
   if (data && data.user && data.user.email) {
-    return { user: data.user }
+    return { user: data.user, addons: [] }
   }
   const err = new Error('Could not validate auth key (no user email)')
   err.code = 1

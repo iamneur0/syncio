@@ -1,22 +1,11 @@
 const express = require('express');
 const { StremioAPIStore, StremioAPIClient } = require('stremio-api-client');
 const { handleStremioError, handleDatabaseError, StremioAPIUtils } = require('../utils/handlers');
+const { validateStremioAuthKey } = require('../utils/stremio');
 const { validateStremioCredentials, sanitizeUrl } = require('../utils/helpers');
 
 module.exports = ({ prisma, getAccountId, encrypt, decrypt, assignUserToGroup, AUTH_ENABLED }) => {
   const router = express.Router();
-
-  // Helper function to validate Stremio auth key
-  async function validateStremioAuthKey(authKey) {
-    try {
-      const client = new StremioAPIClient({ authKey });
-      const user = await client.getUser();
-      const addons = await client.getAddonCollection();
-      return { user, addons };
-    } catch (error) {
-      throw error;
-    }
-  }
 
   // Validate Stremio credentials
   router.post('/validate', async (req, res) => {
