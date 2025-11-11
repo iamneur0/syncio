@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
-import { useTheme } from '@/contexts/ThemeContext'
-import { getColorBgClass, getColorHexValue } from '@/utils/colorMapping'
+import { getColorBgClass, getColorTextClass } from '@/utils/colorMapping'
 import { addonsAPI } from '@/services/api'
 import { VersionChip } from '@/components/ui'
 
@@ -27,7 +26,6 @@ export default function AddonAddModal({
   isCreating,
   groups = []
 }: AddonAddModalProps) {
-  const { isDark, isMono } = useTheme()
   const [mounted, setMounted] = useState(false)
   
   const [addonName, setAddonName] = useState('')
@@ -197,21 +195,19 @@ export default function AddonAddModal({
         }
       }}
     >
-      <div className={`rounded-lg max-w-md w-full p-6 ${isDark ? 'bg-gray-800' : 'bg-white'}`}>
+      <div className={`rounded-lg max-w-md w-full p-6 card`}>
         <div className="flex items-center justify-between mb-4">
-          <h2 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>Add New Addon</h2>
+          <h2 className={`text-lg font-semibold`}>Add New Addon</h2>
           <button
             onClick={handleClose}
-            className={`w-8 h-8 flex items-center justify-center rounded transition-colors border-0 ${
-              isDark ? 'text-gray-400 hover:text-gray-300 hover:bg-gray-700' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
-            }`}
+            className={`w-8 h-8 flex items-center justify-center rounded transition-colors border-0 color-hover`}
           >
             <X className="w-4 h-4" />
           </button>
         </div>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
+            <label className={`block text-sm font-medium mb-1`}>
               Addon Name *
             </label>
             <div className="flex items-center gap-2">
@@ -221,26 +217,22 @@ export default function AddonAddModal({
                 onChange={(e) => setAddonName(e.target.value)}
                 placeholder="Cinemeta"
                 required
-                className={`w-full px-3 py-2 border rounded-lg focus:outline-none ${
+                className={`w-full px-3 py-2 border rounded-lg focus:outline-none input ${
                   nameError 
-                    ? 'border-red-500' 
+                    ? 'color-border' 
                     : ''
-                } ${
-                  isDark 
-                    ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
-                    : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
                 }`}
               />
               {versionTag}
             </div>
             {nameError && (
-              <p className="text-xs mt-1 text-red-500">
+              <p className="text-xs mt-1 color-text">
                 {nameError}
               </p>
             )}
           </div>
           <div>
-            <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
+            <label className={`block text-sm font-medium mb-1`}>
               Addon URL *
             </label>
             <input
@@ -249,19 +241,15 @@ export default function AddonAddModal({
               onChange={(e) => setAddonUrl(e.target.value)}
               placeholder="https://v3-cinemeta.strem.io/manifest.json"
               required
-              className={`w-full px-3 py-2 border rounded-lg focus:outline-none ${
-                isDark 
-                  ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
-                  : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
-              }`}
+              className={`w-full px-3 py-2 border rounded-lg focus:outline-none input`}
             />
-            <p className={`text-xs mt-1 ${urlError ? 'text-red-500' : (isDark ? 'text-gray-400' : 'text-gray-500')}`}>
+            <p className={`text-xs mt-1 ${urlError ? 'color-text' : 'color-text-secondary'}`}>
               {urlError ? urlError : 'Enter the full URL to the Stremio addon manifest'}
             </p>
           </div>
           {/* Groups selection - match AddonDetailModal style */}
           <div>
-            <label className={`block text-sm font-medium mb-3 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
+            <label className={`block text-sm font-medium mb-3`}>
               Assign to groups (optional)
             </label>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -270,11 +258,9 @@ export default function AddonAddModal({
                 return (
                   <div 
                     key={group.id}
-                    className={`flex items-center justify-between p-3 rounded-lg cursor-pointer ${
-                      isDark ? 'bg-gray-600 hover:bg-gray-550' : 'bg-white hover:bg-gray-50'
-                    } border ${
+                    className={`flex items-center justify-between p-3 rounded-lg cursor-pointer card color-hover border ${
                       active
-                        ? (isMono ? 'ring-2 ring-white/50 border-white/40' : 'ring-2 ring-gray-400 border-gray-400')
+                        ? 'selection-ring'
                         : 'border-transparent'
                     }`}
                     onClick={() => {
@@ -284,16 +270,15 @@ export default function AddonAddModal({
                     <div className="flex items-center flex-1 min-w-0">
                       <div 
                         className={`w-8 h-8 rounded-full flex items-center justify-center mr-3 flex-shrink-0 ${
-                          getColorBgClass(group?.colorIndex || 0, isMono ? 'mono' : isDark ? 'dark' : 'light')
-                        }`}
-                        style={{ backgroundColor: getColorHexValue(group?.colorIndex || 0, isMono ? 'mono' : isDark ? 'dark' : 'light') }}
+                          getColorBgClass(group?.colorIndex || 0)
+                        } ${getColorTextClass(group?.colorIndex || 0)}`}
                       >
-                        <span className="text-white text-sm font-semibold">
+                        <span className={`${getColorTextClass(group?.colorIndex || 0)} text-sm font-semibold`}>
                           {group.name ? group.name.charAt(0).toUpperCase() : 'G'}
                         </span>
                       </div>
                       <div className="min-w-0 flex-1">
-                        <h4 className={`font-medium text-sm ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                        <h4 className={`font-medium text-sm`}>
                           {group.name}
                         </h4>
                       </div>
@@ -308,18 +293,14 @@ export default function AddonAddModal({
               type="button"
               onClick={handleClose}
               disabled={isCreating}
-              className={`flex-1 px-4 py-2 rounded-lg transition-colors ${
-                isDark 
-                  ? 'text-gray-300 hover:text-white hover:bg-gray-700' 
-                  : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-              }`}
+              className={`flex-1 px-4 py-2 rounded-lg transition-colors color-text-secondary color-hover`}
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={isCreating || !!urlError || !!nameError || isLoadingManifest || isCheckingName || !manifestData}
-              className="flex-1 px-4 py-2 accent-bg accent-text rounded-lg transition-colors disabled:opacity-50"
+              className="flex-1 px-4 py-2 color-surface rounded-lg transition-colors disabled:opacity-50"
             >
               {isCreating ? 'Adding...' : isLoadingManifest ? 'Loading manifest...' : 'Add Addon'}
             </button>
