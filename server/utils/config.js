@@ -5,6 +5,7 @@ const path = require('path');
 const AUTH_ENABLED = String(process.env.AUTH_ENABLED || 'false').toLowerCase() === 'true';
 const JWT_SECRET = process.env.JWT_SECRET || 'syncio-dev-secret-change-me';
 const DEFAULT_ACCOUNT_ID = 'default';
+const DEFAULT_ACCOUNT_UUID = '00000000-0000-4000-8000-000000000000';
 
 // Default Stremio addons that should be ignored in sync checks
 const defaultAddons = {
@@ -69,6 +70,7 @@ module.exports = {
   AUTH_ENABLED,
   JWT_SECRET,
   DEFAULT_ACCOUNT_ID,
+  DEFAULT_ACCOUNT_UUID,
   defaultAddons,
   AUTH_ALLOWLIST,
   BACKUP_DIR,

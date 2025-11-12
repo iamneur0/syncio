@@ -1,10 +1,73 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
+const bcrypt = require('bcryptjs')
 const { decrypt, encrypt } = require('../utils/encryption')
+const { DEFAULT_ACCOUNT_ID, DEFAULT_ACCOUNT_UUID } = require('../utils/config')
+const { postDiscord } = require('../utils/notify')
 
 module.exports = ({ prisma, AUTH_ENABLED, getAccountDek, getDecryptedManifestUrl, getAccountId }) => {
   const router = express.Router();
+
+  const ensureDefaultAccount = async () => {
+    const privatePassword = process.env.PRIVATE_ACCOUNT_PASSWORD || 'private-mode'
+    const defaultSyncPayload = JSON.stringify({ enabled: false, frequency: '0', safe: true, mode: 'normal', webhookUrl: null })
+
+    let account = await prisma.appAccount.findUnique({ where: { id: DEFAULT_ACCOUNT_ID } })
+    if (!account) {
+      const passwordHash = await bcrypt.hash(privatePassword, 12)
+      account = await prisma.appAccount.create({
+        data: {
+          id: DEFAULT_ACCOUNT_ID,
+          uuid: DEFAULT_ACCOUNT_UUID,
+          passwordHash,
+          sync: defaultSyncPayload
+        }
+      })
+      return account
+    }
+
+    const updates = {}
+    if (!account.uuid || account.uuid !== DEFAULT_ACCOUNT_UUID) {
+      updates.uuid = DEFAULT_ACCOUNT_UUID
+    }
+    if (!account.passwordHash) {
+      updates.passwordHash = await bcrypt.hash(privatePassword, 12)
+    }
+    if (!account.sync) {
+      updates.sync = defaultSyncPayload
+    }
+
+    if (Object.keys(updates).length) {
+      account = await prisma.appAccount.update({ where: { id: DEFAULT_ACCOUNT_ID }, data: updates })
+    }
+
+    return account
+  }
+
+  router.get('/account-info', async (req, res) => {
+    try {
+      if (!AUTH_ENABLED) {
+        const account = await ensureDefaultAccount()
+        return res.json({
+          id: DEFAULT_ACCOUNT_ID,
+          uuid: account?.uuid || DEFAULT_ACCOUNT_UUID,
+        })
+      }
+
+      if (!req.appAccountId) {
+        return res.status(401).json({ message: 'Unauthorized' })
+      }
+
+      const account = await prisma.appAccount.findUnique({ where: { id: req.appAccountId }, select: { id: true, uuid: true } })
+      if (!account) {
+        return res.status(404).json({ message: 'Account not found' })
+      }
+      return res.json(account)
+    } catch (e) {
+      return res.status(500).json({ message: 'Failed to load account info', error: e?.message })
+    }
+  })
 
   // Backup settings endpoints - only available in private mode
   if (!AUTH_ENABLED) {
@@ -68,13 +131,28 @@ module.exports = ({ prisma, AUTH_ENABLED, getAccountDek, getDecryptedManifestUrl
   router.get('/account-sync', async (req, res) => {
     try {
       if (!AUTH_ENABLED) {
-        // Private mode: return global file-based schedule for backward compat
-        return res.json({
-          enabled: readSyncFrequencyMinutes() > 0,
-          frequency: readSyncFrequencyMinutes() === 1 ? '1m' : (readSyncFrequencyMinutes() >= 1440 ? `${Math.round(readSyncFrequencyMinutes()/1440)}d` : `${readSyncFrequencyMinutes()}m`),
-          safe: true,
-          mode: 'normal'
-        })
+        const account = await ensureDefaultAccount()
+        let syncCfg = account?.sync
+        if (syncCfg && typeof syncCfg === 'string') {
+          try { syncCfg = JSON.parse(syncCfg) } catch { syncCfg = null }
+        }
+
+        const minutes = readSyncFrequencyMinutes()
+        const derivedFrequency = minutes === 1 ? '1m' : (minutes >= 1440 ? `${Math.round(minutes / 1440)}d` : `${minutes}m`)
+
+        const enabled = syncCfg && typeof syncCfg === 'object'
+          ? syncCfg.enabled !== false
+          : minutes > 0
+
+        const response = {
+          enabled,
+          frequency: (syncCfg && typeof syncCfg === 'object' && syncCfg.frequency) ? String(syncCfg.frequency).trim() : derivedFrequency,
+          safe: (syncCfg && typeof syncCfg === 'object' && typeof syncCfg.safe === 'boolean') ? syncCfg.safe : true,
+          mode: (syncCfg && typeof syncCfg === 'object' && syncCfg.mode === 'advanced') ? 'advanced' : 'normal',
+          webhookUrl: (syncCfg && typeof syncCfg === 'object' && typeof syncCfg.webhookUrl === 'string') ? syncCfg.webhookUrl : ''
+        }
+
+        return res.json(response)
       }
       const acc = await prisma.appAccount.findUnique({ where: { id: req.appAccountId }, select: { sync: true } })
       let syncCfg = acc?.sync || null
@@ -100,16 +178,63 @@ module.exports = ({ prisma, AUTH_ENABLED, getAccountDek, getDecryptedManifestUrl
     try {
       const { enabled, frequency, mode, unsafe, safe, webhookUrl } = req.body || {}
       if (!AUTH_ENABLED) {
-        // Private mode: update global schedule
-        const minutes = Number(frequencyMinutes || 0)
-        if (!Number.isFinite(minutes) || minutes < 0) return res.status(400).json({ message: 'Invalid minutes' })
-        writeSyncFrequencyMinutes(enabled === false ? 0 : minutes)
-        const { reloadGroupAddons } = require('../routes/users');
-        const scopedWhere = require('../utils/helpers').scopedWhere;
-        const decrypt = require('../utils/encryption').decrypt;
-        const { DEFAULT_ACCOUNT_ID } = require('../utils/config');
+        await ensureDefaultAccount()
+        const safeMinutes = (() => {
+          if (frequency === undefined || frequency === null) return null
+          if (typeof frequency === 'number') return frequency
+          if (typeof frequency === 'string') {
+            const trimmed = frequency.trim().toLowerCase()
+            if (trimmed.endsWith('d')) {
+              const days = Number(trimmed.slice(0, -1))
+              return Number.isFinite(days) && days > 0 ? days * 1440 : null
+            }
+            if (trimmed.endsWith('m')) {
+              const mins = Number(trimmed.slice(0, -1))
+              return Number.isFinite(mins) && mins >= 0 ? mins : null
+            }
+            const raw = Number(trimmed)
+            return Number.isFinite(raw) && raw >= 0 ? raw : null
+          }
+          return null
+        })()
+
+        if (safeMinutes !== null && safeMinutes < 0) {
+          return res.status(400).json({ message: 'Invalid frequency value' })
+        }
+
+        const nextMinutes = enabled === false ? 0 : (safeMinutes ?? readSyncFrequencyMinutes())
+        if (!Number.isFinite(nextMinutes) || nextMinutes < 0) {
+          return res.status(400).json({ message: 'Invalid minutes' })
+        }
+
+        writeSyncFrequencyMinutes(nextMinutes)
+
+        const current = await prisma.appAccount.findUnique({ where: { id: DEFAULT_ACCOUNT_ID }, select: { sync: true } })
+        let syncCfg = current?.sync
+        if (syncCfg && typeof syncCfg === 'string') {
+          try { syncCfg = JSON.parse(syncCfg) } catch { syncCfg = null }
+        }
+        const baseCfg = (syncCfg && typeof syncCfg === 'object') ? syncCfg : {}
+        const nextCfg = {
+          ...baseCfg,
+          enabled: enabled === undefined ? baseCfg.enabled !== false : !!enabled,
+          frequency: typeof frequency === 'string' && frequency.trim() ? frequency.trim() : baseCfg.frequency || '0',
+          safe: safe !== undefined ? !!safe : (unsafe !== undefined ? !unsafe : baseCfg.safe !== false),
+          mode: mode === 'advanced' ? 'advanced' : baseCfg.mode === 'advanced' ? 'advanced' : 'normal',
+          webhookUrl: webhookUrl !== undefined ? (webhookUrl || null) : (baseCfg.webhookUrl || null)
+        }
+
+        try {
+          await prisma.appAccount.update({ where: { id: DEFAULT_ACCOUNT_ID }, data: { sync: nextCfg } })
+        } catch {
+          await prisma.appAccount.update({ where: { id: DEFAULT_ACCOUNT_ID }, data: { sync: JSON.stringify(nextCfg) } })
+        }
+
+        const { reloadGroupAddons } = require('../routes/users')
+        const scopedWhere = require('../utils/helpers').scopedWhere
+        const decrypt = require('../utils/encryption').decrypt
         const schedulerReq = { appAccountId: DEFAULT_ACCOUNT_ID }
-        scheduleSyncs(enabled === false ? 0 : minutes, prisma, getAccountId, scopedWhere, decrypt, reloadGroupAddons, schedulerReq, false)
+        scheduleSyncs(nextMinutes, prisma, getAccountId, scopedWhere, decrypt, reloadGroupAddons, schedulerReq, false)
         return res.json({ message: 'Sync settings updated' })
       }
       // Load current config to preserve unspecified fields
@@ -144,6 +269,48 @@ module.exports = ({ prisma, AUTH_ENABLED, getAccountDek, getDecryptedManifestUrl
       return res.json({ message: 'Account sync settings updated' })
     } catch (e) {
       return res.status(500).json({ message: 'Failed to update account sync settings', error: e?.message })
+    }
+  })
+
+  router.post('/account-sync/test-webhook', async (req, res) => {
+    try {
+      const providedUrl = typeof req.body?.webhookUrl === 'string' ? req.body.webhookUrl.trim() : ''
+      let targetUrl = providedUrl
+
+      const readAccountWebhook = async (accountId) => {
+        const acc = await prisma.appAccount.findUnique({ where: { id: accountId }, select: { sync: true } })
+        if (!acc) return null
+        let syncCfg = acc.sync
+        if (typeof syncCfg === 'string') {
+          try { syncCfg = JSON.parse(syncCfg) } catch { syncCfg = null }
+        }
+        if (syncCfg && typeof syncCfg === 'object' && syncCfg.webhookUrl) {
+          return String(syncCfg.webhookUrl)
+        }
+        return null
+      }
+
+      if (!targetUrl) {
+        if (AUTH_ENABLED) {
+          if (!req.appAccountId) {
+            return res.status(401).json({ message: 'Unauthorized' })
+          }
+          targetUrl = await readAccountWebhook(req.appAccountId)
+        } else {
+          await ensureDefaultAccount()
+          targetUrl = await readAccountWebhook(DEFAULT_ACCOUNT_ID)
+        }
+      }
+
+      if (!targetUrl) {
+        return res.status(400).json({ message: 'No webhook URL configured' })
+      }
+
+      await postDiscord(targetUrl, '🔬 Syncio test webhook message')
+      return res.json({ message: 'Test message sent' })
+    } catch (e) {
+      console.error('Failed to send webhook test:', e)
+      return res.status(500).json({ message: 'Failed to send test message', error: e?.message })
     }
   })
 

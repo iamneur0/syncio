@@ -2,17 +2,15 @@
 
 import React, { useEffect, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { useTheme } from '@/contexts/ThemeContext'
 import api, { publicAuthAPI } from '@/services/api'
 import { ConfirmDialog } from '@/components/modals'
 import { Eye, EyeOff, LogIn, User, Lock } from 'lucide-react'
 
 export default function AuthGate({ children }: { children: React.ReactNode }) {
   const AUTH_ENABLED = process.env.NEXT_PUBLIC_AUTH_ENABLED === 'true'
-  const { isDark, isModernDark, isMono } = useTheme()
   const queryClient = useQueryClient()
 
-  const [authed, setAuthed] = useState(false)
+  const [authState, setAuthState] = useState<'loading' | 'authed' | 'guest'>(AUTH_ENABLED ? 'loading' : 'authed')
   const [accountUuid, setAccountUuid] = useState('')
 
   useEffect(() => {
@@ -20,21 +18,21 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
     ;(async () => {
       try {
         const me = await publicAuthAPI.me()
-        setAuthed(!!me?.account)
+        setAuthState(me?.account ? 'authed' : 'guest')
         setAccountUuid(me?.account?.uuid || '')
         try { window.dispatchEvent(new CustomEvent('sfm:auth:changed', { detail: { authed: true } })) } catch {}
       } catch {
-        setAuthed(false)
+        setAuthState('guest')
         setAccountUuid('')
         try { window.dispatchEvent(new CustomEvent('sfm:auth:changed', { detail: { authed: false } })) } catch {}
       }
     })()
-  }, [])
+  }, [AUTH_ENABLED])
 
   useEffect(() => {
     const onAuthChanged = (e: any) => {
       const next = !!e?.detail?.authed
-      setAuthed(next)
+      setAuthState(next ? 'authed' : 'guest')
       if (!next) {
         setAccountUuid('')
         queryClient.setQueryData(['addons'], [])
@@ -55,15 +53,18 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
 
   if (!AUTH_ENABLED) return <>{children}</>
   
-  if (!authed) {
-    return <LoginForm setAuthed={setAuthed} />
+  if (authState === 'loading') {
+    return <div className="min-h-screen" />
+  }
+
+  if (authState !== 'authed') {
+    return <LoginForm setAuthState={setAuthState} />
   }
   
   return <>{children}</>
 }
 
-function LoginForm({ setAuthed }: { setAuthed: (authed: boolean) => void }) {
-  const { isDark, isMono } = useTheme()
+function LoginForm({ setAuthState }: { setAuthState: (state: 'loading' | 'authed' | 'guest') => void }) {
   const [uuid, setUuid] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
@@ -97,10 +98,10 @@ function LoginForm({ setAuthed }: { setAuthed: (authed: boolean) => void }) {
         if (isRegisterMode) {
           // Registration deferred; handled on confirm
         } else {
-          // Trigger auth change event
-          window.dispatchEvent(new CustomEvent('sfm:auth:changed', { detail: { authed: true } }))
-          // Also update local state immediately
-          setAuthed(true)
+        // Trigger auth change event
+        window.dispatchEvent(new CustomEvent('sfm:auth:changed', { detail: { authed: true } }))
+        // Also update local state immediately
+        setAuthState('authed')
         }
       } else {
         setError(response.message || `${isRegisterMode ? 'Registration' : 'Login'} failed`)
@@ -119,32 +120,24 @@ function LoginForm({ setAuthed }: { setAuthed: (authed: boolean) => void }) {
   }
 
   return (
-    <div className={`min-h-screen flex items-center justify-center ${
-      isMono ? 'bg-black text-white' : isDark ? 'bg-gray-900' : 'bg-gray-50'
-    }`}>
-      <div className={`max-w-md w-full mx-4 ${
-        isMono ? 'bg-black border-white/20' : isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'
-      } border rounded-lg shadow-lg p-8`}>
+    <div className={`min-h-screen flex items-center justify-center`}>
+      <div className={`max-w-md w-full mx-4 card shadow-lg p-8`}>
         {/* Logo and Title */}
         <div className="text-center mb-8">
           <div className="flex justify-center mb-4">
             <img 
-              src={(isDark || isMono) ? "/logo-white.png" : "/logo-black.png"} 
+              src="/logo-black.png" 
               alt="Syncio Logo" 
-              className="w-16 h-16"
+              className="w-16 h-16 dark:invert logo-invert-mono"
               onError={(e) => {
                 e.currentTarget.src = "/favicon-32x32.png"
               }}
             />
           </div>
-          <h1 className={`text-2xl font-bold ${
-            isDark ? 'text-white' : 'text-gray-900'
-          }`}>
+          <h1 className={`text-2xl font-bold`}>
             Welcome to Syncio
           </h1>
-          <p className={`mt-2 ${
-            isDark ? 'text-gray-300' : 'text-gray-600'
-          }`}>
+          <p className={`mt-2`}>
             {isRegisterMode ? 'Create a new account to get started' : 'Enter your account credentials to continue'}
           </p>
         </div>
@@ -153,16 +146,12 @@ function LoginForm({ setAuthed }: { setAuthed: (authed: boolean) => void }) {
         <form onSubmit={handleSubmit} className="space-y-6" autoComplete="on">
           {/* UUID Field */}
           <div>
-            <label htmlFor="uuid" className={`block text-sm font-medium ${
-              isDark ? 'text-gray-200' : 'text-gray-700'
-            }`}>
+            <label htmlFor="uuid" className={`block text-sm font-medium`}>
               Account UUID
             </label>
             <div className="mt-1 relative">
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <User className={`h-5 w-5 ${
-                  isDark ? 'text-gray-400' : 'text-gray-400'
-                }`} />
+                <User className={`h-5 w-5 color-text-secondary`} />
               </div>
               <input
                 id="uuid"
@@ -172,11 +161,7 @@ function LoginForm({ setAuthed }: { setAuthed: (authed: boolean) => void }) {
                 value={uuid}
                 onChange={(e) => setUuid(e.target.value)}
                 autoComplete="username"
-                className={`block w-full pl-10 pr-3 py-2 border rounded-md shadow-sm placeholder-gray-400 focus:outline-none sm:text-sm ${
-                  isDark 
-                    ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
-                    : 'border-gray-300 text-gray-900 placeholder-gray-400'
-                }`}
+                className={`block w-full pl-10 pr-3 py-2 rounded-md shadow-sm input sm:text-sm`}
                 placeholder="Enter your account UUID"
               />
             </div>
@@ -184,16 +169,12 @@ function LoginForm({ setAuthed }: { setAuthed: (authed: boolean) => void }) {
 
           {/* Password Field */}
           <div>
-            <label htmlFor="password" className={`block text-sm font-medium ${
-              isDark ? 'text-gray-200' : 'text-gray-700'
-            }`}>
+            <label htmlFor="password" className={`block text-sm font-medium`}>
               Password
             </label>
             <div className="mt-1 relative">
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <Lock className={`h-5 w-5 ${
-                  isDark ? 'text-gray-400' : 'text-gray-400'
-                }`} />
+                <Lock className={`h-5 w-5 color-text-secondary`} />
               </div>
               <input
                 id="password"
@@ -203,11 +184,7 @@ function LoginForm({ setAuthed }: { setAuthed: (authed: boolean) => void }) {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 autoComplete={isRegisterMode ? 'new-password' : 'current-password'}
-                className={`block w-full pl-10 pr-10 py-2 border rounded-md shadow-sm placeholder-gray-400 focus:outline-none sm:text-sm ${
-                  isDark 
-                    ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
-                    : 'border-gray-300 text-gray-900 placeholder-gray-400'
-                }`}
+                className={`block w-full pl-10 pr-10 py-2 rounded-md shadow-sm input sm:text-sm`}
                 placeholder="Enter your password"
               />
               <button
@@ -216,13 +193,9 @@ function LoginForm({ setAuthed }: { setAuthed: (authed: boolean) => void }) {
                 onClick={() => setShowPassword(!showPassword)}
               >
                 {showPassword ? (
-                  <EyeOff className={`h-5 w-5 ${
-                    isDark ? 'text-gray-400 hover:text-gray-300' : 'text-gray-400 hover:text-gray-500'
-                  }`} />
+                  <EyeOff className={`h-5 w-5 color-text-secondary color-hover`} />
                 ) : (
-                  <Eye className={`h-5 w-5 ${
-                    isDark ? 'text-gray-400 hover:text-gray-300' : 'text-gray-400 hover:text-gray-500'
-                  }`} />
+                  <Eye className={`h-5 w-5 color-text-secondary color-hover`} />
                 )}
               </button>
             </div>
@@ -230,9 +203,7 @@ function LoginForm({ setAuthed }: { setAuthed: (authed: boolean) => void }) {
 
           {/* Error Message */}
           {error && (
-            <div className={`text-sm ${
-              isDark ? 'text-red-400' : 'text-red-600'
-            }`}>
+            <div className={`text-sm color-text`}>
               {error}
             </div>
           )}
@@ -242,15 +213,11 @@ function LoginForm({ setAuthed }: { setAuthed: (authed: boolean) => void }) {
             <button
               type="submit"
               disabled={isLoading}
-              className={`group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white focus:outline-none ${
-                isLoading
-                  ? 'bg-gray-400 cursor-not-allowed'
-                  : 'bg-purple-600 hover:bg-purple-700'
-              }`}
+              className={`group relative w-full flex justify-center py-2 px-4 text-sm font-medium rounded-md color-text focus:outline-none ${isLoading ? 'color-surface cursor-not-allowed' : 'color-surface hover:opacity-90'}`}
             >
               {isLoading ? (
                 <div className="flex items-center">
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 color-border mr-2"></div>
                   {isRegisterMode ? 'Creating account...' : 'Signing in...'}
                 </div>
               ) : (
@@ -264,9 +231,7 @@ function LoginForm({ setAuthed }: { setAuthed: (authed: boolean) => void }) {
         </form>
 
         {/* Footer */}
-        <div className={`mt-6 text-center text-sm ${
-          isDark ? 'text-gray-400' : 'text-gray-500'
-        }`}>
+        <div className={`mt-6 text-center text-sm color-text-secondary`}>
           <p>
             {isRegisterMode ? 'Already have an account?' : "Don't have an account?"}{' '}
             <button
@@ -299,9 +264,7 @@ function LoginForm({ setAuthed }: { setAuthed: (authed: boolean) => void }) {
                     })
                 }
               }}
-              className={`underline hover:no-underline ${
-                isDark ? 'text-purple-400 hover:text-purple-300' : 'text-purple-600 hover:text-purple-500'
-              }`}
+              className={`underline hover:no-underline color-text color-hover`}
             >
               {isRegisterMode ? 'Login here' : 'Register here'}
             </button>
@@ -314,12 +277,12 @@ function LoginForm({ setAuthed }: { setAuthed: (authed: boolean) => void }) {
         open={showUuidNotice}
         title="Save your UUID"
         body={(
-          <div className={`${isMono ? 'text-white' : (isDark ? 'text-gray-200' : 'text-gray-800')}`}>
+          <div>
             <p>Please save your UUID now, it cannot be retrieved later.</p>
             <div className="mt-3">
               <code
                 onClick={() => { try { navigator.clipboard.writeText(uuid) } catch {} }}
-                className={`px-1 py-0.5 bg-gray-100 dark:bg-gray-700 rounded cursor-pointer hover:opacity-80 transition-opacity`}
+                className={`px-1 py-0.5 color-surface rounded cursor-pointer hover:opacity-80 transition-opacity`}
                 title="Click to copy UUID"
               >
                 {uuid}
@@ -346,7 +309,7 @@ function LoginForm({ setAuthed }: { setAuthed: (authed: boolean) => void }) {
             const response = await publicAuthAPI.register({ uuid: uuid.trim(), password })
             if (response?.message) {
               window.dispatchEvent(new CustomEvent('sfm:auth:changed', { detail: { authed: true } }))
-              setAuthed(true)
+              setAuthState('authed')
             } else {
               setError(response?.message || 'Registration failed')
             }

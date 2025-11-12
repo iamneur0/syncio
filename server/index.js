@@ -30,17 +30,59 @@ const debugRouter = require('./routes/debug');
 const publicAuthRouter = require('./routes/publicAuth');
 
 // Import configuration constants
-const { AUTH_ENABLED, JWT_SECRET, DEFAULT_ACCOUNT_ID, defaultAddons, AUTH_ALLOWLIST, BACKUP_DIR, BACKUP_CFG, PEPPER, ENCRYPTION_KEY, allowedOrigins, QUIET, DEBUG_ENABLED, PORT } = require('./utils/config');
+const { AUTH_ENABLED, JWT_SECRET, DEFAULT_ACCOUNT_ID, DEFAULT_ACCOUNT_UUID, defaultAddons, AUTH_ALLOWLIST, BACKUP_DIR, BACKUP_CFG, PEPPER, ENCRYPTION_KEY, allowedOrigins, QUIET, DEBUG_ENABLED, PORT } = require('./utils/config');
 
 // Import utility modules
 const { parseAddonIds, parseProtectedAddons, canonicalizeManifestUrl, normalizeUrl, isProdEnv, filterManifestByResources, filterManifestByCatalogs } = require('./utils/validation');
 const { sha256Hex, hmacHex, manifestUrlHash, manifestUrlHmac, getAccountHmacKey, normalizeManifestObject, manifestHash, manifestHmac } = require('./utils/hashing');
 const { validateStremioAuthKey, filterDefaultAddons, buildAddonDbData } = require('./utils/stremio');
-const { ensureBackupDir, readBackupFrequencyDays, writeBackupFrequencyDays, performBackupOnce, clearBackupSchedule, scheduleBackups } = require('./utils/backup');
+const { ensureBackupDir, readBackupFrequencyDays, scheduleBackups } = require('./utils/backup');
 const { scheduleSyncs, readSyncFrequencyMinutes } = require('./utils/syncScheduler');
 const { pathIsAllowlisted, extractBearerToken, parseCookies, cookieName, issueAccessToken, issueRefreshToken, issuePublicToken, randomCsrfToken } = require('./utils/auth');
 const { getAccountId: getAccountIdHelper, scopedWhere, assignUserToGroup } = require('./utils/helpers');
 const { selectKeyForRequest, encrypt, decrypt, getAccountHmacKey: getAccountHmacKeyEnc, encryptIf, decryptIf, getDecryptedManifestUrl, decryptWithFallback } = require('./utils/encryption');
+
+async function ensureDefaultAccount(prismaClient) {
+  if (AUTH_ENABLED) return
+
+  const defaultPassword = process.env.PRIVATE_ACCOUNT_PASSWORD || 'private-mode'
+  const existing = await prismaClient.appAccount.findUnique({ where: { id: DEFAULT_ACCOUNT_ID } })
+
+  if (!existing) {
+    const passwordHash = await bcrypt.hash(defaultPassword, 12)
+    await prismaClient.appAccount.create({
+      data: {
+        id: DEFAULT_ACCOUNT_ID,
+        uuid: DEFAULT_ACCOUNT_UUID,
+        passwordHash,
+        sync: JSON.stringify({ enabled: false, frequency: '0' })
+      }
+    })
+  } else {
+    const updates = {}
+    if (!existing.uuid || existing.uuid !== DEFAULT_ACCOUNT_UUID) {
+      updates.uuid = DEFAULT_ACCOUNT_UUID
+    }
+    if (!existing.sync) {
+      updates.sync = JSON.stringify({ enabled: false, frequency: '0' })
+    }
+    if (!existing.passwordHash) {
+      updates.passwordHash = await bcrypt.hash(defaultPassword, 12)
+    }
+    if (Object.keys(updates).length > 0) {
+      await prismaClient.appAccount.update({ where: { id: DEFAULT_ACCOUNT_ID }, data: updates })
+    }
+  }
+
+  // Normalize existing data to default account scope
+  await Promise.all([
+    prismaClient.user.updateMany({ where: { OR: [{ accountId: null }, { accountId: '' }] }, data: { accountId: DEFAULT_ACCOUNT_ID } }),
+    prismaClient.group.updateMany({ where: { OR: [{ accountId: null }, { accountId: '' }] }, data: { accountId: DEFAULT_ACCOUNT_ID } }),
+    prismaClient.addon.updateMany({ where: { OR: [{ accountId: null }, { accountId: '' }] }, data: { accountId: DEFAULT_ACCOUNT_ID } })
+  ])
+
+  console.log('👤 Private mode: default account ready')
+}
 
 // Optional quiet mode: suppress non-error console output when QUIET=true or DEBUG is not enabled
 // QUIET and DEBUG_ENABLED are now imported from utils/config
@@ -100,6 +142,15 @@ const { createAuthGate, createCsrfGuard } = require('./middleware/auth')
 app.use(createAuthGate({ AUTH_ENABLED, JWT_SECRET, pathIsAllowlisted, parseCookies, cookieName, extractBearerToken, issueAccessToken, isProdEnv }))
 app.use(createCsrfGuard({ AUTH_ENABLED, pathIsAllowlisted, parseCookies, cookieName }))
 
+if (!AUTH_ENABLED) {
+  app.use((req, res, next) => {
+    if (!req.appAccountId) {
+      req.appAccountId = DEFAULT_ACCOUNT_ID
+    }
+    next()
+  })
+}
+
 // Account scoping middleware
 const { createAccountScopingMiddleware } = require('./middleware/accountScoping');
 const accountScopingMiddleware = createAccountScopingMiddleware(prisma);
@@ -156,26 +207,43 @@ const schedulerReq = {
   appAccountId: AUTH_ENABLED ? undefined : DEFAULT_ACCOUNT_ID
 };
 
-// Initialize sync schedule
-scheduleSyncs(
-  readSyncFrequencyMinutes(),
-  prisma,
-  getAccountId,
-  scopedWhere,
-  decrypt,
-  reloadGroupAddons,
-  schedulerReq,
-  AUTH_ENABLED
-);
+async function bootstrap() {
+  if (!AUTH_ENABLED) {
+    await ensureDefaultAccount(prisma)
+    try {
+      ensureBackupDir()
+      scheduleBackups(readBackupFrequencyDays())
+    } catch (err) {
+      console.error('⚠️ Failed to initialize backup scheduler:', err)
+    }
+  }
 
-// Start
-app.listen(PORT, '0.0.0.0', () => {
-  console.log('🚀 Syncio (Database) running on port', PORT);
-  console.log('📊 Health check: http://127.0.0.1:' + PORT + '/health');
-  console.log('🔌 API endpoints: http://127.0.0.1:' + PORT + '/api/');
-  console.log('🎬 Stremio integration: ENABLED');
-  console.log('💾 Storage: PostgreSQL with Prisma');
-});
+  scheduleSyncs(
+    readSyncFrequencyMinutes(),
+    prisma,
+    getAccountId,
+    scopedWhere,
+    decrypt,
+    reloadGroupAddons,
+    schedulerReq,
+    AUTH_ENABLED
+  )
+
+  const storageLabel = process.env.PRISMA_PROVIDER === 'sqlite' ? 'SQLite with Prisma' : 'PostgreSQL with Prisma'
+
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log('🚀 Syncio (Database) running on port', PORT)
+    console.log('📊 Health check: http://127.0.0.1:' + PORT + '/health')
+    console.log('🔌 API endpoints: http://127.0.0.1:' + PORT + '/api/')
+    console.log('🎬 Stremio integration: ENABLED')
+    console.log(`💾 Storage: ${storageLabel}`)
+  })
+}
+
+bootstrap().catch((err) => {
+  console.error('❌ Failed to start Syncio server:', err)
+  process.exit(1)
+})
 
 
 
