@@ -10,7 +10,8 @@ import { ConfirmDialog } from '@/components/modals'
 import api from '@/services/api'
 
 export default function TasksPage() {
-  const { isDark, isModern, isModernDark, theme } = useTheme()
+  // Theme not needed here anymore, keep placeholders for text classes
+  useTheme()
   const [importFile, setImportFile] = React.useState<File | null>(null)
   const [configImporting, setConfigImporting] = React.useState<boolean>(false)
   const [addonImporting, setAddonImporting] = React.useState<boolean>(false)
@@ -22,6 +23,8 @@ export default function TasksPage() {
   const [syncingGroups, setSyncingGroups] = React.useState<boolean>(false)
   const [reloadingAddons, setReloadingAddons] = React.useState<boolean>(false)
   const [syncFrequency, setSyncFrequency] = React.useState<string>('0')
+  const [backupDays, setBackupDays] = React.useState<number>(0)
+  const [isBackupRunning, setIsBackupRunning] = React.useState<boolean>(false)
   
   const addonsDragDepth = React.useRef<number>(0)
   const configDragDepth = React.useRef<number>(0)
@@ -42,6 +45,20 @@ export default function TasksPage() {
         }
         // Default to 1d if enabled but frequency missing
         setSyncFrequency('1d')
+      })
+      .catch(() => {})
+  }, [])
+
+  React.useEffect(() => {
+    if (process.env.NEXT_PUBLIC_AUTH_ENABLED === 'true') {
+      return
+    }
+    api
+      .get('/settings/backup-frequency')
+      .then((resp) => {
+        if (typeof resp.data?.days === 'number') {
+          setBackupDays(resp.data.days)
+        }
       })
       .catch(() => {})
   }, [])
@@ -466,8 +483,8 @@ export default function TasksPage() {
     })
   }
 
-  const textColor = isDark ? 'text-gray-100' : 'text-gray-900'
-  const mutedTextColor = isDark ? 'text-gray-400' : 'text-gray-600'
+  const textColor = 'color-text'
+  const mutedTextColor = 'color-text-secondary'
 
   return (
     <div className="p-4 sm:p-6" style={{ scrollbarGutter: 'stable' }}>
@@ -494,7 +511,7 @@ export default function TasksPage() {
       <div className="max-w-3xl">
 
       {/* Users */}
-      <div className={`p-4 rounded-lg border ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
+      <div className={`p-4 rounded-lg border card`}>
         <h2 className={`text-lg font-semibold ${textColor}`}>Users</h2>
         <p className={`text-sm mt-1 ${mutedTextColor}`}>
           Manage users.
@@ -503,13 +520,13 @@ export default function TasksPage() {
           <button 
             onClick={syncAllUsers}
             disabled={syncingUsers}
-            className="accent-bg accent-text hover:opacity-90 disabled:opacity-50 flex items-center px-4 py-2 rounded-lg transition-colors"
+            className="surface-interactive disabled:opacity-50 flex items-center px-4 py-2 rounded-lg"
           >
             <RefreshCw className={`w-5 h-5 mr-2 ${syncingUsers ? 'animate-spin' : ''}`} /> Sync All Users
           </button>
           <button 
             onClick={deleteAllUsers} 
-            className="accent-bg accent-text hover:opacity-90 flex items-center px-4 py-2 rounded-lg transition-colors"
+            className="surface-interactive flex items-center px-4 py-2 rounded-lg"
           >
             <Trash2 className="w-5 h-5 mr-2" /> Delete All Users
           </button>
@@ -517,7 +534,7 @@ export default function TasksPage() {
       </div>
 
       {/* Groups */}
-      <div className={`p-4 rounded-lg border mt-6 ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
+      <div className={`p-4 rounded-lg border mt-6 card`}>
         <h2 className={`text-lg font-semibold ${textColor}`}>Groups</h2>
         <p className={`text-sm mt-1 ${mutedTextColor}`}>
           Manage groups.
@@ -526,13 +543,13 @@ export default function TasksPage() {
           <button 
             onClick={syncAllGroups}
             disabled={syncingGroups}
-            className="accent-bg accent-text hover:opacity-90 disabled:opacity-50 flex items-center px-4 py-2 rounded-lg transition-colors"
+            className="surface-interactive disabled:opacity-50 flex items-center px-4 py-2 rounded-lg"
           >
             <RefreshCw className={`w-5 h-5 mr-2 ${syncingGroups ? 'animate-spin' : ''}`} /> Sync All Groups
           </button>
           <button 
             onClick={deleteAllGroups} 
-            className="accent-bg accent-text hover:opacity-90 flex items-center px-4 py-2 rounded-lg transition-colors"
+            className="surface-interactive flex items-center px-4 py-2 rounded-lg"
           >
             <Trash2 className="w-5 h-5 mr-2" /> Delete All Groups
           </button>
@@ -540,7 +557,7 @@ export default function TasksPage() {
       </div>
 
       {/* Addons */}
-      <div className={`p-4 rounded-lg border mt-6 ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
+      <div className={`p-4 rounded-lg border mt-6 card`}>
         <h2 className={`text-lg font-semibold ${textColor}`}>Addons</h2>
         <p className={`text-sm mt-1 ${mutedTextColor}`}>
           Import, export and manage addons.
@@ -553,21 +570,21 @@ export default function TasksPage() {
             onDragEnter={onButtonDragEnterAddons}
             onDragLeave={onButtonDragLeaveAddons}
             disabled={addonImporting}
-            className="accent-bg accent-text hover:opacity-90 disabled:opacity-50 flex items-center px-4 py-2 rounded-lg transition-colors"
+            className="surface-interactive disabled:opacity-50 flex items-center px-4 py-2 rounded-lg"
           >
             <Download className="w-5 h-5 mr-2" />
             {isDraggingAddonsOver ? 'Drop Addons' : 'Import Addons'}
           </button>
           <button
             onClick={exportAddons}
-            className="accent-bg accent-text hover:opacity-90 flex items-center px-4 py-2 rounded-lg transition-colors"
+            className="surface-interactive flex items-center px-4 py-2 rounded-lg"
           >
             <Upload className="w-5 h-5 mr-2" /> Export Addons
           </button>
           <button
             onClick={reloadAllAddons}
             disabled={reloadingAddons}
-            className="accent-bg accent-text hover:opacity-90 disabled:opacity-50 flex items-center px-4 py-2 rounded-lg transition-colors"
+            className="surface-interactive disabled:opacity-50 flex items-center px-4 py-2 rounded-lg"
           >
             <RefreshCw className={`w-5 h-5 mr-2 ${reloadingAddons ? 'animate-spin' : ''}`} /> Reload All Addons
           </button>
@@ -582,13 +599,13 @@ export default function TasksPage() {
                 toast.error(e?.response?.data?.message || 'Failed to repair addons')
               }
             }}
-            className="accent-bg accent-text hover:opacity-90 flex items-center px-4 py-2 rounded-lg transition-colors"
+            className="surface-interactive flex items-center px-4 py-2 rounded-lg"
           >
             <RotateCcw className="w-5 h-5 mr-2" /> Repair Addons
           </button>
           <button 
             onClick={deleteAllAddons} 
-            className="accent-bg accent-text hover:opacity-90 flex items-center px-4 py-2 rounded-lg transition-colors"
+            className="surface-interactive flex items-center px-4 py-2 rounded-lg"
           >
             <Trash2 className="w-5 h-5 mr-2" /> Delete All Addons
           </button>
@@ -605,7 +622,7 @@ export default function TasksPage() {
       </div>
 
       {/* Configuration */}
-      <div className={`p-4 rounded-lg border mt-6 ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
+      <div className={`p-4 rounded-lg border mt-6 card`}>
         <h2 className={`text-lg font-semibold ${textColor}`}>Configuration</h2>
         <p className={`text-sm mt-1 ${mutedTextColor}`}>
           Import or export configuration.
@@ -618,12 +635,12 @@ export default function TasksPage() {
             onDragEnter={onButtonDragEnterConfig}
             onDragLeave={onButtonDragLeaveConfig}
             disabled={configImporting}
-            className="accent-bg accent-text hover:opacity-90 disabled:opacity-50 flex items-center px-4 py-2 rounded-lg transition-colors"
+            className="surface-interactive disabled:opacity-50 flex items-center px-4 py-2 rounded-lg"
           >
             <Download className="w-5 h-5 mr-2" />
             {isDraggingConfigOver ? 'Drop Configuration' : 'Import Configuration'}
           </button>
-          <button onClick={exportConfig} className="accent-bg accent-text hover:opacity-90 flex items-center px-4 py-2 rounded-lg transition-colors">
+          <button onClick={exportConfig} className="surface-interactive flex items-center px-4 py-2 rounded-lg">
             <Upload className="w-5 h-5 mr-2" /> Export Configuration
           </button>
         </div>
@@ -632,8 +649,56 @@ export default function TasksPage() {
         <input id="import-config-file" type="file" accept=".json" onChange={handleConfigFileChange} className="hidden" />
       </div>
 
+      {process.env.NEXT_PUBLIC_AUTH_ENABLED !== 'true' && (
+        <div className={`p-4 rounded-lg border mt-6 card`}>
+          <h2 className={`text-lg font-semibold ${textColor}`}>Automatic Backups</h2>
+          <p className={`text-sm mt-1 ${mutedTextColor}`}>
+            Save configuration snapshots to the server-side "backup" folder on a schedule.
+          </p>
+          <div className="mt-4 flex items-center gap-3 flex-wrap">
+            <select
+              value={backupDays}
+              onChange={(e) => {
+                const days = Number(e.target.value)
+                setBackupDays(days)
+                api.put('/settings/backup-frequency', { days })
+                  .then(() => toast.success('Backup schedule updated'))
+                  .catch((err) => toast.error(err?.response?.data?.message || 'Failed to update backup schedule'))
+              }}
+              className={`input px-3 py-2`}
+            >
+              <option value={0}>Disabled</option>
+              <option value={1}>Every day</option>
+              <option value={7}>Every week</option>
+              <option value={15}>Every 15 days</option>
+              <option value={30}>Every month</option>
+            </select>
+            <button
+              onClick={async () => {
+                try {
+                  setIsBackupRunning(true)
+                  await api.post('/settings/backup-now')
+                  toast.success('Backup started')
+                } catch (e: any) {
+                  toast.error(e?.response?.data?.message || 'Failed to start backup')
+                } finally {
+                  setIsBackupRunning(false)
+                }
+              }}
+              className={`surface-interactive flex items-center px-3 py-2 rounded ${isBackupRunning ? 'opacity-75 cursor-not-allowed' : ''}`}
+              disabled={isBackupRunning}
+            >
+              <RotateCcw className={`w-5 h-5 mr-2 ${isBackupRunning ? 'animate-spin' : ''}`} /> Run Backup Now
+            </button>
+          </div>
+          <div className={`text-xs mt-2 ${mutedTextColor}`}>
+            Files are saved under server folder: data/backup/
+          </div>
+        </div>
+      )}
+
       {/* Automatic Sync - available in all modes */}
-      <div className={`p-4 rounded-lg border mt-6 ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
+      <div className={`p-4 rounded-lg border mt-6 card`}>
         <h2 className={`text-lg font-semibold ${textColor}`}>Automatic Sync</h2>
         <p className={`text-sm mt-1 ${mutedTextColor}`}>
           Automatically sync groups.
@@ -648,7 +713,7 @@ export default function TasksPage() {
                 .then(() => toast.success('Sync schedule updated for this account'))
                 .catch((err) => toast.error(err?.response?.data?.message || 'Failed to update sync schedule'))
             }}
-            className={`${isDark ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'} border rounded px-3 py-2`}
+            className={`input px-3 py-2`}
           >
             <option value={'0'}>Disabled</option>
             <option value={'1m'}>Every minute</option>
