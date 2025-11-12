@@ -1,35 +1,40 @@
-import React from 'react'
+import React, { CSSProperties } from 'react'
 import { useTheme } from '@/contexts/ThemeContext'
+import { getEntityColorStyles } from '@/utils/colorMapping'
 
 type Size = '10' | '12'
+
+interface AddonIconProps {
+  name: string
+  iconUrl?: string | null
+  size?: Size
+  className?: string
+  colorIndex?: number
+}
 
 export default function AddonIcon({
   name,
   iconUrl,
   size = '12',
-  className = ''
-}: {
-  name: string
-  iconUrl?: string | null
-  size?: Size
-  className?: string
-}) {
-  const { isDark, isMono, isModern, isModernDark } = useTheme()
-
+  className = '',
+  colorIndex = 1,
+}: AddonIconProps) {
   const circleClass = size === '10' ? 'logo-circle-10' : 'logo-circle-12'
+  const letter = name ? name.charAt(0).toUpperCase() : 'A'
+  const showImage = Boolean(iconUrl)
+  const { theme } = useTheme()
+  const colorStyles = getEntityColorStyles(theme, colorIndex)
 
-  const showImage = !!iconUrl
-
-  const baseClass = showImage
-    ? `border-0 ${(!isDark && !isMono && !isModern && !isModernDark) ? 'accent-bg' : ''}`
-    : 'accent-bg accent-text border accent-border'
-
-  const bgStyle: React.CSSProperties | undefined = showImage && (isDark || isMono || isModern || isModernDark)
-    ? { backgroundColor: 'transparent' }
-    : undefined
+  const baseStyle: CSSProperties = {
+    background: colorStyles.background,
+    color: colorStyles.textColor,
+  }
 
   return (
-    <div className={`${circleClass} ${baseClass} ${className}`} style={bgStyle}>
+    <div
+      className={`${circleClass} flex items-center justify-center ${className}`}
+      style={baseStyle}
+    >
       {showImage ? (
         <img
           src={iconUrl as string}
@@ -38,16 +43,17 @@ export default function AddonIcon({
           onError={(e) => {
             const target = e.currentTarget as HTMLImageElement
             target.style.display = 'none'
-            const nextElement = target.nextElementSibling as HTMLElement
-            if (nextElement) nextElement.style.display = 'block'
+            const nextElement = target.nextElementSibling as HTMLElement | null
+            if (nextElement) nextElement.style.display = 'flex'
           }}
         />
       ) : null}
-      <span className={`text-white font-semibold ${size === '10' ? 'text-sm' : 'text-lg'} ${showImage ? 'hidden' : ''}`}>
-        {name ? name.charAt(0).toUpperCase() : 'A'}
+      <span
+        className={`font-semibold ${size === '10' ? 'text-sm' : 'text-lg'} items-center justify-center w-full h-full`}
+        style={{ display: showImage ? 'none' : 'flex', color: colorStyles.textColor }}
+      >
+        {letter}
       </span>
     </div>
   )
 }
-
-

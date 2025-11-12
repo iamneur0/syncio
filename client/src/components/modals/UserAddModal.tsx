@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 import { useTheme } from '@/contexts/ThemeContext'
-import { getColorHexValue, getThemePalette } from '@/utils/colorMapping'
+import { getThemePalette } from '@/utils/colorMapping'
 import { useModalState, useFormState } from '@/hooks/useCommonState'
 
 interface UserAddModalProps {
@@ -37,7 +37,6 @@ export default function UserAddModal({
   groups = [],
   editingUser
 }: UserAddModalProps) {
-  const { isDark, isMono } = useTheme()
   const [mounted, setMounted] = useState(false)
   const [stremioEmail, setStremioEmail] = useState('')
   const [stremioPassword, setStremioPassword] = useState('')
@@ -160,18 +159,14 @@ export default function UserAddModal({
         }
       }}
     >
-      <div className={`w-full max-w-md rounded-lg shadow-lg ${
-        isDark ? 'bg-gray-800' : 'bg-white'
-      }`}>
-        <div className="flex items-center justify-between p-6 border-b border-gray-200">
-          <h3 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>
+      <div className={`w-full max-w-md rounded-lg shadow-lg card`}>
+        <div className="flex items-center justify-between p-6 border-b color-border">
+          <h3 className={`text-lg font-semibold`}>
             {editingUser ? `Reconnect ${editingUser.username || editingUser.email || 'User'}` : 'Add New User'}
           </h3>
           <button
             onClick={handleClose}
-            className={`w-8 h-8 flex items-center justify-center rounded transition-colors border-0 focus:outline-none ring-0 focus:ring-0 ${
-              isMono ? 'text-white hover:text-white/80 hover:bg-white/10' : (isDark ? 'text-gray-400 hover:text-gray-300 hover:bg-gray-700' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100')
-            }`}
+            className="w-8 h-8 flex items-center justify-center rounded transition-colors border-0 focus:outline-none ring-0 focus:ring-0 color-text-secondary color-hover"
           >
             <X className="w-4 h-4" />
           </button>
@@ -183,21 +178,21 @@ export default function UserAddModal({
               <button
                 type="button"
                 onClick={() => setAuthMode('email')}
-                className={`w-full py-2 text-sm font-medium rounded-md border ${authMode==='email' ? 'accent-bg accent-text accent-border' : (isDark ? 'text-gray-300 border-gray-600' : 'text-gray-700 border-gray-300')}`}
+                className={`w-full py-2 text-sm font-medium rounded-md border ${authMode==='email' ? 'color-surface color-border' : 'color-text-secondary color-border'}`}
               >
                 Email & Password
               </button>
               <button
                 type="button"
                 onClick={() => setAuthMode('authkey')}
-                className={`w-full py-2 text-sm font-medium rounded-md border ${authMode==='authkey' ? 'accent-bg accent-text accent-border' : (isDark ? 'text-gray-300 border-gray-600' : 'text-gray-700 border-gray-300')}`}
+                className={`w-full py-2 text-sm font-medium rounded-md border ${authMode==='authkey' ? 'color-surface color-border' : 'color-text-secondary color-border'}`}
               >
                 Auth Key
               </button>
             </div>
           </div>
           <div>
-            <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
+            <label className={`block text-sm font-medium mb-1`}>
               Username *
             </label>
             <input
@@ -207,19 +202,13 @@ export default function UserAddModal({
               placeholder="Enter username"
               required
               readOnly={!!editingUser}
-              className={`w-full px-3 py-2 border rounded-lg focus:outline-none ${
-                editingUser 
-                  ? (isDark ? 'bg-gray-800 border-gray-600 text-gray-400 cursor-not-allowed' : 'bg-gray-100 text-gray-500 cursor-not-allowed')
-                  : isDark 
-                    ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
-                    : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
-              }`}
+              className={`w-full px-3 py-2 border rounded-lg focus:outline-none ${editingUser ? 'input cursor-not-allowed opacity-80' : 'input'}`}
             />
           </div>
           {authMode === 'email' ? (
             <>
           <div>
-            <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
+            <label className={`block text-sm font-medium mb-1`}>
               Stremio Email *
             </label>
             <input
@@ -229,17 +218,11 @@ export default function UserAddModal({
               placeholder="your@stremio-email.com"
               required
               readOnly={!!editingUser}
-              className={`w-full px-3 py-2 border rounded-lg focus:outline-none ${
-                editingUser 
-                  ? (isDark ? 'bg-gray-800 border-gray-600 text-gray-400 cursor-not-allowed' : 'bg-gray-100 text-gray-500 cursor-not-allowed')
-                  : isDark 
-                    ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
-                    : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
-              }`}
+              className={`w-full px-3 py-2 border rounded-lg focus:outline-none ${editingUser ? 'input cursor-not-allowed opacity-80' : 'input'}`}
             />
           </div>
           <div>
-            <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
+            <label className={`block text-sm font-medium mb-1`}>
               Stremio Password *
             </label>
             <input
@@ -248,11 +231,7 @@ export default function UserAddModal({
               onChange={(e) => setStremioPassword(e.target.value)}
               placeholder="Enter your Stremio password"
               required
-              className={`w-full px-3 py-2 border rounded-lg focus:outline-none ${
-                isDark 
-                  ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
-                  : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
-              }`}
+              className={`w-full px-3 py-2 border rounded-lg focus:outline-none input`}
             />
           </div>
           {!editingUser && (
@@ -262,9 +241,9 @@ export default function UserAddModal({
                 type="checkbox"
                 checked={stremioRegisterNew}
                 onChange={(e) => setStremioRegisterNew(e.target.checked)}
-                className={`h-4 w-4 rounded border ${isDark ? 'border-gray-600 bg-gray-700' : 'border-gray-300'} accent-text focus:ring-0`}
+                className={`h-4 w-4 rounded border color-border color-control focus:ring-0`}
               />
-              <label htmlFor="stremio-register-new" className={`${isDark ? 'text-gray-300' : 'text-gray-700'} text-sm`}>
+              <label htmlFor="stremio-register-new" className={`text-sm`}>
                 Register new Stremio account with these credentials
               </label>
             </div>
@@ -272,7 +251,7 @@ export default function UserAddModal({
             </>
           ) : (
             <div>
-              <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
+              <label className={`block text-sm font-medium mb-1`}>
                 Stremio Auth Key *
               </label>
               <input
@@ -281,28 +260,20 @@ export default function UserAddModal({
                 onChange={(e) => setStremioPassword(e.target.value)}
                 placeholder="Enter your Stremio auth key"
                 required
-                className={`w-full px-3 py-2 border rounded-lg focus:outline-none ${
-                  isDark 
-                    ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
-                    : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
-                }`}
+                className={`w-full px-3 py-2 border rounded-lg focus:outline-none input`}
               />
             </div>
           )}
             {!editingUser && (
               <div>
-                <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
+                <label className={`block text-sm font-medium mb-1`}>
               Assign to group (optional)
                 </label>
               <div className="space-y-2">
                   <select
                     value={selectedGroup}
                     onChange={(e) => setSelectedGroup(e.target.value)}
-                    className={`w-full px-3 py-2 border rounded-lg focus:outline-none ${
-                      isDark 
-                        ? 'bg-gray-700 border-gray-600 text-white' 
-                        : 'bg-white border-gray-300 text-gray-900'
-                    }`}
+                    className={`w-full px-3 py-2 border rounded-lg focus:outline-none input`}
                   >
                   <option value="">Select a group (optional)</option>
                   {groups?.map((group: any) => (
@@ -311,17 +282,13 @@ export default function UserAddModal({
                       </option>
                     ))}
                   </select>
-                <div className="text-center text-sm text-gray-500">or</div>
+                <div className="text-center text-sm color-text-secondary">or</div>
                     <input
                       type="text"
                       value={newGroupName}
                       onChange={(e) => setNewGroupName(e.target.value)}
                   placeholder="Create new group"
-                      className={`w-full px-3 py-2 border rounded-lg focus:outline-none ${
-                        isDark 
-                          ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
-                          : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
-                      }`}
+                      className={`w-full px-3 py-2 border rounded-lg focus:outline-none input`}
                     />
                   </div>
               </div>
@@ -330,11 +297,11 @@ export default function UserAddModal({
             {/* Color Selection */}
             {!editingUser && (
               <div>
-                <label className={`block text-sm font-medium mb-2 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
+                <label className={`block text-sm font-medium mb-2`}>
                   User Color
                 </label>
               <div className="grid grid-cols-5 gap-2">
-                {getThemePalette(isMono ? 'mono' : isDark ? 'dark' : 'light').map((colorOption, index) => {
+                {getThemePalette().map((colorOption, index) => {
                   const actualColorIndex = index
                   return (
                     <button
@@ -345,7 +312,7 @@ export default function UserAddModal({
                         setColorIndexRef(actualColorIndex)
                       }}
                       aria-pressed={colorIndex === actualColorIndex}
-                      className={`relative w-8 h-8 rounded-full border-2 transition ${colorIndex === actualColorIndex ? 'border-white ring-2 ring-offset-2 ring-stremio-purple' : 'border-gray-300'}`}
+                      className={`relative w-8 h-8 rounded-full border-2 transition ${colorIndex === actualColorIndex ? 'selection-ring ring-2 ring-offset-2' : 'color-border'}`}
                       style={{
                         backgroundColor: colorOption.hexValue
                       }}
@@ -368,11 +335,7 @@ export default function UserAddModal({
               <button
                 type="button"
                 onClick={handleClose}
-                className={`flex-1 px-4 py-2 rounded-lg transition-colors ${
-                  isDark 
-                    ? 'text-gray-300 hover:text-white hover:bg-gray-700' 
-                    : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-                }`}
+                className={`flex-1 px-4 py-2 rounded-lg transition-colors color-text-secondary color-hover`}
               >
                 Cancel
               </button>
@@ -380,7 +343,7 @@ export default function UserAddModal({
                 type="submit"
                 disabled={isCreating}
                 onClick={() => {}}
-                className="flex-1 px-4 py-2 accent-bg accent-text rounded-lg transition-colors disabled:opacity-50"
+                className="flex-1 px-4 py-2 color-surface rounded-lg transition-colors disabled:opacity-50"
               >
                 {isCreating ? (stremioRegisterNew ? 'Registering...' : (editingUser ? 'Reconnecting...' : 'Adding...')) : (stremioRegisterNew ? 'Register & Connect' : (editingUser ? 'Reconnect User' : 'Add User'))}
               </button>

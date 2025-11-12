@@ -1,11 +1,12 @@
 'use client'
 
 import React from 'react'
-import { useTheme } from '@/contexts/ThemeContext'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { usersAPI, groupsAPI } from '@/services/api'
 import { invalidateSyncStatusQueries } from '@/utils/queryUtils'
 import { useUnsafeMode } from '@/hooks/useCommonState'
+import { useTheme } from '@/contexts/ThemeContext'
+import { getEntityColorStyles } from '@/utils/colorMapping'
 
 interface SyncBadgeProps {
   // Simple mode - just show status
@@ -38,10 +39,13 @@ export default function SyncBadge({
   userProtectedSet
 }: SyncBadgeProps) {
   
-  const { isDark, isMono } = useTheme()
   const queryClient = useQueryClient()
   const [smartStatus, setSmartStatus] = React.useState<'synced' | 'unsynced' | 'stale' | 'connect' | 'syncing' | 'checking' | 'error'>('checking')
   const [isLoading, setIsLoading] = React.useState(true)
+  const { theme } = useTheme()
+  const accentStyles = React.useMemo(() => getEntityColorStyles(theme, 1), [theme])
+  const accentBackground = accentStyles.accentHex
+  const accentTextColor = accentStyles.textColor
 
   // Smart mode: auto-detect sync status
   const isSmartMode = !status && Boolean(userId || groupId)
@@ -281,56 +285,67 @@ export default function SyncBadge({
     : onClick
 
   const getStatusConfig = () => {
-    // Treat mono theme like dark for contrast purposes
-    const prefersDark = isDark || isMono
+    const baseBackground = accentBackground
+    const neutralDot = 'color-mix(in srgb, var(--color-text) 40%, var(--color-surface))'
+    const syncedDot = '#22c55e'
+    const unsyncedDot = '#ef4444'
+
     switch (finalStatus) {
       case 'synced':
         return {
           text: 'Synced',
-          dotColor: 'bg-green-500',
-          bgColor: isMono ? 'bg-black text-white border border-white/20' : (prefersDark ? 'bg-green-900 text-green-300' : 'bg-green-100 text-green-800')
+          background: baseBackground,
+          dot: syncedDot,
+          textColor: accentTextColor
         }
       case 'unsynced':
         return {
           text: 'Unsynced',
-          dotColor: 'bg-red-500',
-          bgColor: isMono ? 'bg-black text-white border border-white/20' : (prefersDark ? 'bg-red-900 text-red-300' : 'bg-red-100 text-red-800')
+          background: baseBackground,
+          dot: unsyncedDot,
+          textColor: accentTextColor
         }
       case 'stale':
         return {
           text: 'Stale',
-          dotColor: 'bg-gray-400',
-          bgColor: isMono ? 'bg-black text-white border border-white/20' : (prefersDark ? 'bg-gray-700 text-gray-100' : 'bg-gray-600 text-gray-100')
+          background: baseBackground,
+          dot: neutralDot,
+          textColor: accentTextColor
         }
       case 'connect':
         return {
           text: 'Reconnect',
-          dotColor: 'bg-purple-200',
-          bgColor: 'bg-stremio-purple text-white'
+          background: baseBackground,
+          dot: neutralDot,
+          textColor: accentTextColor
         }
       case 'syncing':
         return {
           text: 'Syncing',
-          dotColor: 'bg-red-500',
-          bgColor: isMono ? 'bg-black text-white border border-white/20' : (prefersDark ? 'bg-red-800 text-red-200' : 'bg-red-100 text-red-800')
+          background: `color-mix(in srgb, ${accentBackground} 80%, var(--color-surface))`,
+          dot: neutralDot,
+          textColor: accentTextColor
         }
       case 'checking':
         return {
           text: 'Checking',
-          dotColor: 'bg-gray-400',
-          bgColor: isMono ? 'bg-black text-white border border-white/20' : (prefersDark ? 'bg-gray-700 text-gray-300' : 'bg-gray-200 text-gray-600')
+          background: baseBackground,
+          dot: neutralDot,
+          textColor: accentTextColor
         }
       case 'error':
         return {
           text: 'Error',
-          dotColor: 'bg-red-500',
-          bgColor: isMono ? 'bg-black text-white border border-white/20' : (prefersDark ? 'bg-red-900 text-red-300' : 'bg-red-100 text-red-800')
+          background: `color-mix(in srgb, ${accentBackground} 65%, ${unsyncedDot} 35%)`,
+          dot: unsyncedDot,
+          textColor: accentTextColor
         }
       default:
         return {
           text: 'Unknown',
-          dotColor: 'bg-gray-400',
-          bgColor: isDark ? 'bg-gray-700 text-gray-100' : 'bg-gray-600 text-gray-100'
+          background: baseBackground,
+          dot: neutralDot,
+          textColor: accentTextColor
         }
     }
   }
@@ -342,30 +357,20 @@ export default function SyncBadge({
     // Circular mode - same proportions as pill but circular
     const content = (
       <div 
-        className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-medium ${config.bgColor} ${finalIsClickable ? 'cursor-pointer hover:opacity-80 transition-opacity' : 'cursor-default'}`}
+        className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-medium ${finalIsClickable ? 'cursor-pointer hover:opacity-80 transition-opacity' : 'cursor-default'}`}
+        style={{ backgroundColor: config.background, color: config.textColor }}
         title={title}
       >
-        <div className={`w-2 h-2 rounded-full ${config.dotColor} ${isSpinning ? 'animate-spin' : ''}`} />
+        <div className={`w-2 h-2 rounded-full ${isSpinning ? 'animate-spin' : ''}`} style={{ backgroundColor: config.dot }} />
       </div>
     )
 
     if (finalIsClickable && finalOnClick) {
-      if (isMono) {
-        // Avoid generic .mono button styles adding unwanted borders by not using <button>
-        return (
-          <div onClick={(e) => {
-            e.stopPropagation()
-            finalOnClick()
-          }} className="cursor-pointer select-none">
-            {content}
-          </div>
-        )
-      }
       return (
         <button onClick={(e) => {
           e.stopPropagation()
           finalOnClick()
-        }} className="focus:outline-none">
+        }} className="focus:outline-none border-0 shadow-none ring-0">
           {content}
         </button>
       )
@@ -375,7 +380,7 @@ export default function SyncBadge({
   }
 
   // Regular pill mode
-  const baseClasses = `inline-flex items-center px-2 py-1 text-xs font-medium ${config.bgColor}`
+  const baseClasses = `inline-flex items-center px-2 py-1 text-xs font-medium`
   const clickableClasses = finalIsClickable ? 'cursor-pointer hover:opacity-80 transition-opacity' : 'cursor-default'
 
   const content = (
@@ -388,32 +393,23 @@ export default function SyncBadge({
         paddingLeft: '8px',
         paddingRight: '8px',
         paddingTop: '4px',
-        paddingBottom: '4px'
+        paddingBottom: '4px',
+        backgroundColor: config.background,
+        color: config.textColor
       }}
       title={title}
     >
-      <div className={`w-2 h-2 rounded-full mr-1 ${config.dotColor} ${isSpinning ? 'animate-spin' : ''}`} />
+      <div className={`w-2 h-2 rounded-full mr-1 ${isSpinning ? 'animate-spin' : ''}`} style={{ backgroundColor: config.dot }} />
       {config.text}
     </div>
   )
 
   if (finalIsClickable && finalOnClick) {
-    if (isMono) {
-      // Avoid generic .mono button styles adding unwanted borders by not using <button>
-      return (
-        <div onClick={(e) => {
-          e.stopPropagation()
-          finalOnClick()
-        }} className="cursor-pointer select-none">
-          {content}
-        </div>
-      )
-    }
     return (
       <button onClick={(e) => {
         e.stopPropagation()
         finalOnClick()
-      }} className="focus:outline-none">
+      }} className="focus:outline-none border-0 shadow-none ring-0">
         {content}
       </button>
     )

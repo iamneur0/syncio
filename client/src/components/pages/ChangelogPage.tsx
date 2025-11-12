@@ -2,6 +2,7 @@
 
 import React from 'react'
 import { useTheme } from '@/contexts/ThemeContext'
+import { getEntityColorStyles } from '@/utils/colorMapping'
 import { ScrollText, Tag, ChevronDown, ChevronUp, Sparkles, Bug, Copy, Check } from 'lucide-react'
 import toast from 'react-hot-toast'
 import AccountMenuButton from '@/components/auth/AccountMenuButton'
@@ -163,10 +164,11 @@ const releases: Release[] = [
 ]
 
 export default function ChangelogPage() {
-  const { isDark, isModern, isModernDark, isMono } = useTheme()
   const appVersion = (process.env.NEXT_PUBLIC_APP_VERSION as string) || 'dev'
   const [expandedVersions, setExpandedVersions] = React.useState<Set<string>>(new Set([releases[0].version]))
   const [copied, setCopied] = React.useState(false)
+  const { theme } = useTheme()
+  const accentStyles = React.useMemo(() => getEntityColorStyles(theme, 1), [theme])
 
   const capitalizeFirst = (text: string): string => {
     if (!text) return text
@@ -196,11 +198,11 @@ export default function ChangelogPage() {
     })
   }
 
-  const cardBgColor = isModernDark ? 'bg-gray-750' : isDark ? 'bg-gray-800' : 'bg-white'
-  const textColor = isDark ? 'text-gray-100' : 'text-gray-900'
-  const mutedTextColor = isDark ? 'text-gray-400' : 'text-gray-600'
-  const borderColor = isDark ? 'border-gray-700' : 'border-gray-200'
-  const secondaryBgColor = isDark ? 'bg-gray-750' : 'bg-gray-50'
+  const cardBgColor = 'card'
+  const textColor = ''
+  const mutedTextColor = 'color-text-secondary'
+  const borderColor = 'color-border'
+  const secondaryBgColor = 'card'
 
   return (
     <div className="p-4 sm:p-6">
@@ -232,7 +234,7 @@ export default function ChangelogPage() {
             return (
               <div
                 key={release.version}
-                className={`${cardBgColor} rounded-lg border ${isCurrentVersion ? (isMono ? 'ring-2 ring-white/50 border-white/40' : 'ring-2 ring-gray-400 border-gray-400') : borderColor} overflow-hidden transition-all`}
+                className={`${cardBgColor} rounded-lg border ${isCurrentVersion ? 'selection-ring' : borderColor} overflow-hidden transition-all`}
               >
                 <button
                   onClick={() => toggleVersion(release.version)}
@@ -252,19 +254,30 @@ export default function ChangelogPage() {
                         v{release.version}
                       </a>
                       {isLatest && (
-                        <button
+                        <span
                           onClick={(e) => {
                             e.stopPropagation()
                             copyUpdateCommand()
                           }}
-                          className="inline-flex items-center gap-1.5 rounded px-2 py-0.5 text-xs font-medium accent-bg accent-text hover:opacity-80 transition-opacity"
+                          role="button"
+                          className="inline-flex items-center gap-1.5 rounded px-2 py-0.5 text-xs font-medium hover:opacity-80 transition-opacity min-w-[74px] justify-center cursor-pointer select-none"
+                          style={{
+                            background: accentStyles.accentHex,
+                            color: accentStyles.textColor,
+                          }}
                         >
                           {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
                           <span>{copied ? 'Copied!' : 'Latest'}</span>
-                        </button>
+                        </span>
                       )}
                       {isCurrentVersion && !isLatest && (
-                        <span className="inline-flex items-center rounded px-2 py-0.5 text-xs font-medium accent-bg accent-text">
+                        <span
+                          className="inline-flex items-center rounded px-2 py-0.5 text-xs font-medium"
+                          style={{
+                            background: accentStyles.accentHex,
+                            color: accentStyles.textColor,
+                          }}
+                        >
                           Current
                         </span>
                       )}

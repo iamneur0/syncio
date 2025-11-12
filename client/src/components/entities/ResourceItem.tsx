@@ -1,5 +1,4 @@
 import React from 'react'
-import { useTheme } from '@/contexts/ThemeContext'
 import { Captions, Play, BookOpen, Info, Search } from 'lucide-react'
 
 interface ResourceItemProps {
@@ -9,7 +8,6 @@ interface ResourceItemProps {
 }
 
 export default function ResourceItem({ resource, isSelected, onToggle }: ResourceItemProps) {
-  const { isDark, isMono } = useTheme()
 
   const getResourceIcon = (resource: any) => {
     const kind = ((): string => {
@@ -81,23 +79,17 @@ export default function ResourceItem({ resource, isSelected, onToggle }: Resourc
 
   return (
     <div 
-      className={`flex items-center justify-between p-3 rounded-lg transition-colors cursor-pointer ${
-        isDark ? 'bg-gray-600 hover:bg-gray-550' : 'bg-white hover:bg-gray-50'
-      } border ${
-        isSelected 
-          ? (isMono ? 'ring-2 ring-white/50 border-white/40' : 'ring-2 ring-gray-400 border-gray-400')
-          : 'border-transparent'
+      className={`flex items-center justify-between p-3 rounded-lg transition-colors cursor-pointer card card-selectable color-hover hover:shadow-lg ${
+        isSelected ? 'card-selected' : ''
       }`}
       onClick={() => onToggle(resource)}
     >
       <div className="flex items-center flex-1 min-w-0">
-        <div className={`w-8 h-8 rounded-lg flex items-center justify-center mr-3 flex-shrink-0 ${
-          isMono ? 'bg-black text-white' : 'bg-gray-500 text-white'
-        }`}>
+        <div className="w-8 h-8 rounded-lg flex items-center justify-center mr-3 flex-shrink-0 icon-bg-default">
           {getResourceIcon(resource)}
         </div>
             <div className="min-w-0 flex-1">
-              <h4 className={`font-medium text-sm ${isDark ? 'text-white' : 'text-gray-900'}`}>
+              <h4 className={`font-medium text-sm`}>
                 {getResourceLabel(resource)}
               </h4>
             </div>
