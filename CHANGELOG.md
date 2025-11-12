@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.1.5](https://github.com/iamneur0/syncio/compare/v0.1.4...v0.1.5) (2025-10-26)
+
+
+### Features
+
+* reset addon/resources/catalogs ([8a3eb4a](https://github.com/iamneur0/syncio/commit/8a3eb4a44162cd3a660f2e7cdbda3ada511333ab))
+* search catalog selection ([f11c665](https://github.com/iamneur0/syncio/commit/f11c66517a0259b99a40e330081ae12cbeba05f2))
+* search catalogs view, separated from other catalogs ([25d677d](https://github.com/iamneur0/syncio/commit/25d677dbc0a2e131975ab878e9f669bd779fac0e))
+
+
+### Bug Fixes
+
+* advanced mode now reloads group addons before sync ([69caa60](https://github.com/iamneur0/syncio/commit/69caa6050197fbf2a7f08b3f5189806cfddcfbff))
+* exclude logic now based on stremioAddonId instead of addon id ([caea4d1](https://github.com/iamneur0/syncio/commit/caea4d1f42443cf1e4351fcaae1e1af36064ee8c))
+* handling of exclusions improved and better addon listing ([fa471dc](https://github.com/iamneur0/syncio/commit/fa471dc00d449a225fa13ada31e623c344a200b1))
+* originalManifest not being fetched properly ([3c8098f](https://github.com/iamneur0/syncio/commit/3c8098f93c281ca4ebcf9564f1527bf898494700))
+* reload addons logic totally reworked, handling all cases ([964cf22](https://github.com/iamneur0/syncio/commit/964cf2260b8d0476bdaa961788e74b4cbb60740a))
+* reload group addons handling future conditioning ([a783f31](https://github.com/iamneur0/syncio/commit/a783f31019ad45e755f1823ab7cd98d4f99a88be))
+* reload not applying new catalogs/resources ([c0e2e82](https://github.com/iamneur0/syncio/commit/c0e2e8274d6343afe9d29156aa54ae906ef87684))
+* reload now covering detecting new catalogs/resources ([aa5ee1e](https://github.com/iamneur0/syncio/commit/aa5ee1e92358212027263c6310fc50178e228944))
+* resources now added in addon's details on addon import from users ([16aa80d](https://github.com/iamneur0/syncio/commit/16aa80dbc267ae7fbdb435c1979ec5475a958412))
+* transportName set to empty because munif angy ([d95efed](https://github.com/iamneur0/syncio/commit/d95efeda3371db599ebf070e94f8d6698d78cdb3))
+* ui + import/export fixes for release ([eb1491a](https://github.com/iamneur0/syncio/commit/eb1491aadc02070ce714d93c49597cb174162910))
+* user and group addon reload ([2d855e0](https://github.com/iamneur0/syncio/commit/2d855e0fd97a086e6f68ee0f6ac22a35c4cc68d4))
+
 ## [0.1.4](https://github.com/iamneur0/syncio/compare/v0.1.3...v0.1.4) (2025-10-21)
 
 
