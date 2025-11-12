@@ -188,6 +188,10 @@ module.exports = ({ prisma, AUTH_ENABLED, getAccountDek, getDecryptedManifestUrl
               const days = Number(trimmed.slice(0, -1))
               return Number.isFinite(days) && days > 0 ? days * 1440 : null
             }
+            if (trimmed.endsWith('h')) {
+              const hours = Number(trimmed.slice(0, -1))
+              return Number.isFinite(hours) && hours > 0 ? hours * 60 : null
+            }
             if (trimmed.endsWith('m')) {
               const mins = Number(trimmed.slice(0, -1))
               return Number.isFinite(mins) && mins >= 0 ? mins : null
