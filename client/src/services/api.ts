@@ -119,9 +119,12 @@ export interface CreateAddonData {
 export interface UpdateAddonData {
   name?: string
   description?: string
+  version?: string | null
+  iconUrl?: string | null
   url?: string
   groupIds?: string[]
   resources?: any[]
+  catalogs?: any[]
 }
 
 // API Functions

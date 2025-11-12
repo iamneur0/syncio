@@ -655,7 +655,7 @@ export default function TasksPage() {
           <p className={`text-sm mt-1 ${mutedTextColor}`}>
             Save configuration snapshots to the server-side "backup" folder on a schedule.
           </p>
-          <div className="mt-4 flex items-center gap-3 flex-wrap">
+          <div className="mt-4 flex items-center gap-3">
             <select
               value={backupDays}
               onChange={(e) => {
@@ -665,7 +665,7 @@ export default function TasksPage() {
                   .then(() => toast.success('Backup schedule updated'))
                   .catch((err) => toast.error(err?.response?.data?.message || 'Failed to update backup schedule'))
               }}
-              className={`input px-3 py-2`}
+              className={`input px-3 py-2 flex-1 min-w-[180px]`}
             >
               <option value={0}>Disabled</option>
               <option value={1}>Every day</option>
@@ -685,10 +685,12 @@ export default function TasksPage() {
                   setIsBackupRunning(false)
                 }
               }}
-              className={`surface-interactive flex items-center px-3 py-2 rounded ${isBackupRunning ? 'opacity-75 cursor-not-allowed' : ''}`}
+              className={`surface-interactive w-10 h-10 rounded flex items-center justify-center ${isBackupRunning ? 'opacity-75 cursor-not-allowed' : ''}`}
               disabled={isBackupRunning}
+              aria-label="Run backup now"
+              title="Run backup now"
             >
-              <RotateCcw className={`w-5 h-5 mr-2 ${isBackupRunning ? 'animate-spin' : ''}`} /> Run Backup Now
+              <RotateCcw className={`w-5 h-5 ${isBackupRunning ? 'animate-spin' : ''}`} />
             </button>
           </div>
           <div className={`text-xs mt-2 ${mutedTextColor}`}>
@@ -716,10 +718,10 @@ export default function TasksPage() {
             className={`input px-3 py-2`}
           >
             <option value={'0'}>Disabled</option>
-            <option value={'1m'}>Every minute</option>
             <option value={'1d'}>Every day</option>
-            <option value={'3d'}>Every 3 days</option>
             <option value={'7d'}>Every 7 days</option>
+            <option value={'15d'}>Every 15 days</option>
+            <option value={'30d'}>Every 30 days</option>
           </select>
           {/* Run now button removed per request */}
         </div>

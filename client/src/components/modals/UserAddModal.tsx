@@ -1,9 +1,9 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 import { useTheme } from '@/contexts/ThemeContext'
-import { getThemePalette } from '@/utils/colorMapping'
-import { useModalState, useFormState } from '@/hooks/useCommonState'
+import { getEntityColorStyles } from '@/utils/colorMapping'
+import { ColorPicker } from '@/components/layout'
 
 interface UserAddModalProps {
   isOpen: boolean
@@ -37,6 +37,9 @@ export default function UserAddModal({
   groups = [],
   editingUser
 }: UserAddModalProps) {
+  const { theme } = useTheme()
+  const logoRef = useRef<HTMLDivElement>(null)
+  const [showColorPicker, setShowColorPicker] = useState(false)
   const [mounted, setMounted] = useState(false)
   const [stremioEmail, setStremioEmail] = useState('')
   const [stremioPassword, setStremioPassword] = useState('')
@@ -44,9 +47,14 @@ export default function UserAddModal({
   const [authMode, setAuthMode] = useState<'email' | 'authkey'>('email')
   const [selectedGroup, setSelectedGroup] = useState('')
   const [newGroupName, setNewGroupName] = useState('')
+  const [isCreatingNewGroup, setIsCreatingNewGroup] = useState(false)
   const [stremioRegisterNew, setStremioRegisterNew] = useState(false)
   const [colorIndex, setColorIndex] = useState(0)
   const [colorIndexRef, setColorIndexRef] = useState(0)
+  const colorStyles = useMemo(
+    () => getEntityColorStyles(theme, colorIndex),
+    [theme, colorIndex]
+  )
 
   useEffect(() => {
     setMounted(true)
@@ -62,6 +70,7 @@ export default function UserAddModal({
       setColorIndexRef(editingUser.colorIndex || 0)
       setAuthMode('authkey') // Default to authkey mode for reconnection
       setStremioRegisterNew(false) // Hide register option for reconnection
+      setIsCreatingNewGroup(false)
       
     } else {
       // Reset form when not editing
@@ -74,6 +83,7 @@ export default function UserAddModal({
       setStremioRegisterNew(false)
       setColorIndex(0)
       setColorIndexRef(0)
+      setIsCreatingNewGroup(false)
     }
   }, [editingUser])
 
@@ -102,6 +112,7 @@ export default function UserAddModal({
       setNewGroupName('')
       setStremioRegisterNew(false)
       setAuthMode('email')
+      setIsCreatingNewGroup(false)
     }
   }, [isOpen, editingUser])
 
@@ -141,6 +152,7 @@ export default function UserAddModal({
     setSelectedGroup('')
     setNewGroupName('')
     setStremioRegisterNew(false)
+    setIsCreatingNewGroup(false)
     onClose()
   }
 
@@ -161,9 +173,55 @@ export default function UserAddModal({
     >
       <div className={`w-full max-w-md rounded-lg shadow-lg card`}>
         <div className="flex items-center justify-between p-6 border-b color-border">
-          <h3 className={`text-lg font-semibold`}>
-            {editingUser ? `Reconnect ${editingUser.username || editingUser.email || 'User'}` : 'Add New User'}
-          </h3>
+          <div className="flex items-center gap-4 relative">
+            <div
+              ref={logoRef}
+              onClick={() => setShowColorPicker((prev) => !prev)}
+              className="w-12 h-12 rounded-full flex items-center justify-center flex-shrink-0 cursor-pointer transition-all hover:scale-105"
+              style={{
+                background: colorStyles.background,
+                color: colorStyles.textColor,
+              }}
+              title="Click to change color"
+            >
+              <span className="font-semibold text-lg" style={{ color: colorStyles.textColor }}>
+                {(stremioUsername || 'User').charAt(0).toUpperCase()}
+              </span>
+            </div>
+            <ColorPicker
+              currentColorIndex={colorIndex}
+              onColorChange={(next) => {
+                setColorIndex(next)
+                setColorIndexRef(next)
+                setShowColorPicker(false)
+              }}
+              isOpen={showColorPicker}
+              onClose={() => setShowColorPicker(false)}
+              triggerRef={logoRef}
+            />
+            <div className="flex flex-col">
+              <label className="sr-only" htmlFor="stremio-username-input">
+                Stremio Username
+              </label>
+              <input
+                id="stremio-username-input"
+                type="text"
+                value={stremioUsername}
+                onChange={(e) => setStremioUsername(e.target.value)}
+                placeholder="Username *"
+                required
+                readOnly={!!editingUser}
+                className={`text-lg font-semibold bg-transparent border-none focus:outline-none focus:ring-0 p-0 m-0 ${
+                  editingUser ? 'cursor-not-allowed opacity-80 color-text-secondary' : 'color-text'
+                }`}
+              />
+              <span className="text-sm color-text-secondary">
+                {authMode === 'email'
+                  ? (stremioEmail.trim() || 'Provide credentials below')
+                  : 'Authenticate with an Auth Key'}
+              </span>
+            </div>
+          </div>
           <button
             onClick={handleClose}
             className="w-8 h-8 flex items-center justify-center rounded transition-colors border-0 focus:outline-none ring-0 focus:ring-0 color-text-secondary color-hover"
@@ -173,163 +231,116 @@ export default function UserAddModal({
         </div>
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
           {/* Auth method toggle */}
-          <div className="w-full mb-2 flex justify-center">
-            <div className="grid grid-cols-2 gap-2 w-full max-w-sm">
+          <div className="w-full">
+            <div className="grid grid-cols-2 gap-2 w-full">
               <button
                 type="button"
                 onClick={() => setAuthMode('email')}
-                className={`w-full py-2 text-sm font-medium rounded-md border ${authMode==='email' ? 'color-surface color-border' : 'color-text-secondary color-border'}`}
+                className={`w-full py-3 px-4 rounded-lg cursor-pointer card card-selectable color-hover hover:shadow-lg transition-all ${
+                  authMode === 'email' ? 'card-selected' : ''
+                }`}
               >
-                Email & Password
+                <span className="text-sm font-medium">Email & Password</span>
               </button>
               <button
                 type="button"
                 onClick={() => setAuthMode('authkey')}
-                className={`w-full py-2 text-sm font-medium rounded-md border ${authMode==='authkey' ? 'color-surface color-border' : 'color-text-secondary color-border'}`}
+                className={`w-full py-3 px-4 rounded-lg cursor-pointer card card-selectable color-hover hover:shadow-lg transition-all ${
+                  authMode === 'authkey' ? 'card-selected' : ''
+                }`}
               >
-                Auth Key
+                <span className="text-sm font-medium">Auth Key</span>
               </button>
             </div>
-          </div>
-          <div>
-            <label className={`block text-sm font-medium mb-1`}>
-              Username *
-            </label>
-            <input
-              type="text"
-              value={stremioUsername}
-              onChange={(e) => setStremioUsername(e.target.value)}
-              placeholder="Enter username"
-              required
-              readOnly={!!editingUser}
-              className={`w-full px-3 py-2 border rounded-lg focus:outline-none ${editingUser ? 'input cursor-not-allowed opacity-80' : 'input'}`}
-            />
           </div>
           {authMode === 'email' ? (
             <>
           <div>
-            <label className={`block text-sm font-medium mb-1`}>
-              Stremio Email *
-            </label>
             <input
               type="email"
               value={stremioEmail}
               onChange={(e) => setStremioEmail(e.target.value)}
-              placeholder="your@stremio-email.com"
+              placeholder="Email"
               required
               readOnly={!!editingUser}
               className={`w-full px-3 py-2 border rounded-lg focus:outline-none ${editingUser ? 'input cursor-not-allowed opacity-80' : 'input'}`}
             />
           </div>
           <div>
-            <label className={`block text-sm font-medium mb-1`}>
-              Stremio Password *
-            </label>
             <input
               type="password"
               value={stremioPassword}
               onChange={(e) => setStremioPassword(e.target.value)}
-              placeholder="Enter your Stremio password"
+              placeholder="Password"
               required
               className={`w-full px-3 py-2 border rounded-lg focus:outline-none input`}
             />
           </div>
           {!editingUser && (
-            <div className="flex items-center gap-2">
-              <input
-                id="stremio-register-new"
-                type="checkbox"
-                checked={stremioRegisterNew}
-                onChange={(e) => setStremioRegisterNew(e.target.checked)}
-                className={`h-4 w-4 rounded border color-border color-control focus:ring-0`}
-              />
-              <label htmlFor="stremio-register-new" className={`text-sm`}>
-                Register new Stremio account with these credentials
-              </label>
-            </div>
+            <>
+              <div>
+                <select
+                  value={isCreatingNewGroup ? '__create_new__' : selectedGroup}
+                  onChange={(e) => {
+                    if (e.target.value === '__create_new__') {
+                      setIsCreatingNewGroup(true)
+                      setSelectedGroup('')
+                      setNewGroupName('')
+                    } else {
+                      setIsCreatingNewGroup(false)
+                      setSelectedGroup(e.target.value)
+                      setNewGroupName('')
+                    }
+                  }}
+                  className={`w-full px-3 py-2 border rounded-lg focus:outline-none input`}
+                >
+                  <option value="">Group (optional)</option>
+                  {groups?.map((group: any) => (
+                    <option key={group.id} value={group.id}>
+                      {group.name}
+                    </option>
+                  ))}
+                  <option value="__create_new__">+ Create new group...</option>
+                </select>
+                {isCreatingNewGroup && (
+                  <input
+                    type="text"
+                    value={newGroupName}
+                    onChange={(e) => setNewGroupName(e.target.value)}
+                    placeholder="Enter new group name"
+                    className={`w-full px-3 py-2 border rounded-lg focus:outline-none input mt-2`}
+                    autoFocus
+                  />
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  id="stremio-register-new"
+                  type="checkbox"
+                  checked={stremioRegisterNew}
+                  onChange={(e) => setStremioRegisterNew(e.target.checked)}
+                  className="control-radio"
+                  onClick={(e) => e.stopPropagation()}
+                />
+                <label htmlFor="stremio-register-new" className={`text-sm cursor-pointer`} onClick={() => setStremioRegisterNew(!stremioRegisterNew)}>
+                  Register
+                </label>
+              </div>
+            </>
           )}
             </>
           ) : (
             <div>
-              <label className={`block text-sm font-medium mb-1`}>
-                Stremio Auth Key *
-              </label>
               <input
                 type="text"
                 value={stremioPassword}
                 onChange={(e) => setStremioPassword(e.target.value)}
-                placeholder="Enter your Stremio auth key"
+                placeholder="Auth Key"
                 required
                 className={`w-full px-3 py-2 border rounded-lg focus:outline-none input`}
               />
             </div>
           )}
-            {!editingUser && (
-              <div>
-                <label className={`block text-sm font-medium mb-1`}>
-              Assign to group (optional)
-                </label>
-              <div className="space-y-2">
-                  <select
-                    value={selectedGroup}
-                    onChange={(e) => setSelectedGroup(e.target.value)}
-                    className={`w-full px-3 py-2 border rounded-lg focus:outline-none input`}
-                  >
-                  <option value="">Select a group (optional)</option>
-                  {groups?.map((group: any) => (
-                    <option key={group.id} value={group.id}>
-                        {group.name}
-                      </option>
-                    ))}
-                  </select>
-                <div className="text-center text-sm color-text-secondary">or</div>
-                    <input
-                      type="text"
-                      value={newGroupName}
-                      onChange={(e) => setNewGroupName(e.target.value)}
-                  placeholder="Create new group"
-                      className={`w-full px-3 py-2 border rounded-lg focus:outline-none input`}
-                    />
-                  </div>
-              </div>
-            )}
-            
-            {/* Color Selection */}
-            {!editingUser && (
-              <div>
-                <label className={`block text-sm font-medium mb-2`}>
-                  User Color
-                </label>
-              <div className="grid grid-cols-5 gap-2">
-                {getThemePalette().map((colorOption, index) => {
-                  const actualColorIndex = index
-                  return (
-                    <button
-                      key={index}
-                      type="button"
-                      onClick={() => {
-                        setColorIndex(actualColorIndex)
-                        setColorIndexRef(actualColorIndex)
-                      }}
-                      aria-pressed={colorIndex === actualColorIndex}
-                      className={`relative w-8 h-8 rounded-full border-2 transition ${colorIndex === actualColorIndex ? 'selection-ring ring-2 ring-offset-2' : 'color-border'}`}
-                      style={{
-                        backgroundColor: colorOption.hexValue
-                      }}
-                    >
-                      {colorIndex === actualColorIndex && (
-                        <span className="absolute inset-0 flex items-center justify-center">
-                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="white" className="w-4 h-4">
-                            <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                          </svg>
-                        </span>
-                      )}
-                    </button>
-                  )
-                })}
-              </div>
-              </div>
-            )}
             
             <div className="flex gap-3 pt-4">
               <button

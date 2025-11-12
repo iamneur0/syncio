@@ -218,20 +218,20 @@ async function bootstrap() {
     }
   }
 
-  scheduleSyncs(
-    readSyncFrequencyMinutes(),
-    prisma,
-    getAccountId,
-    scopedWhere,
-    decrypt,
-    reloadGroupAddons,
-    schedulerReq,
-    AUTH_ENABLED
+scheduleSyncs(
+  readSyncFrequencyMinutes(),
+  prisma,
+  getAccountId,
+  scopedWhere,
+  decrypt,
+  reloadGroupAddons,
+  schedulerReq,
+  AUTH_ENABLED
   )
 
   const storageLabel = process.env.PRISMA_PROVIDER === 'sqlite' ? 'SQLite with Prisma' : 'PostgreSQL with Prisma'
 
-  app.listen(PORT, '0.0.0.0', () => {
+app.listen(PORT, '0.0.0.0', () => {
     console.log('🚀 Syncio (Database) running on port', PORT)
     console.log('📊 Health check: http://127.0.0.1:' + PORT + '/health')
     console.log('🔌 API endpoints: http://127.0.0.1:' + PORT + '/api/')

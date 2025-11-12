@@ -255,13 +255,13 @@ const ThemeOptionCard: React.FC<{
       onClick={() => onSelect(option.id)}
       className="relative w-full rounded-xl border transition-all text-left shadow-sm focus:outline-none"
       aria-pressed={selected}
-        style={{
+      style={{
           borderColor: option.palette.border,
           borderWidth: '2px',
           background: option.palette.background,
           color: option.palette.text,
           minHeight: '132px',
-        }}
+      }}
     >
       <div className="flex items-start gap-3 p-3">
         <ThemePreview option={option} />
@@ -269,7 +269,7 @@ const ThemeOptionCard: React.FC<{
           <div className="flex items-center gap-2">
             <span className="font-semibold" style={{ color: option.palette.text }}>
               {option.label}
-            </span>
+              </span>
           </div>
           <p
             className="text-sm leading-snug"
@@ -1049,13 +1049,13 @@ export default function SettingsPage() {
         <div className="mt-4">
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
             {THEME_OPTIONS.map((option) => (
-              <ThemeOptionCard
-                key={option.id}
-                option={option}
-                selected={theme === option.id}
-                onSelect={setTheme}
-              />
-            ))}
+                <ThemeOptionCard
+                  key={option.id}
+                  option={option}
+                  selected={theme === option.id}
+                  onSelect={setTheme}
+                />
+              ))}
           </div>
         </div>
       </div>
@@ -1077,36 +1077,36 @@ export default function SettingsPage() {
           </label>
           <div className="flex gap-2">
             <div className="relative flex-1">
-              <input
-                type={hideSensitive && !revealedFields.has('webhook') ? "password" : "text"}
-                value={hideSensitive && !revealedFields.has('webhook') ? (webhookUrl ? '••••••••••••••••••••••••••••••••' : '') : webhookUrl}
-                onChange={(e) => {
-                  if (!hideSensitive || revealedFields.has('webhook')) {
-                    setWebhookUrl(e.target.value)
-                  }
-                }}
-                onClick={() => {
-                  if (hideSensitive && !revealedFields.has('webhook')) {
-                    setRevealedFields(prev => new Set(prev).add('webhook'))
-                  }
-                }}
-                onBlur={() => {
-                  if (webhookUrl && (!hideSensitive || revealedFields.has('webhook'))) {
-                    api.put('/settings/account-sync', { webhookUrl: webhookUrl.trim() || undefined })
-                      .then(() => toast.success('Webhook URL updated'))
+        <input
+              type={hideSensitive && !revealedFields.has('webhook') ? "password" : "text"}
+              value={hideSensitive && !revealedFields.has('webhook') ? (webhookUrl ? '••••••••••••••••••••••••••••••••' : '') : webhookUrl}
+              onChange={(e) => {
+                if (!hideSensitive || revealedFields.has('webhook')) {
+                  setWebhookUrl(e.target.value)
+                }
+              }}
+              onClick={() => {
+                if (hideSensitive && !revealedFields.has('webhook')) {
+                  setRevealedFields(prev => new Set(prev).add('webhook'))
+                }
+              }}
+              onBlur={() => {
+                if (webhookUrl && (!hideSensitive || revealedFields.has('webhook'))) {
+                  api.put('/settings/account-sync', { webhookUrl: webhookUrl.trim() || undefined })
+                    .then(() => toast.success('Webhook URL updated'))
                       .catch((e: any) => toast.error(e?.response?.data?.message || 'Failed to update webhook URL'))
-                  }
-                  if (hideSensitive) {
-                    setRevealedFields(prev => {
-                      const next = new Set(prev)
-                      next.delete('webhook')
-                      return next
-                    })
-                  }
-                }}
-                placeholder="https://discord.com/api/webhooks/..."
-                className={`input w-full px-3 py-2 ${hideSensitive && !revealedFields.has('webhook') ? 'blur-sm' : ''}`}
-              />
+                }
+                if (hideSensitive) {
+                  setRevealedFields(prev => {
+                    const next = new Set(prev)
+                    next.delete('webhook')
+                    return next
+                  })
+                }
+              }}
+              placeholder="https://discord.com/api/webhooks/..."
+              className={`input w-full px-3 py-2 ${hideSensitive && !revealedFields.has('webhook') ? 'blur-sm' : ''}`}
+            />
             </div>
             <button
               type="button"
@@ -1116,7 +1116,7 @@ export default function SettingsPage() {
             >
               <FlaskConical className="w-4 h-4" />
             </button>
-          </div>
+      </div>
         </div>
       </div>
 
@@ -1136,30 +1136,30 @@ export default function SettingsPage() {
               return (
                 <button
                   type="button"
-                  onClick={() => {
-                    if (hideSensitive && !revealedFields.has('apikey')) {
-                      setRevealedFields(prev => new Set(prev).add('apikey'))
+              onClick={() => {
+                if (hideSensitive && !revealedFields.has('apikey')) {
+                  setRevealedFields(prev => new Set(prev).add('apikey'))
                     } else if (currentApiKey) {
-                      navigator.clipboard.writeText(currentApiKey)
-                      toast.success('API key copied to clipboard')
-                    } else {
-                      toast.error('API key not available. Click rotate to generate a new one.')
-                    }
-                  }}
-                  onBlur={() => {
-                    if (hideSensitive && revealedFields.has('apikey')) {
-                      setRevealedFields(prev => {
-                        const next = new Set(prev)
-                        next.delete('apikey')
-                        return next
-                      })
-                    }
-                  }}
+                  navigator.clipboard.writeText(currentApiKey)
+                  toast.success('API key copied to clipboard')
+                } else {
+                  toast.error('API key not available. Click rotate to generate a new one.')
+                }
+              }}
+              onBlur={() => {
+                if (hideSensitive && revealedFields.has('apikey')) {
+                  setRevealedFields(prev => {
+                    const next = new Set(prev)
+                    next.delete('apikey')
+                    return next
+                  })
+                }
+              }}
                   className={`input w-full px-3 py-2 text-left cursor-pointer ${hideSensitive && !revealedFields.has('apikey') ? 'blur-sm' : ''}`}
-                  title={hideSensitive && !revealedFields.has('apikey')
-                    ? 'Click to reveal API key'
-                    : (currentApiKey ? 'Click to copy API key' : 'API key only shown once after generation. Click rotate to generate a new one.')
-                  }
+              title={hideSensitive && !revealedFields.has('apikey')
+                ? 'Click to reveal API key'
+                : (currentApiKey ? 'Click to copy API key' : 'API key only shown once after generation. Click rotate to generate a new one.')
+              }
                 >
                   <span className="inline-block w-full truncate">{displayValue}</span>
                 </button>
