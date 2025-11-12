@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.2.1](https://github.com/iamneur0/syncio/compare/v0.2.0...v0.2.1) (2025-11-12)
+
+
+### Features
+
+* added addon manifesturl update ([ba18f6e](https://github.com/iamneur0/syncio/commit/ba18f6ead61b426b2eca4dfd05e907bcd41c05da))
+* group add is now more complete, adding users and addons directly from group creation ([da2e600](https://github.com/iamneur0/syncio/commit/da2e600c2ed90a43ecb4320cfd0e54baac7a643d))
+
+
+### Bug Fixes
+
+* github release based ([2cb1b20](https://github.com/iamneur0/syncio/commit/2cb1b207a56ca0a7f025eff1ee54d0d3274856ef))
+* multiple ui improvements ([aef4789](https://github.com/iamneur0/syncio/commit/aef4789c849c2f60dfd16125f5224ca3e530eec7))
+* now dynamically pulling data instead of using existing changelog file for past releases ([f7cb2d7](https://github.com/iamneur0/syncio/commit/f7cb2d787d2f58d53909f78d3063c3995990363b))
+* re added uuid in public instance ([ab2a8b3](https://github.com/iamneur0/syncio/commit/ab2a8b3724186973484d13319737f7b17e4f6896))
+
 ## [0.2.0](https://github.com/iamneur0/syncio/compare/v0.1.5...v0.2.0) (2025-11-12)
 
 
