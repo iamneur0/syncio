@@ -139,7 +139,7 @@ const { getServerKey, aesGcmEncrypt, aesGcmDecrypt, getAccountDek } = require('.
 
 // Global auth and CSRF gates via middleware factories
 const { createAuthGate, createCsrfGuard } = require('./middleware/auth')
-app.use(createAuthGate({ AUTH_ENABLED, JWT_SECRET, pathIsAllowlisted, parseCookies, cookieName, extractBearerToken, issueAccessToken, isProdEnv }))
+app.use(createAuthGate({ AUTH_ENABLED, JWT_SECRET, pathIsAllowlisted, parseCookies, cookieName, extractBearerToken, issueAccessToken, randomCsrfToken, isProdEnv }))
 app.use(createCsrfGuard({ AUTH_ENABLED, pathIsAllowlisted, parseCookies, cookieName }))
 
 if (!AUTH_ENABLED) {

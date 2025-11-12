@@ -1,5 +1,5 @@
 // Auth and CSRF middlewares (factory-style for DI/testing)
-module.exports.createAuthGate = function createAuthGate({ AUTH_ENABLED, JWT_SECRET, pathIsAllowlisted, parseCookies, cookieName, extractBearerToken, issueAccessToken, isProdEnv, jsonwebtoken }) {
+module.exports.createAuthGate = function createAuthGate({ AUTH_ENABLED, JWT_SECRET, pathIsAllowlisted, parseCookies, cookieName, extractBearerToken, issueAccessToken, randomCsrfToken, isProdEnv, jsonwebtoken }) {
   const jwt = jsonwebtoken || require('jsonwebtoken')
   return function authGate(req, res, next) {
     if (!AUTH_ENABLED) return next();
@@ -31,6 +31,17 @@ module.exports.createAuthGate = function createAuthGate({ AUTH_ENABLED, JWT_SECR
               path: '/',
               maxAge: 30 * 24 * 60 * 60 * 1000,
             });
+            // Also refresh CSRF token when access token is refreshed
+            if (randomCsrfToken) {
+              const newCsrf = randomCsrfToken();
+              res.cookie(cookieName('sfm_csrf'), newCsrf, {
+                httpOnly: false,
+                secure: isProdEnv(),
+                sameSite: isProdEnv() ? 'strict' : 'lax',
+                path: '/',
+                maxAge: 30 * 24 * 60 * 60 * 1000, // Match access token expiration
+              });
+            }
             req.appAccountId = rj.accId;
             return next();
           }
