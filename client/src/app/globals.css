@@ -13,799 +13,403 @@
   }
 }
 
-@layer components {
-  /* Unified logo containers */
-  .logo-circle-12 {
-    @apply w-12 h-12 rounded-full flex items-center justify-center overflow-hidden border-0;
-  }
-  .logo-circle-10 {
-    @apply w-10 h-10 rounded-full flex items-center justify-center overflow-hidden border-0;
-  }
-  .logo-img {
-    @apply w-full h-full object-contain;
-    min-width: 80%;
-    min-height: 80%;
-    max-width: 100%;
-    max-height: 100%;
-  }
-  
-  /* EntityList logos should fill the entire container */
-  .logo-img-fill {
-    @apply w-full h-full object-cover;
-    object-position: center;
-    transform: scale(1.5);
-    margin: -25%;
-    background: transparent;
-    border-radius: 50%;
-  }
-}
-
-/* Prevent theme flash on page load - set default background */
-html, body, #__next, :root {
-  background-color: transparent; /* allow theme to control actual color */
-  color-scheme: light; /* default */
-  min-height: 100%;
-  margin: 0;
-  padding: 0;
-}
-
-/* Match browser chrome/overscroll color to theme by default */
-@media (prefers-color-scheme: light) { html { background-color: #f9fafb; } }
-@media (prefers-color-scheme: dark) { html { background-color: #111827; color-scheme: dark; } }
-
-/* Themed scrollbars (WebKit + Firefox) */
-/* Base (light) */
-html {
-  scrollbar-width: thin; /* Firefox */
-  scrollbar-color: #cbd5e1 transparent; /* thumb + transparent track */
-}
-/* WebKit */
-*::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-*::-webkit-scrollbar-track { background: transparent; }
-*::-webkit-scrollbar-thumb {
-  background-color: #cbd5e1; /* gray-300 */
-  border-radius: 8px;
-  border: 2px solid #f3f4f6; /* creates padding effect */
-}
-*::-webkit-scrollbar-thumb:hover {
-  background-color: #9ca3af; /* gray-400 */
-}
-
-/* Dark */
-.dark html, .modern-dark html, .mono html { scrollbar-color: #0f172a transparent; }
-  .dark html, .modern-dark html, .mono html { color-scheme: dark; }
-  .mono html { background-color: #000000; }
-.dark *::-webkit-scrollbar-track,
-.modern-dark *::-webkit-scrollbar-track,
-.mono *::-webkit-scrollbar-track { background: transparent; }
-.dark *::-webkit-scrollbar-thumb,
-.modern-dark *::-webkit-scrollbar-thumb { background-color: #0f172a; border-color: #111827; }
-.dark *::-webkit-scrollbar-thumb:hover,
-.modern-dark *::-webkit-scrollbar-thumb:hover { background-color: #1f2937; }
-
-/* Mono (pure black theme) */
-.mono *::-webkit-scrollbar-track { background: transparent; }
-.mono *::-webkit-scrollbar-thumb { background-color: #2a2a2a; border-color: #000000; }
-.mono *::-webkit-scrollbar-thumb:hover { background-color: #3a3a3a; }
-.mono html { scrollbar-color: #2a2a2a #000000; }
-
-/* Modern (light gradient) - subtle purple/indigo thumb */
-.modern html { scrollbar-color: rgba(99,102,241,0.6) transparent; }
-.modern *::-webkit-scrollbar-track { background: transparent; }
-.modern *::-webkit-scrollbar-thumb {
-  background-color: rgba(99,102,241,0.6); /* indigo-500 @ 0.6 */
-  border-color: transparent;
-}
-.modern *::-webkit-scrollbar-thumb:hover {
-  background-color: rgba(79,70,229,0.75); /* indigo-600 @ 0.75 */
-}
-
-/* Modern-dark (dark gradient) - lighter lavender thumb */
-.modern-dark html { scrollbar-color: rgba(255,255,255,0.2) transparent; }
-.modern-dark *::-webkit-scrollbar-track { background: transparent; }
-.modern-dark *::-webkit-scrollbar-thumb { background-color: rgba(255,255,255,0.2); border-color: transparent; }
-.modern-dark *::-webkit-scrollbar-thumb:hover { background-color: rgba(255,255,255,0.3); }
-
-/* Ensure proper theme is applied immediately */
-html:not(.light):not(.dark):not(.modern):not(.modern-dark):not(.mono) {
-  background-color: #000000;
-}
-
-/* Hide content during theme loading to prevent mixing */
-body:not(.theme-loaded) {
-  visibility: hidden;
-}
-
-body.theme-loaded {
-  visibility: visible;
-}
-
 @layer base {
-  html {
-    font-family: 'Inter', system-ui, sans-serif;
-    margin: 0;
-    padding: 0;
-  }
-  
-  body {
-    @apply bg-gray-50 text-gray-900; /* light fallback */
-    margin: 0;
-    padding: 0;
-  }
-
-  /* Ensure overscroll/rubber-band shows correct theme color (html/body) */
-  .light html, .light body {
-    @apply bg-gray-50;
-  }
-  .dark html, .dark body { @apply bg-gray-900; }
-  .light html, .light body { @apply bg-gray-50; }
-  .dark html, .dark body { @apply bg-gray-900; }
-  .mono html, .mono body { @apply bg-black; }
-  .light html, .light body, .dark html, .dark body, .mono html, .mono body { min-height: 100%; }
-
-  /* Force overscroll/out-of-bounds to match active theme */
-  .light html, .light body, .light :root, .light #__next { background-color: #f9fafb !important; }
-  .dark html, .dark body, .dark :root, .dark #__next { background-color: #111827 !important; }
-  .mono html, .mono body, .mono :root, .mono #__next { background-color: #000000 !important; }
-
-  /* Ensure the viewport/out-of-bounds rubber-band area inherits theme color */
-  html, body {
-    background-color: inherit;
-  }
-
-  /* Accent tokens (single source of truth) */
   :root {
-    --accent-bg: #1f2937;        /* gray-800 */
-    --accent-text: #ffffff;      /* white */
-    --accent-border: #9ca3af;    /* gray-400 */
-    --accent-ring: #9ca3af;      /* gray-400 */
-  }
-  .dark :root, .dark {
-    --accent-bg: #4b5563;        /* gray-600 */
-    --accent-text: #ffffff;
-    --accent-border: #9ca3af;    /* gray-400 */
-    --accent-ring: #9ca3af;      /* gray-400 */
-  }
-  .mono :root, .mono {
-    --accent-bg: rgba(255,255,255,0.12);
-    --accent-text: #ffffff;
-    --accent-border: rgba(255,255,255,0.4);
-    --accent-ring: rgba(255,255,255,0.5);
-  }
-
-  /* Override body background for modern themes */
-  .modern html, .modern body {
-    @apply bg-gradient-to-br from-purple-100 via-blue-100 to-indigo-100 text-purple-900;
-  }
-
-  .modern-dark html, .modern-dark body {
-    @apply bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 text-purple-100;
-  }
-
-  .modern .bg-white {
-    @apply bg-gradient-to-br from-purple-50/90 to-blue-50/90 backdrop-blur-sm border-purple-200/60;
-  }
-
-  .modern .bg-gray-800 {
-    @apply bg-gradient-to-br from-purple-900/30 to-blue-900/30 backdrop-blur-sm border-purple-700/50;
-  }
-
-  /* Modern Dark theme styles */
-  .modern-dark body {
-    @apply bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 text-purple-100;
-  }
-
-  .modern-dark .bg-white {
-    @apply bg-gradient-to-br from-purple-800/40 to-blue-800/40 backdrop-blur-sm border-purple-600/50;
-  }
-
-  .modern-dark .bg-gray-800 {
-    @apply bg-gradient-to-br from-purple-900/60 to-blue-900/60 backdrop-blur-sm border-purple-700/70;
-  }
-
-  /* Ensure no white backgrounds anywhere in modern themes */
-  .modern .bg-gray-50 {
-    @apply bg-gradient-to-br from-purple-100/80 to-blue-100/80;
-  }
-
-  .modern-dark .bg-gray-50 {
-    @apply bg-gradient-to-br from-purple-900/80 to-blue-900/80;
-  }
-
-  /* Main page containers */
-  .modern .min-h-screen {
-    @apply bg-gradient-to-br from-purple-100 via-blue-100 to-indigo-100;
-  }
-
-  .modern-dark .min-h-screen {
-    @apply bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900;
-  }
-
-  /* Sidebar backgrounds */
-  .modern .sidebar-gradient {
-    @apply bg-gradient-to-br from-purple-600 via-purple-700 to-blue-800;
-  }
-
-  .modern-dark .sidebar-gradient {
-    @apply bg-gradient-to-br from-purple-800 via-purple-900 to-blue-900;
-  }
-
-  /* Mono theme: fully black UI with white text and subtle borders */
-  .mono html, .mono body {
-    @apply bg-black text-white;
-  }
-
-  .mono .min-h-screen {
-    @apply bg-black;
-  }
-
-  .mono .sidebar-gradient {
-    @apply bg-black;
-  }
-
-  .mono .card,
-  .mono .bg-white,
-  .mono .bg-gray-50 {
-    @apply bg-black border border-white/20 rounded-lg shadow-[inset_0_1px_0_rgba(255,255,255,0.03),0_8px_30px_rgba(0,0,0,0.6)];
-  }
-
-  /* Override gray-800 only for cards and containers, not for color indicators */
-  .mono .card.bg-gray-800,
-  .mono .bg-white.bg-gray-800,
-  .mono .bg-gray-50.bg-gray-800 {
-    @apply bg-black border border-white/20 rounded-lg shadow-[inset_0_1px_0_rgba(255,255,255,0.03),0_8px_30px_rgba(0,0,0,0.6)];
-  }
-
-  .mono .card-header,
-  .mono .border-gray-200,
-  .mono .border-gray-700 {
-    @apply border-white/10;
-  }
-
-  .mono .text-gray-900,
-  .mono .text-gray-700,
-  .mono .text-gray-600,
-  .mono .text-gray-500,
-  .mono .text-purple-800,
-  .mono .text-purple-700,
-  .mono .text-purple-300,
-  .mono .text-purple-100 {
-    @apply text-white;
-  }
-
-  .mono .btn,
-  .mono .btn-primary,
-  .mono .btn-secondary,
-  .mono .btn-outline {
-    @apply bg-black text-white border border-white/20 hover:bg-white/10 active:bg-white/20 focus:outline-none focus:ring-0 rounded-lg;
-  }
-
-  /* Force generic buttons (not specifically styled) to mono style */
-  .mono button:not([class*="bg-"]):not([class*="text-"]) {
-    @apply bg-black text-white border border-white/20 hover:bg-white/10 active:bg-white/20 focus:outline-none focus:ring-0 rounded-lg;
-  }
-
-  /* Ensure toggles remain rounded in mono theme (avoid @apply to prevent circular dependency) */
-  .mono [class*="rounded-full"] {
-    border-radius: 9999px !important;
-  }
-
-  /* Remove focus borders from toggles and interactive elements in mono */
-  .mono [class*="rounded-full"]:focus,
-  .mono [class*="rounded-full"]:focus-visible,
-  .mono [class*="rounded-full"]:active {
-    @apply outline-none ring-0 border-0 shadow-none;
-  }
-
-  /* Remove focus borders from all interactive elements in mono */
-  .mono button:focus,
-  .mono button:focus-visible,
-  .mono button:active,
-  .mono input:focus,
-  .mono input:focus-visible,
-  .mono textarea:focus,
-  .mono textarea:focus-visible {
-    @apply outline-none ring-0;
-  }
-
-  /* Neutralize colored/gradient backgrounds in mono */
-  .mono .bg-gradient-to-br,
-  .mono .bg-gradient-to-r,
-  .mono .bg-gradient-to-b {
-    @apply bg-black;
-  }
-  .mono .hover\:from-*:hover,
-  .mono .hover\:to-*:hover,
-  .mono .from-*,
-  .mono .to-* { /* no-op to avoid gradients */ }
-
-  /* Override colored backgrounds only for UI elements, not for group color indicators */
-  .mono .card .bg-blue-600,
-  .mono .card .bg-red-600,
-  .mono .card .bg-green-600,
-  .mono .card .bg-purple-600,
-  .mono .card .bg-blue-700,
-  .mono .card .bg-red-700,
-  .mono .card .bg-green-700,
-  .mono .card .bg-purple-700,
-  .mono .card .bg-blue-800,
-  .mono .card .bg-red-800,
-  .mono .card .bg-green-800,
-  .mono .card .bg-purple-800,
-  .mono .bg-white .bg-blue-600,
-  .mono .bg-white .bg-red-600,
-  .mono .bg-white .bg-green-600,
-  .mono .bg-white .bg-purple-600,
-  .mono .bg-white .bg-blue-700,
-  .mono .bg-white .bg-red-700,
-  .mono .bg-white .bg-green-700,
-  .mono .bg-white .bg-purple-700,
-  .mono .bg-white .bg-blue-800,
-  .mono .bg-white .bg-red-800,
-  .mono .bg-white .bg-green-800,
-  .mono .bg-white .bg-purple-800 {
-    @apply bg-black;
-  }
-
-  .mono .input {
-    @apply bg-black text-white border border-white/15 placeholder-white/40 focus:border-white/30 focus:ring-white/20;
-  }
-
-  .mono .hover\:bg-gray-100:hover,
-  .mono .hover\:bg-gray-200:hover,
-  .mono .hover\:bg-purple-700:hover,
-  .mono .hover\:bg-blue-100:hover,
-  .mono .hover\:bg-red-100:hover,
-  .mono .hover\:bg-green-100:hover {
-    @apply hover:bg-black/90;
-  }
-
-  .mono .bg-stremio-purple {
-    background-color: #1f1f1f !important; /* match version badge dark grey */
-  }
-
-  .mono .text-stremio-purple {
-    @apply text-white;
-  }
-
-  /* Badges (addon versions, chips) */
-  .mono .bg-purple-100,
-  .mono .bg-green-100,
-  .mono .bg-blue-100,
-  .mono .bg-red-100,
-  .mono .bg-emerald-100,
-  .mono .bg-cyan-100,
-  .mono .bg-pink-100 {
-    @apply bg-white/10 border border-white/20 text-white rounded-lg h-7 px-3 inline-flex items-center tracking-wide;
-  }
-
-  .mono .text-purple-800,
-  .mono .text-green-800,
-  .mono .text-blue-800,
-  .mono .text-red-800 {
-    @apply text-white;
-  }
-
-  /* Inputs and search */
-  .mono input,
-  .mono textarea,
-  .mono .input,
-  .mono .search-input {
-    @apply bg-white/5 border border-white/15 text-white placeholder-white/40 hover:bg-white/10 focus:border-white/25 focus:ring-white/20 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] rounded-lg;
-  }
-
-  /* Icons */
-  .mono svg {
-    @apply text-white/70;
-  }
-  .mono button:hover svg { @apply text-white/90; }
-  .mono button:disabled svg { @apply text-white/35; }
-
-  /* Secondary text */
-  .mono .text-gray-500,
-  .mono .text-gray-600,
-  .mono .text-gray-400 { @apply text-white/70; }
-
-  /* Dividers */
-  .mono .divider { @apply border-t border-white/10; }
-
-  /* Remove borders/outline and shadows for sidebar header + nav buttons in mono */
-  .mono .sidebar-gradient > button,
-  .mono .sidebar-gradient nav button,
-  .mono nav button {
-    @apply border-0 shadow-none ring-0 outline-none;
-  }
-
-  /* Remove hover shadow in mono */
-  .mono .sidebar-gradient > button:hover,
-  .mono .sidebar-gradient nav button:hover,
-  .mono nav button:hover {
-    @apply shadow-none;
-  }
-
-  /* Keep rounded corners for sidebar buttons in mono (matching view buttons) */
-  .mono nav button {
-    @apply rounded;
-  }
-
-  /* Remove all borders and shadows from sidebar containers in mono */
-  .mono .sidebar-gradient,
-  .mono [class*="lg:border"],
-  .mono [class*="shadow-xl"] {
-    @apply border-0 shadow-none;
-  }
-
-  /* Remove borders from sidebar header button in mono */
-  .mono .sidebar-gradient > button {
-    @apply border-0 shadow-none ring-0 outline-none;
-  }
-
-  /* Specifically target the Syncio header button and its container */
-  .mono button[title*="Expand sidebar"],
-  .mono button[title*="Collapse sidebar"],
-  .mono .sidebar-gradient button,
-  .mono .sidebar-gradient > div,
-  .mono .sidebar-gradient h1,
-  .mono .sidebar-gradient img {
-    @apply border-0 shadow-none ring-0 outline-none;
-  }
-
-  /* Remove borders from all buttons and containers in sidebar */
-  .mono .sidebar-gradient button,
-  .mono .sidebar-gradient div,
-  .mono .sidebar-gradient h1,
-  .mono .sidebar-gradient img,
-  .mono .sidebar-gradient * {
-    @apply border-0;
-  }
-
-  /* Remove borders from IconButton in mono theme */
-  .mono button[class*="inline-flex h-8 w-8"] {
-    @apply border-0 outline-none ring-0 shadow-none;
-  }
-
-  /* Override general button styling for modal cancel buttons in mono theme */
-  .mono .fixed button[class*="px-4"][class*="py-2"]:not([class*="accent-bg"]):not([class*="bg-"]) {
-    @apply bg-transparent border-0 text-gray-300 hover:text-white hover:bg-gray-700;
-  }
-
-  /* Remove focus outline/rectangle from all sidebar buttons in mono */
-  .mono .sidebar-gradient button:focus,
-  .mono .sidebar-gradient button:focus-visible,
-  .mono .sidebar-gradient button:active,
-  .mono nav button:focus,
-  .mono nav button:focus-visible,
-  .mono nav button:active {
-    @apply outline-none ring-0 border-0 shadow-none;
-  }
-
-  /* Remove ALL focus/active states from buttons in dark mode - copy light mode behavior exactly */
-  .dark button:focus,
-  .dark button:focus-visible,
-  .dark button:active,
-  .dark button:focus-visible:active,
-  .dark button:focus-visible:focus,
-  .dark button:focus-visible:active:focus {
-    @apply outline-none ring-0 border-0 shadow-none !important;
-    box-shadow: none !important;
-    border: none !important;
-    outline: none !important;
-  }
-
-  /* Specifically target sidebar navigation buttons in dark mode */
-  .dark nav button:focus,
-  .dark nav button:focus-visible,
-  .dark nav button:active,
-  .dark nav button:focus-visible:active,
-  .dark nav button:focus-visible:focus,
-  .dark nav button:focus-visible:active:focus {
-    @apply outline-none ring-0 border-0 shadow-none !important;
-    box-shadow: none !important;
-    border: none !important;
-    outline: none !important;
-  }
-
-  /* Target all possible button states in dark mode */
-  .dark button:is(:focus, :focus-visible, :active, :focus-visible:active) {
-    @apply outline-none ring-0 border-0 shadow-none !important;
-    box-shadow: none !important;
-    border: none !important;
-    outline: none !important;
-  }
-
-  /* Additional overrides for dark mode button states */
-  .dark button:focus-visible {
-    outline: 2px solid transparent !important;
-    outline-offset: 2px !important;
-  }
-
-  /* Ensure no borders appear on click in dark mode */
-  .dark button:active:focus,
-  .dark button:active:focus-visible {
-    outline: none !important;
-    box-shadow: none !important;
-    border: none !important;
-  }
-
-  /* Remove background color from selected sidebar tabs in dark mode */
-  .dark nav button[class*="bg-stremio-purple"] {
-    @apply bg-transparent;
-  }
-
-  /* Remove any background from sidebar navigation buttons in dark mode */
-  .dark nav button {
-    @apply bg-transparent;
-  }
-
-  /* Remove selection background from sidebar buttons in dark mode */
-  .dark .sidebar-gradient nav button[class*="bg-stremio-purple"],
-  .dark .sidebar-gradient nav button[class*="shadow-lg"] {
-    @apply bg-transparent shadow-none;
-  }
-
-  /* Remove hover effect from active/selected sidebar tabs in dark mode */
-  .dark nav button[class*="bg-stremio-purple"]:hover,
-  .dark .sidebar-gradient nav button[class*="bg-stremio-purple"]:hover {
-    @apply bg-transparent hover:bg-transparent;
-  }
-
-
-  /* Fix toggle borders in dark mode - make them white instead of grey */
-  .dark .relative.inline-flex.h-5.w-9.items-center.rounded-full {
-    @apply border border-white/30;
-  }
-
-  .dark .relative.inline-flex.h-5.w-9.items-center.rounded-full.bg-stremio-purple {
-    @apply border border-white/50;
-  }
-
-  /* More general toggle border fixes for dark mode */
-  .dark [class*="relative inline-flex h-5 w-9"] {
-    @apply border border-white/30;
-  }
-
-  .dark [class*="bg-stremio-purple"] {
-    @apply border-white/50;
-  }
-
-  /* Target toggle switches specifically */
-  .dark .toggle-switch,
-  .dark .toggle,
-  .dark [role="switch"] {
-    @apply border border-white/30;
-  }
-
-  /* Mono: use dark grey toggle track like version badge (both states) */
-  .mono [role="switch"],
-  .mono [aria-checked],
-  .mono [data-state],
-  .mono .toggle,
-  .mono .toggle-switch {
-    background-color: #1f1f1f !important; /* dark grey */
-    border: 1px solid rgba(255, 255, 255, 0.2) !important;
-  }
-
-  /* Keep same style when enabled/checked */
-  .mono [role="switch"][aria-checked="true"],
-  .mono [data-state="checked"][role="switch"],
-  .mono .toggle[aria-checked="true"],
-  .mono .toggle-switch[aria-checked="true"] {
-    background-color: #1f1f1f !important;
-    border: 1px solid rgba(255, 255, 255, 0.2) !important;
-  }
-
-  /* Fallback selector for arbitrary toggle tracks (class-based) */
-  .mono [class*="inline-flex"][class*="h-5"][class*="w-9"][class*="rounded-full"] {
-    background-color: #1f1f1f !important;
-    border: 1px solid rgba(255, 255, 255, 0.2) !important;
-  }
-  /* Override toggle switches only, not group color indicators */
-  .mono [class*="inline-flex"][class*="h-5"][class*="w-9"][class*="rounded-full"][class*="bg-"]:not([class*="w-10"][class*="h-10"]) {
-    background-color: #1f1f1f !important;
-    border: 1px solid rgba(255, 255, 255, 0.2) !important;
-  }
-
-  /* Addons view may use slightly larger toggles (h-6 w-11) */
-  .mono [class*="inline-flex"][class*="h-6"][class*="w-11"][class*="rounded-full"] {
-    background-color: #1f1f1f !important;
-    border: 1px solid rgba(255, 255, 255, 0.2) !important;
-  }
-  /* Override toggle switches only, not group color indicators */
-  .mono [class*="inline-flex"][class*="h-6"][class*="w-11"][class*="rounded-full"][class*="bg-"]:not([class*="w-10"][class*="h-10"]) {
-    background-color: #1f1f1f !important;
-    border: 1px solid rgba(255, 255, 255, 0.2) !important;
-  }
-
-  /* Cover input/label switches */
-  .mono input[type="checkbox"][role="switch"],
-  .mono label[role="switch"] {
-    background-color: #1f1f1f !important;
-    border: 1px solid rgba(255, 255, 255, 0.2) !important;
-  }
-
-  .modern .border-gray-200 {
-    @apply border-purple-200/50;
-  }
-
-  .modern .border-gray-700 {
-    @apply border-purple-700/50;
-  }
-
-  .modern .text-gray-600 {
-    @apply text-purple-700/80;
-  }
-
-  .modern .text-gray-400 {
-    @apply text-purple-300/80;
-  }
-
-  /* Modern Dark theme borders and text */
-  .modern-dark .border-gray-200 {
-    @apply border-purple-600/50;
-  }
-
-  .modern-dark .border-gray-700 {
-    @apply border-purple-700/70;
-  }
-
-  .modern-dark .text-gray-600 {
-    @apply text-purple-300/80;
-  }
-
-  .modern-dark .text-gray-400 {
-    @apply text-purple-200/80;
-  }
-
-  .modern .bg-stremio-purple {
-    @apply bg-gradient-to-r from-purple-500 to-blue-500;
-  }
-
-  .modern .hover\:bg-purple-700:hover {
-    @apply hover:from-purple-600 hover:to-blue-600;
-  }
-
-  .modern-dark .bg-stremio-purple {
-    @apply bg-gradient-to-r from-purple-600 to-blue-600;
-  }
-
-  .modern-dark .hover\:bg-purple-700:hover {
-    @apply hover:from-purple-700 hover:to-blue-700;
-  }
-
-  /* Modern theme card styles */
-  .modern .card {
-    @apply bg-gradient-to-br from-purple-50/90 to-blue-50/90 backdrop-blur-sm border-purple-200/50 shadow-lg shadow-purple-100/50;
-  }
-
-  .modern .card-header {
-    @apply border-purple-200/50;
-  }
-
-  /* Modern Dark theme card styles */
-  .modern-dark .card {
-    @apply bg-gradient-to-br from-purple-800/40 to-blue-800/40 backdrop-blur-sm border-purple-600/50 shadow-lg shadow-purple-900/50;
-  }
-
-  .modern-dark .card-header {
-    @apply border-purple-600/50;
-  }
-
-  /* Modern theme button styles */
-  .modern .btn-primary {
-    @apply bg-gradient-to-r from-purple-500 to-blue-500 hover:from-purple-600 hover:to-blue-600 shadow-lg shadow-purple-200/50;
-  }
-
-  .modern .btn-secondary {
-    @apply bg-gradient-to-r from-purple-100 to-blue-100 text-purple-700 hover:from-purple-200 hover:to-blue-200 border-purple-200/50;
-  }
-
-  .modern .btn-outline {
-    @apply border-purple-300/50 bg-purple-50/80 text-purple-700 hover:bg-gradient-to-r hover:from-purple-100 hover:to-blue-100;
-  }
-
-  /* Modern Dark theme button styles */
-  .modern-dark .btn-primary {
-    @apply bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 shadow-lg shadow-purple-900/50;
-  }
-
-  .modern-dark .btn-secondary {
-    @apply bg-gradient-to-r from-purple-800/50 to-blue-800/50 text-purple-200 hover:from-purple-700/50 hover:to-blue-700/50 border-purple-600/50;
-  }
-
-  .modern-dark .btn-outline {
-    @apply border-purple-600/50 bg-purple-800/30 text-purple-200 hover:bg-gradient-to-r hover:from-purple-700/30 hover:to-blue-700/30;
-  }
-
-  /* Modern theme input styles */
-  .modern .input {
-    @apply border-purple-300/50 focus:outline-none bg-purple-50/80;
-  }
-
-  /* Modern Dark theme input styles */
-  .modern-dark .input {
-    @apply border-purple-600/50 focus:outline-none bg-purple-800/30;
-  }
-
-  /* Modern theme scrollbar */
-  .modern ::-webkit-scrollbar-track {
-    @apply bg-purple-100/50;
-  }
-
-  .modern ::-webkit-scrollbar-thumb {
-    @apply bg-gradient-to-b from-purple-300 to-blue-300 rounded-full;
-  }
-
-  .modern ::-webkit-scrollbar-thumb:hover {
-    @apply from-purple-400 to-blue-400;
-  }
-
-  /* Modern Dark theme scrollbar */
-  .modern-dark ::-webkit-scrollbar-track {
-    @apply bg-purple-900/50;
-  }
-
-  .modern-dark ::-webkit-scrollbar-thumb {
-    @apply bg-gradient-to-b from-purple-600 to-blue-600 rounded-full;
-  }
-
-  .modern-dark ::-webkit-scrollbar-thumb:hover {
-    @apply from-purple-500 to-blue-500;
+    --color-background: #f3f4f6;
+    --color-surface: #ffffff;
+    --color-text: #0f172a;
+    --color-text-secondary: #475569;
+    --color-hover: #e2e8f0;
+    --color-border: #e2e8f0;
+    --color-shadow: rgba(15, 23, 42, 0.08);
+    --color-positive: #22c55e;
+    --color-negative: #ef4444;
+    --color-button-bg: color-mix(in srgb, var(--color-surface) 80%, var(--color-text) 20%);
+    --toggle-track-on: color-mix(in srgb, var(--color-text) 12%, var(--color-surface));
+    --toggle-track-off: color-mix(in srgb, var(--color-text-secondary) 8%, var(--color-surface));
+    --toggle-knob-on: var(--color-text);
+    --toggle-knob-off: var(--color-text-secondary);
+  }
+
+  html.light {
+    --color-background: #f3f4f6;
+    --color-surface: #ffffff;
+    --color-text: #0f172a;
+    --color-text-secondary: #475569;
+    --color-hover: #e2e8f0;
+    --color-border: #e2e8f0;
+    --color-shadow: rgba(15, 23, 42, 0.08);
+    --color-positive: #22c55e;
+    --color-negative: #ef4444;
+    --color-button-bg: color-mix(in srgb, var(--color-surface) 80%, var(--color-text) 20%);
+    --toggle-track-on: color-mix(in srgb, var(--color-text) 12%, var(--color-surface));
+    --toggle-track-off: color-mix(in srgb, var(--color-text-secondary) 8%, var(--color-surface));
+    --toggle-knob-on: var(--color-text);
+    --toggle-knob-off: var(--color-text-secondary);
+  }
+
+  html.dark {
+    --color-background: #0f172a;
+    --color-surface: #1e293b;
+    --color-text: #e2e8f0;
+    --color-text-secondary: #94a3b8;
+    --color-hover: #1f2937;
+    --color-border: #334155;
+    --color-shadow: rgba(8, 15, 30, 0.4);
+    --color-positive: #4ade80;
+    --color-negative: #f87171;
+    --color-button-bg: color-mix(in srgb, var(--color-surface) 65%, var(--color-text) 35%);
+    --toggle-track-on: color-mix(in srgb, var(--color-text) 18%, var(--color-surface));
+    --toggle-track-off: color-mix(in srgb, var(--color-text-secondary) 12%, var(--color-surface));
+    --toggle-knob-on: var(--color-text);
+    --toggle-knob-off: var(--color-text-secondary);
+  }
+
+  html.mono {
+    --color-background: #000000;
+    --color-surface: #0f0f0f;
+    --color-text: #f5f5f5;
+    --color-text-secondary: #9ca3af;
+    --color-hover: #1a1a1a;
+    --color-border: #1f1f1f;
+    --color-shadow: rgba(0, 0, 0, 0.6);
+    --color-positive: #4ade80;
+    --color-negative: #f87171;
+    --color-button-bg: color-mix(in srgb, var(--color-surface) 60%, var(--color-text) 40%);
+    --toggle-track-on: color-mix(in srgb, var(--color-text) 20%, var(--color-surface));
+    --toggle-track-off: color-mix(in srgb, var(--color-text-secondary) 15%, var(--color-surface));
+    --toggle-knob-on: var(--color-text);
+    --toggle-knob-off: var(--color-text-secondary);
+  }
+
+  html.aubergine {
+    --color-background: #1f1029;
+    --color-surface: #2c1c3a;
+    --color-text: #f8f5ff;
+    --color-text-secondary: #d8c4f0;
+    --color-hover: #3b2750;
+    --color-border: #4a2d63;
+    --color-shadow: rgba(74, 45, 99, 0.45);
+    --color-positive: #7dd3fc;
+    --color-negative: #f87171;
+    --color-button-bg: color-mix(in srgb, var(--color-surface) 65%, var(--color-text) 35%);
+    --toggle-track-on: color-mix(in srgb, var(--color-text) 18%, var(--color-surface));
+    --toggle-track-off: color-mix(in srgb, var(--color-text-secondary) 12%, var(--color-surface));
+    --toggle-knob-on: var(--color-text);
+    --toggle-knob-off: var(--color-text-secondary);
+  }
+
+  html.hoth {
+    --color-background: #f4f7fb;
+    --color-surface: #ffffff;
+    --color-text: #1f2937;
+    --color-text-secondary: #6b7280;
+    --color-hover: #e2e8f0;
+    --color-border: #d1d5db;
+    --color-shadow: rgba(148, 163, 184, 0.25);
+    --color-positive: #0ea5e9;
+    --color-negative: #ef4444;
+    --color-button-bg: color-mix(in srgb, var(--color-surface) 80%, var(--color-text) 20%);
+    --toggle-track-on: color-mix(in srgb, var(--color-text) 12%, var(--color-surface));
+    --toggle-track-off: color-mix(in srgb, var(--color-text-secondary) 8%, var(--color-surface));
+    --toggle-knob-on: var(--color-text);
+    --toggle-knob-off: var(--color-text-secondary);
+  }
+
+  html.aurora {
+    --color-background: #141827;
+    --color-surface: #1e2431;
+    --color-text: #f4f5ff;
+    --color-text-secondary: #d8dafe;
+    --color-hover: #262d3f;
+    --color-border: #2f3546;
+    --color-shadow: rgba(47, 53, 70, 0.45);
+    --color-positive: #a855f7;
+    --color-negative: #f87171;
+    --color-button-bg: color-mix(in srgb, var(--color-surface) 65%, var(--color-text) 35%);
+    --toggle-track-on: color-mix(in srgb, var(--color-text) 18%, var(--color-surface));
+    --toggle-track-off: color-mix(in srgb, var(--color-text-secondary) 12%, var(--color-surface));
+    --toggle-knob-on: var(--color-text);
+    --toggle-knob-off: var(--color-text-secondary);
+  }
+
+  html.choco-mint {
+    --color-background: #1f2620;
+    --color-surface: #2b352c;
+    --color-text: #f7f7f2;
+    --color-text-secondary: #d1f7c4;
+    --color-hover: #374237;
+    --color-border: #405143;
+    --color-shadow: rgba(64, 81, 67, 0.45);
+    --color-positive: #10b981;
+    --color-negative: #f87171;
+    --color-button-bg: color-mix(in srgb, var(--color-surface) 65%, var(--color-text) 35%);
+    --toggle-track-on: color-mix(in srgb, var(--color-text) 18%, var(--color-surface));
+    --toggle-track-off: color-mix(in srgb, var(--color-text-secondary) 12%, var(--color-surface));
+    --toggle-knob-on: var(--color-text);
+    --toggle-knob-off: var(--color-text-secondary);
+  }
+
+  html.ochin {
+    --color-background: #101f33;
+    --color-surface: #172a46;
+    --color-text: #f1f5f9;
+    --color-text-secondary: #bcd2f9;
+    --color-hover: #203555;
+    --color-border: #29446b;
+    --color-shadow: rgba(41, 68, 107, 0.45);
+    --color-positive: #38bdf8;
+    --color-negative: #f87171;
+    --color-button-bg: color-mix(in srgb, var(--color-surface) 65%, var(--color-text) 35%);
+    --toggle-track-on: color-mix(in srgb, var(--color-text) 18%, var(--color-surface));
+    --toggle-track-off: color-mix(in srgb, var(--color-text-secondary) 12%, var(--color-surface));
+    --toggle-knob-on: var(--color-text);
+    --toggle-knob-off: var(--color-text-secondary);
+  }
+
+  html.work-hard {
+    --color-background: #2d2213;
+    --color-surface: #3a2d1a;
+    --color-text: #fdf5e6;
+    --color-text-secondary: #f5d099;
+    --color-hover: #453523;
+    --color-border: #54422a;
+    --color-shadow: rgba(84, 66, 42, 0.45);
+    --color-positive: #facc15;
+    --color-negative: #f97316;
+    --color-button-bg: color-mix(in srgb, var(--color-surface) 65%, var(--color-text) 35%);
+    --toggle-track-on: color-mix(in srgb, var(--color-text) 18%, var(--color-surface));
+    --toggle-track-off: color-mix(in srgb, var(--color-text-secondary) 12%, var(--color-surface));
+    --toggle-knob-on: var(--color-text);
+    --toggle-knob-off: var(--color-text-secondary);
+  }
+
+  html, body {
+    @apply min-h-screen;
+  }
+
+  body {
+    background-color: var(--color-background);
+    color: var(--color-text);
+    transition: background-color 0.2s ease, color 0.2s ease;
   }
 }
 
 @layer components {
-  /* Accent utility classes */
-  .accent-bg { background-color: var(--accent-bg) !important; }
-  .accent-text { color: var(--accent-text) !important; }
-  .accent-border { border-color: var(--accent-border) !important; }
-  .accent-ring { --tw-ring-color: var(--accent-ring) !important; }
-  .accent-chip {
-    background-color: var(--accent-bg) !important;
-    color: var(--accent-text) !important;
-    border: 1px solid var(--accent-border) !important;
-    border-radius: 0.5rem; /* rounded */
+  .color-background { background-color: var(--color-background) !important; }
+  .color-surface { background-color: var(--color-surface) !important; }
+  .color-text { color: var(--color-text) !important; }
+  .color-text-secondary { color: var(--color-text-secondary) !important; }
+  .color-border { border-color: var(--color-border) !important; }
+
+  .color-hover {
+    transition: color 0.2s ease;
   }
-  .btn {
-    @apply inline-flex items-center justify-center px-4 py-2 text-sm font-medium rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed;
+  .color-hover:hover,
+  .color-hover.is-active {
+    text-shadow: 0.02em 0 currentColor, -0.02em 0 currentColor;
   }
-  
-  .btn-primary {
-    @apply btn bg-primary-600 text-white hover:bg-primary-700 focus:ring-primary-500;
+  .color-hover:hover svg,
+  .color-hover.is-active svg {
+    stroke-width: 2.4;
   }
-  
-  .btn-secondary {
-    @apply btn bg-gray-200 text-gray-900 hover:bg-gray-300 focus:ring-gray-500;
+  .color-hover.is-active:hover {
+    text-shadow: 0.02em 0 currentColor, -0.02em 0 currentColor;
   }
-  
-  .btn-outline {
-    @apply btn border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 focus:ring-primary-500;
+  .color-hover.is-active:hover svg {
+    stroke-width: 2.4;
   }
-  
-  .btn-danger {
-    @apply btn bg-red-600 text-white hover:bg-red-700 focus:ring-red-500;
+
+  .color-control { accent-color: var(--color-text); }
+
+  .surface-interactive {
+    background-color: var(--color-surface) !important;
+    border: none !important;
+    color: var(--color-text);
+    transition: color 0.2s ease;
   }
-  
-  .btn-sm {
-    @apply px-3 py-1.5 text-xs;
+  .surface-interactive:hover,
+  .surface-interactive.is-active {
+    text-shadow: 0.02em 0 currentColor, -0.02em 0 currentColor;
   }
-  
-  .input {
-    @apply block w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500 sm:text-sm;
+  .surface-interactive:hover svg,
+  .surface-interactive.is-active svg {
+    stroke-width: 2.4;
   }
-  
+  .surface-interactive.is-active:hover {
+    text-shadow: 0.02em 0 currentColor, -0.02em 0 currentColor;
+  }
+  .surface-interactive.is-active:hover svg {
+    stroke-width: 2.4;
+  }
+
+  .toggle-track-on { background-color: var(--toggle-track-on) !important; }
+  .toggle-track-off { background-color: var(--toggle-track-off) !important; }
+  .toggle-knob-on { background-color: var(--toggle-knob-on) !important; }
+  .toggle-knob-off { background-color: var(--toggle-knob-off) !important; }
+
+  input.control-radio,
+  .selection-indicator {
+    appearance: none;
+    width: 18px;
+    height: 18px;
+    border-radius: 9999px;
+    border: 2px solid currentColor;
+    color: var(--color-border);
+    background-color: var(--color-surface);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    transition: box-shadow 0.2s ease;
+  cursor: pointer;
+  }
+  input.control-radio::after,
+  .selection-indicator::after {
+    content: '';
+    width: 8px;
+    height: 8px;
+    border-radius: 9999px;
+    background-color: transparent;
+    transition: background-color 0.2s ease;
+  }
+  input.control-radio:checked::after,
+  .selection-indicator.is-selected::after {
+    background-color: currentColor;
+  }
+  input.control-radio:focus-visible,
+  .selection-indicator:focus-visible {
+    outline: 2px solid var(--toggle-track-on);
+    outline-offset: 2px;
+  }
+
+  .selection-ring {
+    outline: none;
+    border-color: var(--color-text) !important;
+  }
+
   .card {
-    @apply bg-white rounded-lg shadow-sm border border-gray-200;
+    @apply rounded-lg transition-shadow;
+    background-color: var(--color-surface);
+    border: 2px solid transparent;
+    color: var(--color-text);
+    box-shadow: 0 8px 24px color-mix(in srgb, var(--color-shadow) 35%, transparent);
   }
-  
+  .card.card-selectable {
+    border-color: var(--color-border);
+  }
+  .card.card-selectable.card-selected {
+    border-color: color-mix(in srgb, var(--color-text) 25%, transparent);
+    outline: 2px solid color-mix(in srgb, var(--color-text) 25%, transparent);
+    outline-offset: -2px;
+  }
+
+.section-panel {
+  background: color-mix(in srgb, var(--color-background) 96%, var(--color-surface) 4%) !important;
+  border: 1px solid color-mix(in srgb, var(--color-border) 80%, transparent) !important;
+  box-shadow: none !important;
+  color: var(--color-text);
+}
   .card-header {
-    @apply px-6 py-4 border-b border-gray-200;
+    @apply px-6 py-4 border-b;
+    border-color: var(--color-border);
   }
-  
-  .card-body {
-    @apply p-6;
+  .card-body { @apply p-6; }
+
+  .input {
+    @apply block w-full px-3 py-2 rounded-lg shadow-sm focus:outline-none sm:text-sm;
+    background-color: var(--color-surface);
+    border: 1px solid var(--color-border);
+    color: var(--color-text);
+  }
+  .input::placeholder { color: var(--color-text-secondary); }
+  .input:focus {
+    background-color: var(--color-surface);
+    border-color: var(--color-text-secondary);
+  }
+
+  .btn {
+    @apply inline-flex items-center justify-center px-4 py-2 text-sm font-medium rounded-lg focus:outline-none focus:ring-0 disabled:opacity-50 disabled:cursor-not-allowed;
+    background-color: var(--color-surface);
+    border: 1px solid currentColor;
+    color: var(--color-text);
+    transition: color 0.2s ease;
+  }
+  .btn:hover,
+  .btn.is-active {
+    text-shadow: 0.02em 0 currentColor, -0.02em 0 currentColor;
+  }
+  .btn:hover svg,
+  .btn.is-active svg {
+    stroke-width: 2.4;
+  }
+  .btn.is-active:hover {
+    text-shadow: 0.02em 0 currentColor, -0.02em 0 currentColor;
+  }
+  .btn.is-active:hover svg {
+    stroke-width: 2.4;
+  }
+  .btn-primary,
+  .btn-secondary,
+  .btn-outline,
+  .btn-danger { @apply btn; }
+
+  .badge {
+    @apply inline-flex items-center px-2 py-1 text-xs font-medium rounded;
+    background-color: var(--color-surface);
+    border: 1px solid var(--color-border);
+    color: var(--color-text-secondary);
+  }
+
+  .color-hover-text {
+    transition: color 0.2s ease;
+  }
+  .color-hover-text:hover {
+    color: var(--color-text);
+  }
+
+  .logo-circle-10 {
+    width: 2.5rem;
+    height: 2.5rem;
+    border-radius: 9999px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    flex-shrink: 0;
+    background-color: transparent;
+    color: var(--color-text);
+  }
+
+  .logo-circle-12 {
+    width: 3rem;
+    height: 3rem;
+    border-radius: 9999px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    flex-shrink: 0;
+    background-color: transparent;
+    color: var(--color-text);
+  }
+
+  .logo-img,
+  .logo-img-fill {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    object-position: center;
+    border-radius: 9999px;
+    background-color: transparent;
+  }
+
+  button:focus,
+  .color-hover:focus,
+  button:focus-visible,
+  .color-hover:focus-visible {
+    outline: none !important;
+    box-shadow: none !important;
   }
 }
 

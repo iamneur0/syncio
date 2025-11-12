@@ -1,16 +1,295 @@
 'use client'
 
 import React from 'react'
-import { useTheme } from '@/contexts/ThemeContext'
+import { useTheme, Theme } from '@/contexts/ThemeContext'
+import { getEntityColorStyles } from '@/utils/colorMapping'
 import { useMutation } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
-import { RotateCcw, Sun, Moon, Sparkles, Trash2, RefreshCcw, SunMoon, Repeat } from 'lucide-react'
+import { Trash2, RefreshCcw, Repeat, FlaskConical } from 'lucide-react'
 import AccountMenuButton from '@/components/auth/AccountMenuButton'
 import { ConfirmDialog } from '@/components/modals'
 import api from '@/services/api'
+import { ToggleSwitch } from '@/components/ui'
+
+type ThemePalette = {
+  background: string
+  surface: string
+  accent: string
+  accentMuted: string
+  text: string
+  textMuted: string
+  border: string
+}
+
+type ThemeOption = {
+  id: Theme
+  label: string
+  description: string
+  group: 'default' | 'custom'
+  palette: ThemePalette
+}
+
+const THEME_OPTIONS_UNSORTED: ThemeOption[] = [
+  {
+    id: 'light',
+    label: 'Light',
+    description: 'Bright and clean interface',
+    group: 'default',
+    palette: {
+      background: '#f3f4f6',
+      surface: '#ffffff',
+      accent: '#3b82f6',
+      accentMuted: '#dbeafe',
+      text: '#0f172a',
+      textMuted: '#94a3b8',
+      border: '#e2e8f0',
+    },
+  },
+  {
+    id: 'dark',
+    label: 'Nightfall',
+    description: 'Balanced contrast for low-light focus',
+    group: 'default',
+    palette: {
+      background: '#0f172a',
+      surface: '#1e293b',
+      accent: '#2563eb',
+      accentMuted: '#1d4ed8',
+      text: '#e2e8f0',
+      textMuted: '#94a3b8',
+      border: '#334155',
+    },
+  },
+  {
+    id: 'mono',
+    label: 'Midnight',
+    description: 'High-contrast monochrome style',
+    group: 'default',
+    palette: {
+      background: '#000000',
+      surface: '#0f0f0f',
+      accent: '#fbbf24',
+      accentMuted: '#f59e0b',
+      text: '#f5f5f5',
+      textMuted: '#9ca3af',
+      border: '#1f1f1f',
+    },
+  },
+  {
+    id: 'aubergine',
+    label: 'Aubergine',
+    description: 'Rich purples with vibrant highlights',
+    group: 'custom',
+    palette: {
+      background: '#1f1029',
+      surface: '#2c1c3a',
+      accent: '#9d4edd',
+      accentMuted: '#7f3fb5',
+      text: '#f8f5ff',
+      textMuted: '#d8c4f0',
+      border: '#4a2d63',
+    },
+  },
+  {
+    id: 'hoth',
+    label: 'Hoth',
+    description: 'Frosted whites with glacial accents',
+    group: 'custom',
+    palette: {
+      background: '#f3f4f6',
+      surface: '#ffffff',
+      accent: '#0ea5e9',
+      accentMuted: '#bae6fd',
+      text: '#0f172a',
+      textMuted: '#6b7280',
+      border: '#e2e8f0',
+    },
+  },
+  {
+    id: 'aurora',
+    label: 'Aurora',
+    description: 'Violet twilight with neon glow',
+    group: 'custom',
+    palette: {
+      background: '#141827',
+      surface: '#1e2431',
+      accent: '#a855f7',
+      accentMuted: '#c4b5fd',
+      text: '#f4f5ff',
+      textMuted: '#d8dafe',
+      border: '#2f3546',
+    },
+  },
+  {
+    id: 'choco-mint',
+    label: 'Choco Mint',
+    description: 'Earthy neutrals with mint highlights',
+    group: 'custom',
+    palette: {
+      background: '#1f2620',
+      surface: '#2b352c',
+      accent: '#4ade80',
+      accentMuted: '#bbf7d0',
+      text: '#f7f7f2',
+      textMuted: '#d1f7c4',
+      border: '#405143',
+    },
+  },
+  {
+    id: 'ochin',
+    label: 'Ochin',
+    description: 'Ocean blues with soft highlights',
+    group: 'custom',
+    palette: {
+      background: '#101f33',
+      surface: '#172a46',
+      accent: '#38bdf8',
+      accentMuted: '#93c5fd',
+      text: '#f1f5f9',
+      textMuted: '#cbd5f5',
+      border: '#29446b',
+    },
+  },
+  {
+    id: 'work-hard',
+    label: 'Cafe',
+    description: 'Warm coffee tones for focus',
+    group: 'custom',
+    palette: {
+      background: '#2d2213',
+      surface: '#3a2d1a',
+      accent: '#facc15',
+      accentMuted: '#fbbf24',
+      text: '#fdf5e6',
+      textMuted: '#f5d099',
+      border: '#54422a',
+    },
+  },
+]
+
+const THEME_OPTIONS: ThemeOption[] = [...THEME_OPTIONS_UNSORTED].sort((a, b) =>
+  a.label.localeCompare(b.label)
+)
+
+const ThemePreview: React.FC<{ option: ThemeOption }> = ({ option }) => {
+  const accentPrimary = getEntityColorStyles(option.id, 0).accentHex
+  const accentSecondary = getEntityColorStyles(option.id, 1).accentHex
+  return (
+    <div
+      className="w-24 h-20 rounded-xl border overflow-hidden shadow-sm flex-shrink-0"
+      style={{ background: option.palette.background, borderColor: option.palette.border }}
+    >
+      <div
+        className="h-full w-full rounded-lg"
+        style={{
+          background: option.palette.surface,
+          border: `1px solid ${option.palette.border}`,
+          padding: '0.55rem',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '0.45rem',
+        }}
+      >
+        <div
+          style={{
+            height: '6px',
+            borderRadius: '9999px',
+            background: option.palette.accent,
+            width: '60%',
+          }}
+        />
+        {[0, 1, 2].map((row) => (
+          <div
+            key={row}
+            style={{
+              display: 'flex',
+              gap: '0.45rem',
+              alignItems: 'center',
+            }}
+          >
+            <span
+              style={{
+                width: '12px',
+                height: '12px',
+                borderRadius: '9999px',
+                background: row === 0 ? accentPrimary : accentSecondary,
+                opacity: row === 0 ? 1 : 0.75,
+              }}
+            />
+            <div style={{ flex: 1 }}>
+              <div
+                style={{
+                  height: '5px',
+                  borderRadius: '9999px',
+                  background: option.palette.text,
+                  opacity: row === 0 ? 0.85 : 0.65,
+                  width: row === 0 ? '72%' : row === 1 ? '64%' : '58%',
+                }}
+              />
+              <div
+                style={{
+                  height: '4px',
+                  borderRadius: '9999px',
+                  background: option.palette.textMuted,
+                  opacity: 0.45,
+                  width: row === 0 ? '48%' : row === 1 ? '42%' : '38%',
+                  marginTop: '4px',
+                }}
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+const ThemeOptionCard: React.FC<{
+  option: ThemeOption
+  selected: boolean
+  onSelect: (theme: Theme) => void
+}> = ({ option, selected, onSelect }) => {
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(option.id)}
+      className="relative w-full rounded-xl border transition-all text-left shadow-sm focus:outline-none"
+      aria-pressed={selected}
+        style={{
+          borderColor: option.palette.border,
+          borderWidth: '2px',
+          background: option.palette.background,
+          color: option.palette.text,
+          minHeight: '132px',
+        }}
+    >
+      <div className="flex items-start gap-3 p-3">
+        <ThemePreview option={option} />
+        <div className="flex-1 space-y-1">
+          <div className="flex items-center gap-2">
+            <span className="font-semibold" style={{ color: option.palette.text }}>
+              {option.label}
+            </span>
+          </div>
+          <p
+            className="text-sm leading-snug"
+            style={{ color: option.palette.textMuted }}
+          >
+            {option.description}
+          </p>
+        </div>
+      </div>
+      <span
+        aria-hidden="true"
+        className={`selection-indicator absolute top-3 right-3 ${selected ? 'is-selected' : ''}`}
+        style={{ color: option.palette.border, backgroundColor: option.palette.background }}
+      />
+    </button>
+  )
+}
 
 export default function SettingsPage() {
-  const { isDark, isModern, isModernDark, theme, setTheme, hideSensitive, toggleHideSensitive } = useTheme()
+  const { theme, setTheme, hideSensitive, toggleHideSensitive } = useTheme()
   const appVersion = (process.env.NEXT_PUBLIC_APP_VERSION as string) || 'dev'
   const [syncMode, setSyncMode] = React.useState<'normal' | 'advanced'>('normal')
   const [deleteMode, setDeleteMode] = React.useState<'safe' | 'unsafe'>('safe')
@@ -20,7 +299,6 @@ export default function SettingsPage() {
   const [configImporting, setConfigImporting] = React.useState<boolean>(false)
   const [showConfigImport, setShowConfigImport] = React.useState<boolean>(false)
   const [configText, setConfigText] = React.useState<string>('')
-  const [backupDays, setBackupDays] = React.useState<number>(0)
   const [isDraggingFiles, setIsDraggingFiles] = React.useState<boolean>(false)
   const [isDraggingAddonsOver, setIsDraggingAddonsOver] = React.useState<boolean>(false)
   const [isDraggingConfigOver, setIsDraggingConfigOver] = React.useState<boolean>(false)
@@ -142,21 +420,26 @@ export default function SettingsPage() {
     }
   }, [])
 
-  // Load backup frequency (only in private mode)
-  React.useEffect(() => {
-    if (process.env.NEXT_PUBLIC_AUTH_ENABLED !== 'true') {
-      api.get('/settings/backup-frequency')
-        .then(r => setBackupDays(Number(r.data?.days || 0)))
-        .catch(() => {})
-    }
-  }, [])
-
-
   const onSyncModeChange = (mode: 'normal' | 'advanced') => {
     setSyncMode(mode)
     api.put('/settings/account-sync', { mode })
       .then(() => window.dispatchEvent(new CustomEvent('sfm:settings:changed')))
       .catch(() => {})
+  }
+
+  const handleTestWebhook = async () => {
+    const trimmed = (webhookUrl || '').trim()
+    if (!trimmed) {
+      toast.error('Set a webhook URL first')
+      return
+    }
+    try {
+      await api.post('/settings/account-sync/test-webhook', { webhookUrl: trimmed })
+      toast.success('Test message sent to Discord')
+    } catch (e: any) {
+      const msg = e?.response?.data?.message || e?.message || 'Failed to send test message'
+      toast.error(msg)
+    }
   }
 
   const onDeleteModeChange = (mode: 'safe' | 'unsafe') => {
@@ -641,20 +924,8 @@ export default function SettingsPage() {
       <div className="mb-6 sm:mb-8">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4 gap-4">
           <div>
-            <h1 className={`hidden sm:block text-xl sm:text-2xl font-bold ${
-              isModern 
-                ? 'text-purple-800' 
-                : isModernDark
-                ? 'text-purple-100'
-                : isDark ? 'text-white' : 'text-gray-900'
-            }`}>Settings</h1>
-            <p className={`text-sm sm:text-base ${
-              isModern 
-                ? 'text-purple-600' 
-                : isModernDark
-                ? 'text-purple-300'
-                : isDark ? 'text-gray-400' : 'text-gray-600'
-            }`}>Configure your Syncio preferences</p>
+            <h1 className={`hidden sm:block text-xl sm:text-2xl font-bold`}>Settings</h1>
+            <p className={`text-sm sm:text-base color-text-secondary`}>Configure your Syncio preferences</p>
           </div>
           <div className="flex items-center gap-2">
             {/* Desktop account button */}
@@ -667,36 +938,28 @@ export default function SettingsPage() {
 
       <div className="max-w-3xl">
 
-      <div className={`p-4 rounded-lg border ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
-        <h2 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>Privacy</h2>
-        <p className={`text-sm mt-1 ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
+      <div className="p-4 rounded-lg border card">
+        <h2 className={`text-lg font-semibold`}>Privacy</h2>
+        <p className={`text-sm mt-1 color-text-secondary`}>
           Control visibility of sensitive fields in the user details view.
         </p>
         <div className="mt-4 flex items-center justify-between">
           <div>
-            <div className={`font-medium ${isDark ? 'text-white' : 'text-gray-900'}`}>Hide sensitive information</div>
-            <div className={`${isDark ? 'text-gray-400' : 'text-gray-500'} text-sm`}>Mask username, email, webhook URL, and API key.</div>
+            <div className={`font-medium`}>Hide sensitive information</div>
+            <div className={`color-text-secondary text-sm`}>Mask username, email, webhook URL, and API key.</div>
           </div>
-          <button
-            onClick={toggleHideSensitive}
-            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-              hideSensitive
-                ? (theme === 'mono' ? 'bg-white/30 border border-white/20' : (isDark ? 'bg-gray-600' : 'bg-gray-800'))
-                : (theme === 'mono' ? 'bg-white/15 border border-white/20' : (isDark ? 'bg-gray-700' : 'bg-gray-300'))
-            }`}
-            aria-pressed={hideSensitive}
-          >
-            <span
-              className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${hideSensitive ? 'translate-x-5' : 'translate-x-1'}`}
-            />
-          </button>
+          <ToggleSwitch
+            checked={!!hideSensitive}
+            onChange={toggleHideSensitive}
+            title={hideSensitive ? 'Show sensitive information' : 'Hide sensitive information'}
+          />
         </div>
       </div>
 
       {/* Sync Mode Setting */}
-      <div className={`p-4 rounded-lg border mt-6 ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
-        <h2 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>Sync Behavior</h2>
-        <p className={`text-sm mt-1 ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
+      <div className="p-4 rounded-lg border mt-6 card">
+        <h2 className={`text-lg font-semibold`}>Sync Behavior</h2>
+        <p className={`text-sm mt-1 color-text-secondary`}>
           Control how addon synchronization works when syncing users or groups.
         </p>
         <div className="mt-4 space-y-3">
@@ -708,11 +971,11 @@ export default function SettingsPage() {
               value="normal"
               checked={syncMode === 'normal'}
               onChange={() => onSyncModeChange('normal')}
-              className="mr-3"
+              className="control-radio mr-3"
             />
-            <label htmlFor="sync-normal" className={`${isDark ? 'text-white' : 'text-gray-900'}`}>
+            <label htmlFor="sync-normal" className={``}>
               <div className="font-medium">Normal Sync</div>
-              <div className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+              <div className={`text-sm color-text-secondary`}>
                 Push existing group addons to users
               </div>
             </label>
@@ -725,11 +988,11 @@ export default function SettingsPage() {
               value="advanced"
               checked={syncMode === 'advanced'}
               onChange={() => onSyncModeChange('advanced')}
-              className="mr-3"
+              className="control-radio mr-3"
             />
-            <label htmlFor="sync-advanced" className={`${isDark ? 'text-white' : 'text-gray-900'}`}>
+            <label htmlFor="sync-advanced" className={``}>
               <div className="font-medium">Advanced Sync</div>
-              <div className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+              <div className={`text-sm color-text-secondary`}>
                 Reload all group addons first, then sync the updated addons to users
               </div>
             </label>
@@ -738,9 +1001,9 @@ export default function SettingsPage() {
       </div>
 
       {/* Delete Mode Setting */}
-      <div className={`p-4 rounded-lg border mt-6 ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
-        <h2 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>Delete Protection</h2>
-        <p className={`text-sm mt-1 ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
+      <div className="p-4 rounded-lg border mt-6 card">
+        <h2 className={`text-lg font-semibold`}>Delete Protection</h2>
+        <p className={`text-sm mt-1 color-text-secondary`}>
           Choose how delete protection behaves.
         </p>
         <div className="mt-4 space-y-3">
@@ -752,11 +1015,11 @@ export default function SettingsPage() {
               value="safe"
               checked={deleteMode === 'safe'}
               onChange={() => onDeleteModeChange('safe')}
-              className="mr-3"
+              className="control-radio mr-3"
             />
-            <label htmlFor="delete-safe" className={`${isDark ? 'text-white' : 'text-gray-900'}`}>
+            <label htmlFor="delete-safe" className={``}>
               <div className="font-medium">Safe mode</div>
-              <div className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>Can’t delete or unprotect Stremio default addons</div>
+              <div className={`text-sm color-text-secondary`}>Can’t delete or unprotect Stremio default addons</div>
             </label>
           </div>
           <div className="flex items-center">
@@ -767,171 +1030,35 @@ export default function SettingsPage() {
               value="unsafe"
               checked={deleteMode === 'unsafe'}
               onChange={() => onDeleteModeChange('unsafe')}
-              className="mr-3"
+              className="control-radio mr-3"
             />
-            <label htmlFor="delete-unsafe" className={`${isDark ? 'text-white' : 'text-gray-900'}`}>
+            <label htmlFor="delete-unsafe" className={``}>
               <div className="font-medium">Unsafe mode</div>
-              <div className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>Can delete and unprotect all addons</div>
+              <div className={`text-sm color-text-secondary`}>Can delete and unprotect all addons</div>
             </label>
           </div>
         </div>
       </div>
 
       {/* Theme Setting */}
-      <div className={`p-4 rounded-lg border mt-6 ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
-        <h2 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>Appearance</h2>
-        <p className={`text-sm mt-1 ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
+      <div className="p-4 rounded-lg border mt-6 card">
+        <h2 className={`text-lg font-semibold`}>Appearance</h2>
+        <p className={`text-sm mt-1 color-text-secondary`}>
           Choose your preferred visual theme for the application.
         </p>
-        <div className="mt-4 space-y-3">
-          <div className="flex items-center">
-            <input
-              type="radio"
-              id="theme-light"
-              name="theme"
-              value="light"
-              checked={theme === 'light'}
-              onChange={() => setTheme('light')}
-              className="mr-3"
-            />
-            <label htmlFor="theme-light" className={`flex items-center ${isDark ? 'text-white' : 'text-gray-900'}`}>
-              <Sun className="w-5 h-5 mr-3 text-yellow-500" />
-              <div>
-                <div className="font-medium">Light</div>
-                <div className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
-                  Clean and bright interface
-                </div>
-              </div>
-            </label>
-          </div>
-          <div className="flex items-center">
-            <input
-              type="radio"
-              id="theme-dark"
-              name="theme"
-              value="dark"
-              checked={theme === 'dark'}
-              onChange={() => setTheme('dark')}
-              className="mr-3"
-            />
-            <label htmlFor="theme-dark" className={`flex items-center ${isDark ? 'text-white' : 'text-gray-900'}`}>
-              <Moon className="w-5 h-5 mr-3 text-blue-400" />
-              <div>
-                <div className="font-medium">Dark</div>
-                <div className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
-                  Easy on the eyes in low light
-                </div>
-              </div>
-            </label>
-          </div>
-          {/* Modern themes disabled - keeping code for future use */}
-          {/* 
-          <div className="flex items-center">
-            <input
-              type="radio"
-              id="theme-modern"
-              name="theme"
-              value="modern"
-              checked={theme === 'modern'}
-              onChange={() => setTheme('modern')}
-              className="mr-3"
-            />
-            <label htmlFor="theme-modern" className={`flex items-center ${isDark ? 'text-white' : 'text-gray-900'}`}>
-              <Sparkles className="w-5 h-5 mr-3 text-purple-500" />
-              <div>
-                <div className="font-medium">Modern Mode</div>
-                <div className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
-                  Beautiful gradients and modern styling
-                </div>
-              </div>
-            </label>
-          </div>
-          <div className="flex items-center">
-            <input
-              type="radio"
-              id="theme-modern-dark"
-              name="theme"
-              value="modern-dark"
-              checked={theme === 'modern-dark'}
-              onChange={() => setTheme('modern-dark')}
-              className="mr-3"
-            />
-            <label htmlFor="theme-modern-dark" className={`flex items-center ${isDark ? 'text-white' : 'text-gray-900'}`}>
-              <Sparkles className="w-5 h-5 mr-3 text-purple-400" />
-              <div>
-                <div className="font-medium">Modern Dark Mode</div>
-                <div className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
-                  Dark gradients with modern styling
-                </div>
-              </div>
-            </label>
-          </div>
-          */}
-          <div className="flex items-center">
-            <input
-              type="radio"
-              id="theme-mono"
-              name="theme"
-              value="mono"
-              checked={(theme as any) === 'mono'}
-              onChange={() => setTheme('mono' as any)}
-              className="mr-3"
-            />
-            <label htmlFor="theme-mono" className={`flex items-center ${isDark ? 'text-white' : 'text-gray-900'}`}>
-              <SunMoon className="w-5 h-5 mr-3 text-black" />
-              <div>
-                <div className="font-medium">Black</div>
-                <div className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
-                  For the minimalism enjoyers
-                </div>
-              </div>
-            </label>
+        <div className="mt-4">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {THEME_OPTIONS.map((option) => (
+              <ThemeOptionCard
+                key={option.id}
+                option={option}
+                selected={theme === option.id}
+                onSelect={setTheme}
+              />
+            ))}
           </div>
         </div>
       </div>
-
-      {/* Automatic Backups - only available in private mode */}
-      {process.env.NEXT_PUBLIC_AUTH_ENABLED !== 'true' && (
-        <div className={`p-4 rounded-lg border mt-6 ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
-          <h2 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>Automatic Backups</h2>
-          <p className={`text-sm mt-1 ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
-            Save configuration snapshots to the server-side "backup" folder on a schedule.
-          </p>
-          <div className="mt-4 flex items-center gap-3">
-            <select
-              value={backupDays}
-              onChange={(e) => {
-                const days = Number(e.target.value)
-                setBackupDays(days)
-                api.put('/settings/backup-frequency', { days })
-                  .then(() => toast.success('Backup schedule updated'))
-                  .catch((err) => toast.error(err?.response?.data?.message || 'Failed to update backup schedule'))
-              }}
-              className={`${isDark ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'} border rounded px-3 py-2`}
-            >
-              <option value={0}>Disabled</option>
-              <option value={1}>Every day</option>
-              <option value={7}>Every week</option>
-              <option value={15}>Every 15 days</option>
-              <option value={30}>Every month</option>
-            </select>
-            <button
-              onClick={async () => {
-                try {
-                  await api.post('/settings/backup-now')
-                  toast.success('Backup started')
-                } catch (e: any) {
-                  toast.error(e?.response?.data?.message || 'Failed to start backup')
-                }
-              }}
-              className={`${isDark ? 'bg-gray-700 hover:bg-gray-600 text-white' : 'bg-gray-100 hover:bg-gray-200 text-gray-900'} px-3 py-2 rounded`}
-            >Run now</button>
-          </div>
-          <div className={`text-xs mt-2 ${isDark ? 'text-gray-500' : 'text-gray-500'}`}>
-            Files are saved under server folder: data/backup/
-          </div>
-        </div>
-      )}
 
       {/* Addon Import/Export - moved to Tasks page */}
       {/* Configuration Import/Export - moved to Tasks page */}
@@ -939,97 +1066,105 @@ export default function SettingsPage() {
       {/* Maintenance moved to Tasks page */}
 
       {/* Discord Webhook */}
-      <div className={`p-4 rounded-lg border mt-6 ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
-        <h2 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>Discord Webhook</h2>
-        <p className={`text-sm mt-1 ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
+      <div className="p-4 rounded-lg border mt-6 card">
+        <h2 className={`text-lg font-semibold`}>Discord Webhook</h2>
+        <p className={`text-sm mt-1 color-text-secondary`}>
           Receive notifications when automatic syncs or API-triggered syncs complete.
         </p>
         <div className="mt-4">
-          <label className={`block text-sm font-medium mb-2 ${isDark ? 'text-white' : 'text-gray-900'}`}>
+          <label className={`block text-sm font-medium mb-2`}>
             Webhook URL
           </label>
-          <div className="relative">
-            <input
-              type={hideSensitive && !revealedFields.has('webhook') ? "password" : "text"}
-              value={hideSensitive && !revealedFields.has('webhook') ? (webhookUrl ? '••••••••••••••••••••••••••••••••' : '') : webhookUrl}
-              onChange={(e) => {
-                if (!hideSensitive || revealedFields.has('webhook')) {
-                  setWebhookUrl(e.target.value)
-                }
-              }}
-              onClick={() => {
-                if (hideSensitive && !revealedFields.has('webhook')) {
-                  setRevealedFields(prev => new Set(prev).add('webhook'))
-                }
-              }}
-              onBlur={() => {
-                if (webhookUrl && (!hideSensitive || revealedFields.has('webhook'))) {
-                  api.put('/settings/account-sync', { webhookUrl: webhookUrl.trim() || undefined })
-                    .then(() => toast.success('Webhook URL updated'))
-                    .catch(() => toast.error('Failed to update webhook URL'))
-                }
-                if (hideSensitive) {
-                  setRevealedFields(prev => {
-                    const next = new Set(prev)
-                    next.delete('webhook')
-                    return next
-                  })
-                }
-              }}
-              placeholder="https://discord.com/api/webhooks/..."
-              className={`w-full border rounded px-3 py-2 ${
-                isDark ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' : 'bg-white border-gray-300 text-gray-900'
-              } ${hideSensitive && !revealedFields.has('webhook') ? 'blur-sm' : ''}`}
-            />
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <input
+                type={hideSensitive && !revealedFields.has('webhook') ? "password" : "text"}
+                value={hideSensitive && !revealedFields.has('webhook') ? (webhookUrl ? '••••••••••••••••••••••••••••••••' : '') : webhookUrl}
+                onChange={(e) => {
+                  if (!hideSensitive || revealedFields.has('webhook')) {
+                    setWebhookUrl(e.target.value)
+                  }
+                }}
+                onClick={() => {
+                  if (hideSensitive && !revealedFields.has('webhook')) {
+                    setRevealedFields(prev => new Set(prev).add('webhook'))
+                  }
+                }}
+                onBlur={() => {
+                  if (webhookUrl && (!hideSensitive || revealedFields.has('webhook'))) {
+                    api.put('/settings/account-sync', { webhookUrl: webhookUrl.trim() || undefined })
+                      .then(() => toast.success('Webhook URL updated'))
+                      .catch((e: any) => toast.error(e?.response?.data?.message || 'Failed to update webhook URL'))
+                  }
+                  if (hideSensitive) {
+                    setRevealedFields(prev => {
+                      const next = new Set(prev)
+                      next.delete('webhook')
+                      return next
+                    })
+                  }
+                }}
+                placeholder="https://discord.com/api/webhooks/..."
+                className={`input w-full px-3 py-2 ${hideSensitive && !revealedFields.has('webhook') ? 'blur-sm' : ''}`}
+              />
+            </div>
+            <button
+              type="button"
+              onClick={handleTestWebhook}
+              className="w-10 h-10 rounded surface-interactive flex items-center justify-center"
+              title="Send test message"
+            >
+              <FlaskConical className="w-4 h-4" />
+            </button>
           </div>
         </div>
       </div>
 
       {/* API Access */}
-      <div className={`p-4 rounded-lg border mt-6 ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
-        <h2 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>API Access</h2>
-        <p className={`text-sm mt-1 ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
+      <div className="p-4 rounded-lg border mt-6 card">
+        <h2 className={`text-lg font-semibold`}>API Access</h2>
+        <p className={`text-sm mt-1 color-text-secondary`}>
           Generate an API key to access your account via external API endpoints.
         </p>
         <div className="mt-4 flex gap-2 items-center">
           <div className="flex-1">
-            <input
-              type={hideSensitive && !revealedFields.has('apikey') ? "password" : "text"}
-              value={hideSensitive && !revealedFields.has('apikey')
+            {(() => {
+              const displayValue = hideSensitive && !revealedFields.has('apikey')
                 ? (currentApiKey ? '••••••••••••••••••••••••••••••••' : (apiKeyStatus.hasKey ? 'Loading...' : 'Generating...'))
                 : (currentApiKey || (apiKeyStatus.hasKey ? 'Loading...' : 'Generating...'))
-              }
-              readOnly
-              onClick={() => {
-                if (hideSensitive && !revealedFields.has('apikey')) {
-                  setRevealedFields(prev => new Set(prev).add('apikey'))
-                } else if (!hideSensitive && currentApiKey) {
-                  navigator.clipboard.writeText(currentApiKey)
-                  toast.success('API key copied to clipboard')
-                } else if (hideSensitive && revealedFields.has('apikey') && currentApiKey) {
-                  navigator.clipboard.writeText(currentApiKey)
-                  toast.success('API key copied to clipboard')
-                } else {
-                  toast.error('API key not available. Click rotate to generate a new one.')
-                }
-              }}
-              onBlur={() => {
-                if (hideSensitive && revealedFields.has('apikey')) {
-                  setRevealedFields(prev => {
-                    const next = new Set(prev)
-                    next.delete('apikey')
-                    return next
-                  })
-                }
-              }}
-              className={`w-full border rounded px-3 py-2 cursor-pointer ${
-                isDark ? 'bg-gray-700 border-gray-600 text-white' : 'bg-gray-50 border-gray-300 text-gray-900'
-              } ${hideSensitive && !revealedFields.has('apikey') ? 'blur-sm' : ''}`}
-              title={hideSensitive && !revealedFields.has('apikey')
-                ? 'Click to reveal API key'
-                : (currentApiKey ? 'Click to copy API key' : 'API key only shown once after generation. Click rotate to generate a new one.')
-              }
-            />
+
+              return (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (hideSensitive && !revealedFields.has('apikey')) {
+                      setRevealedFields(prev => new Set(prev).add('apikey'))
+                    } else if (currentApiKey) {
+                      navigator.clipboard.writeText(currentApiKey)
+                      toast.success('API key copied to clipboard')
+                    } else {
+                      toast.error('API key not available. Click rotate to generate a new one.')
+                    }
+                  }}
+                  onBlur={() => {
+                    if (hideSensitive && revealedFields.has('apikey')) {
+                      setRevealedFields(prev => {
+                        const next = new Set(prev)
+                        next.delete('apikey')
+                        return next
+                      })
+                    }
+                  }}
+                  className={`input w-full px-3 py-2 text-left cursor-pointer ${hideSensitive && !revealedFields.has('apikey') ? 'blur-sm' : ''}`}
+                  title={hideSensitive && !revealedFields.has('apikey')
+                    ? 'Click to reveal API key'
+                    : (currentApiKey ? 'Click to copy API key' : 'API key only shown once after generation. Click rotate to generate a new one.')
+                  }
+                >
+                  <span className="inline-block w-full truncate">{displayValue}</span>
+                </button>
+              )
+            })()}
           </div>
           <button
             onClick={async () => {
@@ -1046,15 +1181,13 @@ export default function SettingsPage() {
                 toast.error(e?.response?.data?.message || 'Failed to generate API key')
               }
             }}
-            className={`flex items-center justify-center w-10 h-10 rounded ${
-              isDark ? 'bg-gray-700 hover:bg-gray-600 text-white' : 'bg-gray-100 hover:bg-gray-200 text-gray-900'
-            }`}
+            className={`flex items-center justify-center w-10 h-10 rounded surface-interactive`}
             title="Rotate API key (revoke old and generate new)"
           >
             <Repeat className="w-4 h-4" />
           </button>
         </div>
-        <p className={`text-xs mt-2 ${isDark ? 'text-gray-500' : 'text-gray-500'}`}>
+        <p className={`text-xs mt-2 color-text-secondary`}>
           Use this key in the Authorization header:{' '}
           <code 
             onClick={() => {
@@ -1066,7 +1199,7 @@ export default function SettingsPage() {
                 toast.error('API key not available')
               }
             }}
-            className={`px-1 py-0.5 bg-gray-100 dark:bg-gray-700 rounded cursor-pointer hover:opacity-80 transition-opacity ${
+            className={`px-1 py-0.5 color-surface rounded cursor-pointer hover:opacity-80 transition-opacity ${
               hideSensitive && !revealedFields.has('apikey') ? 'blur-sm' : ''
             }`}
             title={currentApiKey ? 'Click to copy "Bearer {key}"' : 'API key not available'}
@@ -1077,34 +1210,34 @@ export default function SettingsPage() {
       </div>
 
       {/* Account Management */}
-      <div className={`p-4 rounded-lg border mt-6 ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
-        <h2 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>Account Management</h2>
-        <p className={`text-sm mt-1 ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
+      <div className="p-4 rounded-lg border mt-6 card">
+        <h2 className="text-lg font-semibold">Account Management</h2>
+        <p className="text-sm mt-1 color-text-secondary">
           Delete all items of a specific type or perform bulk operations. These operations cannot be undone.
         </p>
         <div className="mt-4 flex gap-4 flex-wrap">
           <button 
             onClick={clearAllUserAddons} 
-            className="accent-bg accent-text hover:opacity-90 flex items-center px-4 py-2 rounded-lg transition-colors"
+            className="flex items-center px-4 py-2 rounded-lg surface-interactive"
           >
             <RefreshCcw className="w-5 h-5 mr-2" /> Clear User Addons
           </button>
           <button 
             onClick={resetConfig} 
-            className="accent-bg accent-text hover:opacity-90 flex items-center px-4 py-2 rounded-lg transition-colors"
+            className="flex items-center px-4 py-2 rounded-lg surface-interactive"
           >
             <RefreshCcw className="w-5 h-5 mr-2" /> Reset Configuration
           </button>
           {AUTH_ENABLED && (
             <button 
               onClick={deleteAccount} 
-              className="accent-bg accent-text hover:opacity-90 flex items-center px-4 py-2 rounded-lg transition-colors"
+              className="flex items-center px-4 py-2 rounded-lg surface-interactive"
             >
               <Trash2 className="w-5 h-5 mr-2" /> Delete Account
             </button>
           )}
         </div>
-        <div className={`text-xs mt-3 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+        <div className="text-xs mt-3 color-text-secondary">
           ⚠️ These operations are permanent and cannot be undone. Consider exporting your data first.
         </div>
       </div>
@@ -1124,5 +1257,3 @@ export default function SettingsPage() {
     </div>
   )
 }
-
-

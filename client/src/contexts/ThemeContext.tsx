@@ -2,7 +2,21 @@
 
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react'
 
-type Theme = 'light' | 'dark' | 'modern' | 'modern-dark' | 'mono'
+const THEME_CLASSNAMES = [
+  'light',
+  'dark',
+  'modern',
+  'modern-dark',
+  'mono',
+  'aubergine',
+  'hoth',
+  'aurora',
+  'choco-mint',
+  'ochin',
+  'work-hard',
+] as const
+
+export type Theme = (typeof THEME_CLASSNAMES)[number]
 
 export interface ThemeContextType {
   theme: Theme
@@ -40,15 +54,18 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
     // Only run on client side
     if (typeof window !== 'undefined') {
       // Get theme from localStorage or system preference
-      const savedTheme = localStorage.getItem('theme') as Theme
+      const savedTheme = localStorage.getItem('theme') as Theme | null
       const systemTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
       
       // Fallback modern themes to dark theme since they're disabled
-      let initialTheme = savedTheme || systemTheme
+      let initialTheme: Theme = savedTheme || (systemTheme as Theme)
       if (initialTheme === 'modern' || initialTheme === 'modern-dark') {
         initialTheme = 'dark'
         // Update localStorage to reflect the fallback
         localStorage.setItem('theme', 'dark')
+      } else if (!THEME_CLASSNAMES.includes(initialTheme)) {
+        initialTheme = 'light'
+        localStorage.setItem('theme', 'light')
       }
       
       // Load hide sensitive setting
@@ -82,7 +99,7 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
   const updateDocumentClass = (newTheme: Theme) => {
     if (typeof window !== 'undefined') {
       const root = window.document.documentElement
-      root.classList.remove('light', 'dark', 'modern', 'modern-dark', 'mono')
+      root.classList.remove(...THEME_CLASSNAMES)
       root.classList.add(newTheme)
       // Update theme-color meta to match background precisely per theme
       const colors: Record<Theme, string> = {
@@ -91,6 +108,12 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
         'modern': '#f9fafb',
         'modern-dark': '#111827',
         mono: '#000000',
+        aubergine: '#1f1029',
+        hoth: '#f5f7fb',
+        aurora: '#141827',
+        'choco-mint': '#1f2620',
+        ochin: '#101f33',
+        'work-hard': '#2d2213',
       }
       const tag = ensureThemeColorTag()
       tag.setAttribute('content', colors[newTheme] || '#111827')
@@ -99,7 +122,10 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
 
   const toggleTheme = () => {
     // Skip modern themes since they're disabled
-    const newTheme: Theme = theme === 'light' ? 'dark' : theme === 'dark' ? 'mono' : 'light'
+    const cycle: Theme[] = ['light', 'dark', 'mono']
+    const currentIndex = cycle.indexOf(theme)
+    const nextTheme = currentIndex === -1 ? 'dark' : cycle[(currentIndex + 1) % cycle.length]
+    const newTheme = nextTheme
     setTheme(newTheme)
     updateDocumentClass(newTheme)
     
@@ -126,11 +152,13 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
     }
   }
 
+  const darkThemes: Theme[] = ['dark', 'modern-dark', 'mono', 'aubergine', 'aurora', 'choco-mint', 'ochin', 'work-hard']
+
   const value: ThemeContextType = {
     theme,
     toggleTheme,
     setTheme: setThemeValue,
-    isDark: theme === 'dark',
+    isDark: darkThemes.includes(theme),
     isModern: theme === 'modern',
     isModernDark: theme === 'modern-dark',
     isMono: theme === 'mono',
