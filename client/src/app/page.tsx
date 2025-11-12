@@ -10,7 +10,8 @@ import {
   Menu, 
   X,
   ScrollText,
-  ListTodo
+  ListTodo,
+  Github
 } from 'lucide-react'
 
 // Import page components
@@ -18,16 +19,16 @@ import AddonsPage from '@/components/pages/AddonsPage'
 import UsersPage from '@/components/pages/UsersPage'
 import GroupsPage from '@/components/pages/GroupsPage'
 import SettingsPage from '@/components/pages/SettingsPage'
-import ChangelogPage, { LATEST_VERSION } from '@/components/pages/ChangelogPage'
+import ChangelogPage from '@/components/pages/ChangelogPage'
 import TasksPage from '@/components/pages/TasksPage'
 import AccountMenuButton from '@/components/auth/AccountMenuButton'
+import { useGithubReleases } from '@/hooks/useGithubReleases'
 
 const navigation = [
   { name: 'Users', icon: User, id: 'users' },
   { name: 'Groups', icon: Users, id: 'groups' },
   { name: 'Addons', icon: Puzzle, id: 'addons' },
   { name: 'Tasks', icon: ListTodo, id: 'tasks' },
-  { name: "What's New", icon: ScrollText, id: 'changelog' },
   { name: 'Settings', icon: Settings, id: 'settings' },
 ]
 
@@ -36,7 +37,9 @@ export default function HomePage() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const appVersion = (process.env.NEXT_PUBLIC_APP_VERSION as string) || 'dev'
-  const isUpToDate = appVersion === LATEST_VERSION || appVersion === 'dev'
+  const { data: githubReleases } = useGithubReleases()
+  const latestReleaseVersion = githubReleases?.[0]?.version
+  const isUpToDate = appVersion === 'dev' || !latestReleaseVersion || appVersion === latestReleaseVersion
   const { theme, isDark } = useTheme()
   const logoSrc = isDark ? '/logo-white.png' : '/logo-black.png'
 
@@ -121,16 +124,28 @@ export default function HomePage() {
           </nav>
         {/* Version badge */}
         <div className="px-3 pb-0 mt-auto">
-          <button
-            onClick={() => activateTab('changelog', true)}
-            className={`text-xs font-medium w-full py-2 hover:opacity-80 transition-opacity flex items-center justify-center gap-1.5 theme-text-3`}
-            title={isUpToDate ? 'Up to date' : 'Update available'}
-          >
+          <div className="flex items-center justify-center gap-2 py-2">
             {appVersion !== 'dev' && (
-              <div className="w-2 h-2 rounded-full" style={{ backgroundColor: isUpToDate ? 'var(--color-positive)' : 'var(--color-negative)' }} />
+              <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: isUpToDate ? 'var(--color-positive)' : 'var(--color-negative)' }} />
             )}
-            v{appVersion}
-          </button>
+            <span className="text-xs font-medium theme-text-3">v{appVersion}</span>
+            <button
+              onClick={() => activateTab('changelog', true)}
+              className="p-1.5 hover:opacity-80 transition-opacity theme-text-3"
+              title="What's New"
+            >
+              <ScrollText className="w-4 h-4" />
+            </button>
+            <a
+              href="https://github.com/iamneur0/syncio"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="p-1.5 hover:opacity-80 transition-opacity theme-text-3"
+              title="GitHub Repository"
+            >
+              <Github className="w-4 h-4" />
+            </a>
+          </div>
         </div>
         </div>
       </div>
@@ -181,29 +196,53 @@ export default function HomePage() {
         </nav>
         {/* Version badge */}
         <div className={`${sidebarCollapsed ? 'px-1' : 'px-3'} pb-0 flex-shrink-0 mt-auto`}>
-          <button
-            onClick={() => activateTab('changelog')}
-            className={`text-xs font-medium w-full ${sidebarCollapsed ? 'py-1' : 'py-2'} hover:opacity-80 transition-opacity flex items-center justify-center ${
-              sidebarCollapsed ? 'flex-col gap-1' : 'gap-1.5'
-            } theme-text-3`}
-            title={isUpToDate ? 'Up to date' : 'Update available'}
-          >
-            {sidebarCollapsed ? (
-              <>
-                {appVersion !== 'dev' && (
-                  <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: isUpToDate ? 'var(--color-positive)' : 'var(--color-negative)' }} />
-                )}
-                <span className="leading-tight break-all text-center">v{appVersion}</span>
-              </>
-            ) : (
-              <>
-                {appVersion !== 'dev' && (
-                  <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: isUpToDate ? 'var(--color-positive)' : 'var(--color-negative)' }} />
-                )}
-                <span>v{appVersion}</span>
-              </>
-            )}
-          </button>
+          {sidebarCollapsed ? (
+            <div className="flex flex-col items-center gap-1 py-1">
+              {appVersion !== 'dev' && (
+                <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: isUpToDate ? 'var(--color-positive)' : 'var(--color-negative)' }} />
+              )}
+              <span className="text-xs font-medium leading-tight break-all text-center theme-text-3">v{appVersion}</span>
+              <button
+                onClick={() => activateTab('changelog')}
+                className="p-1.5 hover:opacity-80 transition-opacity theme-text-3"
+                title="What's New"
+              >
+                <ScrollText className="w-4 h-4" />
+              </button>
+              <a
+                href="https://github.com/iamneur0/syncio"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="p-1.5 hover:opacity-80 transition-opacity theme-text-3"
+                title="GitHub Repository"
+              >
+                <Github className="w-4 h-4" />
+              </a>
+            </div>
+          ) : (
+            <div className="flex items-center justify-center gap-2 py-2">
+              {appVersion !== 'dev' && (
+                <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: isUpToDate ? 'var(--color-positive)' : 'var(--color-negative)' }} />
+              )}
+              <span className="text-xs font-medium theme-text-3">v{appVersion}</span>
+              <button
+                onClick={() => activateTab('changelog')}
+                className="p-1.5 hover:opacity-80 transition-opacity theme-text-3"
+                title="What's New"
+              >
+                <ScrollText className="w-4 h-4" />
+              </button>
+              <a
+                href="https://github.com/iamneur0/syncio"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="p-1.5 hover:opacity-80 transition-opacity theme-text-3"
+                title="GitHub Repository"
+              >
+                <Github className="w-4 h-4" />
+              </a>
+            </div>
+          )}
         </div>
       </div>
 

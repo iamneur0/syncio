@@ -1,9 +1,9 @@
 // backup kept in AddonDetailModal_backup.tsx if needed in the future
 'use client'
 
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
-import { Puzzle, X, BookOpen, Clapperboard, Tv, Library, Zap, Clipboard, ClipboardList, Users, Copy } from 'lucide-react'
+import { Puzzle, X, BookOpen, Clapperboard, Tv, Library, Zap, Clipboard, ClipboardList, Users, Copy, Loader2 } from 'lucide-react'
 import { useTheme } from '@/contexts/ThemeContext'
 import { getEntityColorStyles } from '@/utils/colorMapping'
 import { VersionChip } from '@/components/ui'
@@ -12,6 +12,24 @@ import { EntityList, InlineEdit, ResourceItem, CatalogItem } from '@/components/
 import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query'
 import { addonsAPI, groupsAPI } from '@/services/api'
 import toast from 'react-hot-toast'
+
+const normalizeManifestUrl = (raw?: string | null): string => {
+  if (!raw) return ''
+  let sanitized = String(raw).trim()
+  if (!sanitized) return ''
+  sanitized = sanitized.replace(/^@+/, '')
+  if (/^stremio:\/\//i.test(sanitized)) {
+    sanitized = sanitized.replace(/^stremio:\/\//i, 'https://')
+  }
+  return sanitized
+}
+
+const urlsMatch = (a?: string | null, b?: string | null): boolean => {
+  const left = normalizeManifestUrl(a)
+  const right = normalizeManifestUrl(b)
+  if (!left || !right) return false
+  return left.toLowerCase() === right.toLowerCase()
+}
 
 interface AddonDetailModalProps {
   isOpen: boolean
@@ -51,6 +69,14 @@ export default function AddonDetailModal({
     setMounted(true)
   }, [])
 
+  useEffect(() => {
+    if (!isOpen) {
+      setPreviewAddon(null)
+      setIsPreviewLoading(false)
+      setPreviewError(null)
+    }
+  }, [isOpen])
+
   const queryClient = useQueryClient()
 
   // Fetch addon data using query to ensure it stays updated
@@ -78,178 +104,245 @@ export default function AddonDetailModal({
     }
   })
 
-  // Handle addon name update
-  const handleAddonNameUpdate = async (newName: string) => {
-    if (currentAddon) {
-      await updateAddonMutation.mutateAsync({
-        addonId: currentAddon.id,
-        addonData: { name: newName }
-      })
-    }
-  }
+  const handleAddonNameDraftSave = useCallback(async (newName: string) => {
+    setEditName(newName.trim())
+  }, [])
   
   // Form state
   const [editName, setEditName] = useState('')
+  const [editDescription, setEditDescription] = useState('')
   const [editGroupIds, setEditGroupIds] = useState<string[]>([])
   const [editResources, setEditResources] = useState<any[]>([])
   const [editCatalogs, setEditCatalogs] = useState<any[]>([])
   const [catalogSearchState, setCatalogSearchState] = useState<Map<string, boolean>>(new Map())
   const [urlCopied, setUrlCopied] = useState(false)
+  const [editUrl, setEditUrl] = useState('')
+  const [isUrlRevealed, setIsUrlRevealed] = useState(false)
   const [showManifestModal, setShowManifestModal] = useState(false)
   const [showOriginalManifestModal, setShowOriginalManifestModal] = useState(false)
   const [manifestJson, setManifestJson] = useState('')
   const [originalManifestJson, setOriginalManifestJson] = useState('')
+const [previewAddon, setPreviewAddon] = useState<any | null>(null)
+const [isPreviewLoading, setIsPreviewLoading] = useState(false)
+const [previewError, setPreviewError] = useState<string | null>(null)
 
   // Debug mode check
   const isDebugMode = process.env.NEXT_PUBLIC_DEBUG === 'true' || process.env.NEXT_PUBLIC_DEBUG === '1'
   
   
-  // Initialize form data when addon changes
-  useEffect(() => {
-    if (currentAddon) {
-      setEditName(currentAddon.name || '')
-      // Initialize associated groups by ids (supports both groupIds and groups arrays)
-      try {
-        const initialGroupIds = Array.isArray(currentAddon.groupIds) && currentAddon.groupIds.length > 0
-          ? currentAddon.groupIds
-          : (Array.isArray(currentAddon.groups) ? currentAddon.groups.map((g: any) => g.id).filter(Boolean) : [])
-        setEditGroupIds(initialGroupIds)
-      } catch {
-        setEditGroupIds([])
-      }
-      // Initialize resources selection from addon like the old page did
-      try {
-        const stored = Array.isArray(currentAddon.resources) ? currentAddon.resources : null
-        const detailManifest: any = currentAddon.originalManifest || currentAddon.manifest
-        const manifestResources = Array.isArray(detailManifest?.resources) ? detailManifest.resources : []
-        
-        // Check if there are any search catalogs
-        const catalogAddons = detailManifest?.catalogs || []
-        const hasSearchCatalogs = catalogAddons.some((catalog: any) => 
-          catalog.extra?.some((extra: any) => extra.name === 'search')
-        )
-        
-        // Add "search" resource if there are search catalogs
-        const fallback = [...manifestResources]
-        if (hasSearchCatalogs && !fallback.includes('search')) {
-          fallback.push('search')
-        }
-        
-        // Use stored resources if explicitly set (including empty array), otherwise use manifest resources
-        setEditResources(stored !== null ? stored : fallback)
-      } catch (e) { 
-        setEditResources([]) 
+  const hydrateAddonFromSource = useCallback((sourceAddon: any | null) => {
+    if (!sourceAddon) {
+      setEditName('')
+      setEditDescription('')
+      setEditUrl('')
+      setEditGroupIds([])
+      setEditResources([])
+      setEditCatalogs([])
+      setCatalogSearchState(new Map())
+      return
+    }
+
+    setEditName(sourceAddon.name || '')
+    // Get description from addon, or from manifest if available
+    const manifest = sourceAddon?.manifest || sourceAddon?.originalManifest
+    const description = sourceAddon.description || manifest?.description || ''
+    setEditDescription(description)
+    setEditUrl((prev) => {
+      const next = sourceAddon.url || ''
+      return prev === next ? prev : next
+    })
+
+    try {
+      const initialGroupIds = Array.isArray(sourceAddon.groupIds) && sourceAddon.groupIds.length > 0
+        ? sourceAddon.groupIds
+        : (Array.isArray(sourceAddon.groups) ? sourceAddon.groups.map((g: any) => g.id).filter(Boolean) : [])
+      setEditGroupIds(initialGroupIds)
+    } catch {
+      setEditGroupIds([])
+    }
+
+    try {
+      const stored = Array.isArray(sourceAddon.resources) ? sourceAddon.resources : null
+      const detailManifest: any = sourceAddon.originalManifest || sourceAddon.manifest
+      const manifestResources = Array.isArray(detailManifest?.resources) ? detailManifest.resources : []
+
+      const catalogAddons = detailManifest?.catalogs || []
+      const hasSearchCatalogs = catalogAddons.some((catalog: any) =>
+        catalog.extra?.some((extra: any) => extra.name === 'search')
+      )
+
+      const fallback = [...manifestResources]
+      if (hasSearchCatalogs && !fallback.includes('search')) {
+        fallback.push('search')
       }
 
-      // Initialize catalogs selection from addon
-      try {
-        let stored = null
-        if (Array.isArray(currentAddon.catalogs)) {
-          // If addon.catalogs is already parsed objects, use them
-          if (currentAddon.catalogs.length > 0 && typeof currentAddon.catalogs[0] === 'object') {
-            stored = currentAddon.catalogs
-          } else {
-            // If it's a JSON string, parse it
-            try {
-              stored = JSON.parse(currentAddon.catalogs)
-            } catch (e) {
-              stored = currentAddon.catalogs
-            }
+      setEditResources(stored !== null ? stored : fallback)
+    } catch {
+      setEditResources([])
+    }
+
+    try {
+      let stored = null
+      if (Array.isArray(sourceAddon.catalogs)) {
+        if (sourceAddon.catalogs.length > 0 && typeof sourceAddon.catalogs[0] === 'object') {
+          stored = sourceAddon.catalogs
+        } else {
+          try {
+            stored = JSON.parse(sourceAddon.catalogs)
+          } catch {
+            stored = sourceAddon.catalogs
           }
         }
-        
-        const detailManifest: any = currentAddon.originalManifest || currentAddon.manifest
-        const fallback = Array.isArray(detailManifest?.catalogs) ? detailManifest.catalogs : []
-        // Use stored catalogs if explicitly set (including empty array), otherwise use manifest catalogs
-        // For new addons, always use manifest catalogs as default
-        if (stored !== null && stored.length > 0) {
-          // If we have stored catalogs, we need to merge them with manifest data to get the full structure
-          const manifestCatalogs = Array.isArray(detailManifest?.catalogs) ? detailManifest.catalogs : []
-          
-          // Create a map of stored catalogs to check for search functionality
-          const storedCatalogMap = new Map()
-          stored.forEach((storedCatalog: any) => {
-            const key = `${storedCatalog.id}:${storedCatalog.type}`
-            storedCatalogMap.set(key, storedCatalog)
-          })
-          
-          const mergedCatalogs = manifestCatalogs.map((manifestCatalog: any) => {
+      }
+
+      const detailManifest: any = sourceAddon.originalManifest || sourceAddon.manifest
+      const fallback = Array.isArray(detailManifest?.catalogs) ? detailManifest.catalogs : []
+
+      if (stored !== null && stored.length > 0) {
+        const manifestCatalogs = Array.isArray(detailManifest?.catalogs) ? detailManifest.catalogs : []
+
+        const storedCatalogMap = new Map()
+        stored.forEach((storedCatalog: any) => {
+          const key = `${storedCatalog.id}:${storedCatalog.type}`
+          storedCatalogMap.set(key, storedCatalog)
+        })
+
+        const mergedCatalogs = manifestCatalogs
+          .map((manifestCatalog: any) => {
             const key = `${manifestCatalog.id}:${manifestCatalog.type}`
             const storedCatalog = storedCatalogMap.get(key)
-            
+
             if (storedCatalog) {
-              // Check if this catalog has embedded search functionality in the manifest
               const hasSearch = manifestCatalog.extra?.some((extra: any) => extra.name === 'search')
               const hasOtherExtras = manifestCatalog.extra?.some((extra: any) => extra.name !== 'search')
               const isEmbeddedSearch = hasSearch && hasOtherExtras
               const isStandaloneSearch = hasSearch && !hasOtherExtras
-              
+
               if (isEmbeddedSearch) {
-                // For embedded search catalogs, use the database state to determine search functionality
                 const storedHasSearch = storedCatalog.search === true
-                
-                console.log(`🔍 Initializing ${manifestCatalog.id}:${manifestCatalog.type} - storedHasSearch:`, storedHasSearch)
-                console.log(`🔍 Stored catalog:`, storedCatalog)
-                
                 if (storedHasSearch) {
-                  // Keep the search functionality from manifest
-                  console.log(`🔍 Keeping search for ${manifestCatalog.id}:${manifestCatalog.type}`)
                   return manifestCatalog
-                } else {
-                  // Remove the search functionality based on database state
-                  console.log(`🔍 Removing search for ${manifestCatalog.id}:${manifestCatalog.type}`)
-                  return {
-                    ...manifestCatalog,
-                    extra: manifestCatalog.extra?.filter((extra: any) => extra.name !== 'search') || [],
-                    extraSupported: manifestCatalog.extraSupported?.filter((extra: any) => extra !== 'search') || []
-                  }
+                }
+                return {
+                  ...manifestCatalog,
+                  extra: manifestCatalog.extra?.filter((extra: any) => extra.name !== 'search') || [],
+                  extraSupported: manifestCatalog.extraSupported?.filter((extra: any) => extra !== 'search') || []
                 }
               } else if (isStandaloneSearch) {
-                // Standalone search catalog: include only if stored says search=true
-                const storedHasSearch = storedCatalog.search === true
-                if (storedHasSearch) {
-                  return manifestCatalog
-                }
-                // Unselected in DB → omit from merged list
-                return null
-              } else {
-                // Regular catalog, use as-is
-                return manifestCatalog
+                return storedCatalog.search === true ? manifestCatalog : null
               }
-            } else {
-              // Not in stored catalogs - this means it was unselected
-              // Return null to indicate it should be filtered out
-              console.log(`🔍 Catalog ${manifestCatalog.id}:${manifestCatalog.type} was unselected (not in database)`)
-              return null
+
+              return manifestCatalog
             }
-          }).filter(Boolean) // Remove null entries
-          
-          // Initialize search state map
-          const searchStateMap = new Map<string, boolean>()
-          stored.forEach((storedCatalog: any) => {
-            const key = `${storedCatalog.id}:${storedCatalog.type}`
-            searchStateMap.set(key, storedCatalog.search === true)
+
+            return null
           })
-          setCatalogSearchState(searchStateMap)
-          setEditCatalogs(mergedCatalogs)
-        } else {
-          // For new addons (stored is null), initialize search state based on manifest
-          const manifestCatalogs = Array.isArray(detailManifest?.catalogs) ? detailManifest.catalogs : []
-          const searchStateMap = new Map<string, boolean>()
-          // For new addons, default all search states to false (unselected) to reflect DB = none
-          manifestCatalogs.forEach((catalog: any) => {
-            const key = `${catalog.id}:${catalog.type}`
-            searchStateMap.set(key, false)
-          })
-          
-          setCatalogSearchState(searchStateMap)
-          setEditCatalogs(fallback)
-        }
-      } catch (e) { 
-        setEditCatalogs([]) 
+          .filter(Boolean)
+
+        const searchStateMap = new Map<string, boolean>()
+        stored.forEach((storedCatalog: any) => {
+          const key = `${storedCatalog.id}:${storedCatalog.type}`
+          searchStateMap.set(key, storedCatalog.search === true)
+        })
+        setCatalogSearchState(searchStateMap)
+        setEditCatalogs(mergedCatalogs as any[])
+      } else {
+        const manifestCatalogs = Array.isArray(detailManifest?.catalogs) ? detailManifest.catalogs : []
+        const searchStateMap = new Map<string, boolean>()
+        manifestCatalogs.forEach((catalog: any) => {
+          const key = `${catalog.id}:${catalog.type}`
+          searchStateMap.set(key, false)
+        })
+
+        setCatalogSearchState(searchStateMap)
+        setEditCatalogs(fallback)
       }
+    } catch {
+      setEditCatalogs([])
     }
-  }, [currentAddon])
+  }, [])
+
+  useEffect(() => {
+    hydrateAddonFromSource(previewAddon || currentAddon || null)
+  }, [currentAddon, previewAddon, hydrateAddonFromSource])
+
+  useEffect(() => {
+    if (!isOpen || !currentAddon) return
+
+    const trimmed = editUrl.trim()
+
+    if (!trimmed || urlsMatch(trimmed, currentAddon.url)) {
+      if (previewAddon) {
+        setPreviewAddon(null)
+      }
+      setPreviewError(null)
+      setIsPreviewLoading(false)
+      return
+    }
+
+    const normalizedInput = normalizeManifestUrl(trimmed)
+
+    if (!/^https?:\/\//i.test(normalizedInput)) {
+      setPreviewAddon(null)
+      setIsPreviewLoading(false)
+      setPreviewError(trimmed ? 'Enter a valid http(s) URL' : null)
+      return
+    }
+
+    if (previewAddon && urlsMatch(previewAddon.url, normalizedInput)) {
+      setPreviewError(null)
+      return
+    }
+
+    let cancelled = false
+    const controller = new AbortController()
+    setIsPreviewLoading(true)
+    setPreviewError(null)
+
+    const timeoutId = window.setTimeout(async () => {
+      try {
+        const response = await fetch(normalizedInput, { signal: controller.signal, mode: 'cors' })
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`)
+        }
+        const manifestData = await response.json()
+        if (cancelled) return
+
+        setPreviewAddon({
+          ...currentAddon,
+          url: normalizedInput,
+          version: manifestData?.version || manifestData?.addonVersion || currentAddon.version || null,
+          description: manifestData?.description ?? manifestData?.desc ?? currentAddon?.description ?? '',
+          iconUrl: manifestData?.logo || currentAddon?.iconUrl || null,
+          manifest: manifestData,
+          originalManifest: manifestData,
+          resources: Array.isArray(manifestData?.resources) ? manifestData.resources : [],
+          catalogs: Array.isArray(manifestData?.catalogs) ? manifestData.catalogs : [],
+        })
+        setPreviewError(null)
+      } catch (err: any) {
+        if (cancelled) return
+        if (err?.name === 'AbortError') return
+        console.error('Failed to load manifest preview:', err)
+        setPreviewAddon(null)
+        setPreviewError('Failed to load manifest from this URL')
+      } finally {
+        if (!cancelled) {
+          setIsPreviewLoading(false)
+        }
+      }
+    }, 500)
+
+    return () => {
+      cancelled = true
+      controller.abort()
+      window.clearTimeout(timeoutId)
+    }
+  }, [editUrl, currentAddon, isOpen, previewAddon])
+
+  useEffect(() => {
+    setIsUrlRevealed(!hideSensitive)
+  }, [hideSensitive])
 
 
 
@@ -259,8 +352,22 @@ export default function AddonDetailModal({
     
     const updateData: any = {}
     
-    if (editName.trim()) {
-      updateData.name = editName.trim()
+    const trimmedName = editName.trim()
+    if (trimmedName && trimmedName !== (currentAddon?.name || '').trim()) {
+      updateData.name = trimmedName
+    }
+
+    const trimmedDescription = editDescription.trim()
+    if (trimmedDescription !== (currentAddon?.description || '').trim()) {
+      updateData.description = trimmedDescription
+    }
+
+    const trimmedUrl = editUrl.trim()
+    if (trimmedUrl) {
+      const normalizedUrl = normalizeManifestUrl(trimmedUrl)
+      if (normalizedUrl && !urlsMatch(normalizedUrl, currentAddon?.url)) {
+        updateData.url = normalizedUrl
+      }
     }
     
     // Groups are managed via groups API to unify behavior with GroupDetailModal
@@ -444,7 +551,7 @@ export default function AddonDetailModal({
 
   const handleResetResources = () => {
     // Reset both resources and catalogs (same as master reset)
-    const detailManifest: any = currentAddon?.originalManifest || currentAddon?.manifest
+    const detailManifest: any = addonManifest
     const manifestResources = Array.isArray(detailManifest?.resources) ? detailManifest.resources : []
     const manifestCatalogs = Array.isArray(detailManifest?.catalogs) ? detailManifest.catalogs : []
     
@@ -485,7 +592,7 @@ export default function AddonDetailModal({
 
   const handleResetCatalogs = () => {
     // Reset both resources and catalogs (same as master reset)
-    const detailManifest: any = currentAddon?.originalManifest || currentAddon?.manifest
+    const detailManifest: any = addonManifest
     const manifestResources = Array.isArray(detailManifest?.resources) ? detailManifest.resources : []
     const manifestCatalogs = Array.isArray(detailManifest?.catalogs) ? detailManifest.catalogs : []
     
@@ -530,9 +637,28 @@ export default function AddonDetailModal({
     handleResetCatalogs()
   }
 
-  const addonManifest = currentAddon?.originalManifest || currentAddon?.manifest || {}
+  const effectiveAddon = previewAddon || currentAddon
+  const originalManifest = React.useMemo(() => {
+    if (previewAddon?.originalManifest && typeof previewAddon.originalManifest === 'object') {
+      return previewAddon.originalManifest
+    }
+    if (currentAddon?.originalManifest && typeof currentAddon.originalManifest === 'object') {
+      return currentAddon.originalManifest
+    }
+    return null
+  }, [previewAddon, currentAddon])
+  const filteredManifest = React.useMemo(() => {
+    if (previewAddon?.manifest && typeof previewAddon.manifest === 'object') {
+      return previewAddon.manifest
+    }
+    if (currentAddon?.manifest && typeof currentAddon.manifest === 'object') {
+      return currentAddon.manifest
+    }
+    return null
+  }, [previewAddon, currentAddon])
+  const addonManifest = originalManifest || filteredManifest || {}
   const addonLogoUrl =
-    currentAddon?.iconUrl ||
+    effectiveAddon?.iconUrl ||
     addonManifest?.logo ||
     addonManifest?.icon ||
     addonManifest?.images?.logo
@@ -560,10 +686,10 @@ export default function AddonDetailModal({
       >
         <div className="p-6">
           {/* Header */}
-          <div className="flex flex-wrap items-start justify-between mb-6 gap-4">
-            <div className="flex items-start gap-4 relative">
+          <div className="flex flex-wrap items-center justify-between mb-6 gap-4">
+            <div className="flex items-center gap-4 relative">
               <AddonIcon
-                name={currentAddon?.name || addonManifest?.name || 'Addon'}
+                name={editName || effectiveAddon?.name || addonManifest?.name || 'Addon'}
                 iconUrl={addonLogoUrl}
                 size="12"
                 className="flex-shrink-0"
@@ -571,13 +697,13 @@ export default function AddonDetailModal({
               />
               <div className="flex items-center gap-3">
                 <InlineEdit
-                  value={currentAddon?.name || ''}
-                  onSave={handleAddonNameUpdate}
+                  value={editName}
+                  onSave={handleAddonNameDraftSave}
                   placeholder="Enter addon name..."
                   maxLength={100}
                 />
-                {currentAddon?.version && (
-                  <VersionChip version={currentAddon.version} />
+                {effectiveAddon?.version && (
+                  <VersionChip version={effectiveAddon.version} />
                 )}
               </div>
             </div>
@@ -606,49 +732,81 @@ export default function AddonDetailModal({
               </button>
             </div>
             
-          <div className="mb-4">
-            <h4 className={`text-sm font-semibold mb-2`}>
-              URL
-            </h4>
-            <div className="relative">
-              <button
-                type="button"
-                onClick={async () => {
-                  if (currentAddon?.url) {
+            <div className="mb-4">
+              <h4 className={`text-sm font-semibold mb-2`}>
+                URL
+              </h4>
+              <div className="flex items-center gap-2">
+                <input
+                  type={hideSensitive && !isUrlRevealed ? 'password' : 'text'}
+                  value={
+                    hideSensitive && !isUrlRevealed
+                      ? (editUrl ? '\u2022'.repeat(30) : '')
+                      : editUrl
+                  }
+                  onChange={(e) => {
+                    if (!(hideSensitive && !isUrlRevealed)) {
+                      setEditUrl(e.target.value)
+                    }
+                  }}
+                  onClick={() => {
+                    if (hideSensitive && !isUrlRevealed) {
+                      setIsUrlRevealed(true)
+                    }
+                  }}
+                  onBlur={() => {
+                    if (hideSensitive) {
+                      setIsUrlRevealed(false)
+                    }
+                  }}
+                  placeholder="https://example.com/configure"
+                  className={`input w-full px-3 py-2 ${hideSensitive && !isUrlRevealed ? 'blur-sm' : ''}`}
+                  autoComplete="off"
+                />
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const urlToCopy = editUrl.trim()
+                    if (!urlToCopy) return
                     try {
-                      await navigator.clipboard.writeText(addon.url)
+                      await navigator.clipboard.writeText(urlToCopy)
                       setUrlCopied(true)
-                      setTimeout(() => setUrlCopied(false), 1000)
+                      setTimeout(() => setUrlCopied(false), 1200)
+                      toast.success('URL copied to clipboard')
                     } catch (err) {
                       console.error('Failed to copy URL:', err)
+                      toast.error('Failed to copy URL')
                     }
-                  }
-                }}
-                className={`w-full px-3 py-2 pr-10 rounded-lg text-left transition-all duration-200 hover:opacity-80 input`}
-                style={urlCopied ? { boxShadow: '0 0 0 2px var(--toggle-track-on)' } : undefined}
-                title={hideSensitive ? '***'.repeat(50) : (currentAddon?.url || 'No URL available')}
-              >
-                <span className={`block truncate ${hideSensitive ? 'blur-sm select-none' : ''}`}>
-                  {hideSensitive ? '***'.repeat(50) : (currentAddon?.url || 'No URL available')}
-                </span>
-              </button>
-              <div className="absolute right-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-center">
-                {urlCopied ? (
-                  <ClipboardList className={`w-4 h-4 color-text-secondary`} />
-                ) : (
-                  <Clipboard className={`w-4 h-4 color-text-secondary`} />
-                )}
+                  }}
+                  className="w-10 h-10 rounded flex items-center justify-center color-hover"
+                  title="Copy URL"
+                >
+                  {isPreviewLoading ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : urlCopied ? (
+                    <ClipboardList className="w-4 h-4" />
+                  ) : (
+                    <Clipboard className="w-4 h-4" />
+                  )}
+                </button>
               </div>
+              {previewError && (
+                <p className="text-xs mt-1 color-negative">
+                  {previewError}
+                </p>
+              )}
             </div>
-          </div>
 
             <div>
               <h4 className={`text-sm font-semibold mb-2`}>
               Description
               </h4>
-            <div className={`w-full px-3 py-2 rounded-lg input`}>
-              {currentAddon?.description || 'No description available'}
-              </div>
+              <textarea
+                value={editDescription}
+                onChange={(e) => setEditDescription(e.target.value)}
+                placeholder="No description available"
+                className={`w-full px-3 py-2 rounded-lg input min-h-[80px] resize-y`}
+              />
             </div>
           </div>
 
@@ -662,13 +820,9 @@ export default function AddonDetailModal({
                 <button
                   type="button"
                   onClick={() => {
-                    if (currentAddon?.manifest) {
+                    if (filteredManifest) {
                       try {
-                        // manifest is already decrypted by the backend
-                        const manifest = typeof currentAddon.manifest === 'string' 
-                          ? JSON.parse(currentAddon.manifest) 
-                          : currentAddon.manifest
-                        setManifestJson(JSON.stringify(manifest, null, 2))
+                        setManifestJson(JSON.stringify(filteredManifest, null, 2))
                         setShowManifestModal(true)
                       } catch (err) {
                         console.error('Failed to parse manifest:', err)
@@ -682,12 +836,8 @@ export default function AddonDetailModal({
                 <button
                   type="button"
                   onClick={() => {
-                    if (currentAddon?.originalManifest) {
+                    if (originalManifest) {
                       try {
-                        // originalManifest is already decrypted by the backend
-                        const originalManifest = typeof currentAddon.originalManifest === 'string' 
-                          ? JSON.parse(currentAddon.originalManifest) 
-                          : currentAddon.originalManifest
                         setOriginalManifestJson(JSON.stringify(originalManifest, null, 2))
                         setShowOriginalManifestModal(true)
                       } catch (err) {
@@ -734,17 +884,17 @@ export default function AddonDetailModal({
                       {(() => {
                         const colorStyles = getEntityColorStyles(theme, group?.colorIndex || 0)
                         return (
-                          <div 
+                      <div 
                             className="w-8 h-8 rounded-full flex items-center justify-center mr-3 flex-shrink-0"
                             style={{
                               background: colorStyles.background,
                               color: colorStyles.textColor,
                             }}
-                          >
+                      >
                             <span className="text-sm font-semibold" style={{ color: colorStyles.textColor }}>
-                              {group.name ? group.name.charAt(0).toUpperCase() : 'G'}
-                            </span>
-                          </div>
+                          {group.name ? group.name.charAt(0).toUpperCase() : 'G'}
+                        </span>
+                      </div>
                         )
                       })()}
                       <div className="min-w-0 flex-1">
@@ -764,7 +914,7 @@ export default function AddonDetailModal({
           {/* Resources Section */}
           {(() => {
             // Always get all resources from originalManifest (show all available options)
-            const detailManifest: any = currentAddon?.originalManifest || currentAddon?.manifest
+            const detailManifest: any = addonManifest
             const manifestResources: any[] = Array.isArray(detailManifest?.resources) ? detailManifest.resources : []
             
             // Check if there are any search catalogs
@@ -938,7 +1088,7 @@ export default function AddonDetailModal({
 
           {/* Catalogs Section */}
           {(() => {
-            const detailManifest: any = currentAddon?.originalManifest || currentAddon?.manifest
+            const detailManifest: any = addonManifest
             const catalogAddons = detailManifest?.catalogs || []
             
             // Check if catalog resource is enabled
@@ -1001,7 +1151,7 @@ export default function AddonDetailModal({
 
           {/* Search Catalogs Section */}
           {(() => {
-            const detailManifest: any = currentAddon?.originalManifest || currentAddon?.manifest
+            const detailManifest: any = addonManifest
             const catalogAddons = detailManifest?.catalogs || []
             
             // Check if catalog resource is enabled

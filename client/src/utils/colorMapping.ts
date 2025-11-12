@@ -219,9 +219,9 @@ const buildPalette = (theme?: ThemeName | string | null): ColorConfig[] => {
     const textHex = pickTextColor(midHsl)
 
     return {
-      bgClass: 'color-surface',
-      textClass: 'color-text',
-      borderClass: 'color-border',
+  bgClass: 'color-surface',
+  textClass: 'color-text',
+  borderClass: 'color-border',
       hexValue: accentHex,
       name: `Option ${index + 1}`,
       index,

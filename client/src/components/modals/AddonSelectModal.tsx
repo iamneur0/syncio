@@ -94,25 +94,25 @@ export default function AddonSelectModal({
   const renderAddonItem = (addon: any) => {
     const isSelected = selectedAddonIds.includes(addon.id)
     return (
-      <div 
+    <div 
         className={`p-3 rounded-lg cursor-pointer transition-colors card card-selectable color-hover hover:shadow-lg ${
           isSelected ? 'card-selected' : ''
         }`}
-        onClick={() => handleItemClick(addon.id)}
-      >
-        <div className="flex items-center gap-3">
-          <AddonIcon name={addon.name || 'Addon'} iconUrl={addon.iconUrl} size="10" className="flex-shrink-0" />
-          <div className="flex-1 min-w-0">
-            <h4 className={`font-medium truncate`}>
-              {addon.name || 'Unknown Addon'}
-            </h4>
-            <p className={`text-sm truncate color-text-secondary`}>
-              {addon.description || 'No description'}
-            </p>
-          </div>
+      onClick={() => handleItemClick(addon.id)}
+    >
+      <div className="flex items-center gap-3">
+        <AddonIcon name={addon.name || 'Addon'} iconUrl={addon.iconUrl} size="10" className="flex-shrink-0" />
+        <div className="flex-1 min-w-0">
+          <h4 className={`font-medium truncate`}>
+            {addon.name || 'Unknown Addon'}
+          </h4>
+          <p className={`text-sm truncate color-text-secondary`}>
+            {addon.description || 'No description'}
+          </p>
         </div>
       </div>
-    )
+    </div>
+  )
   }
 
   return createPortal(

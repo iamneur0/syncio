@@ -396,9 +396,9 @@ export default function EntityCard({
         // List mode layout
         <div className="w-full flex flex-row items-center justify-between gap-3">
           <div className="flex items-center gap-4 min-w-0 flex-1">
-          <div className="flex-shrink-0">
+            <div className="flex-shrink-0">
             {renderAvatar()}
-          </div>
+            </div>
             
             <div className="flex-1 min-w-0 overflow-hidden">
               <div className="flex items-center gap-2 mb-1 flex-wrap">
@@ -410,7 +410,7 @@ export default function EntityCard({
                       className="truncate text-left color-hover cursor-pointer hover:underline underline-offset-2 focus:outline-none bg-transparent border-0 p-0"
                       title="Open configure page"
                     >
-                      {displayName}
+                  {displayName}
                     </button>
                   ) : (
                     <span className="truncate color-hover">{displayName}</span>
@@ -656,7 +656,7 @@ export default function EntityCard({
                   className="truncate text-left color-hover cursor-pointer hover:underline underline-offset-2 focus:outline-none bg-transparent border-0 p-0"
                   title={displayName}
                 >
-                  {displayName}
+              {displayName}
                 </button>
               ) : (
                 <span className="truncate">{displayName}</span>

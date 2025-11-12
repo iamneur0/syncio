@@ -119,7 +119,7 @@ export default function EntityList({
   }
 
   return (
-    <div
+    <div 
       className={`p-4 rounded-lg mb-6 section-panel ${onClearSelection ? 'cursor-pointer' : ''}`}
       onClick={handleContainerClick}
     >
