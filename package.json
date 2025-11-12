@@ -1,6 +1,6 @@
 {
   "name": "syncio",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Syncio - Stremio addon and user management system",
   "main": "server/index.js",
   "scripts": {
