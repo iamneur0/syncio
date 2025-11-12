@@ -1,5 +1,46 @@
 # Changelog
 
+## [0.2.0](https://github.com/iamneur0/syncio/compare/v0.1.5...v0.2.0) (2025-11-12)
+
+
+### Features
+
+* addon names in stremio account replicate the name in Syncio ([d8e4b0d](https://github.com/iamneur0/syncio/commit/d8e4b0d50f63daa09ef0ee51c23daea72ae919f0))
+* autoSync now available from tasks ([9fb0264](https://github.com/iamneur0/syncio/commit/9fb0264353b68f3b05d551b4df44aaeee80649dc))
+* Changelog page ([fd9a212](https://github.com/iamneur0/syncio/commit/fd9a2123eceb7b522db2b59721cae88e47f11a15))
+* confirm dialog on empty group sync + several fixes ([5a00534](https://github.com/iamneur0/syncio/commit/5a00534cfe63cd968ef07bd530814fee3b0f5e21))
+* discord notification on sync through API ([da8a0d7](https://github.com/iamneur0/syncio/commit/da8a0d74ddc40c155a5410fea6d8ae45e669de53))
+* improved login/register page with confirm dialog for uuid save and compatibility with password managers ([1ebf1b6](https://github.com/iamneur0/syncio/commit/1ebf1b6c27643ebb5ef4b9ae7e1943f15f615a10))
+* including catalog/resource diff on reload ([595361a](https://github.com/iamneur0/syncio/commit/595361a858652bd221fad635697f20fd8cb18a5a))
+* move automatic backups + page wiring ([3d19497](https://github.com/iamneur0/syncio/commit/3d19497d13302b03b659b3f6d6bf6972b3c07998))
+* new task page to run tasks either manually or automatically ([c36beb6](https://github.com/iamneur0/syncio/commit/c36beb632adf3da96b4f2f250d8b87c4e7dcc1db))
+* private-mode single account, stats & webhook helpers ([a5d7e8f](https://github.com/iamneur0/syncio/commit/a5d7e8f15e7a94dbb7c162256bf6681f26537470))
+* reworked theme selector with more flexibility and easier implementation for future themes ([6944398](https://github.com/iamneur0/syncio/commit/694439841f642669d775b4c9234a01cd62015382))
+* scheduled sync format now common with addon triggered sync ([c362b0a](https://github.com/iamneur0/syncio/commit/c362b0a4e4c6e8c2a44f1a87ea543a5b4319c9da))
+* Syncio API now live with sync endpoints and more ([d5bf57b](https://github.com/iamneur0/syncio/commit/d5bf57b04d302a073cedaf5a37bfe7772e07033f))
+* version displayed in sidebar with up-to-date indicator ([b78c2fc](https://github.com/iamneur0/syncio/commit/b78c2fc9f9fda90bc434a02ca83f9ad94b1696ad))
+
+
+### Bug Fixes
+
+* added more info to discord notification ([5d4ba8b](https://github.com/iamneur0/syncio/commit/5d4ba8bcc317347c3cae0361954c53f55ed6aa06))
+* added re-ordering of user addons files ([1961125](https://github.com/iamneur0/syncio/commit/1961125cd67145849a84bfed5ac37321382f42f0))
+* addon re-ordering in user and group ([2c4b027](https://github.com/iamneur0/syncio/commit/2c4b0275a7c8b7f0227d1f75931f675d11bc5e51))
+* auth key login ([85c7888](https://github.com/iamneur0/syncio/commit/85c78883b093b2ec46d23df7ae3701b30ad78cd0))
+* including catalog/resource diff on reload for user user reloadGroupAddons ([542b2b9](https://github.com/iamneur0/syncio/commit/542b2b9a9acac5ddd31c2735043a49138f760ac4))
+* many bug fixes (sync/excluded/protected/import/export) + refactoring of sync of group with user sync ([b0ff3a4](https://github.com/iamneur0/syncio/commit/b0ff3a42bd3571959575fbc90d01e023ac1ba570))
+* merged addon add logic from group and addon ([4687fa3](https://github.com/iamneur0/syncio/commit/4687fa3edc781d5d9e708b72f97f842c3738b965))
+* misc fixes to auth and syncing ([9cf9368](https://github.com/iamneur0/syncio/commit/9cf9368d22245b0e3838ed77146c1ff4141f3490))
+* pass through all the features to adapt to latest changes ([9acda6d](https://github.com/iamneur0/syncio/commit/9acda6d9071afdc557a737e4becb6917d5ccf2b5))
+* updated auto sync embed ([f591eac](https://github.com/iamneur0/syncio/commit/f591eac6f84ffe23cd972f05ddc95f24ebca10e5))
+* various theme/layout improvements ([216528c](https://github.com/iamneur0/syncio/commit/216528c4a39bfd510171ed6f010bb52879dcf3b5))
+
+
+### Miscellaneous Chores
+
+* release 0.2.0 ([5c9bb73](https://github.com/iamneur0/syncio/commit/5c9bb73564e0d08bdc3db31382cb6faeb52c55f0))
+* release 0.2.0 ([026570c](https://github.com/iamneur0/syncio/commit/026570c6f98620b6a2ffc21ac57d32029a737f9f))
+
 ## [0.1.5](https://github.com/iamneur0/syncio/compare/v0.1.4...v0.1.5) (2025-10-26)
 
 
