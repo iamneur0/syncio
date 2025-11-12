@@ -313,19 +313,19 @@ export default function UserAddModal({
                   />
                 )}
               </div>
-              <div className="flex items-center gap-2">
-                <input
-                  id="stremio-register-new"
-                  type="checkbox"
-                  checked={stremioRegisterNew}
-                  onChange={(e) => setStremioRegisterNew(e.target.checked)}
+            <div className="flex items-center gap-2">
+              <input
+                id="stremio-register-new"
+                type="checkbox"
+                checked={stremioRegisterNew}
+                onChange={(e) => setStremioRegisterNew(e.target.checked)}
                   className="control-radio"
                   onClick={(e) => e.stopPropagation()}
-                />
+              />
                 <label htmlFor="stremio-register-new" className={`text-sm cursor-pointer`} onClick={() => setStremioRegisterNew(!stremioRegisterNew)}>
                   Register
-                </label>
-              </div>
+              </label>
+            </div>
             </>
           )}
             </>
@@ -339,8 +339,8 @@ export default function UserAddModal({
                 required
                 className={`w-full px-3 py-2 border rounded-lg focus:outline-none input`}
               />
-            </div>
-          )}
+              </div>
+            )}
             
             <div className="flex gap-3 pt-4">
               <button
