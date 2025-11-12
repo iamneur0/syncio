@@ -6,169 +6,28 @@ import { getEntityColorStyles } from '@/utils/colorMapping'
 import { ScrollText, Tag, ChevronDown, ChevronUp, Sparkles, Bug, Copy, Check } from 'lucide-react'
 import toast from 'react-hot-toast'
 import AccountMenuButton from '@/components/auth/AccountMenuButton'
-
-interface Release {
-  version: string
-  date: string
-  features: string[]
-  bugFixes: string[]
-  miscChores?: string[]
-}
-
-// Export latest version for use in other components
-export const LATEST_VERSION = '0.1.5'
-
-const releases: Release[] = [
-  {
-    version: LATEST_VERSION,
-    date: '2025-10-26',
-    features: [
-      'reset addon/resources/catalogs',
-      'search catalog selection',
-      'search catalogs view, separated from other catalogs'
-    ],
-    bugFixes: [
-      'advanced mode now reloads group addons before sync',
-      'exclude logic now based on stremioAddonId instead of addon id',
-      'handling of exclusions improved and better addon listing',
-      'originalManifest not being fetched properly',
-      'reload addons logic totally reworked, handling all cases',
-      'reload group addons handling future conditioning',
-      'reload not applying new catalogs/resources',
-      'reload now covering detecting new catalogs/resources',
-      'resources now added in addon\'s details on addon import from users',
-      'transportName set to empty because munif angy',
-      'ui + import/export fixes for release',
-      'user and group addon reload'
-    ]
-  },
-  {
-    version: '0.1.4',
-    date: '2025-10-21',
-    features: [],
-    bugFixes: [
-      'add addon in a group with same manifesturl but differnet manifest',
-      'addon clone missing fields',
-      'addon info now reflecting db instead of manifest',
-      'changed order of tabs',
-      'debug unavailable in public for security',
-      'dragging listItems and items name',
-      'regression for exclude logic',
-      'regression on excluded addons',
-      'reload inconsistency with filters, refactored with addonUpdate',
-      'reload now adds new resources/catalogs',
-      'reworked addon group add',
-      'sync badge update on addon add',
-      'unsafe mode now properly handling default addons as normal addons',
-      'user addon import associates existing addons, check now manifest content'
-    ]
-  },
-  {
-    version: '0.1.3',
-    date: '2025-10-19',
-    features: [],
-    bugFixes: [
-      'error preventing build'
-    ]
-  },
-  {
-    version: '0.1.2',
-    date: '2025-10-19',
-    features: [
-      'reconnect user when logins expire'
-    ],
-    bugFixes: []
-  },
-  {
-    version: '0.1.1',
-    date: '2025-10-19',
-    features: [
-      'kiss sync and sync check process',
-      'made cards responsive and now adapting to window size',
-      'manifest view from user page'
-    ],
-    bugFixes: [
-      'desired addons better compute',
-      'group addon add at the bottom instead of the top',
-      'removed debugging logs in prod',
-      'UI and responsiveness'
-    ]
-  },
-  {
-    version: '0.1.0',
-    date: '2025-10-16',
-    features: [
-      'added more account management options, category full deletion',
-      'addon selection and UI buttons reworked',
-      'backend rework',
-      'backend rewrite with sync optimisations',
-      'disable automatic backup feature in public mode',
-      'finished UI + fixed group toggle',
-      'improved UI',
-      'improved UI',
-      'repair feature + diverse QoL',
-      'selection to user and group tabs',
-      'UI fully reworked with better sync process',
-      'UI Refactor'
-    ],
-    bugFixes: [
-      'added Modal unification with createPortal',
-      'user imports, no more empty groups created, better messaging'
-    ]
-  },
-  {
-    version: '0.0.18',
-    date: '2025-10-08',
-    features: [],
-    bugFixes: [
-      'dynamically create schema.prisma based on INSTANCE type'
-    ]
-  },
-  {
-    version: '0.0.17',
-    date: '2025-10-08',
-    features: [],
-    bugFixes: [
-      'resolve Docker build and backend runtime issues'
-    ]
-  },
-  {
-    version: '0.0.16',
-    date: '2025-10-08',
-    features: [
-      'added addon resource selection',
-      'addon manifest fetching reworked to match resource filtering',
-      'display addon ressources',
-      'improved addon import',
-      'improved config import',
-      'improved security for protectedAddons and excludedAddons and sync logic',
-      'reloading now resource filter based',
-      'removed unused resources from exports',
-      'scheduled backups'
-    ],
-    bugFixes: [
-      'account addon conflict impacting sync',
-      'added missing fields on user addon import',
-      'Addon modal UX fixed, edit now needs confirmation',
-      'addonsPage fixes',
-      'aligned UI components across themes',
-      'group addon visual duplication',
-      'now syncing manifest from db instead of live fetching',
-      're-designed addon modal',
-      'removed excluded tag, redundant with icon',
-      'replaced private compose',
-      'udpated db models for ressources',
-      'updated compose files'
-    ]
-  }
-]
+import { useGithubReleases } from '@/hooks/useGithubReleases'
+import type { Release } from '@/hooks/useGithubReleases'
 
 export default function ChangelogPage() {
   const appVersion = (process.env.NEXT_PUBLIC_APP_VERSION as string) || 'dev'
-  const [expandedVersions, setExpandedVersions] = React.useState<Set<string>>(new Set([releases[0].version]))
+  const { data: releasesData = [], isLoading, isError, error, refetch, isFetching } = useGithubReleases()
+  const releases: Release[] = releasesData
+  const [expandedVersions, setExpandedVersions] = React.useState<Set<string>>(new Set())
   const [copied, setCopied] = React.useState(false)
   const { theme } = useTheme()
   const accentStyles = React.useMemo(() => getEntityColorStyles(theme, 1), [theme])
+
+  React.useEffect(() => {
+    if (releases.length > 0) {
+      setExpandedVersions((prev) => {
+        if (prev.size === 0) {
+          return new Set([releases[0].version])
+        }
+        return prev
+      })
+    }
+  }, [releases])
 
   const capitalizeFirst = (text: string): string => {
     if (!text) return text
@@ -203,6 +62,8 @@ export default function ChangelogPage() {
   const mutedTextColor = 'color-text-secondary'
   const borderColor = 'color-border'
   const secondaryBgColor = 'card'
+  const errorMessage = error instanceof Error ? error.message : 'Failed to load releases from GitHub.'
+  const isInitialLoading = isLoading && releases.length === 0
 
   return (
     <div className="p-4 sm:p-6">
@@ -226,6 +87,50 @@ export default function ChangelogPage() {
           </div>
         </div>
 
+        {isInitialLoading && (
+          <div className="space-y-4">
+            {[0, 1, 2].map((idx) => (
+              <div key={idx} className={`${cardBgColor} rounded-lg border ${borderColor} overflow-hidden`}>
+                <div className="px-6 py-4 animate-pulse">
+                  <div className="flex items-center justify-between">
+                    <div className="h-6 w-48 bg-gray-400/20 rounded" />
+                    <div className="h-5 w-5 bg-gray-400/10 rounded-full" />
+                  </div>
+                  <div className="mt-4 space-y-2">
+                    <div className="h-4 w-full bg-gray-400/10 rounded" />
+                    <div className="h-4 w-3/4 bg-gray-400/10 rounded" />
+                    <div className="h-4 w-2/3 bg-gray-400/10 rounded" />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {isError && (
+          <div className={`mb-4 p-4 rounded-lg border ${borderColor} bg-opacity-60`}>
+            <p className={`text-sm ${mutedTextColor}`}>
+              Could not load release notes from GitHub. {errorMessage}
+            </p>
+            <button
+              onClick={() => refetch()}
+              className="mt-3 surface-interactive px-3 py-1.5 rounded text-sm"
+              disabled={isFetching}
+            >
+              {isFetching ? 'Retrying…' : 'Retry'}
+            </button>
+          </div>
+        )}
+
+        {!isInitialLoading && !isError && releases.length === 0 && (
+          <div className={`p-6 rounded-lg border ${borderColor}`}>
+            <p className={`text-sm ${mutedTextColor}`}>
+              No releases found on GitHub. Once releases are published, they will appear here automatically.
+            </p>
+          </div>
+        )}
+
+        {!isInitialLoading && releases.length > 0 && (
         <div className="space-y-4">
           {releases.map((release, index) => {
             const isExpanded = expandedVersions.has(release.version)
@@ -233,8 +138,8 @@ export default function ChangelogPage() {
             const isLatest = index === 0
             return (
               <div
-                key={release.version}
-                className={`${cardBgColor} rounded-lg border ${isCurrentVersion ? 'selection-ring' : borderColor} overflow-hidden transition-all`}
+                key={release.tagName || release.version}
+                className={`${cardBgColor} rounded-lg border ${borderColor} overflow-hidden transition-all card-selectable ${isCurrentVersion ? 'card-selected' : ''}`}
               >
                 <button
                   onClick={() => toggleVersion(release.version)}
@@ -245,7 +150,7 @@ export default function ChangelogPage() {
                   <div className="flex items-baseline gap-3">
                     <div className="flex items-center gap-2">
                       <a
-                        href={`https://github.com/iamneur0/syncio/releases/tag/v${release.version}`}
+                        href={release.htmlUrl}
                         target="_blank"
                         rel="noopener noreferrer"
                         onClick={(e) => e.stopPropagation()}
@@ -253,32 +158,40 @@ export default function ChangelogPage() {
                       >
                         v{release.version}
                       </a>
-                      {isLatest && (
-                        <span
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            copyUpdateCommand()
-                          }}
-                          role="button"
-                          className="inline-flex items-center gap-1.5 rounded px-2 py-0.5 text-xs font-medium hover:opacity-80 transition-opacity min-w-[74px] justify-center cursor-pointer select-none"
-                          style={{
-                            background: accentStyles.accentHex,
-                            color: accentStyles.textColor,
-                          }}
-                        >
-                          {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-                          <span>{copied ? 'Copied!' : 'Latest'}</span>
-                        </span>
-                      )}
-                      {isCurrentVersion && !isLatest && (
-                        <span
-                          className="inline-flex items-center rounded px-2 py-0.5 text-xs font-medium"
-                          style={{
-                            background: accentStyles.accentHex,
-                            color: accentStyles.textColor,
-                          }}
-                        >
-                          Current
+                      <div className="flex items-center gap-2">
+                        {isLatest && (
+                          <span
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              copyUpdateCommand()
+                            }}
+                            role="button"
+                            className="inline-flex items-center gap-1.5 rounded px-2 py-0.5 text-xs font-medium hover:opacity-80 transition-opacity min-w-[74px] justify-center cursor-pointer select-none"
+                            style={{
+                              background: accentStyles.accentHex,
+                              color: accentStyles.textColor,
+                            }}
+                          >
+                            {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                            <span>{copied ? 'Copied!' : 'Latest'}</span>
+                          </span>
+                        )}
+                        {isCurrentVersion && (
+                          <span
+                            className="inline-flex items-center gap-1.5 rounded px-2 py-0.5 text-xs font-medium"
+                            style={{
+                              background: accentStyles.accentHex,
+                              color: accentStyles.textColor,
+                            }}
+                          >
+                            <Check className="w-3 h-3" />
+                            <span>Current</span>
+                          </span>
+                        )}
+                      </div>
+                      {release.isPreRelease && (
+                        <span className="inline-flex items-center rounded px-2 py-0.5 text-xs font-medium bg-amber-500/20 text-amber-600">
+                          Pre-release
                         </span>
                       )}
                     </div>
@@ -328,26 +241,31 @@ export default function ChangelogPage() {
                       </div>
                     )}
 
-                    {release.miscChores && release.miscChores.length > 0 && (
-                      <div>
-                        <h3 className={`text-base font-semibold mb-3 ${mutedTextColor}`}>
-                          🔧 Miscellaneous Chores
-                        </h3>
-                        <ul className="space-y-2 pl-0">
-                          {release.miscChores.map((chore, idx) => (
-                            <li key={idx} className={`text-sm ${mutedTextColor} list-disc list-inside`}>
-                              {chore}
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
+                    {release.otherSections.map((section) => (
+                      section.items.length > 0 ? (
+                        <div key={`${release.version}-${section.title}`}>
+                          <h3 className={`text-base font-semibold mb-3 flex items-center gap-2 ${textColor}`}>
+                            <ScrollText className="w-4 h-4" />
+                            <span>{capitalizeFirst(section.title)}</span>
+                          </h3>
+                          <ul className="space-y-2 pl-0">
+                            {section.items.map((item, idx) => (
+                              <li key={idx} className={`text-sm ${mutedTextColor} list-disc list-inside`}>
+                                {capitalizeFirst(item)}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      ) : null
+                    ))}
+
                   </div>
                 )}
               </div>
             )
           })}
         </div>
+        )}
 
         <div className={`mt-12 p-6 rounded-lg ${secondaryBgColor} border ${borderColor}`}>
           <p className={`text-sm text-center ${mutedTextColor}`}>
