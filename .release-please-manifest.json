@@ -1,1 +1,3 @@
-{".":"0.2.0"}
+{".":"0.2.0"} 
+
+[{"type":"movie","id":"cc1e3b0.tmdb.trending","search":false},{"type":"series","id":"cc1e3b0.tmdb.trending","search":false},{"type":"movie","id":"cc1e3b0.tmdb.search","search":true},{"type":"series","id":"cc1e3b0.tmdb.search","search":true}]
