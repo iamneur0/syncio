@@ -3,6 +3,7 @@
 import React from 'react'
 import { User as UserIcon, Users as GroupsIcon, User as UsersIcon, Puzzle as AddonsIcon } from 'lucide-react'
 import api, { publicAuthAPI, addonsAPI, usersAPI, groupsAPI } from '@/services/api'
+import toast from 'react-hot-toast'
 
 type Props = {
   className?: string
@@ -23,7 +24,7 @@ export default function AccountMenuButton({ className = '' }: Props) {
   const wrapperRef = React.useRef<HTMLDivElement | null>(null)
   const [stats, setStats] = React.useState<{ addons: number; users: number; groups: number } | null>(null)
   const [statsLoading, setStatsLoading] = React.useState(false)
-  const [copied, setCopied] = React.useState(false)
+  const [accountUuid, setAccountUuid] = React.useState<string | null>(null)
 
   React.useEffect(() => {
     const onAuthChanged = async (e: any) => {
@@ -46,19 +47,19 @@ export default function AccountMenuButton({ className = '' }: Props) {
           setAuthState('authed')
           if (typeof window !== 'undefined') (window as any).__SYNCIO_AUTHED = true
         } else {
-          const me = await publicAuthAPI.me()
-          const ok = !!me?.account
-          const nextState: AuthState = ok ? 'authed' : 'guest'
-          setAuthState(nextState)
-          if (typeof window !== 'undefined') (window as any).__SYNCIO_AUTHED = ok
+        const me = await publicAuthAPI.me()
+        const ok = !!me?.account
+        const nextState: AuthState = ok ? 'authed' : 'guest'
+        setAuthState(nextState)
+        if (typeof window !== 'undefined') (window as any).__SYNCIO_AUTHED = ok
         }
       } catch {
         if (!AUTH_ENABLED) {
           setAuthState('authed')
           if (typeof window !== 'undefined') (window as any).__SYNCIO_AUTHED = true
         } else {
-          setAuthState('guest')
-          if (typeof window !== 'undefined') (window as any).__SYNCIO_AUTHED = false
+        setAuthState('guest')
+        if (typeof window !== 'undefined') (window as any).__SYNCIO_AUTHED = false
         }
       }
     })()
@@ -82,12 +83,20 @@ export default function AccountMenuButton({ className = '' }: Props) {
       if (AUTH_ENABLED && authState !== 'authed') return
       setStatsLoading(true)
       try {
-        const [addons, users, groups] = await Promise.all([
+        const [addons, users, groups, accountInfo] = await Promise.all([
           addonsAPI.getAll().catch(() => []),
           usersAPI.getAll().catch(() => []),
           groupsAPI.getAll().catch(() => []),
+          AUTH_ENABLED ? publicAuthAPI.me().catch(() => null) : api.get('/settings/account-info').catch(() => null),
         ])
-        if (!cancelled) setStats({ addons: addons.length, users: users.length, groups: groups.length })
+        if (!cancelled) {
+          setStats({ addons: addons.length, users: users.length, groups: groups.length })
+          if (AUTH_ENABLED && accountInfo) {
+            // Handle both { account: { id } } and { id } response structures
+            const uuid = accountInfo?.account?.id || accountInfo?.id || null
+            if (uuid) setAccountUuid(uuid)
+          }
+        }
       } finally {
         if (!cancelled) setStatsLoading(false)
       }
@@ -128,6 +137,17 @@ export default function AccountMenuButton({ className = '' }: Props) {
     try { await publicAuthAPI.logout() } catch {}
   }
 
+  const handleCopyUuid = async () => {
+    if (!accountUuid) return
+    try {
+      await navigator.clipboard.writeText(accountUuid)
+      toast.success('UUID copied to clipboard')
+    } catch (err) {
+      console.error('Failed to copy UUID:', err)
+      toast.error('Failed to copy UUID')
+    }
+  }
+
   if (AUTH_ENABLED && authState === 'guest') return null
 
   const btnClasses = `h-10 px-3 rounded-lg flex items-center justify-center focus:outline-none focus:ring-0 color-surface color-hover ${className}`
@@ -141,6 +161,18 @@ export default function AccountMenuButton({ className = '' }: Props) {
       </button>
       {showMenu && (
         <div className={menuClasses}>
+          {AUTH_ENABLED && accountUuid && (
+            <div 
+              className={`mb-2 px-3 py-2 rounded border color-border cursor-pointer`} 
+              onClick={handleCopyUuid} 
+              title="Click to copy UUID"
+            >
+              <div className={`text-center mb-1`}>
+                <span className={`text-xs color-text-secondary`}>UUID</span>
+              </div>
+              <code className={`text-xs color-text break-all block text-center`}>{accountUuid}</code>
+            </div>
+          )}
           <div className={`mb-1 rounded overflow-hidden border color-border`}>
             {[
               ['Addons', stats?.addons, <AddonsIcon key="a" className="w-4 h-4" />],
@@ -156,13 +188,14 @@ export default function AccountMenuButton({ className = '' }: Props) {
               </div>
             ))}
           </div>
-          {/* Export/Delete actions moved to Settings */}
-          <button
-            onClick={handleLogout}
-            className={`color-surface color-hover color-text w-full text-center px-3 py-2 rounded`}
-          >
-            Logout
-          </button>
+          {AUTH_ENABLED && (
+            <button
+              onClick={handleLogout}
+              className={`color-surface color-hover color-text w-full text-center px-3 py-2 rounded`}
+            >
+              Logout
+            </button>
+          )}
         </div>
       )}
     </div>
