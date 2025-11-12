@@ -2,7 +2,6 @@ const express = require('express');
 const { StremioAPIClient } = require('stremio-api-client');
 const { handleDatabaseError, sendError, createRouteHandler, DatabaseTransactions } = require('../utils/handlers');
 const { findAddonById, sanitizeUrl, validateAccountContext } = require('../utils/helpers');
-const { canonicalizeManifestUrl } = require('../utils/validation');
 const { responseUtils, dbUtils } = require('../utils/routeUtils');
 
 // In-memory manifest cache (short TTL) to avoid hammering when multiple addons share a URL
@@ -1020,7 +1019,7 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
   router.put('/:id', async (req, res) => {
     try {
       const { id } = req.params;
-      const { name, description, url, version, groupIds, resources, catalogs } = req.body;
+      const { name, description, url, version, groupIds, resources, catalogs, iconUrl } = req.body;
       
 
       // Check if addon exists
@@ -1040,6 +1039,10 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
       // If URL is provided, validate scheme and fetch manifest to refresh fields
       let manifestData = null;
       let nextUrl = undefined;
+      let derivedDescription = null;
+      let derivedVersion = null;
+      let derivedIconUrl = null;
+
       if (url !== undefined) {
         const trimmedUrl = String(url).trim()
         let sanitizedUrl = trimmedUrl.replace(/^@+/, '')
@@ -1049,19 +1052,6 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
           sanitizedUrl = sanitizedUrl.replace(/^stremio:\/\//i, 'https://')
         }
         
-        const lowerUrl = sanitizedUrl.toLowerCase()
-
-        // If changing URL, ensure no other addon already uses it (including canonical similarity)
-        const prevCanon = canonicalizeManifestUrl(getDecryptedManifestUrl(existingAddon) || '')
-        const nextCanon = canonicalizeManifestUrl(sanitizedUrl)
-        if (nextCanon !== prevCanon) {
-          const all = await prisma.addon.findMany({ where: {}, select: { id: true, manifestUrl: true } })
-          const conflict = all.find((a) => a.id !== id && canonicalizeManifestUrl(getDecryptedManifestUrl(a, req)) === nextCanon)
-          if (conflict) {
-            return res.status(409).json({ message: 'Another addon already exists with this (similar) URL.' })
-          }
-        }
-
         nextUrl = sanitizedUrl;
         try {
           console.log(`🔍 Reloading manifest for updated URL: ${sanitizedUrl}`);
@@ -1070,6 +1060,9 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
             return res.status(400).json({ message: 'Failed to fetch addon manifest. The add-on URL may be incorrect.' });
           }
           manifestData = await resp.json();
+          derivedDescription = manifestData?.description ?? manifestData?.desc ?? null;
+          derivedVersion = manifestData?.version ?? manifestData?.addonVersion ?? null;
+          derivedIconUrl = manifestData?.logo ?? manifestData?.icon ?? manifestData?.images?.logo ?? null;
         } catch (e) {
           return res.status(400).json({ message: 'Failed to fetch addon manifest. The add-on URL may be incorrect.' });
         }
@@ -1156,12 +1149,21 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
         },
         data: {
           ...(name !== undefined && { name: name.trim() }),
-          ...(description !== undefined && { description }),
-          ...(nextUrl && { 
+          ...(manifestData
+            ? {
+                description: description !== undefined ? description : (derivedDescription ?? existingAddon.description ?? ''),
+                version: version !== undefined ? version : (derivedVersion ?? existingAddon.version ?? null),
+                iconUrl: iconUrl !== undefined ? iconUrl : (derivedIconUrl ?? existingAddon.iconUrl ?? null),
+              }
+            : {
+                ...(description !== undefined && { description }),
+                ...(version !== undefined && { version }),
+                ...(iconUrl !== undefined && { iconUrl }),
+              }),
+          ...(nextUrl && {
             manifestUrl: encrypt(nextUrl, req),
             manifestUrlHash: manifestUrlHmac(req, nextUrl)
           }),
-          ...(version !== undefined && { version }),
           ...(resources !== undefined && { 
             resources: JSON.stringify(Array.isArray(resources) ? resources.map(r => {
               if (typeof r === 'string') return r
