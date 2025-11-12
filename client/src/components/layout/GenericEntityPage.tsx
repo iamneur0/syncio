@@ -1,9 +1,8 @@
 'use client'
 
-import React, { useState, useEffect, useMemo } from 'react'
+import React, { useState, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useTheme } from '@/contexts/ThemeContext'
 import { addonsAPI, usersAPI, groupsAPI } from '@/services/api'
 import { useSyncStatusRefresh } from '@/hooks/useSyncStatusRefresh'
 import { invalidateEntityQueries, invalidateSyncStatusQueries } from '@/utils/queryUtils'
@@ -75,7 +74,6 @@ interface GenericEntityPageProps {
 }
 
 export default function GenericEntityPage({ config }: GenericEntityPageProps) {
-  const { isDark, isModern, isModernDark, isMono } = useTheme()
   const queryClient = useQueryClient()
   
   // State
@@ -95,7 +93,6 @@ export default function GenericEntityPage({ config }: GenericEntityPageProps) {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [entityToDelete, setEntityToDelete] = useState<{ id: string; name: string } | null>(null)
   const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false)
-  const [mounted, setMounted] = useState(false)
   const [syncingEntities, setSyncingEntities] = useState<Set<string>>(new Set())
   const [reloadingEntities, setReloadingEntities] = useState<Set<string>>(new Set())
   const [importingEntities, setImportingEntities] = useState<Set<string>>(new Set())
@@ -110,10 +107,6 @@ export default function GenericEntityPage({ config }: GenericEntityPageProps) {
     }
   }
 
-  useEffect(() => {
-    setMounted(true)
-  }, [])
-
   const { refreshAllSyncStatus } = useSyncStatusRefresh()
 
   // Data fetching
@@ -121,12 +114,6 @@ export default function GenericEntityPage({ config }: GenericEntityPageProps) {
     queryKey: [finalConfig.entityType],
     queryFn: finalConfig.api.getAll
   })
-
-  // Debug logging for data updates
-  useEffect(() => {
-    if (entities) {
-    }
-  }, [entities, finalConfig.entityType])
 
   // Get related data for modals
   const { data: groups } = useQuery({
@@ -514,17 +501,6 @@ export default function GenericEntityPage({ config }: GenericEntityPageProps) {
   // Check if empty state
   const isEmpty = !isLoading && Array.isArray(entities) && entities.length === 0
 
-  // Loading state - show header but skeleton for content
-  const renderLoadingContent = () => (
-    <div className="space-y-6 animate-in fade-in duration-200">
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {Array.from({ length: 3 }).map((_, i) => (
-          <LoadingSkeleton key={i} className="h-48 opacity-60" />
-        ))}
-      </div>
-    </div>
-  )
-
   // Error state - show header but error for content
   const renderErrorContent = () => (
     <EmptyState
@@ -557,12 +533,9 @@ export default function GenericEntityPage({ config }: GenericEntityPageProps) {
           isSyncing={syncAllMutation.isPending}
           isSyncDisabled={selectedEntities.length === 0 || syncAllMutation.isPending}
           isDeleteDisabled={selectedEntities.length === 0}
-          mounted={mounted}
         />
 
-        {isLoading ? (
-          renderLoadingContent()
-        ) : error ? (
+        {isLoading ? null : error ? (
           renderErrorContent()
         ) : isEmpty ? (
           <EmptyState
@@ -640,7 +613,7 @@ export default function GenericEntityPage({ config }: GenericEntityPageProps) {
       </div>
 
       {/* Modals */}
-      {mounted && typeof window !== 'undefined' && document.body && createPortal(
+      {typeof window !== 'undefined' && document.body && createPortal(
         <finalConfig.addModal
           isOpen={showAddModal}
           editingUser={editingUser}
@@ -659,7 +632,7 @@ export default function GenericEntityPage({ config }: GenericEntityPageProps) {
         document.body
       )}
 
-      {mounted && typeof window !== 'undefined' && document.body && finalConfig.detailModal && createPortal(
+      {typeof window !== 'undefined' && document.body && finalConfig.detailModal && createPortal(
         <finalConfig.detailModal
           isOpen={showDetailModal}
           onClose={handleCloseDetailModal}
@@ -686,7 +659,7 @@ export default function GenericEntityPage({ config }: GenericEntityPageProps) {
         document.body
       )}
 
-      {mounted && typeof window !== 'undefined' && document.body && createPortal(
+      {typeof window !== 'undefined' && document.body && createPortal(
         <ConfirmDialog
           open={showDeleteConfirm}
           title={`Delete ${finalConfig.title.slice(0, -1)}`}
@@ -700,7 +673,7 @@ export default function GenericEntityPage({ config }: GenericEntityPageProps) {
         document.body
       )}
 
-      {mounted && typeof window !== 'undefined' && document.body && createPortal(
+      {typeof window !== 'undefined' && document.body && createPortal(
         <ConfirmDialog
           open={showBulkDeleteConfirm}
           title={`Delete ${selectedEntities.length} ${finalConfig.title.slice(0, -1)}${selectedEntities.length > 1 ? 's' : ''}`}

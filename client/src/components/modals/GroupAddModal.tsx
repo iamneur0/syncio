@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
-import { getColorHexValue, getThemePalette } from '@/utils/colorMapping'
 import { useTheme } from '@/contexts/ThemeContext'
+import { getThemePalette } from '@/utils/colorMapping'
 import { useModalState, useFormState } from '@/hooks/useCommonState'
 import toast from 'react-hot-toast'
 
@@ -24,7 +24,6 @@ export default function GroupAddModal({
   onCreateGroup, 
   isCreating 
 }: GroupAddModalProps) {
-  const { isDark, isMono, isModern, isModernDark } = useTheme()
   const { mounted } = useModalState()
   const { formData, updateField, reset } = useFormState({
     groupName: '',
@@ -32,6 +31,8 @@ export default function GroupAddModal({
     colorIndex: 0,
     colorIndexRef: 0
   })
+  const { theme } = useTheme()
+  const colorPalette = useMemo(() => getThemePalette(theme), [theme])
 
   // Close on Escape
   useEffect(() => {
@@ -81,14 +82,12 @@ export default function GroupAddModal({
         }
       }}
     >
-      <div className={`rounded-lg max-w-md w-full p-6 ${isDark ? 'bg-gray-800' : 'bg-white'}`}>
+      <div className={`rounded-lg max-w-md w-full p-6 card`}>
         <div className="flex items-center justify-between mb-4">
-          <h2 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>Create New Group</h2>
+          <h2 className={`text-lg font-semibold`}>Create New Group</h2>
           <button
             onClick={handleClose}
-            className={`w-8 h-8 flex items-center justify-center rounded transition-colors border-0 ${
-              isDark ? 'text-gray-400 hover:text-gray-300 hover:bg-gray-700' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
-            }`}
+            className={`w-8 h-8 flex items-center justify-center rounded transition-colors border-0 color-hover`}
           >
             <X className="w-4 h-4" />
           </button>
@@ -98,37 +97,29 @@ export default function GroupAddModal({
           onSubmit={handleSubmit}
         >
           <div>
-            <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>Group Name</label>
+            <label className={`block text-sm font-medium mb-1`}>Group Name</label>
             <input
               type="text"
               placeholder="Group name"
               value={formData.groupName}
               onChange={(e) => updateField('groupName', e.target.value)}
-              className={`w-full px-3 py-2 border rounded-lg focus:outline-none ${
-                isDark 
-                  ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
-                  : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
-              }`}
+              className={`w-full px-3 py-2 border rounded-lg focus:outline-none input`}
             />
           </div>
           <div>
-            <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>Description</label>
+            <label className={`block text-sm font-medium mb-1`}>Description</label>
             <textarea
               placeholder="Describe the purpose of this group..."
               rows={3}
               value={formData.groupDescription}
               onChange={(e) => updateField('groupDescription', e.target.value)}
-              className={`w-full px-3 py-2 border rounded-lg focus:outline-none ${
-                isDark 
-                  ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
-                  : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
-              }`}
+              className={`w-full px-3 py-2 border rounded-lg focus:outline-none input`}
             />
           </div>
           <div>
-            <label className={`block text-sm font-medium mb-2 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>Color</label>
+            <label className={`block text-sm font-medium mb-2`}>Color</label>
             <div className="grid grid-cols-5 gap-2">
-              {getThemePalette(isMono ? 'mono' : isDark ? 'dark' : 'light').map((colorOption, index) => {
+              {colorPalette.map((colorOption, index) => {
                 const actualColorIndex = index
                 return (
                   <button
@@ -139,14 +130,15 @@ export default function GroupAddModal({
                       updateField('colorIndexRef', actualColorIndex)
                     }}
                     aria-pressed={formData.colorIndex === actualColorIndex}
-                    className={`relative w-8 h-8 rounded-full border-2 transition ${formData.colorIndex === actualColorIndex ? 'border-white ring-2 ring-offset-2 ring-stremio-purple' : 'border-gray-300'}`}
+                    className={`relative w-8 h-8 rounded-full border-2 transition ${formData.colorIndex === actualColorIndex ? 'selection-ring ring-2 ring-offset-2' : 'color-border'}`}
                     style={{ 
-                      backgroundColor: colorOption.hexValue
+                      background: colorOption.gradient,
+                      borderColor: colorOption.borderHex,
                     }}
                   >
                     {formData.colorIndex === actualColorIndex && (
                       <span className="absolute inset-0 flex items-center justify-center">
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="white" className="w-4 h-4">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill={colorOption.textHex} className="w-4 h-4">
                           <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-7.25 7.25a1 1 0 01-1.414 0l-3-3a1 1 0 111.414-1.414L8.5 11.586l6.543-6.543a1 1 0 011.414 0z" clipRule="evenodd" />
                         </svg>
                       </span>
@@ -160,18 +152,14 @@ export default function GroupAddModal({
             <button
               type="button"
               onClick={handleClose}
-              className={`flex-1 px-4 py-2 rounded-lg transition-colors ${
-                isDark 
-                  ? 'text-gray-300 hover:text-white hover:bg-gray-700' 
-                  : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-              }`}
+              className={`flex-1 px-4 py-2 rounded-lg transition-colors color-text-secondary color-hover`}
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={isCreating}
-              className="flex-1 px-4 py-2 accent-bg accent-text rounded-lg transition-colors disabled:opacity-50"
+              className="flex-1 px-4 py-2 color-surface rounded-lg transition-colors disabled:opacity-50"
             >
               {isCreating ? 'Creating...' : 'Create Group'}
             </button>

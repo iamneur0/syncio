@@ -1,5 +1,4 @@
 import React from 'react'
-import { useTheme } from '@/contexts/ThemeContext'
 import { SyncBadge } from '@/components/ui'
 import { ConfirmDialog } from '@/components/modals'
 
@@ -78,7 +77,6 @@ export default function EntityList({
   getIsSelected,
   onClearSelection
 }: EntityListProps) {
-  const { isDark, isMono } = useTheme()
   const [confirmOpen, setConfirmOpen] = React.useState(false)
 
   // Helper function to render action buttons
@@ -100,8 +98,8 @@ export default function EntityList({
               }}
               className={`p-2 rounded-lg transition-colors ${
                 isActive
-                  ? (isDark ? 'text-blue-400 hover:bg-blue-900/20' : 'text-blue-600 hover:bg-blue-50')
-                  : (isDark ? 'text-gray-400 hover:bg-gray-700' : 'text-gray-600 hover:bg-gray-100')
+                  ? 'color-text color-hover'
+                  : 'color-text-secondary color-hover'
               }`}
               title={button.tooltip}
             >
@@ -121,13 +119,13 @@ export default function EntityList({
   }
 
   return (
-    <div 
-      className={`p-4 rounded-lg mb-6 ${isDark ? 'bg-gray-700' : 'bg-gray-50'} ${onClearSelection ? 'cursor-pointer' : ''}`}
+    <div
+      className={`p-4 rounded-lg mb-6 section-panel ${onClearSelection ? 'cursor-pointer' : ''}`}
       onClick={handleContainerClick}
     >
       <div className="flex items-center justify-between mb-3">
         {title && (
-          <h3 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>
+          <h3 className={`text-lg font-semibold`}>
             {count > 0 && `${count} `}{title}
           </h3>
         )}
@@ -136,11 +134,7 @@ export default function EntityList({
           {actionButton && (
             <button
               onClick={actionButton.onClick}
-              className={`p-2 rounded-lg transition-colors ${
-                isDark 
-                  ? 'text-gray-400 hover:text-gray-300 hover:bg-gray-600' 
-                  : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'
-              }`}
+              className={`p-2 rounded-lg transition-colors color-hover`}
               title={actionButton.tooltip}
             >
               {actionButton.icon}
@@ -149,11 +143,7 @@ export default function EntityList({
           {items.length > 0 && onClear && (
             <button
               onClick={() => setConfirmOpen(true)}
-              className={`px-3 py-1 text-sm rounded transition-colors ${
-                isDark 
-                  ? 'text-gray-300 hover:text-white hover:bg-gray-600' 
-                  : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-              }`}
+              className={`px-3 py-1 text-sm rounded transition-colors color-hover`}
               title={`Reset ${title.toLowerCase()} to default`}
             >
               Reset
@@ -164,7 +154,7 @@ export default function EntityList({
       
       {isLoading ? (
         <div className="flex items-center justify-center py-8">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 accent-border"></div>
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 color-border"></div>
         </div>
       ) : items.length > 0 ? (
         <div className={layout === 'grid' ? 'grid [grid-template-columns:repeat(auto-fill,minmax(320px,1fr))] gap-3 max-w-full' : 'space-y-3'}>
@@ -177,11 +167,7 @@ export default function EntityList({
                 return (
                   <div
                     key={`${item.id || item.manifestUrl || item.transportUrl || index}::${index}`}
-                    className={`relative rounded-lg border p-4 hover:shadow-md transition-all ${
-                      isDark
-                        ? 'bg-gray-600 border-gray-500 hover:bg-gray-550'
-                        : 'bg-white border-gray-200 hover:bg-gray-50'
-                    }`}
+                    className={`relative rounded-lg border p-4 hover:shadow-md transition-all card`}
                     onClick={(e) => e.stopPropagation()}
                   >
                     <div className="flex items-center justify-between gap-3">
@@ -189,7 +175,7 @@ export default function EntityList({
                         {/* Item content - this would need to be customized per entity type */}
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-2 mb-1">
-                            <h4 className={`font-medium truncate ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                            <h4 className={`font-medium truncate`}>
                               {item.name || item.username || item.email || 'Unknown'}
                             </h4>
                             {showSyncBadge && syncBadgeProps && (
@@ -201,7 +187,7 @@ export default function EntityList({
                             />
                             )}
                           </div>
-                          <p className={`text-sm truncate ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+                          <p className={`text-sm truncate color-text-secondary`}>
                             {item.description || item.email || 'No description'}
                           </p>
                         </div>
@@ -213,16 +199,12 @@ export default function EntityList({
               }
               // Otherwise use the custom renderItem function, optionally wrapping with a selection ring
               const isSelected = typeof getIsSelected === 'function' ? !!getIsSelected(item) : false
-              const wrapperClass = isSelected
-                ? (isMono
-                    ? 'ring-2 ring-white/50 border border-white/40'
-                    : (isDark ? 'ring-2 ring-gray-400 border border-gray-400' : 'ring-2 ring-gray-400 border border-gray-400'))
-                : 'border border-transparent'
+              const wrapperClass = isSelected ? 'card-selected' : ''
 
               return (
                 <div
                   key={`${item.id || item.manifestUrl || item.transportUrl || index}::${index}`}
-                  className={`${wrapperClass} rounded-lg`}
+                  className={`${wrapperClass}`}
                   onClick={(e) => e.stopPropagation()}
                 >
                   {renderItem(item, index)}
@@ -234,7 +216,7 @@ export default function EntityList({
       ) : (
         <div className="text-center py-8">
           {emptyIcon}
-          <p className={`${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+          <p className={`color-text-secondary`}>
             {emptyMessage}
           </p>
         </div>

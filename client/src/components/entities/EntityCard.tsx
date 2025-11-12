@@ -1,12 +1,90 @@
-import React, { useState } from 'react'
+import React, { useMemo, useState } from 'react'
 import { User as UserIcon, Users as GroupIcon, Eye, Edit, Trash2, Copy, Download, RefreshCw, Puzzle } from 'lucide-react'
-import { useTheme } from '@/contexts/ThemeContext'
-import { getColorBgClass, getColorTextClass, getColorBorderClass, getColorHexValue } from '@/utils/colorMapping'
 import AddonIcon from './AddonIcon'
 import { SyncBadge, ToggleSwitch, VersionChip } from '@/components/ui'
 import { ConfirmDialog } from '@/components/modals'
 import { groupsAPI } from '@/services/api'
+import { useTheme } from '@/contexts/ThemeContext'
+import { getEntityColorStyles } from '@/utils/colorMapping'
 // ToggleSwitch and VersionChip are imported from '@/components/ui' above
+
+const MANIFEST_SUFFIX_REGEX = /\/manifest(\.[^/?#]+)?$/i
+
+const normalizeBaseUrl = (raw?: string | null): string | null => {
+  if (typeof raw !== 'string') return null
+  let candidate = raw.trim()
+  if (!candidate) return null
+  candidate = candidate.replace(/\?.*$/, '').replace(/#.*$/, '')
+  candidate = candidate.replace(/\/configure\/?$/i, '')
+  candidate = candidate.replace(MANIFEST_SUFFIX_REGEX, '')
+  try {
+    const parsed = new URL(candidate)
+    let pathname = parsed.pathname
+    if (pathname.endsWith('/') && pathname !== '/') {
+      pathname = pathname.slice(0, -1)
+    }
+    return pathname && pathname !== '/' ? `${parsed.origin}${pathname}` : parsed.origin
+  } catch {
+    return candidate || null
+  }
+}
+
+const extractOrigin = (url: string): string | null => {
+  try {
+    return new URL(url).origin
+  } catch {
+    const match = url.match(/^https?:\/\/[^/]+/i)
+    return match ? match[0] : null
+  }
+}
+
+const appendConfigure = (baseUrl: string | null): string | null => {
+  if (!baseUrl) return null
+  return baseUrl.endsWith('/') ? `${baseUrl}configure` : `${baseUrl}/configure`
+}
+
+const buildCandidateUrls = (addon: Record<string, any>): string[] => {
+  const manifest =
+    (addon.originalManifest as Record<string, any> | undefined) ||
+    (addon.manifest as Record<string, any> | undefined) ||
+    {}
+
+  const baseCandidates = [
+    addon.configureUrl,
+    addon.configure,
+    addon.manifestUrl,
+    addon.transportUrl,
+    addon.url,
+    manifest?.configureUrl,
+    manifest?.configure,
+    manifest?.configUrl,
+    manifest?.manifestUrl,
+    manifest?.transportUrl,
+  ]
+
+  const seen = new Set<string>()
+  const result: string[] = []
+
+  const push = (value: string | null | undefined) => {
+    if (!value) return
+    const trimmed = value.trim()
+    if (!trimmed || !trimmed.startsWith('http')) return
+    const normalized = trimmed.endsWith('/') ? trimmed.slice(0, -1) : trimmed
+    if (seen.has(normalized)) return
+    seen.add(normalized)
+    result.push(normalized)
+  }
+
+  for (const candidate of baseCandidates) {
+    const baseUrl = normalizeBaseUrl(candidate as string | undefined)
+    if (!baseUrl) continue
+    push(appendConfigure(baseUrl))
+    push(baseUrl)
+    push(extractOrigin(baseUrl))
+  }
+
+  return result
+}
 
 type Variant = 'user' | 'group' | 'addon'
 
@@ -83,8 +161,17 @@ export default function EntityCard({
   isReloading,
   isListMode
 }: EntityCardProps) {
-  const theme = useTheme()
-  const { isDark, isModern, isModernDark, isMono } = theme
+  const { theme } = useTheme()
+  const avatarColorStyles = useMemo(
+    () => getEntityColorStyles(theme, entity.colorIndex ?? 0),
+    [theme, entity.colorIndex]
+  )
+  const isAddon = variant === 'addon'
+  const addonCandidateUrls = useMemo(
+    () => (isAddon ? buildCandidateUrls(entity as Record<string, any>) : []),
+    [entity, isAddon],
+  )
+  const hasAddonLink = isAddon && addonCandidateUrls.length > 0
 
   const handleCardClick = (e: React.MouseEvent) => {
     e.stopPropagation()
@@ -171,12 +258,35 @@ export default function EntityCard({
     onReload?.(entity.id)
   }
 
-  const iconBg = getColorBgClass(
-    entity.colorIndex,
-    isMono ? 'mono' : isModern ? 'modern' : isModernDark ? 'modern-dark' : isDark ? 'dark' : 'light'
-  )
-  
-  const iconBorder = getColorBorderClass(entity.colorIndex, isMono ? 'mono' : isDark ? 'dark' : 'light')
+  const handleOpenConfigure = async (e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (!addonCandidateUrls.length) return
+
+    const openUrl = (url: string) => {
+      if (!url || typeof window === 'undefined') return false
+      window.open(url, '_blank', 'noopener,noreferrer')
+      return true
+    }
+
+    for (const candidate of addonCandidateUrls) {
+      try {
+        const response = await fetch(candidate, {
+          method: 'GET',
+          mode: 'cors',
+          cache: 'no-cache',
+        })
+        if (response.ok && response.status < 400) {
+          openUrl(candidate)
+          return
+        }
+      } catch {
+        // continue to next candidate
+      }
+    }
+
+    // As a final fallback, just open the first candidate even if the GET failed (covers cases where CORS blocks the probe)
+    openUrl(addonCandidateUrls[0])
+  }
 
   // Get display name and subtitle
   const displayName = variant === 'user' 
@@ -200,6 +310,35 @@ export default function EntityCard({
     } else {
       return entity.name ? entity.name.charAt(0).toUpperCase() : 'A'
     }
+  }
+
+  const renderAvatar = () => {
+    if (variant === 'addon') {
+      return (
+        <AddonIcon
+          name={entity.name}
+          iconUrl={(entity as any).iconUrl}
+          size="12"
+        />
+      )
+    }
+
+    return (
+      <div
+        className="logo-circle-12 flex items-center justify-center"
+        style={{
+          background: avatarColorStyles.background,
+          color: avatarColorStyles.textColor,
+        }}
+      >
+        <span
+          className="font-semibold text-lg"
+          style={{ color: avatarColorStyles.textColor }}
+        >
+          {getAvatarText()}
+        </span>
+      </div>
+    )
   }
 
   // Normalize counts
@@ -241,30 +380,14 @@ export default function EntityCard({
     <div 
       onClick={handleCardClick}
       className={isListMode ? 
-        `rounded-lg border p-4 hover:shadow-md transition-all flex items-center justify-between relative group ${
-          isModern
-            ? 'bg-gradient-to-r from-purple-50/90 to-blue-50/90 backdrop-blur-sm border-purple-200/60'
-            : isModernDark
-            ? 'bg-gradient-to-r from-purple-800/40 to-blue-800/40 backdrop-blur-sm border-purple-600/50'
-            : isDark 
-            ? 'bg-gray-800 border-gray-700 hover:bg-gray-750' 
-            : 'bg-white border-gray-200 hover:bg-gray-50'
-        } ${!entity.isActive ? 'opacity-50' : ''} cursor-pointer min-w-[320px] ${
+        `card card-selectable p-4 hover:shadow-lg transition-all flex items-center justify-between relative group ${!entity.isActive ? 'opacity-50' : ''} cursor-pointer min-w-[320px] ${
           isSelected 
-            ? (isMono ? 'ring-2 ring-white/50 border-white/40' : 'ring-2 ring-gray-400 border-gray-400') 
+            ? 'card-selected' 
             : ''
         }` :
-        `rounded-lg shadow-sm border p-6 hover:shadow-md transition-all flex flex-col h-full relative group min-w-[320px] ${
-          isModern
-            ? 'bg-gradient-to-br from-purple-50/90 to-blue-50/90 backdrop-blur-sm border-purple-200/60'
-            : isModernDark
-            ? 'bg-gradient-to-br from-purple-800/40 to-blue-800/40 backdrop-blur-sm border-purple-600/50'
-            : isDark 
-            ? 'bg-gray-800 border-gray-700 hover:bg-gray-750' 
-            : 'bg-white border-gray-200 hover:bg-gray-50'
-        } ${!entity.isActive ? 'opacity-50' : ''} cursor-pointer ${
+        `card card-selectable p-6 hover:shadow-lg transition-all flex flex-col h-full relative group min-w-[320px] ${!entity.isActive ? 'opacity-50' : ''} cursor-pointer ${
           isSelected 
-            ? (isMono ? 'ring-2 ring-white/50 border-white/40' : 'ring-2 ring-gray-400 border-gray-400') 
+            ? 'card-selected' 
             : ''
         }`
       }
@@ -273,33 +396,25 @@ export default function EntityCard({
         // List mode layout
         <div className="w-full flex flex-row items-center justify-between gap-3">
           <div className="flex items-center gap-4 min-w-0 flex-1">
-            {variant === 'addon' ? (
-              <div className="flex-shrink-0">
-                <AddonIcon name={entity.name} iconUrl={(entity as any).iconUrl} size="12" />
-              </div>
-            ) : (
-              <div 
-                className={`logo-circle-12 flex-shrink-0 ${
-                  isMono
-                    ? `${iconBg} border ${iconBorder} text-white`
-                    : isModern
-                    ? 'bg-gradient-to-br from-purple-600 to-blue-800 text-white'
-                    : isModernDark
-                    ? 'bg-gradient-to-br from-purple-800 to-blue-900 text-white'
-                    : `${iconBg} border ${iconBorder} text-white`
-                }`}
-                style={{ backgroundColor: getColorHexValue(entity.colorIndex, isMono ? 'mono' : isDark ? 'dark' : 'light') }}
-              >
-                <span className="text-white font-semibold text-lg">
-                  {getAvatarText()}
-                </span>
-              </div>
-            )}
+          <div className="flex-shrink-0">
+            {renderAvatar()}
+          </div>
             
             <div className="flex-1 min-w-0 overflow-hidden">
               <div className="flex items-center gap-2 mb-1 flex-wrap">
-                <h3 className={`font-medium truncate ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                  {displayName}
+                <h3 className="font-medium truncate">
+                  {hasAddonLink ? (
+                    <button
+                      type="button"
+                      onClick={handleOpenConfigure}
+                      className="truncate text-left color-hover cursor-pointer hover:underline underline-offset-2 focus:outline-none bg-transparent border-0 p-0"
+                      title="Open configure page"
+                    >
+                      {displayName}
+                    </button>
+                  ) : (
+                    <span className="truncate color-hover">{displayName}</span>
+                  )}
                 </h3>
                 {variant === 'addon' && (entity as any).version && (
                   <VersionChip version={(entity as any).version} size="sm" />
@@ -325,44 +440,44 @@ export default function EntityCard({
                   />
                 )}
               </div>
-              <p className={`text-sm ${isDark ? 'text-gray-300' : 'text-gray-600'} truncate` }>
+              <p className={`text-sm color-text-secondary truncate` }>
                 {subtitle}
               </p>
 
               {/* Stats under name on < md screens */}
               <div className="mt-2 flex items-center gap-3 md:hidden">
                 {variant === 'addon' && (
-                  <div className="flex items-center gap-1 text-xs text-gray-500">
+                  <div className="flex items-center gap-1 text-xs color-text-secondary">
                     <UserIcon className="w-4 h-4" />
                     <span>{addonUsersCount}</span>
                   </div>
                 )}
                 {variant === 'addon' && (
-                  <div className="flex items-center gap-1 text-xs text-gray-500">
+                  <div className="flex items-center gap-1 text-xs color-text-secondary">
                     <GroupIcon className="w-4 h-4" />
                     <span>{addonGroupsCount}</span>
                   </div>
                 )}
                 {variant === 'user' && (
-                  <div className="flex items-center gap-1 text-xs text-gray-500">
+                  <div className="flex items-center gap-1 text-xs color-text-secondary">
                     <Puzzle className="w-4 h-4" />
                     <span>{(entity as any).stremioAddonsCount || 0}</span>
                   </div>
                 )}
                 {variant === 'user' && (
-                  <div className="flex items-center gap-1 text-xs text-gray-500">
+                  <div className="flex items-center gap-1 text-xs color-text-secondary">
                     <GroupIcon className="w-4 h-4" />
                     <span>{(entity as any).groupName || ((entity as any).groups && (entity as any).groups.length > 0) ? ((entity as any).groupName || (entity as any).groups[0].name) : 'No Group'}</span>
                   </div>
                 )}
                 {variant === 'group' && (
-                  <div className="flex items-center gap-1 text-xs text-gray-500">
-                    <AddonIcon name="Addon" className="w-4 h-4" />
+                  <div className="flex items-center gap-1 text-xs color-text-secondary">
+                    <Puzzle className="w-4 h-4" />
                     <span>{groupAddonsCount}</span>
                   </div>
                 )}
                 {variant === 'group' && (
-                  <div className="flex items-center gap-1 text-xs text-gray-500">
+                  <div className="flex items-center gap-1 text-xs color-text-secondary">
                     <UserIcon className="w-4 h-4" />
                     <span>{groupUsersCount}</span>
                   </div>
@@ -377,37 +492,37 @@ export default function EntityCard({
             <div className="hidden md:flex items-center gap-3">
               {/* Stats for list mode - always show like card mode */}
               {variant === 'addon' && (
-                <div className="flex items-center gap-1 text-xs text-gray-500">
+                <div className="flex items-center gap-1 text-xs color-text-secondary">
                   <UserIcon className="w-4 h-4" />
                   <span>{addonUsersCount}</span>
                 </div>
               )}
               {variant === 'addon' && (
-                <div className="flex items-center gap-1 text-xs text-gray-500">
+                <div className="flex items-center gap-1 text-xs color-text-secondary">
                   <GroupIcon className="w-4 h-4" />
                   <span>{addonGroupsCount}</span>
                 </div>
               )}
               {variant === 'user' && (
-                <div className="flex items-center gap-1 text-xs text-gray-500">
+                <div className="flex items-center gap-1 text-xs color-text-secondary">
                   <Puzzle className="w-4 h-4" />
                   <span>{(entity as any).stremioAddonsCount || 0}</span>
                 </div>
               )}
               {variant === 'user' && (
-                <div className="flex items-center gap-1 text-xs text-gray-500">
+                <div className="flex items-center gap-1 text-xs color-text-secondary">
                   <GroupIcon className="w-4 h-4" />
                   <span>{(entity as any).groupName || ((entity as any).groups && (entity as any).groups.length > 0) ? ((entity as any).groupName || (entity as any).groups[0].name) : 'No Group'}</span>
                 </div>
               )}
               {variant === 'group' && (
-                <div className="flex items-center gap-1 text-xs text-gray-500">
+                <div className="flex items-center gap-1 text-xs color-text-secondary">
                   <Puzzle className="w-4 h-4" />
                   <span>{groupAddonsCount}</span>
                 </div>
               )}
               {variant === 'group' && (
-                <div className="flex items-center gap-1 text-xs text-gray-500">
+                <div className="flex items-center gap-1 text-xs color-text-secondary">
                   <UserIcon className="w-4 h-4" />
                   <span>{groupUsersCount}</span>
                 </div>
@@ -426,7 +541,7 @@ export default function EntityCard({
               {onView && (
                 <button
                   onClick={handleView}
-                  className={`p-2 rounded transition-colors ${isDark ? 'hover:bg-gray-700 text-gray-300' : 'hover:bg-gray-100 text-gray-600'}`}
+                  className={`p-2 rounded surface-interactive color-text`}
                   title="View details"
                 >
                   <Eye className="w-4 h-4" />
@@ -436,7 +551,7 @@ export default function EntityCard({
               {onEdit && (
                 <button
                   onClick={handleEdit}
-                  className={`p-2 rounded transition-colors ${isDark ? 'hover:bg-gray-700 text-gray-300' : 'hover:bg-gray-100 text-gray-600'}`}
+                  className={`p-2 rounded surface-interactive color-text`}
                   title="Edit"
                 >
                   <Edit className="w-4 h-4" />
@@ -446,7 +561,7 @@ export default function EntityCard({
               {variant === 'group' && onClone && (
                 <button
                   onClick={handleClone}
-                  className={`p-2 rounded transition-colors ${isDark ? 'hover:bg-gray-700 text-gray-300' : 'hover:bg-gray-100 text-gray-600'}`}
+                  className={`p-2 rounded surface-interactive color-text`}
                   title="Clone"
                 >
                   <Copy className="w-4 h-4" />
@@ -457,7 +572,7 @@ export default function EntityCard({
                   <button
                     onClick={handleReload}
                     disabled={isReloading}
-                    className={`p-2 rounded transition-colors ${isDark ? 'hover:bg-gray-700 text-gray-300' : 'hover:bg-gray-100 text-gray-600'} ${isReloading ? 'opacity-50' : ''}`}
+                    className={`p-2 rounded surface-interactive color-text ${isReloading ? 'opacity-50' : ''}`}
                     title="Reload group addons"
                   >
                     <RefreshCw className={`w-4 h-4 ${isReloading ? 'animate-spin' : ''}`} />
@@ -468,7 +583,7 @@ export default function EntityCard({
                 <button
                   onClick={handleImport}
                   disabled={isImporting}
-                  className={`p-2 rounded transition-colors ${isDark ? 'hover:bg-gray-700 text-gray-300' : 'hover:bg-gray-100 text-gray-600'} ${isImporting ? 'opacity-50' : ''}`}
+                  className={`p-2 rounded surface-interactive color-text ${isImporting ? 'opacity-50' : ''}`}
                   title="Import user's addons to a new group"
                 >
                   {isImporting ? (
@@ -483,7 +598,7 @@ export default function EntityCard({
                 <button
                   onClick={handleReload}
                   disabled={isReloading}
-                  className={`p-2 rounded transition-colors ${isDark ? 'hover:bg-gray-700 text-gray-300' : 'hover:bg-gray-100 text-gray-600'} ${isReloading ? 'opacity-50' : ''}`}
+                  className={`p-2 rounded surface-interactive color-text ${isReloading ? 'opacity-50' : ''}`}
                   title="Reload user addons"
                 >
                   <RefreshCw className={`w-4 h-4 ${isReloading ? 'animate-spin' : ''}`} />
@@ -493,7 +608,7 @@ export default function EntityCard({
               {variant === 'addon' && onClone && (
                 <button
                   onClick={handleClone}
-                  className={`p-2 rounded transition-colors ${isDark ? 'hover:bg-gray-700 text-gray-300' : 'hover:bg-gray-100 text-gray-600'}`}
+                  className={`p-2 rounded surface-interactive color-text`}
                   title="Clone addon"
                 >
                   <Copy className="w-4 h-4" />
@@ -504,7 +619,7 @@ export default function EntityCard({
                 <button
                   onClick={handleReload}
                   disabled={isReloading}
-                  className={`p-2 rounded transition-colors ${isDark ? 'hover:bg-gray-700 text-gray-300' : 'hover:bg-gray-100 text-gray-600'} ${isReloading ? 'opacity-50' : ''}`}
+                  className={`p-2 rounded surface-interactive color-text ${isReloading ? 'opacity-50' : ''}`}
                   title="Reload"
                 >
                   <RefreshCw className={`w-4 h-4 ${isReloading ? 'animate-spin' : ''}`} />
@@ -513,7 +628,7 @@ export default function EntityCard({
               
               <button
                 onClick={handleDelete}
-                className={`p-2 rounded transition-colors ${isDark ? 'hover:bg-gray-700 text-gray-300' : 'hover:bg-gray-100 text-gray-600'}`}
+                className={`p-2 rounded surface-interactive color-text`}
                 title="Delete"
               >
                 <Trash2 className="w-4 h-4" />
@@ -526,47 +641,26 @@ export default function EntityCard({
         <div className="flex flex-col h-full">
           <div className="flex items-start justify-between mb-4">
         <div className="flex items-center gap-3 flex-1 min-w-0">
-          <div 
-            className={`logo-circle-12 flex-shrink-0 ${
-              variant === 'addon' && (entity as any).iconUrl
-                ? `border-0 ${(!isDark && !isMono && !isModern && !isModernDark) ? 'accent-bg' : ''}`
-                : variant === 'addon'
-                ? 'accent-bg accent-text'
-                : isMono
-                ? `${iconBg} border ${iconBorder} text-white`
-                : isModern
-                ? 'bg-gradient-to-br from-purple-600 to-blue-800 text-white'
-                : isModernDark
-                ? 'bg-gradient-to-br from-purple-800 to-blue-900 text-white'
-                : `${iconBg} border ${iconBorder} text-white`
-            }`}
-            style={{ backgroundColor: (variant === 'addon' && (entity as any).iconUrl && (isDark || isMono || isModern || isModernDark)) ? 'transparent' : undefined }}
-          >
-            {variant === 'addon' && (entity as any).iconUrl ? (
-              <img 
-                src={(entity as any).iconUrl} 
-                alt={entity.name}
-                className="logo-img"
-                onError={(e) => {
-                  // Fallback to letter if image fails to load
-                  const target = e.currentTarget as HTMLImageElement
-                  const nextElement = target.nextElementSibling as HTMLElement
-                  target.style.display = 'none'
-                  if (nextElement) nextElement.style.display = 'block'
-                }}
-              />
-            ) : null}
-            <span className={`text-white font-semibold text-lg ${variant === 'addon' && (entity as any).iconUrl ? 'hidden' : ''}`}>
-              {getAvatarText()}
-            </span>
+          <div className="flex-shrink-0">
+            {renderAvatar()}
           </div>
           <div className="min-w-0 flex-1">
-            <h3 className={`font-medium cursor-pointer transition-colors ${
-              isModern ? 'text-purple-800 hover:text-purple-900' : 
-              isModernDark ? 'text-purple-200 hover:text-purple-100' : 
-              (isDark ? 'text-white hover:text-gray-300' : 'text-gray-900 hover:text-gray-700')
-            } truncate`} title={displayName}>
-              {displayName}
+            <h3
+              className={`font-medium transition-colors truncate ${!hasAddonLink ? 'cursor-pointer color-hover' : ''}`}
+              title={displayName}
+            >
+              {hasAddonLink ? (
+                <button
+                  type="button"
+                  onClick={handleOpenConfigure}
+                  className="truncate text-left color-hover cursor-pointer hover:underline underline-offset-2 focus:outline-none bg-transparent border-0 p-0"
+                  title={displayName}
+                >
+                  {displayName}
+                </button>
+              ) : (
+                <span className="truncate">{displayName}</span>
+              )}
             </h3>
             {/* Inline Sync Badge for groups next to name */}
             {variant === 'group' && onSync && (
@@ -578,11 +672,7 @@ export default function EntityCard({
                 />
               </div>
             )}
-            <p className={`text-sm ${
-              isModern ? 'text-purple-600' : 
-              isModernDark ? 'text-purple-300' : 
-              (isDark ? 'text-gray-400' : 'text-gray-500')
-            }`}>
+            <p className={`text-sm color-text-secondary`}>
               {subtitle}
             </p>
             {/* Version Chip for addons */}
@@ -620,29 +710,21 @@ export default function EntityCard({
         {variant === 'group' && (
           <>
             <div className="flex items-center">
-              <Puzzle className="w-4 h-4 text-gray-400 mr-2 flex-shrink-0" />
+              <Puzzle className="w-4 h-4 color-text-secondary mr-2 flex-shrink-0" />
               <div className="min-w-0">
-                <p className={`text-lg font-semibold ${
-                  isModern ? 'text-purple-100' : isModernDark ? 'text-purple-100' : (isDark ? 'text-white' : 'text-gray-900')
-                }`}>
+                <p className={`text-lg font-semibold`}>
                   {(entity as any).addons || 0}
                 </p>
-                <p className={`text-xs ${
-                  isModern ? 'text-purple-300' : isModernDark ? 'text-purple-300' : (isDark ? 'text-gray-400' : 'text-gray-500')
-                }`}>{(entity as any).addons === 1 ? 'Addon' : 'Addons'}</p>
+                <p className={`text-xs color-text-secondary`}>{(entity as any).addons === 1 ? 'Addon' : 'Addons'}</p>
               </div>
             </div>
             <div className="flex items-center">
-              <UserIcon className="w-4 h-4 text-gray-400 mr-2 flex-shrink-0" />
+              <UserIcon className="w-4 h-4 color-text-secondary mr-2 flex-shrink-0" />
               <div className="min-w-0">
-                <p className={`text-lg font-semibold ${
-                  isModern ? 'text-purple-100' : isModernDark ? 'text-purple-100' : (isDark ? 'text-white' : 'text-gray-900')
-                }`}>
+                <p className={`text-lg font-semibold`}>
                   {groupUsersCount}
                 </p>
-                <p className={`text-xs ${
-                  isModern ? 'text-purple-300' : isModernDark ? 'text-purple-300' : (isDark ? 'text-gray-400' : 'text-gray-500')
-                }`}>{groupUsersCount === 1 ? 'User' : 'Users'}</p>
+                <p className={`text-xs color-text-secondary`}>{groupUsersCount === 1 ? 'User' : 'Users'}</p>
               </div>
             </div>
           </>
@@ -650,26 +732,21 @@ export default function EntityCard({
         {variant === 'user' && (
           <>
             <div className="flex items-center">
-              <Puzzle className="w-4 h-4 text-gray-400 mr-2 flex-shrink-0" />
+              <Puzzle className="w-4 h-4 color-text-secondary mr-2 flex-shrink-0" />
               <div className="min-w-0">
-                <p className={`text-lg font-semibold ${
-                  isModern ? 'text-purple-100' : isModernDark ? 'text-purple-100' : (isDark ? 'text-white' : 'text-gray-900')
-                }`}>
+                <p className={`text-lg font-semibold`}>
                   {(entity as any).stremioAddonsCount || 0}
                 </p>
-                <p className={`text-xs ${
-                  isModern ? 'text-purple-300' : isModernDark ? 'text-purple-300' : (isDark ? 'text-gray-400' : 'text-gray-500')
-                }`}>{(entity as any).stremioAddonsCount === 1 ? 'Addon' : 'Addons'}</p>
+                <p className={`text-xs color-text-secondary`}>{(entity as any).stremioAddonsCount === 1 ? 'Addon' : 'Addons'}</p>
               </div>
             </div>
             <div className="flex items-center min-w-0">
-              <UserIcon className="w-4 h-4 text-gray-400 mr-2 flex-shrink-0" />
+              <GroupIcon className="w-4 h-4 color-text-secondary mr-2 flex-shrink-0" />
               <div className="min-w-0 flex-1">
-                <p className={`text-lg font-semibold truncate ${
-                  isModern ? 'text-purple-100' : isModernDark ? 'text-purple-100' : (isDark ? 'text-white' : 'text-gray-900')
-                }`}>
+                <p className={`text-lg font-semibold truncate`}>
                   {(entity as any).groupName || 'No group'}
                 </p>
+                <p className={`text-xs color-text-secondary`}>Group</p>
               </div>
             </div>
           </>
@@ -677,25 +754,17 @@ export default function EntityCard({
         {variant === 'addon' && (
           <>
             <div className="flex items-center">
-              <UserIcon className="w-4 h-4 text-gray-400 mr-2 flex-shrink-0" />
+              <UserIcon className="w-4 h-4 color-text-secondary mr-2 flex-shrink-0" />
               <div className="min-w-0">
-                <p className={`text-lg font-semibold ${
-                  isModern ? 'text-purple-100' : isModernDark ? 'text-purple-100' : (isDark ? 'text-white' : 'text-gray-900')
-                }`}>{addonUsersCount}</p>
-                <p className={`text-xs ${
-                  isModern ? 'text-purple-300' : isModernDark ? 'text-purple-300' : (isDark ? 'text-gray-400' : 'text-gray-500')
-                }`}>{addonUsersCount === 1 ? 'User' : 'Users'}</p>
+                <p className={`text-lg font-semibold`}>{addonUsersCount}</p>
+                <p className={`text-xs color-text-secondary`}>{addonUsersCount === 1 ? 'User' : 'Users'}</p>
               </div>
             </div>
             <div className="flex items-center">
-              <GroupIcon className="w-4 h-4 text-gray-400 mr-2 flex-shrink-0" />
+              <GroupIcon className="w-4 h-4 color-text-secondary mr-2 flex-shrink-0" />
               <div className="min-w-0">
-                <p className={`text-lg font-semibold ${
-                  isModern ? 'text-purple-100' : isModernDark ? 'text-purple-100' : (isDark ? 'text-white' : 'text-gray-900')
-                }`}>{addonGroupsCount}</p>
-                <p className={`text-xs ${
-                  isModern ? 'text-purple-300' : isModernDark ? 'text-purple-300' : (isDark ? 'text-gray-400' : 'text-gray-500')
-                }`}>{addonGroupsCount === 1 ? 'Group' : 'Groups'}</p>
+                <p className={`text-lg font-semibold`}>{addonGroupsCount}</p>
+                <p className={`text-xs color-text-secondary`}>{addonGroupsCount === 1 ? 'Group' : 'Groups'}</p>
               </div>
             </div>
           </>
@@ -706,7 +775,7 @@ export default function EntityCard({
         {onView && (
           <button
             onClick={handleView}
-            className="flex-1 flex items-center justify-center px-3 py-2 h-8 min-h-8 max-h-8 text-sm rounded transition-colors hover:font-semibold accent-bg accent-text hover:opacity-90"
+            className="flex-1 flex items-center justify-center px-3 py-2 h-8 min-h-8 max-h-8 text-sm rounded font-medium color-text color-hover"
           >
             <Eye className="w-4 h-4 mr-1" />
             View
@@ -717,7 +786,7 @@ export default function EntityCard({
           <button
             onClick={handleImport}
             disabled={isImporting}
-            className="flex items-center justify-center px-3 py-2 h-8 min-h-8 max-h-8 text-sm rounded transition-colors disabled:opacity-50 accent-bg accent-text hover:opacity-90"
+            className="flex items-center justify-center px-3 py-2 h-8 min-h-8 max-h-8 text-sm rounded disabled:opacity-50 color-text color-hover"
             title="Import user's addons to a new group"
           >
             {isImporting ? (
@@ -732,7 +801,7 @@ export default function EntityCard({
           <button
             onClick={handleReload}
             disabled={isReloading}
-            className="flex items-center justify-center px-3 py-2 h-8 min-h-8 max-h-8 text-sm rounded transition-colors disabled:opacity-50 accent-bg accent-text hover:opacity-90"
+            className="flex items-center justify-center px-3 py-2 h-8 min-h-8 max-h-8 text-sm rounded disabled:opacity-50 color-text color-hover"
             title="Reload user addons"
           >
             <RefreshCw className={`w-4 h-4 ${isReloading ? 'animate-spin' : ''}`} />
@@ -742,7 +811,7 @@ export default function EntityCard({
         {variant === 'group' && onClone && (
           <button
             onClick={handleClone}
-            className="flex items-center justify-center px-3 py-2 h-8 min-h-8 max-h-8 text-sm rounded transition-colors accent-bg accent-text hover:opacity-90"
+            className="flex items-center justify-center px-3 py-2 h-8 min-h-8 max-h-8 text-sm rounded color-text color-hover"
             title="Clone this group"
           >
             <Copy className="w-4 h-4" />
@@ -753,7 +822,7 @@ export default function EntityCard({
           <button
             onClick={handleReload}
             disabled={isReloading}
-            className="flex items-center justify-center px-3 py-2 h-8 min-h-8 max-h-8 text-sm rounded transition-colors disabled:opacity-50 accent-bg accent-text hover:opacity-90"
+            className="flex items-center justify-center px-3 py-2 h-8 min-h-8 max-h-8 text-sm rounded disabled:opacity-50 color-text color-hover"
             title="Reload group addons"
           >
             <RefreshCw className={`w-4 h-4 ${isReloading ? 'animate-spin' : ''}`} />
@@ -764,7 +833,7 @@ export default function EntityCard({
         {variant === 'addon' && onClone && (
           <button
             onClick={handleClone}
-            className="flex items-center justify-center px-3 py-2 h-8 min-h-8 max-h-8 text-sm rounded transition-colors accent-bg accent-text hover:opacity-90"
+            className="flex items-center justify-center px-3 py-2 h-8 min-h-8 max-h-8 text-sm rounded color-text color-hover"
             title="Clone addon"
           >
             <Copy className="w-4 h-4" />
@@ -775,7 +844,7 @@ export default function EntityCard({
           <button
             onClick={handleReload}
             disabled={isReloading}
-            className="flex items-center justify-center px-3 py-2 h-8 min-h-8 max-h-8 text-sm rounded transition-colors disabled:opacity-50 accent-bg accent-text hover:opacity-90"
+            className="flex items-center justify-center px-3 py-2 h-8 min-h-8 max-h-8 text-sm rounded disabled:opacity-50 color-text color-hover"
             title="Reload addon"
           >
             <RefreshCw className={`w-4 h-4 ${isReloading ? 'animate-spin' : ''}`} />
@@ -785,7 +854,7 @@ export default function EntityCard({
         <button 
           onClick={handleDelete}
           disabled={false}
-          className="flex items-center justify-center px-3 py-2 h-8 min-h-8 max-h-8 text-sm rounded transition-colors disabled:opacity-50 accent-bg accent-text hover:opacity-90"
+          className="flex items-center justify-center px-3 py-2 h-8 min-h-8 max-h-8 text-sm rounded disabled:opacity-50 color-text color-hover"
         >
           <Trash2 className="w-4 h-4" />
         </button>

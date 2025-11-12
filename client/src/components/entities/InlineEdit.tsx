@@ -25,7 +25,6 @@ export default function InlineEdit({
   invalidateQueries = []
 }: InlineEditProps) {
   const theme = useTheme()
-  const { isDark } = theme as any
   const queryClient = useQueryClient()
   const [isEditing, setIsEditing] = useState(false)
   const [editValue, setEditValue] = useState(value)
@@ -120,9 +119,7 @@ export default function InlineEdit({
         {/* Hidden span to measure original text width */}
         <span
           ref={measureRef}
-          className={`text-xl font-bold absolute opacity-0 pointer-events-none whitespace-nowrap ${
-            isDark ? 'text-white' : 'text-gray-900'
-          } ${className}`}
+          className={`text-xl font-bold absolute opacity-0 pointer-events-none whitespace-nowrap ${className}`}
         >
           {value || placeholder}
         </span>
@@ -141,9 +138,7 @@ export default function InlineEdit({
           placeholder={placeholder}
           maxLength={maxLength}
           disabled={isSaving}
-          className={`absolute top-0 left-0 text-xl font-bold bg-transparent border-none outline-none focus:ring-0 focus:outline-none p-0 m-0 overflow-hidden ${
-            isDark ? 'text-white placeholder-gray-400' : 'text-gray-900 placeholder-gray-500'
-          } ${isSaving ? 'opacity-50' : ''} ${className}`}
+          className={`absolute top-0 left-0 text-xl font-bold bg-transparent border-none outline-none focus:ring-0 focus:outline-none p-0 m-0 overflow-hidden color-text placeholder:color-text-secondary ${isSaving ? 'opacity-50' : ''} ${className}`}
           style={{
             width: inputWidth > 0 ? `${inputWidth}px` : 'auto',
             minWidth: '20px',
@@ -158,9 +153,7 @@ export default function InlineEdit({
   return (
     <span 
       onClick={handleStartEdit}
-      className={`text-xl font-bold cursor-pointer hover:underline transition-all ${
-        isDark ? 'text-white hover:text-gray-200' : 'text-gray-900 hover:text-gray-700'
-      } ${disabled ? 'cursor-default hover:no-underline' : ''} ${className}`}
+      className={`text-xl font-bold cursor-pointer hover:underline transition-all color-text hover:opacity-80 ${disabled ? 'cursor-default hover:no-underline' : ''} ${className}`}
       title={disabled ? '' : 'Click to edit'}
     >
       {value || placeholder}

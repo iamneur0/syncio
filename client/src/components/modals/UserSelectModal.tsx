@@ -4,7 +4,7 @@ import { X, Search, User } from 'lucide-react'
 import { useTheme } from '@/contexts/ThemeContext'
 import { useQuery } from '@tanstack/react-query'
 import { usersAPI } from '@/services/api'
-import { getColorBgClass, getColorHexValue } from '@/utils/colorMapping'
+import { getEntityColorStyles } from '@/utils/colorMapping'
 import { EntityList } from '@/components/entities'
 
 interface UserSelectModalProps {
@@ -22,7 +22,7 @@ export default function UserSelectModal({
   groupId,
   excludeUserIds = []
 }: UserSelectModalProps) {
-  const { isDark, isMono, hideSensitive } = useTheme()
+  const { hideSensitive, theme } = useTheme()
   const [mounted, setMounted] = useState(false)
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([])
@@ -94,35 +94,40 @@ export default function UserSelectModal({
     return null
   }
 
-  const renderUserItem = (user: any) => (
+  const renderUserItem = (user: any) => {
+    const colorStyles = getEntityColorStyles(theme, user.colorIndex || 0)
+    const isSelected = selectedUserIds.includes(user.id)
+    return (
     <div 
-      className={`p-3 rounded-lg cursor-pointer transition-colors ${
-        isDark ? 'bg-gray-700 hover:bg-gray-600' : 'bg-white hover:bg-gray-50'
-      }`}
+        className={`p-3 rounded-lg cursor-pointer transition-colors card card-selectable color-hover hover:shadow-lg ${
+          isSelected ? 'card-selected' : ''
+        }`}
       onClick={() => handleItemClick(user.id)}
     >
       <div className="flex items-center gap-3">
         <div 
-          className={`w-8 h-8 rounded-full flex items-center justify-center ${
-            getColorBgClass(user.colorIndex || 0, isMono ? 'mono' : isDark ? 'dark' : 'light')
-          }`}
-          style={{ backgroundColor: getColorHexValue(user.colorIndex || 0, isMono ? 'mono' : isDark ? 'dark' : 'light') }}
+            className="w-8 h-8 rounded-full flex items-center justify-center"
+            style={{ 
+              background: colorStyles.background,
+              color: colorStyles.textColor,
+            }}
         >
-          <span className="text-white font-semibold text-sm">
+            <span className="font-semibold text-sm" style={{ color: colorStyles.textColor }}>
             {(user.username || user.email || 'U').charAt(0).toUpperCase()}
           </span>
         </div>
         <div className="flex-1 min-w-0">
-          <h4 className={`font-medium truncate ${isDark ? 'text-white' : 'text-gray-900'}`}>
+          <h4 className={`font-medium truncate`}>
             {user.username || 'No username'}
           </h4>
-          <p className={`text-sm truncate ${isDark ? 'text-gray-400' : 'text-gray-500'} ${hideSensitive ? 'blur-sm select-none' : ''}`}>
+          <p className={`text-sm truncate color-text-secondary ${hideSensitive ? 'blur-sm select-none' : ''}`}>
             {hideSensitive ? '••••••••' : (user.email || 'No email')}
           </p>
         </div>
       </div>
     </div>
   )
+  }
 
   return createPortal(
     <div 
@@ -133,19 +138,15 @@ export default function UserSelectModal({
         }
       }}
     >
-      <div className={`w-full max-w-2xl max-h-[80vh] rounded-lg shadow-xl ${
-        isDark ? 'bg-gray-800' : 'bg-white'
-      }`}>
+      <div className={`w-full max-w-2xl max-h-[80vh] rounded-lg shadow-xl card`}>
         <div className="p-6">
           <div className="flex items-center justify-between mb-6">
-            <h2 className={`text-xl font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>
+            <h2 className={`text-xl font-bold`}>
               Add User to Group
             </h2>
             <button
               onClick={onClose}
-              className={`w-8 h-8 flex items-center justify-center rounded transition-colors border-0 ${
-                isDark ? 'text-gray-400 hover:text-gray-300 hover:bg-gray-700' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
-              }`}
+              className={`w-8 h-8 flex items-center justify-center rounded transition-colors border-0 color-hover`}
             >
               <X className="w-4 h-4" />
             </button>
@@ -154,18 +155,14 @@ export default function UserSelectModal({
           {/* Search */}
           <div className="relative mb-4">
             <Search className={`absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 ${
-              isDark ? 'text-gray-400' : 'text-gray-500'
+              'color-text-secondary'
             }`} />
             <input
               type="text"
               placeholder="Search users..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className={`w-full pl-10 pr-4 py-2 border rounded-lg focus:outline-none ${
-                isDark 
-                  ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
-                  : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
-              }`}
+              className={`w-full pl-10 pr-4 py-2 rounded-lg input`}
             />
           </div>
 
@@ -177,7 +174,7 @@ export default function UserSelectModal({
               items={filteredUsers}
               isLoading={isLoading}
               renderItem={renderUserItem}
-              emptyIcon={<User className={`w-12 h-12 mx-auto mb-4 ${isDark ? 'text-gray-500' : 'text-gray-400'}`} />}
+              emptyIcon={<User className={`w-12 h-12 mx-auto mb-4 color-text-secondary`} />}
               emptyMessage={searchTerm ? 'No users found matching your search' : 'No users available to add'}
               getIsSelected={(user) => selectedUserIds.includes(user.id)}
               onClearSelection={() => setSelectedUserIds([])}
@@ -189,11 +186,7 @@ export default function UserSelectModal({
           <div className="flex justify-end gap-3 mt-6">
             <button
               onClick={onClose}
-              className={`px-4 py-2 rounded-lg transition-colors ${
-                isDark 
-                  ? 'text-gray-300 hover:text-white hover:bg-gray-700' 
-                  : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-              }`}
+              className={`px-4 py-2 rounded-lg transition-colors color-hover`}
             >
               Cancel
             </button>
@@ -202,8 +195,8 @@ export default function UserSelectModal({
               disabled={selectedUserIds.length === 0}
               className={`px-4 py-2 rounded-lg transition-colors ${
                 selectedUserIds.length > 0
-                  ? (isMono ? 'bg-white text-black hover:bg-gray-200' : 'accent-bg accent-text')
-                  : (isDark ? 'bg-gray-600 text-gray-400 cursor-not-allowed' : 'bg-gray-300 text-gray-500 cursor-not-allowed')
+                  ? 'color-surface'
+                  : 'color-surface color-text-secondary cursor-not-allowed'
               }`}
             >
               Add to Group {selectedUserIds.length > 0 && `(${selectedUserIds.length})`}

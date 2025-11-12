@@ -1,5 +1,4 @@
 import React from 'react'
-import { useTheme } from '@/contexts/ThemeContext'
 
 interface LoadingSkeletonProps {
   type?: 'card' | 'list' | 'text' | 'avatar' | 'button'
@@ -12,21 +11,14 @@ export default function LoadingSkeleton({
   className = '', 
   lines = 1 
 }: LoadingSkeletonProps) {
-  const theme = useTheme()
-  const { isDark, isMono } = theme
-  
   const baseClasses = 'animate-pulse'
-  const bgClasses = isMono 
-    ? 'bg-white/10' 
-    : isDark 
-    ? 'bg-gray-700' 
-    : 'bg-gray-200'
+  const bgClasses = 'color-surface'
   
   const renderSkeleton = () => {
     switch (type) {
       case 'card':
         return (
-          <div className={`rounded-lg border p-6 ${bgClasses} ${className}`}>
+          <div className={`rounded-lg border p-6 card ${className}`}>
             <div className="flex items-start justify-between mb-4">
               <div className="flex items-center gap-3">
                 <div className={`w-10 h-10 rounded-lg ${bgClasses}`} />
@@ -52,7 +44,7 @@ export default function LoadingSkeleton({
       
       case 'list':
         return (
-          <div className={`rounded-lg border p-4 ${bgClasses} ${className}`}>
+          <div className={`rounded-lg border p-4 card ${className}`}>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-4">
                 <div className={`w-8 h-8 rounded ${bgClasses}`} />

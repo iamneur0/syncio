@@ -1,10 +1,10 @@
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { useTheme } from '@/contexts/ThemeContext'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { groupsAPI, usersAPI, addonsAPI } from '@/services/api'
 import { useSyncStatusRefresh } from '@/hooks/useSyncStatusRefresh'
-import { getColorBgClass, getColorHexValue } from '@/utils/colorMapping'
+import { getEntityColorStyles } from '@/utils/colorMapping'
 import { invalidateGroupQueries, invalidateSyncStatusQueries } from '@/utils/queryUtils'
 import { groupSuccessHandlers } from '@/utils/toastUtils'
 import { useModalState } from '@/hooks/useCommonState'
@@ -39,8 +39,7 @@ export default function GroupDetailModal({
   onClose,
   group
 }: GroupDetailModalProps) {
-  const theme = useTheme()
-  const { isDark, isModern, isModernDark, isMono } = theme
+  const { theme: themeName } = useTheme()
   const { mounted } = useModalState()
   const [addons, setAddons] = useState<any[]>([])
   const [refreshKey, setRefreshKey] = useState(0)
@@ -94,6 +93,11 @@ export default function GroupDetailModal({
 
   // Use the query data instead of the prop
   const currentGroup = groupDetails || group
+  const groupColorIndex = currentGroup?.colorIndex || 0
+  const groupColorStyles = useMemo(
+    () => getEntityColorStyles(themeName, groupColorIndex),
+    [themeName, groupColorIndex]
+  )
 
   // Force refresh when group data changes
   useEffect(() => {
@@ -381,9 +385,10 @@ export default function GroupDetailModal({
         }
       }}
     >
-      <div className={`relative w-full max-w-4xl max-h-[90vh] overflow-y-auto overflow-x-hidden rounded-lg shadow-xl ${
-        isDark ? 'bg-gray-800' : 'bg-white'
-      }`}>
+      <div
+        className={`relative w-full max-w-4xl max-h-[90vh] overflow-y-auto overflow-x-hidden rounded-lg shadow-xl card`}
+        style={{ background: 'var(--color-background)' }}
+      >
         <div className="p-6">
           <div className="flex items-center justify-between mb-6">
             <div className="flex flex-col flex-1">
@@ -393,13 +398,14 @@ export default function GroupDetailModal({
                   <div 
                     ref={logoRef}
                     onClick={() => setShowColorPicker(!showColorPicker)}
-                    className={`w-12 h-12 rounded-full flex items-center justify-center flex-shrink-0 border-2 cursor-pointer transition-all hover:scale-105 ${
-                      getColorBgClass(currentGroup.colorIndex || 0, isMono ? 'mono' : isDark ? 'dark' : 'light')
-                    }`}
-                    style={{ backgroundColor: getColorHexValue(currentGroup.colorIndex || 0, isMono ? 'mono' : isDark ? 'dark' : 'light') }}
+                    className="w-12 h-12 rounded-full flex items-center justify-center flex-shrink-0 cursor-pointer transition-all hover:scale-105"
                     title="Click to change color"
+                    style={{
+                      background: groupColorStyles.background,
+                      color: groupColorStyles.textColor,
+                    }}
                   >
-                    <span className="text-white font-semibold text-lg">
+                    <span className="font-semibold text-lg" style={{ color: groupColorStyles.textColor }}>
                       {currentGroup.name.charAt(0).toUpperCase()}
                     </span>
                   </div>
@@ -445,7 +451,7 @@ export default function GroupDetailModal({
                       />
                     </div>
                     {currentGroup.description && (
-                      <p className={`text-sm mt-1 truncate ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+                      <p className={`text-sm mt-1 truncate color-text-secondary`}>
                         {currentGroup.description}
                       </p>
                     )}
@@ -456,9 +462,7 @@ export default function GroupDetailModal({
             </div>
             <button
               onClick={onClose}
-              className={`w-8 h-8 flex items-center justify-center rounded transition-colors border-0 ${
-                isDark ? 'text-gray-400 hover:text-gray-300 hover:bg-gray-700' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
-              }`}
+              className={`w-8 h-8 flex items-center justify-center rounded transition-colors border-0 color-hover`}
               aria-label="Close"
             >
               <X className="w-4 h-4" />
@@ -513,7 +517,7 @@ export default function GroupDetailModal({
                 }}
               />
             )}
-            emptyIcon={<Users className={`w-12 h-12 mx-auto mb-4 ${isDark ? 'text-gray-500' : 'text-gray-400'}`} />}
+            emptyIcon={<Users className={`w-12 h-12 mx-auto mb-4 color-text-secondary`} />}
             emptyMessage="No users in this group"
           />
 
@@ -541,7 +545,7 @@ export default function GroupDetailModal({
               tooltip: 'Add addon to group'
             }}
             isDraggable={true}
-            emptyIcon={<Puzzle className={`w-12 h-12 mx-auto mb-4 ${isDark ? 'text-gray-500' : 'text-gray-400'}`} />}
+            emptyIcon={<Puzzle className={`w-12 h-12 mx-auto mb-4 color-text-secondary`} />}
             emptyMessage="No addons in this group"
           >
             {!isLoadingGroupAddons && addons.length > 0 && (

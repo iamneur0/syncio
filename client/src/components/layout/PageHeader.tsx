@@ -28,7 +28,6 @@ interface PageHeaderProps {
   isSyncing?: boolean
   isSyncDisabled?: boolean
   isDeleteDisabled?: boolean
-  mounted?: boolean
 }
 
 export default function PageHeader({
@@ -50,8 +49,7 @@ export default function PageHeader({
   isReloadDisabled = false,
   isSyncing = false,
   isSyncDisabled = false,
-  isDeleteDisabled = false,
-  mounted = true
+  isDeleteDisabled = false
 }: PageHeaderProps) {
   const theme = useTheme()
 
@@ -96,7 +94,7 @@ export default function PageHeader({
         {/* Search Bar */}
         <div className="flex-1">
           <div className="relative">
-            <div className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500">
+            <div className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 color-text-secondary">
               <Search className="w-4 h-4" />
             </div>
             <input
@@ -104,13 +102,13 @@ export default function PageHeader({
               placeholder={searchPlaceholder}
               value={searchTerm}
               onChange={(e) => onSearchChange(e.target.value)}
-              className="w-full pl-9 pr-10 py-2 rounded-lg border bg-white text-gray-900 placeholder-gray-500 border-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-300 dark:bg-gray-700 dark:text-white dark:placeholder-gray-400 dark:border-gray-600 dark:focus:ring-gray-600"
+              className="w-full pl-9 pr-10 py-2 rounded-lg input"
             />
             {searchTerm && (
               <button
                 type="button"
                 onClick={() => onSearchChange('')}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-xs px-2 py-1 rounded bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-600 dark:text-white dark:hover:bg-gray-500"
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-xs px-2 py-1 rounded color-surface color-text hover:opacity-80"
                 title="Clear"
               >
                 Clear
@@ -172,28 +170,26 @@ export default function PageHeader({
         </div>
         
         {/* View Mode Toggle */}
-        {mounted && (
-          <div className="flex items-center">
-            <div className="flex rounded-lg border border-gray-300 dark:border-gray-600">
-              <ToggleButton
-                isActive={viewMode === 'card'}
-                onClick={() => onViewModeChange('card')}
-                activeIcon={<Grip className="w-4 h-4" />}
-                inactiveIcon={<Grip className="w-4 h-4" />}
-                className="rounded-l-lg border-0 border-r-0"
-                title="Card view"
-              />
-              <ToggleButton
-                isActive={viewMode === 'list'}
-                onClick={() => onViewModeChange('list')}
-                activeIcon={<List className="w-4 h-4" />}
-                inactiveIcon={<List className="w-4 h-4" />}
-                className="rounded-r-lg border-0 border-l-0"
-                title="List view"
-              />
-            </div>
+        <div className="flex items-center h-10">
+          <div className="flex h-full rounded-lg border color-border">
+            <ToggleButton
+              isActive={viewMode === 'card'}
+              onClick={() => onViewModeChange('card')}
+              activeIcon={<Grip className="w-4 h-4" />}
+              inactiveIcon={<Grip className="w-4 h-4" />}
+              className="rounded-l-lg border-0 border-r-0"
+              title="Card view"
+            />
+            <ToggleButton
+              isActive={viewMode === 'list'}
+              onClick={() => onViewModeChange('list')}
+              activeIcon={<List className="w-4 h-4" />}
+              inactiveIcon={<List className="w-4 h-4" />}
+              className="rounded-r-lg border-0 border-l-0"
+              title="List view"
+            />
           </div>
-        )}
+        </div>
       </div>
     </div>
   )

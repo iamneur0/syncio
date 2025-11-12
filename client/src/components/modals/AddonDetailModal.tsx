@@ -5,8 +5,9 @@ import React, { useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { Puzzle, X, BookOpen, Clapperboard, Tv, Library, Zap, Clipboard, ClipboardList, Users, Copy } from 'lucide-react'
 import { useTheme } from '@/contexts/ThemeContext'
-import { getColorBgClass, getColorTextClass, getColorBorderClass, getColorHexValue } from '@/utils/colorMapping'
+import { getEntityColorStyles } from '@/utils/colorMapping'
 import { VersionChip } from '@/components/ui'
+import AddonIcon from '@/components/entities/AddonIcon'
 import { EntityList, InlineEdit, ResourceItem, CatalogItem } from '@/components/entities'
 import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query'
 import { addonsAPI, groupsAPI } from '@/services/api'
@@ -29,7 +30,7 @@ export default function AddonDetailModal({
   onSave,
   isLoading = false
 }: AddonDetailModalProps) {
-  const { isDark, isModern, isModernDark, isMono, hideSensitive } = useTheme() as any
+  const { hideSensitive, theme } = useTheme()
   const [mounted, setMounted] = useState(false)
 
   // Handle escape key
@@ -529,6 +530,13 @@ export default function AddonDetailModal({
     handleResetCatalogs()
   }
 
+  const addonManifest = currentAddon?.originalManifest || currentAddon?.manifest || {}
+  const addonLogoUrl =
+    currentAddon?.iconUrl ||
+    addonManifest?.logo ||
+    addonManifest?.icon ||
+    addonManifest?.images?.logo
+
 
   if (!isOpen || !addon) return null
 
@@ -546,37 +554,21 @@ export default function AddonDetailModal({
         }
       }}
     >
-      <div className={`relative w-full max-w-4xl max-h-[90vh] overflow-y-auto rounded-lg shadow-xl ${
-        isDark ? 'bg-gray-800' : 'bg-white'
-      }`}>
+      <div
+        className={`relative w-full max-w-4xl max-h-[90vh] overflow-y-auto rounded-lg shadow-xl card`}
+        style={{ background: 'var(--color-background)' }}
+      >
         <div className="p-6">
           {/* Header */}
-          <div className="flex items-center justify-between mb-6">
-            <div className="flex items-center gap-4">
-              <div className={`logo-circle-12 mr-0 flex-shrink-0`}>
-                {(() => {
-                  const manifest = currentAddon?.originalManifest || currentAddon?.manifest || {}
-                  const logoUrl = currentAddon?.iconUrl || manifest?.logo || manifest?.icon || manifest?.images?.logo
-                  return logoUrl ? (
-                    <img
-                      src={logoUrl}
-                      alt={`${currentAddon?.name || 'Addon'} logo`}
-                      className="logo-img-fill"
-                      onError={(e) => {
-                        // Hide broken image and show puzzle fallback
-                        e.currentTarget.style.display = 'none'
-                        const nextEl = e.currentTarget.nextElementSibling as HTMLElement | null
-                        if (nextEl) {
-                          nextEl.style.display = 'block'
-                        }
-                      }}
-                    />
-                  ) : null
-                })()}
-                <div className="w-full h-full flex items-center justify-center" style={{ display: currentAddon?.iconUrl || (currentAddon?.originalManifest || currentAddon?.manifest)?.logo ? 'none' : 'flex' }}>
-                  <Puzzle className={`w-6 h-6 ${isDark ? 'text-gray-300' : 'text-gray-400'}`} />
-                </div>
-              </div>
+          <div className="flex flex-wrap items-start justify-between mb-6 gap-4">
+            <div className="flex items-start gap-4 relative">
+              <AddonIcon
+                name={currentAddon?.name || addonManifest?.name || 'Addon'}
+                iconUrl={addonLogoUrl}
+                size="12"
+                className="flex-shrink-0"
+                colorIndex={1}
+              />
               <div className="flex items-center gap-3">
                 <InlineEdit
                   value={currentAddon?.name || ''}
@@ -591,9 +583,7 @@ export default function AddonDetailModal({
             </div>
             <button
               onClick={onClose}
-              className={`w-8 h-8 flex items-center justify-center rounded transition-colors border-0 ${
-                isDark ? 'text-gray-400 hover:text-gray-300 hover:bg-gray-700' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
-              }`}
+              className={`w-8 h-8 flex items-center justify-center rounded transition-colors border-0 color-hover`}
               aria-label="Close"
             >
               <X className="w-4 h-4" />
@@ -601,29 +591,25 @@ export default function AddonDetailModal({
           </div>
 
           {/* URL and Description */}
-          <div className={`p-4 rounded-lg mb-6 ${isDark ? 'bg-gray-700' : 'bg-gray-50'}`}>
+          <div className="p-4 rounded-lg mb-6 section-panel">
             <div className="flex items-center justify-between mb-3">
-              <h3 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>
+              <h3 className={`text-lg font-semibold`}>
                 Details
             </h3>
               <button
                 type="button"
                 onClick={handleMasterReset}
-                className={`px-3 py-1 text-sm rounded transition-colors ${
-                  isDark 
-                    ? 'text-gray-300 hover:text-white hover:bg-gray-600' 
-                    : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-                }`}
+                className={`px-3 py-1 text-sm rounded transition-colors color-text-secondary color-hover`}
                 title="Reset all resources and catalogs to defaults"
               >
                 Reset
               </button>
             </div>
             
-            <div className="mb-4">
-              <h4 className={`text-sm font-semibold mb-2 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
-                URL
-              </h4>
+          <div className="mb-4">
+            <h4 className={`text-sm font-semibold mb-2`}>
+              URL
+            </h4>
             <div className="relative">
               <button
                 type="button"
@@ -638,34 +624,29 @@ export default function AddonDetailModal({
                     }
                   }
                 }}
-                className={`w-full px-3 py-2 pr-10 border rounded-lg text-left transition-all duration-200 hover:opacity-80 ${
-                  urlCopied 
-                    ? (isMono ? 'bg-transparent border-white/20 text-white' : isDark ? 'bg-green-600 border-green-500 text-white' : 'bg-green-100 border-green-300 text-green-900')
-                    : (isMono ? 'bg-transparent border-white/20 text-white hover:bg-white/5' : isDark ? 'bg-gray-600 border-gray-500 text-white hover:bg-gray-550' : 'bg-gray-100 border-gray-300 text-gray-900 hover:bg-gray-200')
-                }`}
+                className={`w-full px-3 py-2 pr-10 rounded-lg text-left transition-all duration-200 hover:opacity-80 input`}
+                style={urlCopied ? { boxShadow: '0 0 0 2px var(--toggle-track-on)' } : undefined}
                 title={hideSensitive ? '***'.repeat(50) : (currentAddon?.url || 'No URL available')}
               >
                 <span className={`block truncate ${hideSensitive ? 'blur-sm select-none' : ''}`}>
                   {hideSensitive ? '***'.repeat(50) : (currentAddon?.url || 'No URL available')}
                 </span>
               </button>
-              <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
+              <div className="absolute right-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-center">
                 {urlCopied ? (
-                  <ClipboardList className={`w-4 h-4 ${isMono ? 'text-white' : isDark ? 'text-white' : 'text-green-600'}`} />
+                  <ClipboardList className={`w-4 h-4 color-text-secondary`} />
                 ) : (
-                  <Clipboard className={`w-4 h-4 ${isMono ? 'text-white/60' : isDark ? 'text-gray-400' : 'text-gray-500'}`} />
+                  <Clipboard className={`w-4 h-4 color-text-secondary`} />
                 )}
               </div>
             </div>
           </div>
 
             <div>
-              <h4 className={`text-sm font-semibold mb-2 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
+              <h4 className={`text-sm font-semibold mb-2`}>
               Description
               </h4>
-            <div className={`w-full px-3 py-2 rounded-lg ${
-              isMono ? 'bg-black text-white border border-white/20' : (isDark ? 'bg-gray-800 text-white border border-gray-700' : 'bg-gray-100 text-gray-900 border border-gray-300')
-            }`}>
+            <div className={`w-full px-3 py-2 rounded-lg input`}>
               {currentAddon?.description || 'No description available'}
               </div>
             </div>
@@ -673,8 +654,8 @@ export default function AddonDetailModal({
 
           {/* Manifest Buttons - Debug Only */}
           {isDebugMode && (
-            <div className={`p-4 rounded-lg mb-6 ${isDark ? 'bg-gray-700' : 'bg-gray-50'}`}>
-              <h3 className={`text-lg font-semibold mb-3 ${isDark ? 'text-white' : 'text-gray-900'}`}>
+            <div className="p-4 rounded-lg mb-6 section-panel">
+              <h3 className={`text-lg font-semibold mb-3`}>
                 Manifest (Debug)
               </h3>
               <div className="flex gap-3">
@@ -694,11 +675,7 @@ export default function AddonDetailModal({
                       }
                     }
                   }}
-                  className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
-                    isDark 
-                      ? 'bg-gray-600 text-white hover:bg-gray-550' 
-                      : 'bg-gray-100 text-gray-900 hover:bg-gray-200'
-                  }`}
+                  className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors color-surface hover:opacity-90`}
                 >
                   View Manifest
                 </button>
@@ -718,11 +695,7 @@ export default function AddonDetailModal({
                       }
                     }
                   }}
-                  className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
-                    isDark 
-                      ? 'bg-gray-600 text-white hover:bg-gray-550' 
-                      : 'bg-gray-100 text-gray-900 hover:bg-gray-200'
-                  }`}
+                  className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors color-surface hover:opacity-90`}
                 >
                   View Original Manifest
                 </button>
@@ -753,34 +726,36 @@ export default function AddonDetailModal({
                   <div
                     key={group.id}
                     onClick={() => handleToggleGroup(group)}
-                    className={`flex items-center justify-between p-3 rounded-lg cursor-pointer ${
-                      isDark ? 'bg-gray-600 hover:bg-gray-550' : 'bg-white hover:bg-gray-50'
-                    } border ${
-                      isGroupSelected(group)
-                        ? (isMono ? 'ring-2 ring-white/50 border-white/40' : 'ring-2 ring-gray-400 border-gray-400')
-                        : 'border-transparent'
+                    className={`flex items-center justify-between p-3 rounded-lg cursor-pointer card card-selectable color-hover hover:shadow-lg ${
+                      isGroupSelected(group) ? 'card-selected' : ''
                     }`}
                   >
                     <div className="flex items-center flex-1 min-w-0">
-                      <div 
-                        className={`w-8 h-8 rounded-full flex items-center justify-center mr-3 flex-shrink-0 ${
-                          getColorBgClass(group?.colorIndex || 0, isMono ? 'mono' : isDark ? 'dark' : 'light')
-                        }`}
-                        style={{ backgroundColor: getColorHexValue(group?.colorIndex || 0, isMono ? 'mono' : isDark ? 'dark' : 'light') }}
-                      >
-                        <span className="text-white text-sm font-semibold">
-                          {group.name ? group.name.charAt(0).toUpperCase() : 'G'}
-                        </span>
-                      </div>
+                      {(() => {
+                        const colorStyles = getEntityColorStyles(theme, group?.colorIndex || 0)
+                        return (
+                          <div 
+                            className="w-8 h-8 rounded-full flex items-center justify-center mr-3 flex-shrink-0"
+                            style={{
+                              background: colorStyles.background,
+                              color: colorStyles.textColor,
+                            }}
+                          >
+                            <span className="text-sm font-semibold" style={{ color: colorStyles.textColor }}>
+                              {group.name ? group.name.charAt(0).toUpperCase() : 'G'}
+                            </span>
+                          </div>
+                        )
+                      })()}
                       <div className="min-w-0 flex-1">
-                        <h4 className={`font-medium text-sm ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                        <h4 className={`font-medium text-sm`}>
                           {group.name}
                         </h4>
                       </div>
                     </div>
                   </div>
                 )}
-                emptyIcon={<Users className={`w-12 h-12 mx-auto mb-4 ${isDark ? 'text-gray-500' : 'text-gray-400'}`} />}
+                emptyIcon={<Users className={`w-12 h-12 mx-auto mb-4 color-text-secondary`} />}
                 emptyMessage="No groups associated with this addon"
               />
             )
@@ -946,16 +921,12 @@ export default function AddonDetailModal({
                   />
                 )}
                 emptyMessage="No resources available for this addon"
-                emptyIcon={<Puzzle className={`w-12 h-12 mx-auto mb-4 ${isDark ? 'text-gray-500' : 'text-gray-400'}`} />}
+                emptyIcon={<Puzzle className={`w-12 h-12 mx-auto mb-4 color-text-secondary`} />}
                 headerRight={
                   <button
                     type="button"
                     onClick={handleResetResources}
-                    className={`px-3 py-1 text-sm rounded transition-colors ${
-                      isDark 
-                        ? 'text-gray-300 hover:text-white hover:bg-gray-600' 
-                        : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-                    }`}
+                    className={`px-3 py-1 text-sm rounded transition-colors color-text-secondary color-hover`}
                     title="Reset all resources to defaults"
                   >
                     Reset
@@ -1018,11 +989,7 @@ export default function AddonDetailModal({
                   <button
                     type="button"
                     onClick={handleResetCatalogs}
-                    className={`px-3 py-1 text-sm rounded transition-colors ${
-                      isDark 
-                        ? 'text-gray-300 hover:text-white hover:bg-gray-600' 
-                        : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-                    }`}
+                    className={`px-3 py-1 text-sm rounded transition-colors color-text-secondary color-hover`}
                     title="Reset all catalogs to defaults"
                   >
                     Reset
@@ -1111,18 +1078,14 @@ export default function AddonDetailModal({
             <button
               type="button"
               onClick={onClose}
-              className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
-                isDark 
-                  ? 'text-gray-300 hover:text-white hover:bg-gray-700' 
-                  : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-              }`}
+              className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors color-text-secondary color-hover`}
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={isLoading}
-              className="px-4 py-2 text-sm font-medium rounded-lg transition-colors disabled:opacity-50 accent-bg accent-text hover:opacity-90"
+              className="px-4 py-2 text-sm font-medium rounded-lg transition-colors disabled:opacity-50 color-surface hover:opacity-90"
             >
               {isLoading ? 'Saving...' : 'Save Changes'}
             </button>
@@ -1134,38 +1097,30 @@ export default function AddonDetailModal({
       {/* Manifest JSON Modal */}
       {showManifestModal && (
         <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-[1001] p-4">
-          <div className={`relative w-full max-w-4xl max-h-[90vh] overflow-y-auto rounded-lg shadow-xl ${
-            isDark ? 'bg-gray-800' : 'bg-white'
-          }`}>
+          <div className={`relative w-full max-w-4xl max-h-[90vh] overflow-y-auto rounded-lg shadow-xl card`}>
             <div className="absolute top-4 right-4 flex gap-2">
               <button
                 onClick={() => {
                   navigator.clipboard.writeText(manifestJson)
                   toast.success('JSON copied to clipboard')
                 }}
-                className={`p-2 rounded-lg transition-colors ${
-                  isDark ? 'text-gray-400 hover:bg-gray-700' : 'text-gray-600 hover:bg-gray-100'
-                }`}
+                className={`p-2 rounded-lg transition-colors color-text-secondary color-hover`}
                 title="Copy JSON to clipboard"
               >
                 <Copy className="w-4 h-4" />
               </button>
               <button
                 onClick={() => setShowManifestModal(false)}
-                className={`p-2 rounded-lg transition-colors ${
-                  isDark ? 'text-gray-400 hover:bg-gray-700' : 'text-gray-600 hover:bg-gray-100'
-                }`}
+                className={`p-2 rounded-lg transition-colors color-text-secondary color-hover`}
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
             <div className="p-6 pt-12">
-              <h3 className={`text-lg font-semibold mb-4 ${isDark ? 'text-white' : 'text-gray-900'}`}>
+              <h3 className={`text-lg font-semibold mb-4`}>
                 Manifest JSON
               </h3>
-              <pre className={`p-4 rounded-lg overflow-auto text-sm ${
-                isDark ? 'bg-gray-900 text-gray-100' : 'bg-gray-100 text-gray-900'
-              }`}>
+              <pre className={`p-4 rounded-lg overflow-auto text-sm color-surface color-text`}>
                 {manifestJson}
               </pre>
             </div>
@@ -1176,38 +1131,30 @@ export default function AddonDetailModal({
       {/* Original Manifest JSON Modal */}
       {showOriginalManifestModal && (
         <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-[1001] p-4">
-          <div className={`relative w-full max-w-4xl max-h-[90vh] overflow-y-auto rounded-lg shadow-xl ${
-            isDark ? 'bg-gray-800' : 'bg-white'
-          }`}>
+          <div className={`relative w-full max-w-4xl max-h-[90vh] overflow-y-auto rounded-lg shadow-xl card`}>
             <div className="absolute top-4 right-4 flex gap-2">
               <button
                 onClick={() => {
                   navigator.clipboard.writeText(originalManifestJson)
                   toast.success('JSON copied to clipboard')
                 }}
-                className={`p-2 rounded-lg transition-colors ${
-                  isDark ? 'text-gray-400 hover:bg-gray-700' : 'text-gray-600 hover:bg-gray-100'
-                }`}
+                className={`p-2 rounded-lg transition-colors color-text-secondary color-hover`}
                 title="Copy JSON to clipboard"
               >
                 <Copy className="w-4 h-4" />
               </button>
               <button
                 onClick={() => setShowOriginalManifestModal(false)}
-                className={`p-2 rounded-lg transition-colors ${
-                  isDark ? 'text-gray-400 hover:bg-gray-700' : 'text-gray-600 hover:bg-gray-100'
-                }`}
+                className={`p-2 rounded-lg transition-colors color-text-secondary color-hover`}
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
             <div className="p-6 pt-12">
-              <h3 className={`text-lg font-semibold mb-4 ${isDark ? 'text-white' : 'text-gray-900'}`}>
+              <h3 className={`text-lg font-semibold mb-4`}>
                 Original Manifest JSON
               </h3>
-              <pre className={`p-4 rounded-lg overflow-auto text-sm ${
-                isDark ? 'bg-gray-900 text-gray-100' : 'bg-gray-100 text-gray-900'
-              }`}>
+              <pre className={`p-4 rounded-lg overflow-auto text-sm color-surface color-text`}>
                 {originalManifestJson}
               </pre>
             </div>

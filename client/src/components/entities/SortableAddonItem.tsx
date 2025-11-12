@@ -1,5 +1,4 @@
 import React from 'react'
-import { useTheme } from '@/contexts/ThemeContext'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { VersionChip } from '@/components/ui'
@@ -29,7 +28,6 @@ export default function SortableAddonItem({
   className = '',
   uniqueId
 }: SortableAddonItemProps) {
-  const { isDark, isMono } = useTheme()
 
   // Extract data from the addon format (handles both Stremio and group addon formats)
   const manifest = addon?.manifest || addon
@@ -81,11 +79,7 @@ export default function SortableAddonItem({
     <div
       ref={setNodeRef}
       style={style}
-      className={`relative rounded-lg border p-4 hover:shadow-md transition-all cursor-grab active:cursor-grabbing select-none touch-none ${
-        isDark
-          ? 'bg-gray-600 border-gray-500 hover:bg-gray-550'
-          : 'bg-white border-gray-200 hover:bg-gray-50'
-      } ${isDragging ? 'opacity-50' : ''} ${className}`}
+      className={`relative rounded-lg card card-selectable p-4 hover:shadow-lg transition-all cursor-grab active:cursor-grabbing select-none touch-none ${isDragging ? 'opacity-50' : ''} ${className}`}
       {...attributes}
       {...listeners}
     >
@@ -94,14 +88,14 @@ export default function SortableAddonItem({
           <AddonIcon name={name} iconUrl={iconUrl} size="10" className="mr-3 flex-shrink-0" />
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 mb-1">
-              <h4 className={`font-medium truncate ${isDark ? 'text-white' : 'text-gray-900'}`}>
+              <h4 className={`font-medium truncate`}>
                 {name}
               </h4>
               {version && (
                 <VersionChip version={version} />
               )}
             </div>
-            <p className={`text-sm truncate ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+            <p className={`text-sm truncate color-text-secondary`}>
               {description}
             </p>
           </div>
@@ -114,10 +108,10 @@ export default function SortableAddonItem({
               disabled={isProtectDisabled}
               className={`p-2 rounded-lg transition-colors ${
                 isProtectDisabled
-                  ? ((isMono || isDark) ? 'text-gray-500 cursor-not-allowed' : 'text-gray-500 cursor-not-allowed')
+                  ? 'color-text-secondary cursor-not-allowed'
                   : isProtected
-                    ? ((isMono || isDark) ? 'text-green-400 hover:bg-green-900/20' : 'text-green-600 hover:bg-green-50')
-                    : ((isMono || isDark) ? 'text-gray-400 hover:bg-gray-700' : 'text-gray-600 hover:bg-gray-100')
+                    ? 'color-text-secondary color-hover'
+                    : 'color-text-secondary color-hover'
               }`}
               title={
                 isProtectDisabled
@@ -136,8 +130,8 @@ export default function SortableAddonItem({
             disabled={isRemoveDisabled}
             className={`p-2 rounded-lg transition-colors ${
               isRemoveDisabled
-                ? ((isMono || isDark) ? 'text-gray-500 cursor-not-allowed' : 'text-gray-500 cursor-not-allowed')
-                : ((isMono || isDark) ? 'text-red-400 hover:bg-red-900/20' : 'text-red-600 hover:bg-red-50')
+                ? 'color-text-secondary cursor-not-allowed'
+                : 'color-text color-hover'
             }`}
             title={
               isRemoveDisabled

@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { AlertTriangle } from 'lucide-react'
-import { useTheme } from '@/contexts/ThemeContext'
 
 interface ConfirmDialogProps {
   open: boolean
@@ -26,7 +25,6 @@ export default function ConfirmDialog({
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
-  const { isDark, isMono } = useTheme()
   const [mounted, setMounted] = useState(false)
 
   useEffect(() => {
@@ -67,17 +65,13 @@ export default function ConfirmDialog({
         role="dialog"
         aria-modal="true"
         aria-labelledby="confirm-title"
-        className={`relative w-full max-w-md rounded-xl shadow-xl overflow-hidden animate-[fadeIn_120ms_ease-out] ${
-          isDark ? 'bg-gray-800' : 'bg-white'
-        }`}
+        className={`relative w-full max-w-md rounded-xl shadow-xl overflow-hidden animate-[fadeIn_120ms_ease-out] card`}
       >
-        <div className={`px-6 py-4 flex items-center gap-3 border-b ${
-          isDark ? 'border-gray-700' : 'border-gray-200'
-        }`}>
-          <div className={`${isDanger ? (isDark ? 'text-red-400' : 'text-red-600') : (isDark ? 'text-blue-400' : 'text-blue-600')}`}>
+        <div className={`px-6 py-4 flex items-center gap-3 card-header`}>
+          <div className={`${isDanger ? 'color-text' : 'color-text-secondary'}`}>
             <AlertTriangle className="w-5 h-5" />
           </div>
-          <h3 id="confirm-title" className={`text-base sm:text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>{title}</h3>
+          <h3 id="confirm-title" className={`text-base sm:text-lg font-semibold`}>{title}</h3>
         </div>
 
         <div className="px-6 py-4">
@@ -85,7 +79,7 @@ export default function ConfirmDialog({
             body
           ) : (
             hasDescription && (
-              <p className={`text-sm ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>{description}</p>
+              <p className={`text-sm`}>{description}</p>
             )
           )}
         </div>
@@ -95,11 +89,7 @@ export default function ConfirmDialog({
             <button
               autoFocus
               onClick={() => onCancel('cancel')}
-              className={`px-3 py-2 text-sm rounded-lg border-0 focus:outline-none focus:ring-0 ${
-                isDark 
-                  ? 'text-gray-300 hover:text-white hover:bg-gray-700' 
-                  : 'text-gray-700 hover:text-gray-900 hover:bg-gray-100'
-              }`}
+              className={`px-3 py-2 text-sm rounded-lg border-0 focus:outline-none focus:ring-0 color-hover`}
             >
               {cancelText}
             </button>
@@ -107,8 +97,8 @@ export default function ConfirmDialog({
               onClick={onConfirm}
               className={`px-3 py-2 text-sm rounded-lg focus:outline-none focus:ring-2 focus:ring-offset-2 ${
                 isDanger
-                  ? (isDark ? 'bg-red-600 text-white hover:bg-red-700 focus:ring-red-500' : 'bg-red-600 text-white hover:bg-red-700 focus:ring-red-500')
-                  : 'accent-bg accent-text hover:opacity-90 focus:ring-gray-500'
+                  ? 'color-surface color-text hover:opacity-90 focus:ring-offset-2'
+                  : 'color-surface color-text hover:opacity-90 focus:ring-gray-500'
               }`}
             >
               {confirmText}

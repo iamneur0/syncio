@@ -12,17 +12,17 @@ export default function Error({ error, reset }: { error: Error & { digest?: stri
     <div className="min-h-[60vh] flex items-center justify-center p-6">
       <div className="max-w-md w-full text-center">
         <h2 className="text-2xl font-semibold mb-3">Something went wrong</h2>
-        <p className="text-gray-500 mb-6">An unexpected error occurred. Please try again.</p>
+        <p className="theme-text-3 mb-6">An unexpected error occurred. Please try again.</p>
         <div className="flex items-center justify-center gap-3">
           <button
             onClick={() => reset()}
-            className="px-4 py-2 rounded-md bg-stremio-purple text-white hover:opacity-90"
+            className="px-4 py-2 rounded-md accent-bg accent-text hover:opacity-90"
           >
             Try again
           </button>
           <button
             onClick={() => window.location.reload()}
-            className="px-4 py-2 rounded-md border border-gray-300 text-gray-700 hover:bg-gray-50"
+            className="px-4 py-2 rounded-md border theme-border-3 theme-text-1 hover-accent"
           >
             Reload
           </button>

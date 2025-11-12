@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
-import { getColorBgClass, getColorTextClass } from '@/utils/colorMapping'
+import { useTheme } from '@/contexts/ThemeContext'
+import { getEntityColorStyles } from '@/utils/colorMapping'
 import { addonsAPI } from '@/services/api'
 import { VersionChip } from '@/components/ui'
 
@@ -27,6 +28,7 @@ export default function AddonAddModal({
   groups = []
 }: AddonAddModalProps) {
   const [mounted, setMounted] = useState(false)
+  const { theme } = useTheme()
   
   const [addonName, setAddonName] = useState('')
   const [addonUrl, setAddonUrl] = useState('')
@@ -258,25 +260,30 @@ export default function AddonAddModal({
                 return (
                   <div 
                     key={group.id}
-                    className={`flex items-center justify-between p-3 rounded-lg cursor-pointer card color-hover border ${
-                      active
-                        ? 'selection-ring'
-                        : 'border-transparent'
+                    className={`flex items-center justify-between p-3 rounded-lg cursor-pointer card card-selectable color-hover hover:shadow-lg ${
+                      active ? 'card-selected' : ''
                     }`}
                     onClick={() => {
                       setSelectedGroupIds(prev => active ? prev.filter(id => id !== group.id) : [...prev, group.id])
                     }}
                   >
                     <div className="flex items-center flex-1 min-w-0">
+                      {(() => {
+                        const colorStyles = getEntityColorStyles(theme, group?.colorIndex || 0)
+                        return (
                       <div 
-                        className={`w-8 h-8 rounded-full flex items-center justify-center mr-3 flex-shrink-0 ${
-                          getColorBgClass(group?.colorIndex || 0)
-                        } ${getColorTextClass(group?.colorIndex || 0)}`}
+                            className="w-8 h-8 rounded-full flex items-center justify-center mr-3 flex-shrink-0"
+                            style={{
+                              background: colorStyles.background,
+                              color: colorStyles.textColor,
+                            }}
                       >
-                        <span className={`${getColorTextClass(group?.colorIndex || 0)} text-sm font-semibold`}>
+                            <span className="text-sm font-semibold" style={{ color: colorStyles.textColor }}>
                           {group.name ? group.name.charAt(0).toUpperCase() : 'G'}
                         </span>
                       </div>
+                        )
+                      })()}
                       <div className="min-w-0 flex-1">
                         <h4 className={`font-medium text-sm`}>
                           {group.name}

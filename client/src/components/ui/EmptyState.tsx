@@ -1,6 +1,4 @@
 import React from 'react'
-import { useTheme } from '@/contexts/ThemeContext'
-import { getTextClasses, getButtonClasses } from '@/utils/themeUtils'
 
 interface EmptyStateProps {
   icon: React.ReactNode
@@ -20,13 +18,8 @@ export default function EmptyState({
   action,
   className = ''
 }: EmptyStateProps) {
-  const theme = useTheme()
-  const { isDark, isMono } = theme
-  
   const getIconColor = () => {
-    if (isMono) return 'text-white/40'
-    if (isDark) return 'text-gray-500'
-    return 'text-gray-400'
+    return 'color-text-secondary'
   }
   
   return (
@@ -35,21 +28,18 @@ export default function EmptyState({
         {icon}
       </div>
       
-      <h3 className={`text-lg font-medium mb-2 ${getTextClasses(theme, 'primary')}`}>
+      <h3 className={`text-lg font-medium mb-2`}>
         {title}
       </h3>
       
-      <p className={`text-sm mb-6 max-w-sm mx-auto ${getTextClasses(theme, 'secondary')}`}>
+      <p className={`text-sm mb-6 max-w-sm mx-auto`}>
         {description}
       </p>
       
       {action && (
         <button
           onClick={action.onClick}
-          className={`
-            px-4 py-2 rounded-lg text-sm font-medium transition-colors
-            ${getButtonClasses(theme, 'primary')}
-          `}
+          className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors color-surface hover:opacity-90`}
         >
           {action.label}
         </button>

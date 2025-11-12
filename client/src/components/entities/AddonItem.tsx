@@ -1,5 +1,4 @@
 import React from 'react'
-import { useTheme } from '@/contexts/ThemeContext'
 import { VersionChip } from '@/components/ui'
 import AddonIcon from './AddonIcon'
 import { Puzzle, X } from 'lucide-react'
@@ -25,17 +24,13 @@ export default function AddonItem({
   dragProps,
   dragListeners
 }: AddonItemProps) {
-  const { isDark, isMono } = useTheme()
+  // Theme not needed for this component
 
   const containerProps = {
     ...dragProps,
     ...(isDraggable ? dragListeners : {}),
-    className: `relative rounded-lg border p-4 hover:shadow-md transition-all ${
+    className: `relative rounded-lg card card-selectable p-4 hover:shadow-lg transition-all ${
       isDraggable ? 'cursor-grab' : ''
-    } ${
-      isDark 
-        ? 'bg-gray-600 border-gray-500 hover:bg-gray-550' 
-        : 'bg-white border-gray-200 hover:bg-gray-50'
     }`
   }
 
@@ -46,14 +41,14 @@ export default function AddonItem({
           <AddonIcon name={addon.name || 'Addon'} iconUrl={addon.iconUrl} size="10" className="mr-3 flex-shrink-0" />
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 mb-1 flex-wrap">
-              <h4 className={`font-medium truncate ${isDark ? 'text-white' : 'text-gray-900'}`}>
+              <h4 className={`font-medium truncate`}>
                 {addon.name || 'Unknown Addon'}
               </h4>
               {addon.version && (
                 <VersionChip version={addon.version} />
               )}
             </div>
-            <p className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-500'} truncate`}>
+            <p className={`text-sm truncate`}>
               {addon.description || 'No description'}
             </p>
           </div>
@@ -66,11 +61,7 @@ export default function AddonItem({
           onPointerDown={(e) => {
             e.stopPropagation()
           }}
-          className={`p-2 rounded-lg transition-colors ${
-            isDark 
-              ? 'text-red-400 hover:bg-red-900/20' 
-              : 'text-red-600 hover:bg-red-50'
-          }`}
+          className={`p-2 rounded-lg transition-colors color-text color-hover`}
           title="Remove addon from group"
         >
           <X className="w-4 h-4" />

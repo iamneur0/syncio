@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { useTheme } from '@/contexts/ThemeContext'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import api, { usersAPI, groupsAPI } from '@/services/api'
-import { getColorBgClass, getColorHexValue } from '@/utils/colorMapping'
+import { getEntityColorStyles } from '@/utils/colorMapping'
 import { invalidateUserQueries, invalidateSyncStatusQueries } from '@/utils/queryUtils'
 import { userSuccessHandlers } from '@/utils/toastUtils'
 import { useModalState } from '@/hooks/useCommonState'
@@ -51,8 +51,7 @@ export default function UserDetailModal({
   userProtectedSet,
   isSyncing
 }: UserDetailModalProps) {
-  const theme = useTheme()
-  const { isDark, isModern, isModernDark, isMono, hideSensitive } = theme as any
+  const { hideSensitive, theme: themeName } = useTheme()
   const queryClient = useQueryClient()
   const { mounted } = useModalState()
   const [showColorPicker, setShowColorPicker] = useState(false)
@@ -71,6 +70,11 @@ export default function UserDetailModal({
 
   // Use the query data instead of the prop
   const currentUser = userData || user
+  const userColorIndex = currentUser?.colorIndex || 0
+  const userColorStyles = useMemo(
+    () => getEntityColorStyles(themeName, userColorIndex),
+    [themeName, userColorIndex]
+  )
   
   // Local state for excluded and protected addons to ensure proper reactivity
   const [localExcludedSet, setLocalExcludedSet] = useState<Set<string>>(new Set())
@@ -435,24 +439,20 @@ export default function UserDetailModal({
     const isExcluded = localExcludedSet.has(addonId)
     
     return (
-      <div className={`relative rounded-lg border p-4 hover:shadow-md transition-all ${
-        isDark
-          ? 'bg-gray-600 border-gray-500 hover:bg-gray-550'
-          : 'bg-white border-gray-200 hover:bg-gray-50'
-      }`}>
+      <div className={`relative rounded-lg card card-selectable p-4 hover:shadow-lg transition-all color-hover`}>
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center flex-1 min-w-0">
             <AddonIcon name={name || 'Addon'} iconUrl={iconUrl} size="10" className="mr-3 flex-shrink-0" />
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2 mb-1">
-                <h4 className={`font-medium truncate ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                <h4 className={`font-medium truncate`}>
                   {name || 'Unknown Addon'}
                 </h4>
                 {version && (
                   <VersionChip version={version} />
                 )}
               </div>
-              <p className={`text-sm truncate ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+              <p className={`text-sm truncate color-text-secondary`}>
                 {description || 'No description'}
               </p>
             </div>
@@ -461,8 +461,8 @@ export default function UserDetailModal({
             onClick={() => handleExcludeGroupAddon(addonId)}
             className={`p-2 rounded-lg transition-colors ${
               isExcluded
-                ? ((isMono || isDark) ? 'text-red-400 hover:bg-red-900/20' : 'text-red-600 hover:bg-red-50')
-                : ((isMono || isDark) ? 'text-gray-400 hover:bg-gray-700' : 'text-gray-600 hover:bg-gray-100')
+                ? 'color-text color-hover'
+                : 'color-text-secondary color-hover'
             }`}
             title={isExcluded ? "Include addon" : "Exclude addon"}
           >
@@ -487,9 +487,10 @@ export default function UserDetailModal({
         }
       }}
     >
-      <div className={`relative w-full max-w-4xl max-h-[90vh] overflow-y-auto overflow-x-hidden rounded-lg shadow-xl ${
-        isDark ? 'bg-gray-800' : 'bg-white'
-      }`}>
+      <div
+        className={`relative w-full max-w-4xl max-h-[90vh] overflow-y-auto overflow-x-hidden rounded-lg shadow-xl card`}
+        style={{ background: 'var(--color-background)' }}
+      >
         <div className="p-6">
           {/* Header: Logo + Name/email + Sync (left), Group selector + Close (right) */}
           <div className="flex flex-wrap items-start justify-between mb-6 gap-4">
@@ -498,13 +499,14 @@ export default function UserDetailModal({
               <div 
                 ref={logoRef}
                 onClick={() => setShowColorPicker(!showColorPicker)}
-                className={`w-12 h-12 rounded-full flex items-center justify-center flex-shrink-0 border-2 cursor-pointer transition-all hover:scale-105 ${
-                  getColorBgClass(currentUser.colorIndex || 0, isMono ? 'mono' : isDark ? 'dark' : 'light')
-                }`}
-                style={{ backgroundColor: getColorHexValue(currentUser.colorIndex || 0, isMono ? 'mono' : isDark ? 'dark' : 'light') }}
+                className="w-12 h-12 rounded-full flex items-center justify-center flex-shrink-0 cursor-pointer transition-all hover:scale-105"
                 title="Click to change color"
+                style={{ 
+                  background: userColorStyles.background,
+                  color: userColorStyles.textColor,
+                }}
               >
-                <span className="text-white font-semibold text-lg">
+                <span className="font-semibold text-lg" style={{ color: userColorStyles.textColor }}>
                   {(currentUser.username || currentUser.email || 'U').charAt(0).toUpperCase()}
                 </span>
               </div>
@@ -539,16 +541,14 @@ export default function UserDetailModal({
                     isSyncing={isSyncing}
                   />
                 </div>
-                <div className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-500'} ${hideSensitive ? 'blur-sm select-none' : ''}`}>
+                <div className={`text-sm color-text-secondary ${hideSensitive ? 'blur-sm select-none' : ''}`}>
                   {hideSensitive ? '••••••••' : (currentUser.email || 'No email')}
                 </div>
               </div>
             </div>
             <button
               onClick={onClose}
-              className={`w-8 h-8 flex items-center justify-center rounded transition-colors border-0 ${
-                isDark ? 'text-gray-400 hover:text-gray-300 hover:bg-gray-700' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
-              }`}
+              className={`w-8 h-8 flex items-center justify-center rounded transition-colors border-0 color-hover`}
               aria-label="Close"
             >
               <X className="w-4 h-4" />
@@ -568,7 +568,7 @@ export default function UserDetailModal({
                 <button
                   onClick={handleDebugGroupAddons}
                   className={`px-3 py-1 text-sm rounded transition-colors ${
-                    isDark ? 'text-gray-300 hover:text-white hover:bg-gray-600' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+                    'color-text-secondary color-hover'
                   }`}
                   title="Show current group addons"
                 >
@@ -578,7 +578,7 @@ export default function UserDetailModal({
                   value={userDetails?.groupId || userDetails?.groups?.[0]?.id || ''}
                   onChange={(e) => handleGroupChange(e.target.value)}
                   className={`px-3 py-2 border rounded-lg text-sm focus:outline-none ${
-                    isDark ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'
+                    'input'
                   }`}
                   title="Change group"
                 >
@@ -593,7 +593,7 @@ export default function UserDetailModal({
                 value={userDetails?.groupId || userDetails?.groups?.[0]?.id || ''}
                 onChange={(e) => handleGroupChange(e.target.value)}
                 className={`px-3 py-2 border rounded-lg text-sm focus:outline-none ${
-                  isDark ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'
+                  'input'
                 }`}
                 title="Change group"
               >
@@ -610,7 +610,7 @@ export default function UserDetailModal({
                 index={index}
               />
             )}
-            emptyIcon={<Puzzle className={`w-12 h-12 mx-auto mb-4 ${isDark ? 'text-gray-500' : 'text-gray-400'}`} />}
+            emptyIcon={<Puzzle className={`w-12 h-12 mx-auto mb-4 color-text-secondary`} />}
             emptyMessage="No group addons assigned to this user"
           />
 
@@ -632,7 +632,7 @@ export default function UserDetailModal({
                 <button
                   onClick={handleDebugStremioAddons}
                   className={`px-3 py-1 text-sm rounded transition-colors ${
-                    isDark ? 'text-gray-300 hover:text-white hover:bg-gray-600' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+                    'color-text-secondary color-hover'
                   }`}
                   title="Show current Stremio addons"
                 >
@@ -641,7 +641,7 @@ export default function UserDetailModal({
                 <button
                   onClick={handleDebugDesiredAddons}
                   className={`px-3 py-1 text-sm rounded transition-colors ${
-                    isDark ? 'text-gray-300 hover:text-white hover:bg-gray-600' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+                    'color-text-secondary color-hover'
                   }`}
                   title="Show desired addons (group addons + protected addons)"
                 >
@@ -670,7 +670,7 @@ export default function UserDetailModal({
                 />
               )
             }}
-            emptyIcon={<Puzzle className={`w-12 h-12 mx-auto mb-4 ${isDark ? 'text-gray-500' : 'text-gray-400'}`} />}
+            emptyIcon={<Puzzle className={`w-12 h-12 mx-auto mb-4 color-text-secondary`} />}
             emptyMessage="No Stremio addons found for this user"
           >
             <DndContext
@@ -716,9 +716,9 @@ export default function UserDetailModal({
       {/* Current Addons Debug Modal */}
       {showCurrentModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className={`rounded-lg p-6 max-w-2xl max-h-[80vh] overflow-y-auto ${isDark ? 'bg-gray-800' : 'bg-white'}`}>
+          <div className={`rounded-lg p-6 max-w-2xl max-h-[80vh] overflow-y-auto card`}>
             <div className="flex justify-between items-center mb-4">
-              <h3 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>
+              <h3 className={`text-lg font-semibold`}>
                 Current Stremio Addons ({Array.isArray(currentAddonsData) ? currentAddonsData.length : (currentAddonsData?.addons?.length || 0)})
               </h3>
               <div className="flex items-center gap-2">
@@ -728,7 +728,7 @@ export default function UserDetailModal({
                     toast.success('JSON copied to clipboard')
                   }}
                   className={`p-2 rounded-lg transition-colors ${
-                    isDark ? 'text-gray-400 hover:bg-gray-700' : 'text-gray-600 hover:bg-gray-100'
+                    'color-text-secondary color-hover'
                   }`}
                   title="Copy JSON to clipboard"
                 >
@@ -737,7 +737,7 @@ export default function UserDetailModal({
                 <button
                   onClick={() => setShowCurrentModal(false)}
                   className={`p-2 rounded-lg transition-colors ${
-                    isDark ? 'text-gray-400 hover:bg-gray-700' : 'text-gray-600 hover:bg-gray-100'
+                    'color-text-secondary color-hover'
                   }`}
                 >
                   <X className="w-5 h-5" />
@@ -746,10 +746,10 @@ export default function UserDetailModal({
             </div>
             <div className="space-y-2">
               {(!currentAddonsData || (Array.isArray(currentAddonsData) && currentAddonsData.length === 0) || (!Array.isArray(currentAddonsData) && !currentAddonsData.addons)) ? (
-                <p className={`${isDark ? 'text-gray-400' : 'text-gray-600'}`}>No addons found</p>
+                <p className={`color-text-secondary`}>No addons found</p>
               ) : (
                 <div className="relative">
-                  <pre className={`p-4 rounded-lg border text-xs overflow-auto max-h-96 ${isDark ? 'bg-gray-900 border-gray-600 text-gray-300' : 'bg-gray-100 border-gray-200 text-gray-800'}`}>
+                  <pre className={`p-4 rounded-lg border text-xs overflow-auto max-h-96 card`}>
                     {JSON.stringify(currentAddonsData, null, 2)}
                   </pre>
                 </div>
@@ -762,9 +762,9 @@ export default function UserDetailModal({
       {/* Desired Addons Debug Modal */}
       {showDesiredModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className={`rounded-lg p-6 max-w-2xl max-h-[80vh] overflow-y-auto ${isDark ? 'bg-gray-800' : 'bg-white'}`}>
+          <div className={`rounded-lg p-6 max-w-2xl max-h-[80vh] overflow-y-auto card`}>
             <div className="flex justify-between items-center mb-4">
-              <h3 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>
+              <h3 className={`text-lg font-semibold`}>
                 Desired Addons from Groups ({Array.isArray(desiredAddonsData) ? desiredAddonsData.length : (desiredAddonsData?.addons?.length || 0)})
               </h3>
               <div className="flex items-center gap-2">
@@ -774,7 +774,7 @@ export default function UserDetailModal({
                     toast.success('JSON copied to clipboard')
                   }}
                   className={`p-2 rounded-lg transition-colors ${
-                    isDark ? 'text-gray-400 hover:bg-gray-700' : 'text-gray-600 hover:bg-gray-100'
+                    'color-text-secondary color-hover'
                   }`}
                   title="Copy JSON to clipboard"
                 >
@@ -783,7 +783,7 @@ export default function UserDetailModal({
                 <button
                   onClick={() => setShowDesiredModal(false)}
                   className={`p-2 rounded-lg transition-colors ${
-                    isDark ? 'text-gray-400 hover:bg-gray-700' : 'text-gray-600 hover:bg-gray-100'
+                    'color-text-secondary color-hover'
                   }`}
                 >
                   <X className="w-5 h-5" />
@@ -792,10 +792,10 @@ export default function UserDetailModal({
             </div>
             <div className="space-y-2">
               {(!desiredAddonsData || (Array.isArray(desiredAddonsData) && desiredAddonsData.length === 0) || (!Array.isArray(desiredAddonsData) && !desiredAddonsData.addons)) ? (
-                <p className={`${isDark ? 'text-gray-400' : 'text-gray-600'}`}>No addons found</p>
+                <p className={`color-text-secondary`}>No addons found</p>
               ) : (
                 <div className="relative">
-                  <pre className={`p-4 rounded-lg border text-xs overflow-auto max-h-96 ${isDark ? 'bg-gray-900 border-gray-600 text-gray-300' : 'bg-gray-100 border-gray-200 text-gray-800'}`}>
+                  <pre className={`p-4 rounded-lg border text-xs overflow-auto max-h-96 card`}>
                     {JSON.stringify(desiredAddonsData, null, 2)}
                   </pre>
                 </div>
@@ -808,9 +808,9 @@ export default function UserDetailModal({
       {/* Group Addons Debug Modal */}
       {showGroupAddonsModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className={`rounded-lg p-6 max-w-2xl max-h-[80vh] overflow-y-auto ${isDark ? 'bg-gray-800' : 'bg-white'}`}>
+          <div className={`rounded-lg p-6 max-w-2xl max-h-[80vh] overflow-y-auto card`}>
             <div className="flex justify-between items-center mb-4">
-              <h3 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>
+              <h3 className={`text-lg font-semibold`}>
                 Group Addons ({Array.isArray(groupAddonsData) ? groupAddonsData.length : (groupAddonsData?.addons?.length || 0)})
               </h3>
               <div className="flex items-center gap-2">
@@ -820,7 +820,7 @@ export default function UserDetailModal({
                     toast.success('JSON copied to clipboard')
                   }}
                   className={`p-2 rounded-lg transition-colors ${
-                    isDark ? 'text-gray-400 hover:bg-gray-700' : 'text-gray-600 hover:bg-gray-100'
+                    'color-text-secondary color-hover'
                   }`}
                   title="Copy JSON to clipboard"
                 >
@@ -829,7 +829,7 @@ export default function UserDetailModal({
                 <button
                   onClick={() => setShowGroupAddonsModal(false)}
                   className={`p-2 rounded-lg transition-colors ${
-                    isDark ? 'text-gray-400 hover:bg-gray-700' : 'text-gray-600 hover:bg-gray-100'
+                    'color-text-secondary color-hover'
                   }`}
                 >
                   <X className="w-5 h-5" />
@@ -838,10 +838,10 @@ export default function UserDetailModal({
             </div>
             <div className="space-y-2">
               {(!groupAddonsData || (Array.isArray(groupAddonsData) && groupAddonsData.length === 0) || (!Array.isArray(groupAddonsData) && !groupAddonsData.addons)) ? (
-                <p className={`${isDark ? 'text-gray-400' : 'text-gray-600'}`}>No addons found</p>
+                <p className={`color-text-secondary`}>No addons found</p>
               ) : (
                 <div className="relative">
-                  <pre className={`p-4 rounded-lg border text-xs overflow-auto max-h-96 ${isDark ? 'bg-gray-900 border-gray-600 text-gray-300' : 'bg-gray-100 border-gray-200 text-gray-800'}`}>
+                  <pre className={`p-4 rounded-lg border text-xs overflow-auto max-h-96 card`}>
                     {JSON.stringify(groupAddonsData, null, 2)}
                   </pre>
                 </div>
