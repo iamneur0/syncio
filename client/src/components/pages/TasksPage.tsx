@@ -40,6 +40,7 @@ export default function TasksPage() {
           if (f === 0) setSyncFrequency('0')
           else if (f === 1) setSyncFrequency('1m')
           else if (f >= 1440) setSyncFrequency(`${Math.round(f/1440)}d`)
+          else if (f >= 60 && f % 60 === 0) setSyncFrequency(`${f/60}h`)
           else setSyncFrequency(`${f}m`)
           return
         }
@@ -718,6 +719,7 @@ export default function TasksPage() {
             className={`input px-3 py-2`}
           >
             <option value={'0'}>Disabled</option>
+            <option value={'1h'}>Every hour</option>
             <option value={'1d'}>Every day</option>
             <option value={'7d'}>Every 7 days</option>
             <option value={'15d'}>Every 15 days</option>

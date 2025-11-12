@@ -128,6 +128,7 @@ function scheduleSyncs(frequency, prisma, getAccountId, scopedWhere, decrypt, re
             enabled = syncCfg.enabled !== false
             const fRaw = String(syncCfg.frequency || '').trim()
             if (fRaw.endsWith('m')) { minuteMode = true }
+            else if (fRaw.endsWith('h')) { minuteMode = true } // Hours treated as minute mode
             else if (fRaw.endsWith('d')) { const n = parseInt(fRaw, 10); if (n > 0) freqDays = n }
             if (syncCfg.lastRunAt) { const d = new Date(syncCfg.lastRunAt).getTime(); if (!Number.isNaN(d)) lastRunAt = d }
           }
@@ -135,7 +136,13 @@ function scheduleSyncs(frequency, prisma, getAccountId, scopedWhere, decrypt, re
           let firstRunAt
           let intervalMs
           if (minuteMode) {
-            intervalMs = MINUTE_MS
+            const fRaw = String(syncCfg?.frequency || '').trim()
+            if (fRaw.endsWith('h')) {
+              const hours = Math.max(1, parseInt(fRaw, 10) || 1)
+              intervalMs = hours * 60 * MINUTE_MS
+            } else {
+              intervalMs = MINUTE_MS
+            }
             firstRunAt = (lastRunAt && lastRunAt > now) ? lastRunAt : (now + intervalMs)
           } else {
             intervalMs = Number(freqDays) * DAY_MS
@@ -146,12 +153,16 @@ function scheduleSyncs(frequency, prisma, getAccountId, scopedWhere, decrypt, re
         }
       } catch {}
     } else {
-      // Private mode: parse frequency string (e.g., '1m', '1d', '3d', '7d')
+      // Private mode: parse frequency string (e.g., '1m', '1h', '1d', '3d', '7d')
       let intervalMs
       let firstRunAt
       const fRaw = String(globalFrequencyStr).trim()
       if (fRaw.endsWith('m')) {
         intervalMs = MINUTE_MS
+        firstRunAt = now + intervalMs
+      } else if (fRaw.endsWith('h')) {
+        const hours = Math.max(1, parseInt(fRaw, 10) || 1)
+        intervalMs = hours * 60 * MINUTE_MS
         firstRunAt = now + intervalMs
       } else if (fRaw.endsWith('d')) {
         const days = Math.max(1, parseInt(fRaw, 10) || 1)
