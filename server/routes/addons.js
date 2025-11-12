@@ -281,7 +281,7 @@ async function reloadAddon(prisma, getAccountId, addonId, req, { filterManifestB
     },
     data: {
       name: addon.name, // preserve name
-      description: manifestData?.description || addon.description,
+      description: addon.description, // preserve description
       version: manifestData?.version || addon.version,
       iconUrl: manifestData?.logo || addon.iconUrl || null,
       // Store encrypted manifests (original untouched, filtered current)
