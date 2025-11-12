@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.2](https://github.com/iamneur0/syncio/compare/v0.2.1...v0.2.2) (2025-11-12)
+
+
+### Bug Fixes
+
+* csrf token renewal ([ba666d1](https://github.com/iamneur0/syncio/commit/ba666d13f44d2efb7d5696a990b7bf80d964bf87))
+* description update now pushed to stremio ([9986fa5](https://github.com/iamneur0/syncio/commit/9986fa51f4c3f5bc3002d63a3f2d14066e982cfe))
+
 ## [0.2.1](https://github.com/iamneur0/syncio/compare/v0.2.0...v0.2.1) (2025-11-12)
 
 
