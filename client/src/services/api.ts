@@ -92,13 +92,11 @@ export interface Addon {
 }
 
 export interface CreateUserData {
-  email?: string
-  password?: string
-  authKey?: string
+  email: string
+  password: string
   username?: string
   groupName?: string
   colorIndex?: number
-  registerNew?: boolean
 }
 
 export interface CreateGroupData {
@@ -196,26 +194,7 @@ export const usersAPI = {
 
   // Create new user (via Stremio connect endpoint)
   create: async (userData: CreateUserData): Promise<User> => {
-    // Auth-key flow: call dedicated endpoint when authKey is present
-    if (userData.authKey) {
-      const payload: any = {
-        username: userData.username,
-        authKey: userData.authKey,
-        groupName: userData.groupName,
-        colorIndex: userData.colorIndex,
-      }
-      if (userData.email) {
-        payload.email = userData.email
-      }
-      const response: AxiosResponse<any> = await api.post('/stremio/connect-authkey', payload)
-      return response.data?.user || response.data
-    }
-
-    if (!userData.email || !userData.password) {
-      throw new Error('Email and password are required to create a user without an auth key')
-    }
-
-    // Email/password flow: { email, password, username?, groupName?, colorIndex?, registerNew? }
+    // The backend expects: { email, password, username?, groupName?, colorIndex? }
     const payload: any = {
       email: userData.email,
       password: userData.password,
@@ -223,9 +202,6 @@ export const usersAPI = {
       groupName: userData.groupName,
       colorIndex: userData.colorIndex,
     }
-
-    payload.registerIfMissing = Boolean(userData.registerNew)
-
     const response: AxiosResponse<any> = await api.post('/stremio/connect', payload)
     // Normalize response to User shape when possible
     return response.data?.user || response.data
