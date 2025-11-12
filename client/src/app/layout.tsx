@@ -47,11 +47,12 @@ export default function RootLayout({
                   var isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
                   var theme = saved || (isDark ? 'dark' : 'light');
                   if (theme === 'modern' || theme === 'modern-dark') theme = 'dark';
-                  d.classList.remove('light','dark','modern','modern-dark','mono');
+                  var themeClasses = ['light','dark','modern','modern-dark','mono','aubergine','hoth','aurora','choco-mint','ochin','work-hard'];
+                  themeClasses.forEach(function(cls){ d.classList.remove(cls); });
                   d.classList.add(theme);
                   var tag = document.querySelector('meta[name="theme-color"]');
                   if (!tag) { tag = document.createElement('meta'); tag.setAttribute('name','theme-color'); document.head.appendChild(tag); }
-                  var colors = { light: '#f9fafb', dark: '#111827', mono: '#000000', 'modern': '#f9fafb', 'modern-dark': '#111827' };
+                  var colors = { light: '#f9fafb', dark: '#111827', mono: '#000000', 'modern': '#f9fafb', 'modern-dark': '#111827', 'aubergine': '#1f1029', 'hoth': '#f5f7fb', 'aurora': '#141827', 'choco-mint': '#1f2620', 'ochin': '#101f33', 'work-hard': '#2d2213' };
                   tag.setAttribute('content', colors[theme] || '#111827');
                 } catch(e){}
               })();
