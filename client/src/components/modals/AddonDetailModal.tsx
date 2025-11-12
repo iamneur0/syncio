@@ -97,7 +97,7 @@ export default function AddonDetailModal({
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['addon'] })
       queryClient.invalidateQueries({ queryKey: ['addon', currentAddon?.id, 'details'] })
-      toast.success('Addon updated successfully')
+      // Success message is handled by parent (GenericEntityPage)
     },
     onError: (error: any) => {
       toast.error(error?.response?.data?.message || 'Failed to update addon')

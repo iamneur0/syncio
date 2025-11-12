@@ -107,13 +107,19 @@ async function getDesiredAddons(user, req, { prisma, getAccountId, decrypt, pars
     })
     
     // Strip database fields from filtered group addons for clean JSON
-    // Ensure manifest.name matches the addon name from DB
+    // Ensure manifest.name and manifest.description match the addon name and description from DB
     const cleanGroupAddons = groupAddonsFiltered.map(addon => {
       const manifestObj = (addon && addon.manifest && typeof addon.manifest === 'object')
         ? { ...addon.manifest }
         : addon?.manifest ? addon.manifest : {}
-      if (addon && typeof addon.name === 'string' && manifestObj && typeof manifestObj === 'object') {
-        manifestObj.name = addon.name
+      if (addon && manifestObj && typeof manifestObj === 'object') {
+        if (typeof addon.name === 'string') {
+          manifestObj.name = addon.name
+        }
+        // Update description if it exists (even if empty string, preserve it)
+        if (addon.description !== undefined && addon.description !== null) {
+          manifestObj.description = addon.description
+        }
       }
       return {
         transportUrl: addon.transportUrl,
