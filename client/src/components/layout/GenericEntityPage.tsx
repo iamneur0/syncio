@@ -6,7 +6,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { addonsAPI, usersAPI, groupsAPI } from '@/services/api'
 import { useSyncStatusRefresh } from '@/hooks/useSyncStatusRefresh'
 import { invalidateEntityQueries, invalidateSyncStatusQueries } from '@/utils/queryUtils'
-import { genericSuccessHandlers } from '@/utils/toastUtils'
+import { genericSuccessHandlers, addonSuccessHandlers, userSuccessHandlers, groupSuccessHandlers } from '@/utils/toastUtils'
 import { useModalState } from '@/hooks/useCommonState'
 import toast from 'react-hot-toast'
 import { Puzzle, User as UserIcon, Users } from 'lucide-react'
@@ -133,7 +133,16 @@ export default function GenericEntityPage({ config }: GenericEntityPageProps) {
     mutationFn: ({ id, data }: { id: string; data: any }) => finalConfig.api.update(id, data),
     onSuccess: () => {
       invalidateEntityQueries(queryClient, { entityType: finalConfig.entityType })
-      genericSuccessHandlers.sync(finalConfig.title.slice(0, -1))
+      // Use entity-specific success handlers
+      if (finalConfig.entityType === 'addon') {
+        addonSuccessHandlers.update()
+      } else if (finalConfig.entityType === 'user') {
+        userSuccessHandlers.update()
+      } else if (finalConfig.entityType === 'group') {
+        groupSuccessHandlers.update()
+      } else {
+        toast.success(`${finalConfig.title.slice(0, -1)} updated successfully`)
+      }
       // Close detail modal after successful save
       setShowDetailModal(false)
       setSelectedEntity(null)

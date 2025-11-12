@@ -284,14 +284,14 @@ export default function GroupAddModal({
                 </div>
               </div>
             </div>
-            <button
-              onClick={handleClose}
-              className={`w-8 h-8 flex items-center justify-center rounded transition-colors border-0 color-hover`}
+          <button
+            onClick={handleClose}
+            className={`w-8 h-8 flex items-center justify-center rounded transition-colors border-0 color-hover`}
               aria-label="Close"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
 
           {/* Group Users */}
           <EntityList
@@ -353,7 +353,7 @@ export default function GroupAddModal({
                 collisionDetection={closestCenter}
                 modifiers={[restrictToParentElement]}
                 onDragEnd={handleDragEnd}
-              >
+                  >
                 <SortableContext 
                   items={selectedAddons.map(addon => addon.id || addon.transportUrl || addon.manifestUrl).filter(Boolean)} 
                   strategy={verticalListSortingStrategy}
