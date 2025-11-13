@@ -29,7 +29,7 @@ interface BaseEntity {
 // Components
 import PageHeader from './PageHeader'
 import { EntityCard } from '@/components/entities'
-import { AddonDetailModal, UserDetailModal, GroupDetailModal, AddonAddModal, UserAddModal, GroupAddModal, ConfirmDialog } from '@/components/modals'
+import { AddonDetailModal, UserDetailModal, GroupDetailModal, AddonAddModal, UserAddModal, GroupAddModal, UserInviteModal, ConfirmDialog } from '@/components/modals'
 import { LoadingSkeleton, EmptyState } from '@/components/ui'
 
 // Types
@@ -87,6 +87,7 @@ export default function GenericEntityPage({ config }: GenericEntityPageProps) {
   })
   const [selectedEntities, setSelectedEntities] = useState<string[]>([])
   const [showAddModal, setShowAddModal] = useState(false)
+  const [showInviteModal, setShowInviteModal] = useState(false)
   const [showDetailModal, setShowDetailModal] = useState(false)
   const [selectedEntity, setSelectedEntity] = useState<any>(null)
   const [editingUser, setEditingUser] = useState<any>(null)
@@ -532,6 +533,7 @@ export default function GenericEntityPage({ config }: GenericEntityPageProps) {
           onSelectAll={handleSelectAll}
           onDeselectAll={handleDeselectAll}
           onAdd={() => setShowAddModal(true)}
+          onInvite={finalConfig.entityType === 'user' ? () => setShowInviteModal(true) : undefined}
           onReload={finalConfig.entityType === 'addon' ? () => reloadAllMutation.mutate() : undefined}
           onSync={finalConfig.entityType === 'group' || finalConfig.entityType === 'user' ? () => syncAllMutation.mutate() : undefined}
           onDelete={handleBulkDelete}
@@ -664,6 +666,14 @@ export default function GenericEntityPage({ config }: GenericEntityPageProps) {
               }
             }
           } : {})}
+        />,
+        document.body
+      )}
+
+      {finalConfig.entityType === 'user' && typeof window !== 'undefined' && document.body && createPortal(
+        <UserInviteModal
+          isOpen={showInviteModal}
+          onClose={() => setShowInviteModal(false)}
         />,
         document.body
       )}

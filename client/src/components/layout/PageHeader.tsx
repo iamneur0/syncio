@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Search, Plus, RefreshCw, Trash2, Grip, List, Square, CheckSquare } from 'lucide-react'
+import { Search, Plus, RefreshCw, Trash2, Grip, List, Square, CheckSquare, Send } from 'lucide-react'
 import { useTheme } from '@/contexts/ThemeContext'
 import { getTextClasses } from '@/utils/themeUtils'
 // Inline search input (replaces deprecated ./Input component)
@@ -18,6 +18,7 @@ interface PageHeaderProps {
   onSelectAll: () => void
   onDeselectAll: () => void
   onAdd: () => void
+  onInvite?: () => void
   onReload?: () => void
   onSync?: () => void
   onDelete: () => void
@@ -40,6 +41,7 @@ export default function PageHeader({
   onSelectAll,
   onDeselectAll,
   onAdd,
+  onInvite,
   onReload,
   onSync,
   onDelete,
@@ -62,16 +64,19 @@ export default function PageHeader({
   }
 
   return (
-    <div className="mb-6 sm:mb-8">
+    <div className="mb-4 lg:mb-6">
       {/* Title and Description */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4 gap-4">
+      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between mb-4 gap-4">
         <div>
-          <h1 className={`hidden sm:block text-xl sm:text-2xl font-bold ${getTextClasses(theme, 'primary')}`}>
+          <h1 className={`hidden lg:block text-2xl font-bold ${getTextClasses(theme, 'primary')}`}>
             {title}
           </h1>
-          <p className={`text-sm sm:text-base ${getTextClasses(theme, 'secondary')}`}>
+          <p className={`hidden lg:block text-base ${getTextClasses(theme, 'secondary')}`}>
             {description}
           </p>
+          <div className={`lg:hidden text-sm ${getTextClasses(theme, 'secondary')}`}>
+            {description}
+          </div>
         </div>
         <div className="flex items-center gap-2">
           {/* Desktop account button */}
@@ -92,7 +97,7 @@ export default function PageHeader({
         </IconButton>
         
         {/* Search Bar */}
-        <div className="flex-1">
+        <div className="flex-1 min-w-0">
           <div className="relative">
             <div className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 color-text-secondary">
               <Search className="w-4 h-4" />
@@ -102,7 +107,7 @@ export default function PageHeader({
               placeholder={searchPlaceholder}
               value={searchTerm}
               onChange={(e) => onSearchChange(e.target.value)}
-              className="w-full pl-9 pr-10 py-2 rounded-lg input"
+              className="w-full h-10 pl-9 pr-10 rounded-lg input"
             />
             {searchTerm && (
               <button
@@ -119,6 +124,16 @@ export default function PageHeader({
         
         {/* Action Buttons */}
         <div className="flex items-center gap-1.5">
+          {title === 'Users' && onInvite && (
+            <IconButton
+              onClick={() => {
+                onInvite()
+              }}
+              title="Invite users"
+            >
+              <Send className="w-5 h-5" />
+            </IconButton>
+          )}
           <IconButton
             onClick={() => {
               console.log('Add button clicked!', { title, onAdd })
