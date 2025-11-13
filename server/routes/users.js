@@ -2307,6 +2307,127 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
     }
   });
 
+  // POST /users/invite-webhook - Send webhook notification for invites (generation or summary)
+  router.post('/invite-webhook', async (req, res) => {
+    try {
+      const { type, invites, createdUsers, totalInvites, groupName } = req.body
+      
+      if (type !== 'generated' && type !== 'summary') {
+        return res.status(400).json({ message: 'Invalid type. Must be "generated" or "summary"' })
+      }
+
+      const accountId = getAccountId(req)
+      const account = await prisma.appAccount.findUnique({ 
+        where: { id: accountId }, 
+        select: { sync: true } 
+      })
+      
+      let syncCfg = account?.sync
+      if (syncCfg && typeof syncCfg === 'string') {
+        try { syncCfg = JSON.parse(syncCfg) } catch { syncCfg = null }
+      }
+      
+      const webhookUrl = syncCfg?.webhookUrl
+      if (!webhookUrl) {
+        return res.json({ message: 'No webhook URL configured', sent: false })
+      }
+
+      // Import notify utilities
+      const { postDiscord } = require('../utils/notify')
+      
+      let embed
+      
+      if (type === 'generated') {
+        // Webhook for when invites are generated
+        if (!Array.isArray(invites) || typeof totalInvites !== 'number') {
+          return res.status(400).json({ message: 'Invalid request data for generated type' })
+        }
+        
+        const fields = []
+        invites.forEach((invite, index) => {
+          const codeBlock = `Code: ${invite.code}\nLink: ${invite.link}`
+          fields.push({
+            name: `Invite ${index + 1}`,
+            value: '```' + codeBlock + '```',
+            inline: false
+          })
+        })
+        
+        embed = {
+          title: `${invites.length} Invite${invites.length > 1 ? 's' : ''} Generated${groupName ? ` for ${groupName}` : ''}`,
+          description: 'Each link expires in 5 minutes.',
+          color: 0x808080, // Gray, similar to sync notifications
+          fields: fields,
+          timestamp: new Date().toISOString()
+        }
+      } else {
+        // Webhook for invite summary (users created)
+        if (!Array.isArray(createdUsers) || typeof totalInvites !== 'number') {
+          return res.status(400).json({ message: 'Invalid request data for summary type' })
+        }
+        
+        if (createdUsers.length === 0) {
+          return res.json({ message: 'No users created, skipping webhook', sent: false })
+        }
+        
+        const fields = []
+        createdUsers.forEach((user, index) => {
+          const valueParts = []
+          if (user.username) {
+            valueParts.push(`User: ${user.username}`)
+          }
+          if (user.code) {
+            valueParts.push(`Code: ${user.code}`)
+          }
+          if (user.link) {
+            valueParts.push(`Link: ${user.link}`)
+          }
+          
+          const codeBlock = valueParts.join('\n')
+          fields.push({
+            name: `Invite ${index + 1}`,
+            value: '```' + codeBlock + '```',
+            inline: false
+          })
+        })
+        
+        const userWord = createdUsers.length === 1 ? 'User' : 'Users'
+        const allSynced = createdUsers.length > 0 && createdUsers.every((user) => user.synced === true)
+        const syncText = allSynced ? ' and Synced' : ''
+        const title = groupName && groupName !== 'No Group'
+          ? `${createdUsers.length} ${groupName} ${userWord} Created${syncText}`
+          : `${createdUsers.length} ${userWord} Created${syncText}`
+        
+        embed = {
+          title: title,
+          description: `${createdUsers.length}/${totalInvites} invite${totalInvites > 1 ? 's' : ''} resulted in new users.`,
+          color: 0x00ff00, // Green
+          fields: fields,
+          timestamp: new Date().toISOString()
+        }
+      }
+
+      // Add footer with Syncio version (same as sync notifications)
+      let appVersion = process.env.NEXT_PUBLIC_APP_VERSION || process.env.APP_VERSION || ''
+      if (!appVersion) {
+        try { appVersion = require('../../package.json')?.version || '' } catch {}
+      }
+      if (appVersion) {
+        embed.footer = { text: `Syncio v${appVersion}` }
+      }
+
+      await postDiscord(webhookUrl, null, {
+        embeds: [embed],
+        avatar_url: 'https://raw.githubusercontent.com/iamneur0/syncio/refs/heads/main/client/public/logo-black.png'
+      })
+
+      return res.json({ message: 'Webhook sent successfully', sent: true })
+    } catch (error) {
+      console.error('Failed to send invite webhook:', error)
+      return res.status(500).json({ message: 'Failed to send webhook', error: error?.message })
+    }
+  })
+
   return router;
 };
 
