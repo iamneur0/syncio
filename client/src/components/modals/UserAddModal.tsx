@@ -1,21 +1,26 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react'
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 import { useTheme } from '@/contexts/ThemeContext'
 import { getEntityColorStyles } from '@/utils/colorMapping'
 import { ColorPicker } from '@/components/layout'
+import StremioOAuthCard from '@/components/auth/StremioOAuthCard'
+import { usersAPI } from '@/services/api'
+import toast from 'react-hot-toast'
 
 interface UserAddModalProps {
   isOpen: boolean
   onClose: () => void
   onAddUser: (userData: {
-    username: string
-    email: string
-    password: string
+    username?: string
+    email?: string
+    password?: string
+    authKey?: string
+    groupName?: string
     groupId?: string
     newGroupName?: string
-    registerNew: boolean
-    colorIndex: number
+    registerNew?: boolean
+    colorIndex?: number
   }) => void
   isCreating: boolean
   groups?: any[]
@@ -43,18 +48,74 @@ export default function UserAddModal({
   const [mounted, setMounted] = useState(false)
   const [stremioEmail, setStremioEmail] = useState('')
   const [stremioPassword, setStremioPassword] = useState('')
+  const [stremioAuthKey, setStremioAuthKey] = useState('')
   const [stremioUsername, setStremioUsername] = useState('')
-  const [authMode, setAuthMode] = useState<'email' | 'authkey'>('email')
+  const [usernameTouched, setUsernameTouched] = useState(false)
+  const [authMode, setAuthMode] = useState<'credentials' | 'oauth'>('oauth')
+  // Using email/password as primary credentials, auth key as optional fallback
   const [selectedGroup, setSelectedGroup] = useState('')
   const [newGroupName, setNewGroupName] = useState('')
   const [isCreatingNewGroup, setIsCreatingNewGroup] = useState(false)
   const [stremioRegisterNew, setStremioRegisterNew] = useState(false)
   const [colorIndex, setColorIndex] = useState(0)
   const [colorIndexRef, setColorIndexRef] = useState(0)
+  const trimmedAuthKey = useMemo(() => stremioAuthKey.trim(), [stremioAuthKey])
+  const isOauthVerified = useMemo(() => authMode === 'oauth' && !!trimmedAuthKey, [authMode, trimmedAuthKey])
+
   const colorStyles = useMemo(
     () => getEntityColorStyles(theme, colorIndex),
     [theme, colorIndex]
   )
+
+  const maybeCapitalizeFirst = useCallback((value: string) => {
+    if (!value) return ''
+    return value.charAt(0).toUpperCase() + value.slice(1)
+  }, [])
+
+  const getFinalGroupName = useCallback(() => {
+    const selectedGroupName = selectedGroup ? (groups.find((g: any) => g.id === selectedGroup)?.name || undefined) : undefined
+    return (newGroupName.trim() || selectedGroupName) || undefined
+  }, [selectedGroup, newGroupName, groups])
+
+  const handleAuthKey = useCallback(async (incomingAuthKey: string) => {
+    const trimmed = incomingAuthKey.trim()
+    if (!trimmed) return
+    try {
+      const result = await usersAPI.verifyAuthKey({
+        authKey: trimmed,
+        username: stremioUsername || undefined,
+        email: stremioEmail || undefined,
+      })
+
+      const resolvedAuthKey = (result.authKey || trimmed || '').trim()
+      const responseEmail = result.user?.email?.trim() || ''
+      const responseUsername = result.user?.username?.trim() || ''
+      const derivedUsername =
+        responseUsername ||
+        (responseEmail ? responseEmail.split('@')[0]?.trim() || '' : '')
+
+      setStremioAuthKey(resolvedAuthKey)
+      if (responseEmail) {
+        setStremioEmail(responseEmail)
+      }
+      setStremioUsername((prev) => {
+        if (usernameTouched) return prev
+        if (!derivedUsername) return prev
+        return maybeCapitalizeFirst(derivedUsername)
+      })
+      toast.success('Stremio account verified')
+    } catch (error: any) {
+      const message = error?.response?.data?.message || error?.message || 'Failed to verify Stremio account'
+      toast.error(message)
+    }
+  }, [maybeCapitalizeFirst, stremioEmail, usernameTouched])
+
+  useEffect(() => {
+    if (authMode === 'oauth') {
+      setStremioPassword('')
+      setStremioAuthKey('')
+    }
+  }, [authMode])
 
   useEffect(() => {
     setMounted(true)
@@ -68,16 +129,20 @@ export default function UserAddModal({
       setSelectedGroup(editingUser.groupId || '')
       setColorIndex(editingUser.colorIndex || 0)
       setColorIndexRef(editingUser.colorIndex || 0)
-      setAuthMode('authkey') // Default to authkey mode for reconnection
+      setAuthMode('oauth') // Default to oauth mode for reconnection
+      setStremioAuthKey('')
       setStremioRegisterNew(false) // Hide register option for reconnection
       setIsCreatingNewGroup(false)
+      setUsernameTouched(true)
       
     } else {
       // Reset form when not editing
       setStremioEmail('')
       setStremioPassword('')
+      setStremioAuthKey('')
       setStremioUsername('')
-      setAuthMode('email')
+      setUsernameTouched(false)
+      setAuthMode('oauth')
       setSelectedGroup('')
       setNewGroupName('')
       setStremioRegisterNew(false)
@@ -107,48 +172,85 @@ export default function UserAddModal({
     if (isOpen && !editingUser) {
       setStremioEmail('')
       setStremioPassword('')
+      setStremioAuthKey('')
       setStremioUsername('')
+      setUsernameTouched(false)
       setSelectedGroup('')
       setNewGroupName('')
       setStremioRegisterNew(false)
-      setAuthMode('email')
+      setAuthMode('oauth')
       setIsCreatingNewGroup(false)
     }
   }, [isOpen, editingUser])
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    
-    
-    if (!stremioUsername.trim() || !stremioPassword.trim()) {
+    const finalGroupName = getFinalGroupName()
+
+    if (authMode === 'oauth') {
+      const finalEmail = stremioEmail.trim()
+      const finalUsernameRaw = stremioUsername.trim() || (finalEmail ? finalEmail.split('@')[0]?.trim() || '' : '')
+      if (!trimmedAuthKey || !finalUsernameRaw) {
+        return
+      }
+
+      const submitData: any = {
+        username: finalUsernameRaw,
+        authKey: trimmedAuthKey,
+        groupName: finalGroupName,
+        colorIndex: colorIndexRef,
+      }
+
+      if (finalEmail) {
+        submitData.email = finalEmail
+      }
+
+      try {
+        ;(onAddUser as any)(submitData)
+      } catch (error) {
+        console.error('🔍 Error calling onAddUser (oauth):', error)
+      }
       return
     }
 
-    // Backend expects groupName (optional). Prefer newGroupName; otherwise map selectedGroup id to its name.
-    const selectedGroupName = selectedGroup ? (groups.find((g: any) => g.id === selectedGroup)?.name || undefined) : undefined
-    const finalGroupName = (newGroupName.trim() || selectedGroupName) || undefined
+    const finalUsername = stremioUsername.trim()
+    if (!finalUsername) {
+      return
+    }
 
-    const submitData = {
-      username: stremioUsername.trim(),
-      email: authMode === 'email' ? stremioEmail.trim() : stremioUsername.trim() + '@stremio.local',
-      password: stremioPassword.trim(),
+    const submitData: any = {
+      username: finalUsername,
       groupName: finalGroupName,
       colorIndex: colorIndexRef,
     }
 
-    
-    // Single call including groupName so backend assigns user to group
+    if (stremioAuthKey.trim()) {
+      submitData.authKey = stremioAuthKey.trim()
+      if (stremioEmail.trim()) {
+        submitData.email = stremioEmail.trim()
+      }
+    } else {
+      if (!stremioEmail.trim() || !stremioPassword.trim()) {
+        return
+      }
+      submitData.email = stremioEmail.trim()
+      submitData.password = stremioPassword.trim()
+      submitData.registerNew = stremioRegisterNew
+    }
+
     try {
       ;(onAddUser as any)(submitData)
     } catch (error) {
-      console.error('🔍 Error calling onAddUser:', error)
+      console.error('🔍 Error calling onAddUser (credentials):', error)
     }
   }
 
   const handleClose = () => {
     setStremioEmail('')
     setStremioPassword('')
+    setStremioAuthKey('')
     setStremioUsername('')
+    setUsernameTouched(false)
     setSelectedGroup('')
     setNewGroupName('')
     setStremioRegisterNew(false)
@@ -207,7 +309,10 @@ export default function UserAddModal({
                 id="stremio-username-input"
                 type="text"
                 value={stremioUsername}
-                onChange={(e) => setStremioUsername(e.target.value)}
+                onChange={(e) => {
+                  setUsernameTouched(true)
+                  setStremioUsername(e.target.value)
+                }}
                 placeholder="Username *"
                 required
                 readOnly={!!editingUser}
@@ -216,9 +321,17 @@ export default function UserAddModal({
                 }`}
               />
               <span className="text-sm color-text-secondary">
-                {authMode === 'email'
-                  ? (stremioEmail.trim() || 'Provide credentials below')
-                  : 'Authenticate with an Auth Key'}
+                {authMode === 'credentials'
+                  ? stremioAuthKey.trim()
+                    ? 'Provide Stremio Auth Key'
+                    : (stremioEmail.trim() || 'Provide credentials below')
+                  : (
+                    stremioEmail.trim()
+                      ? stremioEmail.trim()
+                      : (isOauthVerified
+                          ? `Account of ${stremioUsername || 'Stremio user'} verified`
+                          : 'Authenticate with Stremio OAuth')
+                  )}
               </span>
             </div>
           </div>
@@ -235,47 +348,86 @@ export default function UserAddModal({
             <div className="grid grid-cols-2 gap-2 w-full">
               <button
                 type="button"
-                onClick={() => setAuthMode('email')}
+                onClick={() => setAuthMode('oauth')}
                 className={`w-full py-3 px-4 rounded-lg cursor-pointer card card-selectable color-hover hover:shadow-lg transition-all ${
-                  authMode === 'email' ? 'card-selected' : ''
+                  authMode === 'oauth' ? 'card-selected' : ''
                 }`}
               >
-                <span className="text-sm font-medium">Email & Password</span>
+                <span className="text-sm font-medium">Stremio OAuth</span>
               </button>
               <button
                 type="button"
-                onClick={() => setAuthMode('authkey')}
+                onClick={() => {
+                  setAuthMode('credentials')
+                  setStremioAuthKey('')
+                }}
                 className={`w-full py-3 px-4 rounded-lg cursor-pointer card card-selectable color-hover hover:shadow-lg transition-all ${
-                  authMode === 'authkey' ? 'card-selected' : ''
+                  authMode === 'credentials' ? 'card-selected' : ''
                 }`}
               >
-                <span className="text-sm font-medium">Auth Key</span>
+                <span className="text-sm font-medium">Credentials</span>
               </button>
             </div>
           </div>
-          {authMode === 'email' ? (
+          {authMode === 'credentials' ? (
             <>
-          <div>
-            <input
-              type="email"
-              value={stremioEmail}
-              onChange={(e) => setStremioEmail(e.target.value)}
-              placeholder="Email"
-              required
-              readOnly={!!editingUser}
-              className={`w-full px-3 py-2 border rounded-lg focus:outline-none ${editingUser ? 'input cursor-not-allowed opacity-80' : 'input'}`}
-            />
-          </div>
-          <div>
-            <input
-              type="password"
-              value={stremioPassword}
-              onChange={(e) => setStremioPassword(e.target.value)}
-              placeholder="Password"
-              required
-              className={`w-full px-3 py-2 border rounded-lg focus:outline-none input`}
-            />
-          </div>
+              <div>
+                <input
+                  type="email"
+                  value={stremioEmail}
+                  onChange={(e) => {
+                    const value = e.target.value
+                    setStremioEmail(value)
+                    if (!editingUser && !usernameTouched) {
+                      const localPart = value.split('@')[0]?.trim() || ''
+                      setStremioUsername(localPart ? maybeCapitalizeFirst(localPart) : '')
+                    }
+                  }}
+                  placeholder="Email"
+                  readOnly={!!editingUser}
+                  className={`w-full px-3 py-2 border rounded-lg focus:outline-none ${editingUser ? 'input cursor-not-allowed opacity-80' : 'input'}`}
+                />
+              </div>
+              <div>
+                <input
+                  type="password"
+                  value={stremioPassword}
+                  onChange={(e) => setStremioPassword(e.target.value)}
+                  placeholder="Password"
+                  className="w-full px-3 py-2 border rounded-lg focus-outline-none input"
+                />
+              </div>
+              <div className="flex items-center justify-center text-xs uppercase color-text-secondary">
+                <span className="h-px flex-1 bg-color-border" />
+                <span className="px-2">or</span>
+                <span className="h-px flex-1 bg-color-border" />
+              </div>
+              <div>
+                <input
+                  type="text"
+                  value={stremioAuthKey}
+                  onChange={(e) => setStremioAuthKey(e.target.value)}
+                  placeholder="Stremio Auth Key"
+                  className="w-full px-3 py-2 border rounded-lg focus-outline-none input"
+                />
+              </div>
+            </>
+          ) : (
+            <>
+              <StremioOAuthCard
+                active={authMode === 'oauth'}
+                onAuthKey={handleAuthKey}
+                disabled={isCreating || (isOauthVerified && !!trimmedAuthKey)}
+                startButtonLabel={
+                  isOauthVerified
+                    ? `Account of ${stremioUsername || 'Stremio user'} verified`
+                    : 'Sign in with Stremio'
+                }
+                authorizeLabel="Authorize Syncio"
+              />
+            </>
+          )}
+
           {!editingUser && (
             <>
               <div>
@@ -292,7 +444,7 @@ export default function UserAddModal({
                       setNewGroupName('')
                     }
                   }}
-                  className={`w-full px-3 py-2 border rounded-lg focus:outline-none input`}
+                  className="w-full px-3 py-2 border rounded-lg focus:outline-none input"
                 >
                   <option value="">Group (optional)</option>
                   {groups?.map((group: any) => (
@@ -308,57 +460,59 @@ export default function UserAddModal({
                     value={newGroupName}
                     onChange={(e) => setNewGroupName(e.target.value)}
                     placeholder="Enter new group name"
-                    className={`w-full px-3 py-2 border rounded-lg focus:outline-none input mt-2`}
+                    className="w-full px-3 py-2 border rounded-lg focus:outline-none input mt-2"
                     autoFocus
                   />
                 )}
               </div>
-            <div className="flex items-center gap-2">
-              <input
-                id="stremio-register-new"
-                type="checkbox"
-                checked={stremioRegisterNew}
-                onChange={(e) => setStremioRegisterNew(e.target.checked)}
-                  className="control-radio"
-                  onClick={(e) => e.stopPropagation()}
-              />
-                <label htmlFor="stremio-register-new" className={`text-sm cursor-pointer`} onClick={() => setStremioRegisterNew(!stremioRegisterNew)}>
-                  Register
-              </label>
-            </div>
+              {authMode === 'credentials' && !stremioAuthKey.trim() && (
+                <div className="flex items-center gap-2">
+                  <input
+                    id="stremio-register-new"
+                    type="checkbox"
+                    checked={stremioRegisterNew}
+                    onChange={(e) => setStremioRegisterNew(e.target.checked)}
+                    className="control-radio"
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                  <label
+                    htmlFor="stremio-register-new"
+                    className="text-sm cursor-pointer"
+                    onClick={() => setStremioRegisterNew(!stremioRegisterNew)}
+                  >
+                    Register
+                  </label>
+                </div>
+              )}
             </>
           )}
-            </>
-          ) : (
-            <div>
-              <input
-                type="text"
-                value={stremioPassword}
-                onChange={(e) => setStremioPassword(e.target.value)}
-                placeholder="Auth Key"
-                required
-                className={`w-full px-3 py-2 border rounded-lg focus:outline-none input`}
-              />
-              </div>
-            )}
-            
-            <div className="flex gap-3 pt-4">
-              <button
-                type="button"
-                onClick={handleClose}
-                className={`flex-1 px-4 py-2 rounded-lg transition-colors color-text-secondary color-hover`}
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={isCreating}
-                onClick={() => {}}
-                className="flex-1 px-4 py-2 color-surface rounded-lg transition-colors disabled:opacity-50"
-              >
-                {isCreating ? (stremioRegisterNew ? 'Registering...' : (editingUser ? 'Reconnecting...' : 'Adding...')) : (stremioRegisterNew ? 'Register & Connect' : (editingUser ? 'Reconnect User' : 'Add User'))}
-              </button>
-            </div>
+
+          <div className={`flex gap-3 pt-4`}>
+            <button
+              type="button"
+              onClick={handleClose}
+              className="flex-1 px-4 py-2 rounded-lg transition-colors color-text-secondary color-hover"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={isCreating || (authMode === 'oauth' && !isOauthVerified)}
+              className="flex-1 px-4 py-2 color-surface rounded-lg transition-colors disabled:opacity-50"
+            >
+              {isCreating
+                ? (authMode === 'oauth'
+                    ? 'Connecting...'
+                    : (stremioAuthKey.trim()
+                        ? (editingUser ? 'Reconnecting...' : 'Connecting...')
+                        : (stremioRegisterNew ? 'Registering...' : (editingUser ? 'Reconnecting...' : 'Adding...'))))
+                : (authMode === 'oauth'
+                    ? (editingUser ? 'Reconnect User' : 'Add User')
+                    : (stremioAuthKey.trim()
+                        ? (editingUser ? 'Reconnect User' : 'Connect User')
+                        : (stremioRegisterNew ? 'Register & Connect' : (editingUser ? 'Reconnect User' : 'Add User'))))}
+            </button>
+          </div>
         </form>
       </div>
     </div>,
