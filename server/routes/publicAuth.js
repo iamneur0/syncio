@@ -5,6 +5,8 @@ const multer = require('multer');
 const crypto = require('crypto');
 const { repairAddonsList } = require('../utils/repair');
 const { responseUtils, dbUtils } = require('../utils/routeUtils');
+const { validateStremioAuthKey } = require('../utils/stremio');
+const { encrypt } = require('../utils/encryption');
 
 module.exports = ({ prisma, getAccountId, AUTH_ENABLED, issueAccessToken, issueRefreshToken, cookieName, isProdEnv, encrypt, decrypt, getDecryptedManifestUrl, scopedWhere, getAccountDek, decryptWithFallback, manifestUrlHmac, manifestHash, filterManifestByResources, filterManifestByCatalogs }) => {
   console.log('PublicAuth router initialized, prisma available:', !!prisma);
@@ -53,6 +55,45 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, issueAccessToken, issueR
   // Helper function to generate random CSRF token
   function randomCsrfToken() {
     return crypto.randomBytes(32).toString('hex');
+  }
+
+  async function generateUniqueAccountUuid() {
+    const tryGenerate = () => {
+      try {
+        return crypto.randomUUID()
+      } catch {
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+          const r = Math.random() * 16 | 0
+          const v = c === 'x' ? r : (r & 0x3 | 0x8)
+          return v.toString(16)
+        })
+      }
+    }
+
+    for (let i = 0; i < 5; i += 1) {
+      const candidate = tryGenerate()
+      const exists = await prisma.appAccount.findUnique({ where: { uuid: candidate } })
+      if (!exists) return candidate
+    }
+
+    return `${Date.now().toString(16)}-${Math.random().toString(16).slice(2, 10)}`
+  }
+
+  async function ensureUniqueUsername(baseUsername, accountId) {
+    const base = (String(baseUsername || '') || '')
+      .trim()
+      .replace(/[^a-zA-Z0-9._-]/g, '')
+      .toLowerCase() || 'stremio-user'
+    let candidate = base
+    let suffix = 1
+    while (true) {
+      const existing = await prisma.user.findFirst({
+        where: { accountId, username: candidate }
+      })
+      if (!existing) return candidate
+      candidate = `${base}${suffix}`
+      suffix += 1
+    }
   }
 
   // Generate unique UUID endpoint
@@ -118,7 +159,7 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, issueAccessToken, issueR
       res.cookie(cookieName('sfm_csrf'), csrf, { httpOnly: false, secure: isProdEnv(), sameSite: isProdEnv() ? 'strict' : 'lax', path: '/', maxAge: 30 * 24 * 60 * 60 * 1000 });
       return res.status(201).json({
         message: 'Registered successfully',
-        account: { id: account.id, uuid: account.uuid },
+        account: { id: account.id, uuid: account.uuid, email: account.email || null },
       });
     } catch (error) {
       console.error('Registration error:', error);
@@ -152,13 +193,129 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, issueAccessToken, issueR
       res.cookie(cookieName('sfm_csrf'), csrf, { httpOnly: false, secure: isProdEnv(), sameSite: isProdEnv() ? 'strict' : 'lax', path: '/', maxAge: 30 * 24 * 60 * 60 * 1000 });
       return res.json({
         message: 'Login successful',
-        account: { id: account.id, uuid: account.uuid },
+        account: { id: account.id, uuid: account.uuid, email: account.email || null },
       });
     } catch (error) {
       console.error('Login error:', error);
       return responseUtils.internalError(res, String(error && error.message || error));
     }
   });
+
+  router.post('/stremio-login', async (req, res) => {
+    try {
+      if (!AUTH_ENABLED) {
+        return res.status(400).json({ message: 'Stremio login is only available in public auth mode' })
+      }
+
+      const { authKey } = req.body || {}
+      if (!authKey || typeof authKey !== 'string' || !authKey.trim()) {
+        return responseUtils.badRequest(res, 'authKey is required')
+      }
+
+      let stremioInfo
+      try {
+        stremioInfo = await validateStremioAuthKey(authKey.trim())
+      } catch (err) {
+        const code = err?.code
+        const message = err?.message || 'Failed to validate Stremio auth key'
+        if (code === 1) {
+          return res.status(401).json({ message: 'Invalid or expired Stremio session' })
+        }
+        return res.status(400).json({ message })
+      }
+
+      const email = String(stremioInfo?.user?.email || '').trim().toLowerCase()
+      if (!email) {
+        return res.status(400).json({ message: 'Stremio account email not available' })
+      }
+      let account = await prisma.appAccount.findUnique({ where: { email } })
+      if (!account) {
+        const legacyUuid = `stremio:${email}`
+        const legacyAccount = await prisma.appAccount.findUnique({ where: { uuid: legacyUuid } })
+        if (legacyAccount) {
+          const newUuid = await generateUniqueAccountUuid()
+          account = await prisma.appAccount.update({
+            where: { id: legacyAccount.id },
+            data: { uuid: newUuid, email }
+          })
+        } else if (req.appAccountId) {
+          const currentAccount = await prisma.appAccount.findUnique({ where: { id: req.appAccountId } })
+          if (currentAccount && currentAccount.email == null) {
+            account = await prisma.appAccount.update({
+              where: { id: currentAccount.id },
+              data: { email }
+            })
+          }
+        }
+      }
+
+      let isNewAccount = false
+      if (!account) {
+        const randomSecret = crypto.randomBytes(32).toString('hex')
+        const passwordHash = await bcrypt.hash(randomSecret, 12)
+        const newUuid = await generateUniqueAccountUuid()
+        account = await prisma.appAccount.create({
+          data: {
+            uuid: newUuid,
+            email,
+            passwordHash
+          }
+        })
+        isNewAccount = true
+      } else if (account.email == null) {
+        account = await prisma.appAccount.update({
+          where: { id: account.id },
+          data: { email }
+        })
+      }
+
+      req.appAccountId = account.id
+
+      const encryptedAuthKey = encrypt(authKey.trim(), req)
+
+      let user = null
+      const existingUser = await prisma.user.findFirst({
+        where: { accountId: account.id },
+        orderBy: { id: 'asc' }
+      })
+
+      if (isNewAccount) {
+        const baseUsername = stremioInfo?.user?.username || stremioInfo?.user?.name || (email.split('@')[0] || 'stremio-user')
+        const username = await ensureUniqueUsername(baseUsername, account.id)
+        const createdUser = await prisma.user.create({
+          data: {
+            accountId: account.id,
+            email,
+            username,
+            isActive: true,
+            stremioAuthKey: encryptedAuthKey
+          }
+        })
+        user = { id: createdUser.id, email: createdUser.email, username: createdUser.username }
+      } else if (existingUser) {
+        await prisma.user.update({
+          where: { id: existingUser.id },
+          data: { stremioAuthKey: encryptedAuthKey, isActive: true }
+        })
+      }
+
+      const at = issueAccessToken(account.id);
+      const rt = issueRefreshToken(account.id);
+      const csrf = randomCsrfToken();
+      res.cookie(cookieName('sfm_at'), at, { httpOnly: true, secure: isProdEnv(), sameSite: isProdEnv() ? 'strict' : 'lax', path: '/', maxAge: 30 * 24 * 60 * 60 * 1000 });
+      res.cookie(cookieName('sfm_rt'), rt, { httpOnly: true, secure: isProdEnv(), sameSite: isProdEnv() ? 'strict' : 'lax', path: '/', maxAge: 365 * 24 * 60 * 60 * 1000 });
+      res.cookie(cookieName('sfm_csrf'), csrf, { httpOnly: false, secure: isProdEnv(), sameSite: isProdEnv() ? 'strict' : 'lax', path: '/', maxAge: 30 * 24 * 60 * 60 * 1000 });
+
+      return res.json({
+        message: 'Login successful',
+        account: { id: account.id, uuid: account.uuid, email: account.email || null },
+        ...(user ? { user } : {})
+      })
+    } catch (error) {
+      console.error('Stremio login error:', error);
+      return responseUtils.internalError(res, String(error && error.message || error));
+    }
+  })
 
   // Session info endpoint
   router.get('/me', async (req, res) => {
@@ -173,7 +330,7 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, issueAccessToken, issueR
 
       const account = await prisma.appAccount.findUnique({
         where: { id: req.appAccountId },
-        select: { id: true, uuid: true }
+        select: { id: true, uuid: true, email: true }
       });
 
       if (!account) {
@@ -1169,9 +1326,6 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, issueAccessToken, issueR
 
       // Delete all data for this account
       await prisma.groupAddon.deleteMany({
-        where: { group: { accountId: req.appAccountId } }
-      });
-      await prisma.groupUser.deleteMany({
         where: { group: { accountId: req.appAccountId } }
       });
       await prisma.group.deleteMany({
