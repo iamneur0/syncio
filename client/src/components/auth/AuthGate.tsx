@@ -4,7 +4,9 @@ import React, { useEffect, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import api, { publicAuthAPI } from '@/services/api'
 import { ConfirmDialog } from '@/components/modals'
+import { useTheme } from '@/contexts/ThemeContext'
 import { Eye, EyeOff, LogIn, User, Lock } from 'lucide-react'
+import StremioOAuthCard from './StremioOAuthCard'
 
 export default function AuthGate({ children }: { children: React.ReactNode }) {
   const AUTH_ENABLED = process.env.NEXT_PUBLIC_AUTH_ENABLED === 'true'
@@ -65,6 +67,8 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
 }
 
 function LoginForm({ setAuthState }: { setAuthState: (state: 'loading' | 'authed' | 'guest') => void }) {
+  const { isDark } = useTheme()
+  const logoSrc = isDark ? '/logo-white.png' : '/logo-black.png'
   const [uuid, setUuid] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
@@ -72,6 +76,19 @@ function LoginForm({ setAuthState }: { setAuthState: (state: 'loading' | 'authed
   const [error, setError] = useState('')
   const [isRegisterMode, setIsRegisterMode] = useState(false)
   const [showUuidNotice, setShowUuidNotice] = useState(false)
+  const [showStremioLogin, setShowStremioLogin] = useState(false)
+
+  const handleToggleStremio = () => {
+    setShowStremioLogin((prev) => !prev)
+  }
+
+  const handleStremioAuth = React.useCallback(async (authKey: string) => {
+    await publicAuthAPI.loginWithStremio({ authKey })
+    try {
+      window.dispatchEvent(new CustomEvent('sfm:auth:changed', { detail: { authed: true } }))
+    } catch {}
+    setAuthState('authed')
+  }, [setAuthState])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -126,9 +143,9 @@ function LoginForm({ setAuthState }: { setAuthState: (state: 'loading' | 'authed
         <div className="text-center mb-8">
           <div className="flex justify-center mb-4">
             <img 
-              src="/logo-black.png" 
+              src={logoSrc} 
               alt="Syncio Logo" 
-              className="w-16 h-16 dark:invert logo-invert-mono"
+              className="w-16 h-16"
               onError={(e) => {
                 e.currentTarget.src = "/favicon-32x32.png"
               }}
@@ -140,6 +157,34 @@ function LoginForm({ setAuthState }: { setAuthState: (state: 'loading' | 'authed
           <p className={`mt-2`}>
             {isRegisterMode ? 'Create a new account to get started' : 'Enter your account credentials to continue'}
           </p>
+        </div>
+
+        <div className="space-y-4 mb-6">
+          <div className="p-4 border rounded-lg space-y-4 color-surface">
+            <div className="flex items-center justify-between">
+              <button
+                type="button"
+                onClick={handleToggleStremio}
+                className="flex-1 text-center font-medium px-3 py-2 rounded-md color-surface hover:opacity-90 transition-colors"
+              >
+                Sign in with Stremio
+              </button>
+            </div>
+            {showStremioLogin && (
+              <StremioOAuthCard
+                active={showStremioLogin}
+                withContainer={false}
+                showStartButton={false}
+                className="mt-4"
+                onAuthKey={handleStremioAuth}
+              />
+            )}
+          </div>
+          <div className="flex items-center gap-3 text-xs uppercase justify-center color-text-secondary">
+            <span className="h-px flex-1 bg-color-border" />
+            or
+            <span className="h-px flex-1 bg-color-border" />
+          </div>
         </div>
 
         {/* Login/Register Form */}
