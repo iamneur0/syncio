@@ -478,7 +478,7 @@ module.exports = ({ prisma, getAccountId, encrypt, decrypt, assignUserToGroup, A
   // Connect using existing Stremio authKey (create new Syncio user)
   router.post('/connect-authkey', async (req, res) => {
     try {
-      const { username, email, authKey, groupName } = req.body
+      const { username, email, authKey, groupName, colorIndex, create } = req.body
       if (!authKey) return res.status(400).json({ message: 'authKey is required' })
 
       // Validate auth key against Stremio (must be an active session)
@@ -498,51 +498,117 @@ module.exports = ({ prisma, getAccountId, encrypt, decrypt, assignUserToGroup, A
         return res.status(400).json({ message: 'Could not validate auth key' })
       }
 
-      // Encrypt and persist
-      const encryptedAuthKey = encrypt(authKey, req)
-
-      // Ensure username uniqueness
-      const baseUsername = (username || `user_${Math.random().toString(36).slice(2, 8)}`).toLowerCase()
+      const normalizedEmail = (verifiedUser?.email || email || '').toLowerCase()
+      const requestedUsername = typeof username === 'string' ? username.trim() : ''
+      const emailPart = normalizedEmail ? normalizedEmail.split('@')[0] : ''
+      // Preserve exact username from Stremio (case-sensitive) - use requestedUsername first (from frontend which uses Stremio username)
+      let baseUsername = (requestedUsername || verifiedUser?.username || emailPart || `user_${Math.random().toString(36).slice(2, 8)}`).trim()
+      if (!baseUsername) {
+        baseUsername = `user_${Math.random().toString(36).slice(2, 8)}`
+      }
+      // Preserve original case - don't lowercase
       let finalUsername = baseUsername
-      let attempt = 0
-      while (await prisma.user.findFirst({ 
-        where: { 
-          username: finalUsername,
-          accountId: getAccountId(req)
+
+      if (!create) {
+        return res.json({
+          message: 'Stremio account verified',
+          authKey,
+          user: {
+            username: finalUsername,
+            email: normalizedEmail
+          }
+        })
+      }
+
+      // When create flag is true, persist the user
+      const accountId = getAccountId(req)
+
+      // For invite-based creation, check if user with this email already exists first
+      if (normalizedEmail) {
+        const existingUserByEmail = await prisma.user.findFirst({
+          where: {
+            accountId,
+            email: normalizedEmail
+          }
+        })
+        if (existingUserByEmail) {
+          return res.status(409).json({ message: 'User already exists' })
         }
-      })) {
+      }
+
+      // Check username uniqueness and append number if needed
+      let attempt = 0
+      while (await prisma.user.findFirst({ where: { accountId, username: finalUsername } })) {
         attempt += 1
         finalUsername = `${baseUsername}${attempt}`
         if (attempt > 50) break
       }
 
-      const created = await prisma.user.create({
-        data: {
-          accountId: getAccountId(req),
-          email: (verifiedUser?.email || email || `${Date.now()}@example.invalid`).toLowerCase(),
-          username: finalUsername,
-          stremioAuthKey: encryptedAuthKey,
-          isActive: true
-        },
+      const encryptedAuthKey = encrypt(authKey, req)
+
+      // Check if user exists by username (shouldn't happen after uniqueness check, but just in case)
+      let targetUser = await prisma.user.findFirst({
+        where: {
+          accountId,
+          username: finalUsername
+        }
       })
 
-      // Optional: create group and add user
-      if (groupName) {
-        let group = await prisma.group.findFirst({ where: { name: groupName, accountId: getAccountId(req) } })
-        if (!group) {
-          group = await prisma.group.create({ data: { name: groupName, accountId: getAccountId(req) } })
-        }
-        // Assign user to group (ensures user is only in one group)
-        await assignUserToGroup(created.id, group.id, req)
+      const resolvedColorIndex = Number.isFinite(Number(colorIndex)) ? Number(colorIndex) : 0
+
+      if (targetUser) {
+        // This shouldn't happen after email check and username uniqueness, but handle it
+        return res.status(409).json({ message: 'User already exists' })
+      } else {
+        targetUser = await prisma.user.create({
+          data: {
+            accountId,
+            username: finalUsername,
+            email: normalizedEmail || `${Date.now()}@example.invalid`,
+            stremioAuthKey: encryptedAuthKey,
+            isActive: true,
+            colorIndex: resolvedColorIndex,
+          }
+        })
       }
 
-      // Hide sensitive fields
-      delete created.password
-      delete created.stremioAuthKey
-      return res.json(created)
+      let groupAssignmentError = null
+      if (groupName && String(groupName).trim()) {
+        try {
+          const trimmed = String(groupName).trim()
+          let group = await prisma.group.findFirst({ where: { name: trimmed, accountId } })
+          if (!group) {
+            group = await prisma.group.create({ data: { name: trimmed, accountId } })
+          }
+          await assignUserToGroup(targetUser.id, group.id, req)
+        } catch (groupErr) {
+          console.error('Failed to assign user to group after OAuth creation:', groupErr)
+          groupAssignmentError = groupErr?.message || 'Failed to assign to group'
+          // Continue - user was created successfully, group assignment is optional
+        }
+      }
+
+      // User was created successfully, return success even if group assignment failed
+      return res.status(201).json({
+        message: 'Successfully connected to Stremio',
+        user: {
+          id: targetUser.id,
+          username: targetUser.username,
+          email: targetUser.email,
+        },
+        ...(groupAssignmentError ? { warning: `User created but group assignment failed: ${groupAssignmentError}` } : {})
+      })
     } catch (e) {
       console.error('connect-authkey failed:', e)
-      return res.status(500).json({ message: 'Failed to connect with authKey' })
+      const errorMessage = e?.message || 'Failed to connect with authKey'
+      // If user was created but something else failed, provide more context
+      if (errorMessage.includes('user') && errorMessage.includes('created')) {
+        return res.status(201).json({
+          message: 'User created successfully',
+          warning: errorMessage
+        })
+      }
+      return res.status(500).json({ message: errorMessage })
     }
   })
 

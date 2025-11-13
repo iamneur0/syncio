@@ -92,11 +92,20 @@ export interface Addon {
 }
 
 export interface CreateUserData {
-  email: string
-  password: string
+  email?: string
+  password?: string
+  authKey?: string
   username?: string
   groupName?: string
   colorIndex?: number
+}
+
+export interface StremioAuthVerification {
+  authKey: string
+  user: {
+    username: string
+    email: string
+  }
 }
 
 export interface CreateGroupData {
@@ -197,7 +206,23 @@ export const usersAPI = {
 
   // Create new user (via Stremio connect endpoint)
   create: async (userData: CreateUserData): Promise<User> => {
-    // The backend expects: { email, password, username?, groupName?, colorIndex? }
+    if (userData.authKey) {
+      const payload: any = {
+        authKey: userData.authKey,
+        username: userData.username,
+        email: userData.email,
+        groupName: userData.groupName,
+        colorIndex: userData.colorIndex,
+        create: true,
+      }
+      const response: AxiosResponse<any> = await api.post('/stremio/connect-authkey', payload)
+      return response.data?.user || response.data
+    }
+
+    if (!userData.email || !userData.password) {
+      throw new Error('Email and password are required to create a user')
+    }
+
     const payload: any = {
       email: userData.email,
       password: userData.password,
@@ -206,8 +231,12 @@ export const usersAPI = {
       colorIndex: userData.colorIndex,
     }
     const response: AxiosResponse<any> = await api.post('/stremio/connect', payload)
-    // Normalize response to User shape when possible
     return response.data?.user || response.data
+  },
+
+  verifyAuthKey: async (payload: { authKey: string; username?: string; email?: string }): Promise<StremioAuthVerification> => {
+    const response: AxiosResponse<StremioAuthVerification> = await api.post('/stremio/connect-authkey', payload)
+    return response.data
   },
 
   // Update user
@@ -237,6 +266,12 @@ export const usersAPI = {
   // Sync all enabled users
   syncAll: async (): Promise<any> => {
     const response: AxiosResponse<any> = await api.post('/users/sync-all')
+    return response.data
+  },
+
+  // Send invite webhook (generated or summary)
+  sendInviteWebhook: async (data: { type: 'generated' | 'summary', invites?: Array<{ code: string; link: string }>, createdUsers?: Array<{ username?: string; email?: string; code?: string; link?: string; synced?: boolean }>, totalInvites: number, groupName?: string }): Promise<any> => {
+    const response: AxiosResponse<any> = await api.post('/users/invite-webhook', data)
     return response.data
   },
 
@@ -556,6 +591,10 @@ export const stremioAPI = {
 export const publicAuthAPI = {
   register: async (payload: { uuid: string; password: string }): Promise<{ message: string; account: any }> => {
     const res: AxiosResponse<{ message: string; account: any }> = await api.post('/public-auth/register', payload)
+    return res.data
+  },
+  loginWithStremio: async (payload: { authKey: string }): Promise<{ message: string; account: any }> => {
+    const res: AxiosResponse<{ message: string; account: any }> = await api.post('/public-auth/stremio-login', payload)
     return res.data
   },
   login: async (payload: { uuid: string; password: string }): Promise<{ message: string; account: any }> => {
