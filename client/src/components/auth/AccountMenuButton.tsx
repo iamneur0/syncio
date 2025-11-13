@@ -25,6 +25,7 @@ export default function AccountMenuButton({ className = '' }: Props) {
   const [stats, setStats] = React.useState<{ addons: number; users: number; groups: number } | null>(null)
   const [statsLoading, setStatsLoading] = React.useState(false)
   const [accountUuid, setAccountUuid] = React.useState<string | null>(null)
+  const [accountEmail, setAccountEmail] = React.useState<string | null>(null)
 
   React.useEffect(() => {
     const onAuthChanged = async (e: any) => {
@@ -34,8 +35,14 @@ export default function AccountMenuButton({ className = '' }: Props) {
       if (typeof window !== 'undefined') (window as any).__SYNCIO_AUTHED = next
       if (next) {
         try {
-          await publicAuthAPI.me()
+          const info = await publicAuthAPI.me()
+          const acct = info?.account
+          setAccountUuid(acct?.uuid || null)
+          setAccountEmail(acct?.email || null)
         } catch {}
+      } else {
+        setAccountUuid(null)
+        setAccountEmail(null)
       }
     }
     if (AUTH_ENABLED && authState === 'unknown') setAuthState('unknown')
@@ -71,10 +78,32 @@ export default function AccountMenuButton({ className = '' }: Props) {
     if (!AUTH_ENABLED || authState !== 'authed') return
     ;(async () => {
       try {
-        await publicAuthAPI.me()
+        const info = await publicAuthAPI.me()
+        const acct = info?.account
+        setAccountUuid(acct?.uuid || null)
+        setAccountEmail(acct?.email || null)
       } catch {}
     })()
   }, [authState])
+
+  const refreshAccountInfo = React.useCallback(async () => {
+    if (!AUTH_ENABLED) return
+    try {
+      const info = await publicAuthAPI.me()
+      const acct = info?.account
+      setAccountUuid(acct?.uuid || null)
+      setAccountEmail(acct?.email || null)
+    } catch {
+      setAccountUuid(null)
+      setAccountEmail(null)
+    }
+  }, [AUTH_ENABLED])
+
+  React.useEffect(() => {
+    if (!AUTH_ENABLED) return
+    if (authState !== 'authed') return
+    refreshAccountInfo()
+  }, [AUTH_ENABLED, authState, refreshAccountInfo])
 
   React.useEffect(() => {
     let cancelled = false
@@ -91,10 +120,10 @@ export default function AccountMenuButton({ className = '' }: Props) {
         ])
         if (!cancelled) {
           setStats({ addons: addons.length, users: users.length, groups: groups.length })
-          if (AUTH_ENABLED && accountInfo) {
-            // Handle both { account: { id } } and { id } response structures
-            const uuid = accountInfo?.account?.id || accountInfo?.id || null
-            if (uuid) setAccountUuid(uuid)
+          if (AUTH_ENABLED && accountInfo?.account) {
+            const acct = accountInfo.account
+            setAccountUuid(acct?.uuid || null)
+            setAccountEmail(acct?.email || null)
           }
         }
       } finally {
@@ -103,7 +132,7 @@ export default function AccountMenuButton({ className = '' }: Props) {
     }
     load()
     return () => { cancelled = true }
-  }, [showMenu, authState])
+  }, [showMenu, authState, AUTH_ENABLED])
 
   // Close menu on click outside
   React.useEffect(() => {
@@ -133,6 +162,8 @@ export default function AccountMenuButton({ className = '' }: Props) {
     setAuthState('guest')
     if (typeof window !== 'undefined') (window as any).__SYNCIO_AUTHED = false
     setShowMenu(false)
+    setAccountUuid(null)
+    setAccountEmail(null)
     try { window.dispatchEvent(new CustomEvent('sfm:auth:changed', { detail: { authed: false } })) } catch {}
     try { await publicAuthAPI.logout() } catch {}
   }
@@ -161,16 +192,24 @@ export default function AccountMenuButton({ className = '' }: Props) {
       </button>
       {showMenu && (
         <div className={menuClasses}>
-          {AUTH_ENABLED && accountUuid && (
+          {AUTH_ENABLED && (accountUuid || accountEmail) && (
             <div 
               className={`mb-2 px-3 py-2 rounded border color-border cursor-pointer`} 
               onClick={handleCopyUuid} 
               title="Click to copy UUID"
             >
+              {accountEmail && (
+                <div className="mb-1">
+                  <div className="text-xs color-text-secondary text-center">Email</div>
+                  <div className="text-xs color-text text-center break-all">{accountEmail}</div>
+                </div>
+              )}
               <div className={`text-center mb-1`}>
                 <span className={`text-xs color-text-secondary`}>UUID</span>
               </div>
-              <code className={`text-xs color-text break-all block text-center`}>{accountUuid}</code>
+              <code className={`text-xs color-text break-all block text-center`}>
+                {accountUuid || '—'}
+              </code>
             </div>
           )}
           <div className={`mb-1 rounded overflow-hidden border color-border`}>

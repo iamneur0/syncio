@@ -88,6 +88,7 @@ model GroupAddon {
 model AppAccount {
   id           String   @id @default(cuid())
   uuid         String   @unique
+  email        String?  @unique
   passwordHash String
   // SQLite does not support Prisma Json type; store as TEXT (stringified JSON)
   sync         String?

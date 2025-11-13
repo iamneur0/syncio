@@ -259,25 +259,7 @@ export default function HomePage() {
           <h1 className={`text-lg font-semibold theme-text-1`}>
             {navigation.find(item => item.id === activeTab)?.name}
           </h1>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => {
-                // Trigger the UserMenuButton click programmatically
-                const userMenuButton = document.querySelector('[data-user-menu-button]') as HTMLButtonElement
-                if (userMenuButton) {
-                  userMenuButton.click()
-                }
-              }}
-              className="theme-text-3 hover:opacity-80"
-              title="Account"
-            >
-              <User className="w-6 h-6" />
-            </button>
-            {/* Hidden AccountMenuButton for the menu functionality */}
-            <div className="hidden">
-              <AccountMenuButton data-user-menu-button />
-            </div>
-          </div>
+          <AccountMenuButton className="theme-text-3 hover:opacity-80 !bg-transparent !border-none !shadow-none !px-2" />
         </div>
 
         {/* Page content */}

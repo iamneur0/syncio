@@ -90,6 +90,7 @@ model GroupAddon {
 model AppAccount {
   id           String   @id @default(cuid())
   uuid         String   @unique
+  email        String?  @unique
   passwordHash String
   sync         Json?
   apiKeyHash     String?  // Encrypted API key
