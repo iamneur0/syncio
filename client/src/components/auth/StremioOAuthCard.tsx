@@ -22,6 +22,9 @@ interface StremioOAuthCardProps {
   showSubmitButton?: boolean
   onSubmit?: () => void
   isSubmitting?: boolean
+  initialLink?: string | null // Initial OAuth link (from admin-generated link)
+  initialCode?: string | null // Initial OAuth code (from admin-generated link)
+  initialExpiresAt?: number | null // Initial expiration time
 }
 
 const DEFAULT_INSTRUCTION_PREFIX = 'Copy the code'
@@ -48,6 +51,9 @@ export function StremioOAuthCard({
   showSubmitButton = false,
   onSubmit,
   isSubmitting = false,
+  initialLink = null,
+  initialCode = null,
+  initialExpiresAt = null,
 }: StremioOAuthCardProps) {
   const { isDark } = useTheme()
   const logoSrc = isDark ? '/logo-white.png' : '/logo-black.png'
@@ -55,11 +61,49 @@ export function StremioOAuthCard({
   const [isCreating, setIsCreating] = useState(false)
   const [isPolling, setIsPolling] = useState(false)
   const [isCompleting, setIsCompleting] = useState(false)
-  const [stremioLink, setStremioLink] = useState<string | null>(null)
-  const [stremioCode, setStremioCode] = useState('')
-  const [stremioExpiresAt, setStremioExpiresAt] = useState<number | null>(null)
+  const [stremioLink, setStremioLink] = useState<string | null>(initialLink)
+  const [stremioCode, setStremioCode] = useState(initialCode || '')
+  const [stremioExpiresAt, setStremioExpiresAt] = useState<number | null>(initialExpiresAt)
   const [stremioError, setStremioError] = useState('')
   const [tick, setTick] = useState(0)
+  const [isOAuthUsed, setIsOAuthUsed] = useState(false) // Track if OAuth code has been used
+
+  // Update state when initial props change (e.g., admin refreshes OAuth link)
+  useEffect(() => {
+    let hasChanges = false
+    
+    // Always update if initialLink is provided and different from current
+    if (initialLink !== null && initialLink !== undefined) {
+      if (initialLink !== stremioLink) {
+        setStremioLink(initialLink)
+        setIsPolling(true)
+        setStremioError('') // Clear any errors when link changes
+        hasChanges = true
+      }
+    }
+    // Always update if initialCode is provided and different from current
+    if (initialCode !== null && initialCode !== undefined) {
+      if (initialCode !== stremioCode) {
+        setStremioCode(initialCode)
+        setIsPolling(true) // Restart polling with new code
+        hasChanges = true
+      }
+    }
+    // Always update if initialExpiresAt is provided and different from current
+    if (initialExpiresAt !== null && initialExpiresAt !== undefined) {
+      if (initialExpiresAt !== stremioExpiresAt) {
+        setStremioExpiresAt(initialExpiresAt)
+        setTick(0) // Reset timer when expiration changes
+        hasChanges = true
+      }
+    }
+    
+    // If any OAuth data changed, ensure polling is active
+    if (hasChanges && initialLink && initialCode) {
+      setIsPolling(true)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialLink, initialCode, initialExpiresAt])
 
   const resetFlow = useCallback(() => {
     setIsCreating(false)
@@ -70,6 +114,7 @@ export function StremioOAuthCard({
     setStremioExpiresAt(null)
     setStremioError('')
     setTick(0)
+    setIsOAuthUsed(false)
   }, [])
 
   useEffect(() => {
@@ -78,19 +123,24 @@ export function StremioOAuthCard({
     }
   }, [active, resetFlow])
 
+  // Check if OAuth is expired (time-based or used but not completed)
+  const isOAuthExpired = isOAuthUsed || (stremioExpiresAt && stremioExpiresAt < Date.now())
+  
   const stremioTimeLeft = useMemo(() => {
-    if (!stremioExpiresAt) return null
+    if (!stremioExpiresAt || isOAuthExpired) return null
     const diff = Math.max(0, stremioExpiresAt - Date.now())
     const minutes = Math.floor(diff / 60000)
     const seconds = Math.floor((diff % 60000) / 1000)
     return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`
-  }, [stremioExpiresAt, tick])
+  }, [stremioExpiresAt, tick, isOAuthExpired])
 
   const effectiveDisabled = disabled || isCompleting
 
   const startStremioFlow = useCallback(async () => {
     if (typeof window === 'undefined') return
     if (!active || effectiveDisabled || isCreating || isCompleting) return
+    // Don't allow refreshing if initial link is provided (admin-generated link)
+    if (initialLink) return
     setIsCreating(true)
     setStremioError('')
     setIsPolling(false)
@@ -128,7 +178,7 @@ export function StremioOAuthCard({
     } finally {
       setIsCreating(false)
     }
-  }, [active, effectiveDisabled, isCompleting, isCreating, onError])
+  }, [active, effectiveDisabled, isCompleting, isCreating, onError, initialLink])
 
   const completeStremioLogin = useCallback(async (authKey: string) => {
     if (!authKey || isCompleting || disabled) return
@@ -147,25 +197,27 @@ export function StremioOAuthCard({
     }
   }, [disabled, isCompleting, onAuthKey, onError, resetFlow])
 
-  // Timer tick
+  // Timer tick - stop if OAuth is expired
   useEffect(() => {
-    if (!active || !stremioExpiresAt) return
+    if (!active || !stremioExpiresAt || isOAuthExpired) return
     if (typeof window === 'undefined') return
     const timer = window.setInterval(() => {
       setTick((prev) => prev + 1)
     }, 1000)
     return () => window.clearInterval(timer)
-  }, [active, stremioExpiresAt])
+  }, [active, stremioExpiresAt, isOAuthExpired])
 
-  // Auto start / refresh when expired
+  // Auto start (but don't auto-refresh when expired, and don't start if initial link is provided)
   useEffect(() => {
     if (!active) return
     if (!autoStart) return
     if (isCreating || isCompleting || effectiveDisabled) return
-    if (!stremioLink || (stremioExpiresAt && Date.now() >= stremioExpiresAt)) {
+    // Only auto-start if there's no link yet and no initial link was provided
+    // Don't auto-refresh when expired
+    if (!stremioLink && !initialLink) {
       startStremioFlow()
     }
-  }, [active, autoStart, effectiveDisabled, isCompleting, isCreating, startStremioFlow, stremioExpiresAt, stremioLink])
+  }, [active, autoStart, effectiveDisabled, isCompleting, isCreating, startStremioFlow, stremioLink, initialLink])
 
   // Polling for auth key
   useEffect(() => {
@@ -192,7 +244,22 @@ export function StremioOAuthCard({
         const data = await res.json().catch(() => ({}))
         if (!data || cancelled) return
         if (data?.result?.success && data.result.authKey) {
-          await completeStremioLogin(data.result.authKey)
+          // OAuth code was used - try to complete login
+          // If completion fails (e.g., email mismatch), mark as used/expired
+          try {
+            await completeStremioLogin(data.result.authKey)
+          } catch (err: any) {
+            // If completion fails, mark OAuth as used/expired
+            setIsOAuthUsed(true)
+            setIsPolling(false)
+            const errorCode = err?.response?.data?.error
+            if (errorCode === 'EMAIL_MISMATCH') {
+              setStremioError('Stremio account email does not match your request email.')
+            } else {
+              setStremioError('Stremio link expired. Generate a new link to continue.')
+            }
+            if (onError) onError('Stremio link expired. Generate a new link to continue.')
+          }
         } else if (data?.error && data.error.code && data.error.code !== 101) {
           const message = data.error.message || 'Stremio reported an error. Try again.'
           setStremioError(message)
@@ -219,7 +286,7 @@ export function StremioOAuthCard({
 
   const content = (
     <>
-      {showStartButton && (
+      {showStartButton && !initialLink && (
         <div className="flex items-center justify-between">
           <button
             type="button"
@@ -285,15 +352,9 @@ export function StremioOAuthCard({
           {instructionSuffixAfterLink}
         </div>
         <div className="flex items-center text-xs color-text-secondary whitespace-nowrap mt-1">
-          <button
-            type="button"
-            onClick={startStremioFlow}
-            disabled={effectiveDisabled}
-            className="px-2 py-1 rounded color-surface hover:opacity-90 disabled:opacity-70 disabled:cursor-not-allowed transition-colors font-mono"
-            title="Refresh link"
-          >
-            {stremioTimeLeft || refreshLabel}
-          </button>
+          <span className="px-2 py-1 rounded font-mono">
+            {isOAuthExpired ? 'Expired' : (stremioTimeLeft || refreshLabel)}
+          </span>
         </div>
         {stremioError && (
           <div className="text-sm color-text text-center">

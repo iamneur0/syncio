@@ -712,7 +712,10 @@ export default function UserInviteModal({
         }
       }}
     >
-      <div className="w-full max-w-5xl max-h-[85vh] rounded-lg shadow-lg card flex flex-col">
+      <div 
+        className="w-full max-w-5xl max-h-[85vh] rounded-lg shadow-lg card flex flex-col"
+        style={{ background: 'var(--color-background)' }}
+      >
         <div className="flex items-center justify-between p-6 border-b color-border">
           <div className="flex items-center gap-3">
             <div className="w-12 h-12 rounded-full flex items-center justify-center color-surface">
@@ -1045,7 +1048,10 @@ export default function UserInviteModal({
             }
           }}
         >
-          <div className="w-full max-w-2xl max-h-[85vh] rounded-lg shadow-lg card flex flex-col">
+          <div 
+            className="w-full max-w-2xl max-h-[85vh] rounded-lg shadow-lg card flex flex-col"
+            style={{ background: 'var(--color-background)' }}
+          >
             <div className="flex items-center justify-between p-6 border-b color-border">
               <div className="flex items-center gap-3">
                 <div className="w-12 h-12 rounded-full flex items-center justify-center color-surface">

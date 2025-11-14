@@ -118,39 +118,43 @@ export default function EntityList({
     }
   }
 
+  const hasHeaderContent = title || headerRight || actionButton || (items.length > 0 && onClear)
+
   return (
     <div 
       className={`p-4 rounded-lg mb-6 section-panel ${onClearSelection ? 'cursor-pointer' : ''}`}
       onClick={handleContainerClick}
     >
-      <div className="flex items-center justify-between mb-3">
-        {title && (
-          <h3 className={`text-lg font-semibold`}>
-            {count > 0 && `${count} `}{title}
-          </h3>
-        )}
-        <div className="flex items-center gap-2">
-          {headerRight}
-          {actionButton && (
-            <button
-              onClick={actionButton.onClick}
-              className={`p-2 rounded-lg transition-colors color-hover`}
-              title={actionButton.tooltip}
-            >
-              {actionButton.icon}
-            </button>
+      {hasHeaderContent && (
+        <div className="flex items-center justify-between mb-3">
+          {title && (
+            <h3 className={`text-lg font-semibold`}>
+              {count > 0 && `${count} `}{title}
+            </h3>
           )}
-          {items.length > 0 && onClear && (
-            <button
-              onClick={() => setConfirmOpen(true)}
-              className={`px-3 py-1 text-sm rounded transition-colors color-hover`}
-              title={`Reset ${title.toLowerCase()} to default`}
-            >
-              Reset
-            </button>
-          )}
+          <div className="flex items-center gap-2">
+            {headerRight}
+            {actionButton && (
+              <button
+                onClick={actionButton.onClick}
+                className={`p-2 rounded-lg transition-colors color-hover`}
+                title={actionButton.tooltip}
+              >
+                {actionButton.icon}
+              </button>
+            )}
+            {items.length > 0 && onClear && (
+              <button
+                onClick={() => setConfirmOpen(true)}
+                className={`px-3 py-1 text-sm rounded transition-colors color-hover`}
+                title={`Reset ${title.toLowerCase()} to default`}
+              >
+                Reset
+              </button>
+            )}
+          </div>
         </div>
-      </div>
+      )}
       
       {isLoading ? (
         <div className="flex items-center justify-center py-8">

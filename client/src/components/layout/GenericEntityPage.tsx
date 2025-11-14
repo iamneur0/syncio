@@ -7,7 +7,7 @@ import { addonsAPI, usersAPI, groupsAPI } from '@/services/api'
 import { useSyncStatusRefresh } from '@/hooks/useSyncStatusRefresh'
 import { invalidateEntityQueries, invalidateSyncStatusQueries } from '@/utils/queryUtils'
 import { genericSuccessHandlers, addonSuccessHandlers, userSuccessHandlers, groupSuccessHandlers } from '@/utils/toastUtils'
-import { useModalState } from '@/hooks/useCommonState'
+import { useModalState, useUnsafeMode } from '@/hooks/useCommonState'
 import toast from 'react-hot-toast'
 import { Puzzle, User as UserIcon, Users } from 'lucide-react'
 
@@ -76,8 +76,31 @@ interface GenericEntityPageProps {
 export default function GenericEntityPage({ config }: GenericEntityPageProps) {
   const queryClient = useQueryClient()
   
+  // Create config with proper setShowAddModal function
+  const finalConfig = {
+    ...config,
+    emptyStateAction: {
+      ...config.emptyStateAction,
+      onClick: () => {} // Will be set later
+    }
+  }
+  
   // State
   const [searchTerm, setSearchTerm] = useState('')
+  const [statusFilter, setStatusFilter] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem(`${config.entityType}-filter`)
+      return saved || 'all'
+    }
+    return 'all'
+  })
+  
+  // Persist filter to localStorage
+  React.useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(`${finalConfig.entityType}-filter`, statusFilter)
+    }
+  }, [statusFilter, finalConfig.entityType])
   const [viewMode, setViewMode] = useState<'card' | 'list'>(() => {
     if (typeof window !== 'undefined') {
       const raw = String(localStorage.getItem('global-view-mode') || 'card').toLowerCase().trim()
@@ -99,16 +122,11 @@ export default function GenericEntityPage({ config }: GenericEntityPageProps) {
   const [importingEntities, setImportingEntities] = useState<Set<string>>(new Set())
   const [deletingEntities, setDeletingEntities] = useState<Set<string>>(new Set())
 
-  // Create config with proper setShowAddModal function
-  const finalConfig = {
-    ...config,
-    emptyStateAction: {
-      ...config.emptyStateAction,
-      onClick: () => setShowAddModal(true)
-    }
-  }
+  // Update finalConfig with proper setShowAddModal function
+  finalConfig.emptyStateAction.onClick = () => setShowAddModal(true)
 
   const { refreshAllSyncStatus } = useSyncStatusRefresh()
+  const { isUnsafeMode } = useUnsafeMode()
 
   // Data fetching
   const { data: entities, isLoading, error } = useQuery({
@@ -149,7 +167,8 @@ export default function GenericEntityPage({ config }: GenericEntityPageProps) {
       setSelectedEntity(null)
     },
     onError: (error: any) => {
-      const message = error?.response?.data?.error || error?.message || `Failed to update ${finalConfig.entityType}`
+      // Check both 'message' and 'error' fields from backend response
+      const message = error?.response?.data?.message || error?.response?.data?.error || error?.message || `Failed to update ${finalConfig.entityType}`
       toast.error(message)
     }
   })
@@ -161,7 +180,8 @@ export default function GenericEntityPage({ config }: GenericEntityPageProps) {
       setShowAddModal(false)
     },
     onError: (error: any) => {
-      const message = error?.response?.data?.error || error?.message || `Failed to create ${finalConfig.entityType}`
+      // Check both 'message' and 'error' fields from backend response
+      const message = error?.response?.data?.message || error?.response?.data?.error || error?.message || `Failed to create ${finalConfig.entityType}`
       toast.error(message)
     }
   })
@@ -491,22 +511,128 @@ export default function GenericEntityPage({ config }: GenericEntityPageProps) {
     }
   }
 
-  // Filter entities based on search
+  // Fetch sync status for all entities when filtering by sync status
+  const needsSyncStatus = (finalConfig.entityType === 'user' || finalConfig.entityType === 'group') && 
+    (statusFilter === 'synced' || statusFilter === 'unsynced' || statusFilter === 'stale')
+
+  // Fetch sync statuses for users
+  const userSyncStatuses = useQuery({
+    queryKey: ['users', 'sync-statuses', isUnsafeMode ? 'unsafe' : 'safe'],
+    queryFn: async () => {
+      if (finalConfig.entityType !== 'user' || !needsSyncStatus || !Array.isArray(entities)) return {}
+      const statusMap: Record<string, string> = {}
+      await Promise.all(
+        entities.map(async (entity: any) => {
+          try {
+            // Get user's first group if available
+            const userDetails = await usersAPI.getById(entity.id)
+            const groupId = (userDetails as any)?.groups?.[0]?.id
+            const syncStatus = await usersAPI.getSyncStatus(entity.id, groupId, isUnsafeMode)
+            statusMap[entity.id] = (syncStatus as any)?.status || 'unsynced'
+          } catch {
+            statusMap[entity.id] = 'unsynced'
+          }
+        })
+      )
+      return statusMap
+    },
+    enabled: finalConfig.entityType === 'user' && needsSyncStatus && Array.isArray(entities) && entities.length > 0,
+    staleTime: 30000, // Cache for 30 seconds
+  })
+
+  // Fetch sync statuses for groups
+  const groupSyncStatuses = useQuery({
+    queryKey: ['groups', 'sync-statuses', isUnsafeMode ? 'unsafe' : 'safe'],
+    queryFn: async () => {
+      if (finalConfig.entityType !== 'group' || !needsSyncStatus || !Array.isArray(entities)) return {}
+      const statusMap: Record<string, string> = {}
+      await Promise.all(
+        entities.map(async (entity: any) => {
+          try {
+            const groupDetails = await groupsAPI.getById(entity.id)
+            const groupUsers = (groupDetails as any)?.users || []
+            if (groupUsers.length === 0) {
+              statusMap[entity.id] = 'stale'
+              return
+            }
+            const userSyncResults = await Promise.all(
+              groupUsers.map(async (user: any) => {
+                try {
+                  const syncStatus = await usersAPI.getSyncStatus(user.id, entity.id, isUnsafeMode)
+                  return (syncStatus as any)?.status === 'synced'
+                } catch {
+                  return false
+                }
+              })
+            )
+            const allUsersSynced = userSyncResults.every(Boolean)
+            statusMap[entity.id] = allUsersSynced ? 'synced' : 'unsynced'
+          } catch {
+            statusMap[entity.id] = 'unsynced'
+          }
+        })
+      )
+      return statusMap
+    },
+    enabled: finalConfig.entityType === 'group' && needsSyncStatus && Array.isArray(entities) && entities.length > 0,
+    staleTime: 30000, // Cache for 30 seconds
+  })
+
+  // Filter entities based on search and status
   const displayEntities = useMemo(() => {
     if (!Array.isArray(entities)) return []
     
-    if (!searchTerm.trim()) return entities
+    let filtered = entities
     
-    const searchLower = searchTerm.toLowerCase()
-    const searchFields = finalConfig.searchFields || ['name', 'description']
-    
-    return entities.filter((entity: any) => {
-      return searchFields.some(field => {
-        const value = entity[field]
-        return value && String(value).toLowerCase().includes(searchLower)
+    // Apply status filter for addons, users and groups
+    if (statusFilter !== 'all') {
+      filtered = filtered.filter((entity: any) => {
+        // For addons, only check active/inactive status
+        if (finalConfig.entityType === 'addon') {
+          if (statusFilter === 'active' || statusFilter === 'inactive') {
+            const isActive = finalConfig.getEntityStatus?.(entity) ?? (entity.status === 'active' || entity.isActive === true)
+            return statusFilter === 'active' ? isActive : !isActive
+          }
+          return true
+        }
+        
+        // For users and groups
+        if (finalConfig.entityType === 'user' || finalConfig.entityType === 'group') {
+          // Check active/inactive status
+          if (statusFilter === 'active' || statusFilter === 'inactive') {
+            const isActive = entity.isActive === true
+            return statusFilter === 'active' ? isActive : !isActive
+          }
+          
+          // Check sync status
+          if (statusFilter === 'synced' || statusFilter === 'unsynced' || statusFilter === 'stale') {
+            const syncStatusMap = finalConfig.entityType === 'user' 
+              ? userSyncStatuses.data 
+              : groupSyncStatuses.data
+            const entitySyncStatus = syncStatusMap?.[entity.id] || 'unsynced'
+            return entitySyncStatus === statusFilter
+          }
+        }
+        
+        return true
       })
-    })
-  }, [entities, searchTerm, finalConfig.searchFields])
+    }
+    
+    // Apply search filter
+    if (searchTerm.trim()) {
+      const searchLower = searchTerm.toLowerCase()
+      const searchFields = finalConfig.searchFields || ['name', 'description']
+      
+      filtered = filtered.filter((entity: any) => {
+        return searchFields.some(field => {
+          const value = entity[field]
+          return value && String(value).toLowerCase().includes(searchLower)
+        })
+      })
+    }
+    
+    return filtered
+  }, [entities, searchTerm, statusFilter, finalConfig.searchFields, finalConfig.entityType, userSyncStatuses.data, groupSyncStatuses.data])
 
   // Check if empty state
   const isEmpty = !isLoading && Array.isArray(entities) && entities.length === 0
@@ -533,7 +659,7 @@ export default function GenericEntityPage({ config }: GenericEntityPageProps) {
           onSelectAll={handleSelectAll}
           onDeselectAll={handleDeselectAll}
           onAdd={() => setShowAddModal(true)}
-          onInvite={finalConfig.entityType === 'user' ? () => setShowInviteModal(true) : undefined}
+          onInvite={undefined}
           onReload={finalConfig.entityType === 'addon' ? () => reloadAllMutation.mutate() : undefined}
           onSync={finalConfig.entityType === 'group' || finalConfig.entityType === 'user' ? () => syncAllMutation.mutate() : undefined}
           onDelete={handleBulkDelete}
@@ -544,6 +670,27 @@ export default function GenericEntityPage({ config }: GenericEntityPageProps) {
           isSyncing={syncAllMutation.isPending}
           isSyncDisabled={selectedEntities.length === 0 || syncAllMutation.isPending}
           isDeleteDisabled={selectedEntities.length === 0}
+          filterOptions={
+            finalConfig.entityType === 'addon'
+              ? [
+                  { value: 'all', label: 'All' },
+                  { value: 'inactive', label: 'Inactive' },
+                  { value: 'active', label: 'Active' }
+                ]
+              : (finalConfig.entityType === 'user' || finalConfig.entityType === 'group')
+              ? [
+                  { value: 'all', label: 'All' },
+                  { value: 'unsynced', label: 'Unsynced' },
+                  { value: 'stale', label: 'Stale' },
+                  { value: 'synced', label: 'Synced' },
+                  { value: 'inactive', label: 'Inactive' },
+                  { value: 'active', label: 'Active' }
+                ]
+              : undefined
+          }
+          filterValue={statusFilter}
+          onFilterChange={setStatusFilter}
+          filterPlaceholder="Filter by status"
         />
 
         {isLoading ? null : error ? (
@@ -682,7 +829,25 @@ export default function GenericEntityPage({ config }: GenericEntityPageProps) {
         <ConfirmDialog
           open={showDeleteConfirm}
           title={`Delete ${finalConfig.title.slice(0, -1)}`}
-          description={`Are you sure you want to delete "${entityToDelete?.name}"? This action cannot be undone.`}
+          body={
+            <p className="text-sm">
+              Are you sure you want to delete{' '}
+              <span
+                onClick={async () => {
+                  if (entityToDelete?.name) {
+                    await navigator.clipboard.writeText(entityToDelete.name)
+                    toast.success('Copied to clipboard')
+                  }
+                }}
+                className="font-bold px-2 py-1 rounded cursor-pointer inline-block"
+                style={{ backgroundColor: 'var(--color-hover)' }}
+                title="Click to copy"
+              >
+                {entityToDelete?.name}
+              </span>
+              ? This action cannot be undone.
+            </p>
+          }
           confirmText="Delete"
           cancelText="Cancel"
           isDanger={true}

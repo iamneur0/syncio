@@ -146,6 +146,15 @@ export const healthCheck = async (): Promise<{ status: string; message: string; 
 
 // Users API
 export const usersAPI = {
+  // Check if user exists by email or username
+  check: async (email?: string, username?: string): Promise<{ exists: boolean; conflicts: { email?: boolean; username?: boolean } }> => {
+    const params = new URLSearchParams()
+    if (email) params.append('email', email)
+    if (username) params.append('username', username)
+    const response: AxiosResponse<{ exists: boolean; conflicts: { email?: boolean; username?: boolean } }> = await api.get(`/users/check?${params.toString()}`)
+    return response.data
+  },
+
   // Get all users
   getAll: async (): Promise<User[]> => {
     const response: AxiosResponse<User[]> = await api.get('/users')
@@ -601,6 +610,10 @@ export const publicAuthAPI = {
     const res: AxiosResponse<{ message: string; account: any }> = await api.post('/public-auth/login', payload)
     return res.data
   },
+  privateLogin: async (payload: { username: string; password: string }): Promise<{ message: string; account: any }> => {
+    const res: AxiosResponse<{ message: string; account: any }> = await api.post('/public-auth/private-login', payload)
+    return res.data
+  },
   me: async (): Promise<any> => {
     const res: AxiosResponse<any> = await api.get('/public-auth/me')
     return res.data
@@ -612,6 +625,98 @@ export const publicAuthAPI = {
   logout: async (): Promise<void> => {
     await api.post('/public-auth/logout')
   }
+}
+
+// Invitations API
+export const invitationsAPI = {
+  // Get all invitations for the account
+  getAll: async (): Promise<any[]> => {
+    const response: AxiosResponse<any[]> = await api.get('/invitations')
+    return response.data
+  },
+
+  // Create a new invitation
+  create: async (data: { maxUses?: number; expiresAt?: string; groupName?: string }): Promise<any> => {
+    const response: AxiosResponse<any> = await api.post('/invitations', data)
+    return response.data
+  },
+
+  // Delete an invitation
+  delete: async (id: string): Promise<void> => {
+    await api.delete(`/invitations/${id}`)
+  },
+
+  // Toggle invitation status (enable/disable)
+  toggleStatus: async (id: string, isActive: boolean): Promise<any> => {
+    const response: AxiosResponse<any> = await api.patch(`/invitations/${id}/toggle-status`, { isActive })
+    return response.data
+  },
+
+  // Get requests for an invitation
+  getRequests: async (invitationId: string): Promise<any[]> => {
+    const response: AxiosResponse<any[]> = await api.get(`/invitations/${invitationId}/requests`)
+    return response.data
+  },
+
+  // Accept an invite request
+  acceptRequest: async (requestId: string, groupName?: string): Promise<any> => {
+    const response: AxiosResponse<any> = await api.post(`/invitations/requests/${requestId}/accept`, { groupName })
+    return response.data
+  },
+
+  // Reject an invite request
+  rejectRequest: async (requestId: string): Promise<any> => {
+    const response: AxiosResponse<any> = await api.post(`/invitations/requests/${requestId}/reject`)
+    return response.data
+  },
+  undoRejection: async (requestId: string, groupName?: string): Promise<any> => {
+    const response: AxiosResponse<any> = await api.post(`/invitations/requests/${requestId}/undo-rejection`, { groupName })
+    return response.data
+  },
+  clearOAuth: async (requestId: string): Promise<any> => {
+    const response: AxiosResponse<any> = await api.post(`/invitations/requests/${requestId}/clear-oauth`)
+    return response.data
+  },
+
+  // Public: Check if invitation is active
+  checkInvitation: async (inviteCode: string): Promise<any> => {
+    const response: AxiosResponse<any> = await api.get(`/invitations/public/${inviteCode}/check`)
+    return response.data
+  },
+
+  // Public: Submit an invite request
+  submitRequest: async (inviteCode: string, email: string, username: string): Promise<any> => {
+    const response: AxiosResponse<any> = await api.post(`/invitations/public/${inviteCode}/request`, { email, username })
+    return response.data
+  },
+
+  // Public: Check request status
+  checkStatus: async (inviteCode: string, email: string, username: string): Promise<any> => {
+    const response: AxiosResponse<any> = await api.get(`/invitations/public/${inviteCode}/status`, {
+      params: { email, username }
+    })
+    return response.data
+  },
+
+  // Public: Generate OAuth link for accepted request
+  generateOAuth: async (inviteCode: string, email: string, username: string): Promise<any> => {
+    const response: AxiosResponse<any> = await api.post(`/invitations/public/${inviteCode}/generate-oauth`, {
+      email,
+      username
+    })
+    return response.data
+  },
+
+  // Public: Complete OAuth and create user
+  complete: async (inviteCode: string, email: string, username: string, authKey: string, groupName?: string): Promise<any> => {
+    const response: AxiosResponse<any> = await api.post(`/invitations/public/${inviteCode}/complete`, {
+      email,
+      username,
+      authKey,
+      groupName
+    })
+    return response.data
+  },
 }
 
 // Export the axios instance for direct use if needed

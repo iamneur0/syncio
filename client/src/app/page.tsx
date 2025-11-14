@@ -11,7 +11,8 @@ import {
   X,
   ScrollText,
   ListTodo,
-  Github
+  Github,
+  Mail
 } from 'lucide-react'
 
 // Import page components
@@ -21,6 +22,7 @@ import GroupsPage from '@/components/pages/GroupsPage'
 import SettingsPage from '@/components/pages/SettingsPage'
 import ChangelogPage from '@/components/pages/ChangelogPage'
 import TasksPage from '@/components/pages/TasksPage'
+import InvitesPage from '@/components/pages/InvitesPage'
 import AccountMenuButton from '@/components/auth/AccountMenuButton'
 import { useGithubReleases } from '@/hooks/useGithubReleases'
 
@@ -28,6 +30,7 @@ const navigation = [
   { name: 'Users', icon: User, id: 'users' },
   { name: 'Groups', icon: Users, id: 'groups' },
   { name: 'Addons', icon: Puzzle, id: 'addons' },
+  { name: 'Invites', icon: Mail, id: 'invitations' },
   { name: 'Tasks', icon: ListTodo, id: 'tasks' },
   { name: 'Settings', icon: Settings, id: 'settings' },
 ]
@@ -63,6 +66,8 @@ export default function HomePage() {
         return <UsersPage />
       case 'groups':
         return <GroupsPage />
+      case 'invitations':
+        return <InvitesPage />
       case 'changelog':
         return <ChangelogPage />
       case 'tasks':
@@ -249,7 +254,7 @@ export default function HomePage() {
       {/* Main content */}
       <div className="flex-1 flex flex-col overflow-hidden lg:overflow-visible">
         {/* Mobile header */}
-        <div className={`lg:hidden fixed top-0 left-0 right-0 z-50 flex items-center justify-between h-16 px-4 card border-b`}>
+        <div className="lg:hidden fixed top-0 left-0 right-0 z-50 flex items-center justify-between h-16 px-4" style={{ background: 'var(--color-background)' }}>
           <button
             onClick={() => setSidebarOpen(true)}
             className="theme-text-3 hover:opacity-80"
@@ -259,7 +264,7 @@ export default function HomePage() {
           <h1 className={`text-lg font-semibold theme-text-1`}>
             {navigation.find(item => item.id === activeTab)?.name}
           </h1>
-          <AccountMenuButton className="theme-text-3 hover:opacity-80 !bg-transparent !border-none !shadow-none !px-2" />
+          <AccountMenuButton className="theme-text-3 hover:opacity-80" />
         </div>
 
         {/* Page content */}

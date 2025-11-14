@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
+import { usePathname } from 'next/navigation'
 import api, { publicAuthAPI } from '@/services/api'
 import { ConfirmDialog } from '@/components/modals'
 import { useTheme } from '@/contexts/ThemeContext'
@@ -11,36 +12,76 @@ import StremioOAuthCard from './StremioOAuthCard'
 export default function AuthGate({ children }: { children: React.ReactNode }) {
   const AUTH_ENABLED = process.env.NEXT_PUBLIC_AUTH_ENABLED === 'true'
   const queryClient = useQueryClient()
+  const pathname = usePathname()
+  
+  // Check if current path is an invite route (public, no auth required)
+  const isInviteRoute = pathname?.startsWith('/invite/')
 
-  const [authState, setAuthState] = useState<'loading' | 'authed' | 'guest'>(AUTH_ENABLED ? 'loading' : 'authed')
+  const [authState, setAuthState] = useState<'loading' | 'authed' | 'guest'>('loading')
   const [accountUuid, setAccountUuid] = useState('')
+  const [isPrivateAuth, setIsPrivateAuth] = useState(false)
+  const [authChecked, setAuthChecked] = useState(false)
 
   useEffect(() => {
-    if (!AUTH_ENABLED) return
     ;(async () => {
-      try {
-        const me = await publicAuthAPI.me()
-        setAuthState(me?.account ? 'authed' : 'guest')
-        setAccountUuid(me?.account?.uuid || '')
-        try { window.dispatchEvent(new CustomEvent('sfm:auth:changed', { detail: { authed: true } })) } catch {}
-      } catch {
-        setAuthState('guest')
-        setAccountUuid('')
-        try { window.dispatchEvent(new CustomEvent('sfm:auth:changed', { detail: { authed: false } })) } catch {}
+      if (AUTH_ENABLED) {
+        // Public auth mode
+        try {
+          const me = await publicAuthAPI.me()
+          setAuthState(me?.account ? 'authed' : 'guest')
+          setAccountUuid(me?.account?.uuid || '')
+          try { window.dispatchEvent(new CustomEvent('sfm:auth:changed', { detail: { authed: true } })) } catch {}
+        } catch {
+          setAuthState('guest')
+          setAccountUuid('')
+          try { window.dispatchEvent(new CustomEvent('sfm:auth:changed', { detail: { authed: false } })) } catch {}
+        }
+      } else {
+        // Private instance - check if auth is required
+        try {
+          const me = await publicAuthAPI.me()
+          // If /me succeeds, no auth needed
+          setAuthState('authed')
+          setIsPrivateAuth(false)
+        } catch (err: any) {
+          // If /me fails with 401, private auth is enabled
+          if (err?.response?.status === 401) {
+            setAuthState('guest')
+            setIsPrivateAuth(true)
+          } else {
+            // Other error - assume no auth needed
+            setAuthState('authed')
+            setIsPrivateAuth(false)
+          }
+        }
       }
+      setAuthChecked(true)
     })()
   }, [AUTH_ENABLED])
 
   useEffect(() => {
-    const onAuthChanged = (e: any) => {
+    const onAuthChanged = async (e: any) => {
       const next = !!e?.detail?.authed
-      setAuthState(next ? 'authed' : 'guest')
       if (!next) {
+        // Logging out - clear data immediately
         setAccountUuid('')
         queryClient.setQueryData(['addons'], [])
         queryClient.setQueryData(['users'], [])
         queryClient.setQueryData(['groups'], [])
+        
+        // If private auth was enabled, keep it enabled and show login form
+        if (!AUTH_ENABLED && isPrivateAuth) {
+          setAuthState('guest')
+          // Keep isPrivateAuth true so login form shows
+        } else if (AUTH_ENABLED) {
+          setAuthState('guest')
+        } else {
+          // No auth needed
+          setAuthState('authed')
+          setIsPrivateAuth(false)
+        }
       } else {
+        setAuthState('authed')
         ;(async () => {
           try {
             const me = await publicAuthAPI.me()
@@ -51,25 +92,36 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
     }
     window.addEventListener('sfm:auth:changed', onAuthChanged as any)
     return () => window.removeEventListener('sfm:auth:changed', onAuthChanged as any)
-  }, [queryClient])
+  }, [queryClient, AUTH_ENABLED, isPrivateAuth])
 
-  if (!AUTH_ENABLED) return <>{children}</>
+  // Invite routes are public - no auth required
+  if (isInviteRoute) {
+    return <>{children}</>
+  }
+
+  // Don't render anything until we've checked auth status
+  if (!authChecked) {
+    return <div className="min-h-screen" />
+  }
+
+  if (!AUTH_ENABLED && !isPrivateAuth) return <>{children}</>
   
   if (authState === 'loading') {
     return <div className="min-h-screen" />
   }
 
   if (authState !== 'authed') {
-    return <LoginForm setAuthState={setAuthState} />
+    return <LoginForm setAuthState={setAuthState} isPrivateAuth={isPrivateAuth} />
   }
   
   return <>{children}</>
 }
 
-function LoginForm({ setAuthState }: { setAuthState: (state: 'loading' | 'authed' | 'guest') => void }) {
+function LoginForm({ setAuthState, isPrivateAuth }: { setAuthState: (state: 'loading' | 'authed' | 'guest') => void; isPrivateAuth: boolean }) {
   const { isDark } = useTheme()
   const logoSrc = isDark ? '/logo-white.png' : '/logo-black.png'
   const [uuid, setUuid] = useState('')
+  const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
@@ -92,9 +144,16 @@ function LoginForm({ setAuthState }: { setAuthState: (state: 'loading' | 'authed
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!uuid.trim() || !password.trim()) {
-      setError(`Please enter both UUID and password`)
-      return
+    if (isPrivateAuth) {
+      if (!username.trim() || !password.trim()) {
+        setError('Please enter both username and password')
+        return
+      }
+    } else {
+      if (!uuid.trim() || !password.trim()) {
+        setError('Please enter both UUID and password')
+        return
+      }
     }
 
     setIsLoading(true)
@@ -102,7 +161,9 @@ function LoginForm({ setAuthState }: { setAuthState: (state: 'loading' | 'authed
 
     try {
       let response
-      if (isRegisterMode) {
+      if (isPrivateAuth) {
+        response = await publicAuthAPI.privateLogin({ username: username.trim(), password })
+      } else if (isRegisterMode) {
         // Do NOT register yet; show UUID save dialog first
         setShowUuidNotice(true)
         setIsLoading(false)
@@ -159,56 +220,72 @@ function LoginForm({ setAuthState }: { setAuthState: (state: 'loading' | 'authed
           </p>
         </div>
 
-        <div className="space-y-4 mb-6">
-          <div className="p-4 border rounded-lg space-y-4 color-surface">
-            <div className="flex items-center justify-between">
-              <button
-                type="button"
-                onClick={handleToggleStremio}
-                className="flex-1 text-center font-medium px-3 py-2 rounded-md color-surface hover:opacity-90 transition-colors"
-              >
-                Sign in with Stremio
-              </button>
+        {!isPrivateAuth && (
+          <div className="space-y-4 mb-6">
+            <div className="p-4 border rounded-lg space-y-4 color-surface">
+              <div className="flex items-center justify-between">
+                <button
+                  type="button"
+                  onClick={handleToggleStremio}
+                  className="flex-1 text-center font-medium px-3 py-2 rounded-md color-surface hover:opacity-90 transition-colors"
+                >
+                  Sign in with Stremio
+                </button>
+              </div>
+              {showStremioLogin && (
+                <StremioOAuthCard
+                  active={showStremioLogin}
+                  withContainer={false}
+                  showStartButton={false}
+                  className="mt-4"
+                  onAuthKey={handleStremioAuth}
+                />
+              )}
             </div>
-            {showStremioLogin && (
-              <StremioOAuthCard
-                active={showStremioLogin}
-                withContainer={false}
-                showStartButton={false}
-                className="mt-4"
-                onAuthKey={handleStremioAuth}
-              />
-            )}
+            <div className="flex items-center gap-3 text-xs uppercase justify-center color-text-secondary">
+              <span className="h-px flex-1 bg-color-border" />
+              or
+              <span className="h-px flex-1 bg-color-border" />
+            </div>
           </div>
-          <div className="flex items-center gap-3 text-xs uppercase justify-center color-text-secondary">
-            <span className="h-px flex-1 bg-color-border" />
-            or
-            <span className="h-px flex-1 bg-color-border" />
-          </div>
-        </div>
+        )}
 
         {/* Login/Register Form */}
-        <form onSubmit={handleSubmit} className="space-y-6" autoComplete="on">
-          {/* UUID Field */}
+        <form onSubmit={handleSubmit} className="space-y-4" autoComplete="on">
+          {/* Username/UUID Field */}
           <div>
-            <label htmlFor="uuid" className={`block text-sm font-medium`}>
-              Account UUID
+            <label htmlFor={isPrivateAuth ? "username" : "uuid"} className={`block text-sm font-medium`}>
+              {isPrivateAuth ? 'Username' : 'Account UUID'}
             </label>
             <div className="mt-1 relative">
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                 <User className={`h-5 w-5 color-text-secondary`} />
               </div>
-              <input
-                id="uuid"
-                name="username"
-                type="text"
-                required
-                value={uuid}
-                onChange={(e) => setUuid(e.target.value)}
-                autoComplete="username"
-                className={`block w-full pl-10 pr-3 py-2 rounded-md shadow-sm input sm:text-sm`}
-                placeholder="Enter your account UUID"
-              />
+              {isPrivateAuth ? (
+                <input
+                  id="username"
+                  name="username"
+                  type="text"
+                  required
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  autoComplete="username"
+                  className={`block w-full pl-10 pr-3 py-2 rounded-md shadow-sm input sm:text-sm`}
+                  placeholder="Enter your username"
+                />
+              ) : (
+                <input
+                  id="uuid"
+                  name="username"
+                  type="text"
+                  required
+                  value={uuid}
+                  onChange={(e) => setUuid(e.target.value)}
+                  autoComplete="username"
+                  className={`block w-full pl-10 pr-3 py-2 rounded-md shadow-sm input sm:text-sm`}
+                  placeholder="Enter your account UUID"
+                />
+              )}
             </div>
           </div>
 
@@ -247,11 +324,9 @@ function LoginForm({ setAuthState }: { setAuthState: (state: 'loading' | 'authed
           </div>
 
           {/* Error Message */}
-          {error && (
-            <div className={`text-sm color-text`}>
-              {error}
-            </div>
-          )}
+          <div className={`text-sm color-text min-h-[1.5rem]`}>
+            {error && <span>{error}</span>}
+          </div>
 
           {/* Login Button */}
           <div>
@@ -276,10 +351,11 @@ function LoginForm({ setAuthState }: { setAuthState: (state: 'loading' | 'authed
         </form>
 
         {/* Footer */}
-        <div className={`mt-6 text-center text-sm color-text-secondary`}>
-          <p>
-            {isRegisterMode ? 'Already have an account?' : "Don't have an account?"}{' '}
-            <button
+        {!isPrivateAuth && (
+          <div className={`mt-6 text-center text-sm color-text-secondary`}>
+            <p>
+              {isRegisterMode ? 'Already have an account?' : "Don't have an account?"}{' '}
+              <button
               type="button"
               onClick={() => {
                 if (isRegisterMode) {
@@ -315,6 +391,7 @@ function LoginForm({ setAuthState }: { setAuthState: (state: 'loading' | 'authed
             </button>
           </p>
         </div>
+        )}
       </div>
 
       {/* UUID Save Notice */}
