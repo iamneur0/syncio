@@ -138,7 +138,10 @@ export default function UserSelectModal({
         }
       }}
     >
-      <div className={`w-full max-w-2xl max-h-[80vh] rounded-lg shadow-xl card`}>
+      <div 
+        className={`w-full max-w-2xl max-h-[80vh] rounded-lg shadow-xl card`}
+        style={{ background: 'var(--color-background)' }}
+      >
         <div className="p-6">
           <div className="flex items-center justify-between mb-6">
             <h2 className={`text-xl font-bold`}>

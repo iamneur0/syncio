@@ -11,6 +11,7 @@ type Props = {
 
 export default function AccountMenuButton({ className = '' }: Props) {
   const AUTH_ENABLED = process.env.NEXT_PUBLIC_AUTH_ENABLED === 'true'
+  const [isPrivateAuth, setIsPrivateAuth] = React.useState(false)
   type AuthState = 'unknown' | 'authed' | 'guest'
   const initialState: AuthState = (() => {
     if (!AUTH_ENABLED) return 'authed'
@@ -50,9 +51,27 @@ export default function AccountMenuButton({ className = '' }: Props) {
     ;(async () => {
       try {
         if (!AUTH_ENABLED) {
-          const info = await api.get('/settings/account-info')
-          setAuthState('authed')
-          if (typeof window !== 'undefined') (window as any).__SYNCIO_AUTHED = true
+          // Check if private auth is enabled
+          try {
+            const me = await publicAuthAPI.me()
+            // If /me succeeds, we're authenticated (private auth enabled)
+            setAuthState('authed')
+            setIsPrivateAuth(true)
+            if (typeof window !== 'undefined') (window as any).__SYNCIO_AUTHED = true
+          } catch (err: any) {
+            // If /me fails with 401, private auth is enabled but not authenticated
+            if (err?.response?.status === 401) {
+              setAuthState('guest')
+              setIsPrivateAuth(true)
+              if (typeof window !== 'undefined') (window as any).__SYNCIO_AUTHED = false
+            } else {
+              // Other error or no auth - assume no auth needed
+              const info = await api.get('/settings/account-info')
+              setAuthState('authed')
+              setIsPrivateAuth(false)
+              if (typeof window !== 'undefined') (window as any).__SYNCIO_AUTHED = true
+            }
+          }
         } else {
         const me = await publicAuthAPI.me()
         const ok = !!me?.account
@@ -63,6 +82,7 @@ export default function AccountMenuButton({ className = '' }: Props) {
       } catch {
         if (!AUTH_ENABLED) {
           setAuthState('authed')
+          setIsPrivateAuth(false)
           if (typeof window !== 'undefined') (window as any).__SYNCIO_AUTHED = true
         } else {
         setAuthState('guest')
@@ -157,15 +177,18 @@ export default function AccountMenuButton({ className = '' }: Props) {
   }, [])
 
   const handleLogout = async () => {
-    // cookie-based logout is handled server-side
+    setShowMenu(false)
+    // cookie-based logout is handled server-side - do this first
+    try { 
+      await publicAuthAPI.logout()
+    } catch {}
     try { delete (api as any).defaults.headers.Authorization } catch {}
     setAuthState('guest')
     if (typeof window !== 'undefined') (window as any).__SYNCIO_AUTHED = false
-    setShowMenu(false)
     setAccountUuid(null)
     setAccountEmail(null)
+    // Dispatch event after logout completes
     try { window.dispatchEvent(new CustomEvent('sfm:auth:changed', { detail: { authed: false } })) } catch {}
-    try { await publicAuthAPI.logout() } catch {}
   }
 
   const handleCopyUuid = async () => {
@@ -179,7 +202,7 @@ export default function AccountMenuButton({ className = '' }: Props) {
     }
   }
 
-  if (AUTH_ENABLED && authState === 'guest') return null
+  if ((AUTH_ENABLED || isPrivateAuth) && authState === 'guest') return null
 
   const btnClasses = `h-10 px-3 rounded-lg flex items-center justify-center focus:outline-none focus:ring-0 color-surface color-hover ${className}`
 
@@ -227,7 +250,7 @@ export default function AccountMenuButton({ className = '' }: Props) {
               </div>
             ))}
           </div>
-          {AUTH_ENABLED && (
+          {(AUTH_ENABLED || isPrivateAuth) && (
             <button
               onClick={handleLogout}
               className={`color-surface color-hover color-text w-full text-center px-3 py-2 rounded`}

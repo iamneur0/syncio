@@ -126,8 +126,9 @@ const [previewAddon, setPreviewAddon] = useState<any | null>(null)
 const [isPreviewLoading, setIsPreviewLoading] = useState(false)
 const [previewError, setPreviewError] = useState<string | null>(null)
 
-  // Debug mode check
-  const isDebugMode = process.env.NEXT_PUBLIC_DEBUG === 'true' || process.env.NEXT_PUBLIC_DEBUG === '1'
+  // Debug mode check - show debug buttons in debug mode or private instances
+  const AUTH_ENABLED = process.env.NEXT_PUBLIC_AUTH_ENABLED === 'true'
+  const isDebugMode = process.env.NEXT_PUBLIC_DEBUG === 'true' || process.env.NEXT_PUBLIC_DEBUG === '1' || !AUTH_ENABLED
   
   
   const hydrateAddonFromSource = useCallback((sourceAddon: any | null) => {

@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react'
-import { User as UserIcon, Users as GroupIcon, Eye, Edit, Trash2, Copy, Download, RefreshCw, Puzzle } from 'lucide-react'
+import { User as UserIcon, Users as GroupIcon, Eye, Edit, Trash2, Copy, Download, RefreshCw, Puzzle, Mail } from 'lucide-react'
 import AddonIcon from './AddonIcon'
 import { SyncBadge, ToggleSwitch, VersionChip } from '@/components/ui'
 import { ConfirmDialog } from '@/components/modals'
@@ -86,7 +86,7 @@ const buildCandidateUrls = (addon: Record<string, any>): string[] => {
   return result
 }
 
-type Variant = 'user' | 'group' | 'addon'
+type Variant = 'user' | 'group' | 'addon' | 'invitation'
 
 interface BaseEntity {
   id: string
@@ -112,6 +112,12 @@ interface BaseEntity {
   stremioAddonsCount?: number
   groupName?: string
   groupId?: string
+  // Invitation specific
+  inviteCode?: string
+  maxUses?: number
+  currentUses?: number
+  expiresAt?: string | null
+  requests?: Array<any>
 }
 
 interface EntityCardProps {
@@ -135,6 +141,11 @@ interface EntityCardProps {
   onImport?: (id: string) => void
   onReload?: (id: string) => void
   isImporting?: boolean
+  // Invitation specific handlers
+  onRefreshOAuth?: (entity: BaseEntity) => void
+  isRefreshingOAuth?: boolean
+  // Custom badge component for invitations
+  customBadge?: React.ReactNode
   // List mode styling
   isListMode?: boolean
   isReloading?: boolean
@@ -159,7 +170,10 @@ export default function EntityCard({
   onReload,
   isImporting,
   isReloading,
-  isListMode
+  isListMode,
+  onRefreshOAuth,
+  isRefreshingOAuth,
+  customBadge
 }: EntityCardProps) {
   const { theme } = useTheme()
   const avatarColorStyles = useMemo(
@@ -291,6 +305,8 @@ export default function EntityCard({
   // Get display name and subtitle
   const displayName = variant === 'user' 
     ? (entity.username || entity.email || 'Unknown User')
+    : variant === 'invitation'
+    ? (entity.inviteCode || entity.name || 'Invitation')
     : entity.name
 
   const subtitle = variant === 'user' 
@@ -299,6 +315,8 @@ export default function EntityCard({
     ? '' // Never show description for groups
     : variant === 'addon'
     ? '' // Never show description for addons
+    : variant === 'invitation'
+    ? '' // Never show description for invitations
     : ''
 
   // Get avatar text
@@ -307,6 +325,8 @@ export default function EntityCard({
       return (entity.username || entity.email || 'U').charAt(0).toUpperCase()
     } else if (variant === 'group') {
       return entity.name ? entity.name.charAt(0).toUpperCase() : 'G'
+    } else if (variant === 'invitation') {
+      return entity.inviteCode ? entity.inviteCode.charAt(0).toUpperCase() : 'I'
     } else {
       return entity.name ? entity.name.charAt(0).toUpperCase() : 'A'
     }
@@ -380,12 +400,12 @@ export default function EntityCard({
     <div 
       onClick={handleCardClick}
       className={isListMode ? 
-        `card card-selectable p-4 hover:shadow-lg transition-all flex items-center justify-between relative group ${!entity.isActive ? 'opacity-50' : ''} cursor-pointer min-w-[320px] ${
+        `card card-selectable p-4 hover:shadow-lg transition-all flex items-center justify-between relative group ${(!entity.isActive || (variant === 'invitation' && ((entity.maxUses != null && entity.currentUses != null && entity.currentUses >= entity.maxUses) || (entity.expiresAt && new Date(entity.expiresAt) < new Date())))) ? 'opacity-50' : ''} cursor-pointer min-w-[320px] ${
           isSelected 
             ? 'card-selected' 
             : ''
         }` :
-        `card card-selectable p-6 hover:shadow-lg transition-all flex flex-col h-full relative group min-w-[320px] ${!entity.isActive ? 'opacity-50' : ''} cursor-pointer ${
+        `card card-selectable p-6 hover:shadow-lg transition-all flex flex-col h-full relative group min-w-[320px] ${(!entity.isActive || (variant === 'invitation' && ((entity.maxUses != null && entity.currentUses != null && entity.currentUses >= entity.maxUses) || (entity.expiresAt && new Date(entity.expiresAt) < new Date())))) ? 'opacity-50' : ''} cursor-pointer ${
           isSelected 
             ? 'card-selected' 
             : ''
@@ -439,6 +459,7 @@ export default function EntityCard({
                     isListMode={true}
                   />
                 )}
+                {variant === 'invitation' && customBadge && customBadge}
               </div>
               <p className={`text-sm color-text-secondary truncate` }>
                 {subtitle}
@@ -480,6 +501,18 @@ export default function EntityCard({
                   <div className="flex items-center gap-1 text-xs color-text-secondary">
                     <UserIcon className="w-4 h-4" />
                     <span>{groupUsersCount}</span>
+                  </div>
+                )}
+                {variant === 'invitation' && (
+                  <div className="flex items-center gap-1 text-xs color-text-secondary">
+                    <Mail className="w-4 h-4" />
+                    <span>{entity.currentUses || 0} / {entity.maxUses || 0}</span>
+                  </div>
+                )}
+                {variant === 'invitation' && (
+                  <div className="flex items-center gap-1 text-xs color-text-secondary">
+                    <GroupIcon className="w-4 h-4" />
+                    <span>{entity.groupName || 'No group'}</span>
                   </div>
                 )}
               </div>
@@ -527,14 +560,29 @@ export default function EntityCard({
                   <span>{groupUsersCount}</span>
                 </div>
               )}
+              {variant === 'invitation' && (
+                <div className="flex items-center gap-1 text-xs color-text-secondary">
+                  <Mail className="w-4 h-4" />
+                  <span>{entity.currentUses || 0} / {entity.maxUses || 0}</span>
+                </div>
+              )}
+              {variant === 'invitation' && (
+                <div className="flex items-center gap-1 text-xs color-text-secondary">
+                  <GroupIcon className="w-4 h-4" />
+                  <span>{entity.groupName || 'No group'}</span>
+                </div>
+              )}
             </div>
             
             {/* Toggle is always visible; does not wrap into the button grid */}
-            <ToggleSwitch
-              checked={entity.isActive}
-              onChange={() => handleToggle({} as React.MouseEvent)}
-              size="sm"
-            />
+            {!(variant === 'invitation' && ((entity.maxUses != null && entity.currentUses != null && entity.currentUses >= entity.maxUses) || (entity.expiresAt && new Date(entity.expiresAt) < new Date()))) && (
+              <ToggleSwitch
+                checked={entity.isActive}
+                onChange={() => handleToggle({} as React.MouseEvent)}
+                size="sm"
+                title={entity.isActive ? 'Click to disable' : 'Click to enable'}
+              />
+            )}
             
             {/* Actions: inline until < sm, stack 2x2 only on extra-small */}
             <div className="grid grid-cols-2 gap-1 xs:grid-cols-2 sm:flex sm:items-center sm:gap-1 flex-shrink-0 [@media(min-width:640px)]:grid-cols-1">
@@ -626,6 +674,20 @@ export default function EntityCard({
                 </button>
               )}
               
+              {variant === 'invitation' && onRefreshOAuth && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onRefreshOAuth(entity)
+                  }}
+                  disabled={isRefreshingOAuth || !(entity.requests && entity.requests.filter((req: any) => req.status === 'accepted' && req.oauthCode && req.oauthLink).length > 0)}
+                  className={`p-2 rounded surface-interactive color-text ${isRefreshingOAuth ? 'opacity-50' : ''}`}
+                  title="Clear OAuth links (users can generate new ones)"
+                >
+                  <RefreshCw className={`w-4 h-4 ${isRefreshingOAuth ? 'animate-spin' : ''}`} />
+                </button>
+              )}
+              
               <button
                 onClick={handleDelete}
                 className={`p-2 rounded surface-interactive color-text`}
@@ -693,16 +755,24 @@ export default function EntityCard({
                 />
               </div>
             )}
+            {/* Custom Badge for invitations */}
+            {variant === 'invitation' && customBadge && (
+              <div className="mt-1 mb-0">
+                {customBadge}
+              </div>
+            )}
           </div>
         </div>
         
         <div className="flex items-center gap-2 flex-shrink-0 ml-3">
-          <ToggleSwitch
-            checked={!!entity.isActive}
-            onChange={() => handleToggle({} as React.MouseEvent)}
-            size="md"
-            title={entity.isActive ? 'Click to disable' : 'Click to enable'}
-          />
+          {!(variant === 'invitation' && ((entity.maxUses != null && entity.currentUses != null && entity.currentUses >= entity.maxUses) || (entity.expiresAt && new Date(entity.expiresAt) < new Date()))) && (
+            <ToggleSwitch
+              checked={!!entity.isActive}
+              onChange={() => handleToggle({} as React.MouseEvent)}
+              size="md"
+              title={entity.isActive ? 'Click to disable' : 'Click to enable'}
+            />
+          )}
         </div>
       </div>
 
@@ -765,6 +835,28 @@ export default function EntityCard({
               <div className="min-w-0">
                 <p className={`text-lg font-semibold`}>{addonGroupsCount}</p>
                 <p className={`text-xs color-text-secondary`}>{addonGroupsCount === 1 ? 'Group' : 'Groups'}</p>
+              </div>
+            </div>
+          </>
+        )}
+        {variant === 'invitation' && (
+          <>
+            <div className="flex items-center">
+              <Mail className="w-4 h-4 color-text-secondary mr-2 flex-shrink-0" />
+              <div className="min-w-0">
+                <p className="text-lg font-semibold">
+                  {entity.currentUses || 0} / {entity.maxUses || 0}
+                </p>
+                <p className="text-xs color-text-secondary">Uses</p>
+              </div>
+            </div>
+            <div className="flex items-center min-w-0">
+              <GroupIcon className="w-4 h-4 color-text-secondary mr-2 flex-shrink-0" />
+              <div className="min-w-0 flex-1">
+                <p className="text-lg font-semibold truncate">
+                  {entity.groupName || 'No group'}
+                </p>
+                <p className="text-xs color-text-secondary">Group</p>
               </div>
             </div>
           </>
@@ -848,6 +940,20 @@ export default function EntityCard({
             title="Reload addon"
           >
             <RefreshCw className={`w-4 h-4 ${isReloading ? 'animate-spin' : ''}`} />
+          </button>
+        )}
+        
+        {variant === 'invitation' && onRefreshOAuth && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              onRefreshOAuth(entity)
+            }}
+            disabled={isRefreshingOAuth || !(entity.requests && entity.requests.filter((req: any) => req.status === 'accepted' && req.oauthCode && req.oauthLink).length > 0)}
+            className="flex items-center justify-center px-3 py-2 h-8 min-h-8 max-h-8 text-sm rounded color-text color-hover disabled:opacity-50 disabled:cursor-not-allowed"
+            title="Clear OAuth links (users can generate new ones)"
+          >
+            <RefreshCw className={`w-4 h-4 ${isRefreshingOAuth ? 'animate-spin' : ''}`} />
           </button>
         )}
         

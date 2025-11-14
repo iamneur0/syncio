@@ -59,13 +59,23 @@ export default function ConfirmDialog({
   }
 
   return createPortal(
-    <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/60" onClick={() => onCancel('backdrop')} />
+    <div 
+      className="fixed inset-0 z-[1000] flex items-center justify-center p-4"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div 
+        className="absolute inset-0 bg-black/60" 
+        onClick={(e) => {
+          e.stopPropagation()
+          onCancel('backdrop')
+        }} 
+      />
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby="confirm-title"
         className={`relative w-full max-w-md rounded-xl shadow-xl overflow-hidden animate-[fadeIn_120ms_ease-out] card`}
+        onClick={(e) => e.stopPropagation()}
       >
         <div className={`px-6 py-4 flex items-center gap-3 card-header`}>
           <div className={`${isDanger ? 'color-text' : 'color-text-secondary'}`}>
@@ -88,13 +98,19 @@ export default function ConfirmDialog({
           <div className="flex flex-col sm:flex-row sm:justify-end gap-2 sm:gap-3">
             <button
               autoFocus
-              onClick={() => onCancel('cancel')}
+              onClick={(e) => {
+                e.stopPropagation()
+                onCancel('cancel')
+              }}
               className={`px-3 py-2 text-sm rounded-lg border-0 focus:outline-none focus:ring-0 color-hover`}
             >
               {cancelText}
             </button>
             <button
-              onClick={onConfirm}
+              onClick={(e) => {
+                e.stopPropagation()
+                onConfirm()
+              }}
               className={`px-3 py-2 text-sm rounded-lg focus:outline-none focus:ring-2 focus:ring-offset-2 ${
                 isDanger
                   ? 'color-surface color-text hover:opacity-90 focus:ring-offset-2'

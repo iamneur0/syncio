@@ -374,11 +374,11 @@ export default function GroupAddModal({
           </EntityList>
 
           {/* Action Buttons */}
-          <div className="flex gap-3 pt-6 mt-6">
+          <div className="flex justify-end gap-3 pt-4">
             <button
               type="button"
               onClick={handleClose}
-              className={`flex-1 px-4 py-2 rounded-lg transition-colors color-text-secondary color-hover`}
+              className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors color-text-secondary color-hover`}
             >
               Cancel
             </button>
@@ -386,7 +386,7 @@ export default function GroupAddModal({
               type="button"
               onClick={handleSubmit}
               disabled={createGroupMutation.isPending || isCreating}
-              className="flex-1 px-4 py-2 color-surface rounded-lg transition-colors disabled:opacity-50"
+              className="px-4 py-2 text-sm font-medium rounded-lg transition-colors disabled:opacity-50 color-surface hover:opacity-90"
             >
               {createGroupMutation.isPending || isCreating ? 'Creating...' : 'Create Group'}
             </button>

@@ -5,6 +5,7 @@ import { useTheme } from '@/contexts/ThemeContext'
 import { getEntityColorStyles } from '@/utils/colorMapping'
 import { addonsAPI } from '@/services/api'
 import { VersionChip } from '@/components/ui'
+import { AddonIcon, InlineEdit } from '@/components/entities'
 
 interface AddonAddModalProps {
   isOpen: boolean
@@ -32,6 +33,7 @@ export default function AddonAddModal({
   
   const [addonName, setAddonName] = useState('')
   const [addonUrl, setAddonUrl] = useState('')
+  const [addonDescription, setAddonDescription] = useState('')
   const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>([])
   const [urlError, setUrlError] = useState<string>('')
   const [nameError, setNameError] = useState<string>('')
@@ -94,6 +96,8 @@ export default function AddonAddModal({
         if (data.name && !addonName.trim()) {
           setAddonName(data.name)
         }
+        // Always set description, even if empty, to populate the field
+        setAddonDescription(data.description || '')
       } catch (error) {
         setUrlError('Failed to load manifest. Please check the URL.')
         setManifestData(null)
@@ -116,27 +120,37 @@ export default function AddonAddModal({
     const checkNameAvailability = async () => {
       try {
         setIsCheckingName(true)
+        // Clear error immediately when name changes
         setNameError('')
         
         // Get all existing addons
         const existingAddons = await addonsAPI.getAll()
+        const currentName = addonName.toLowerCase().trim()
         const duplicateAddon = existingAddons.find(addon => 
-          addon.name.toLowerCase().trim() === addonName.toLowerCase().trim()
+          addon.name.toLowerCase().trim() === currentName
         )
         
         if (duplicateAddon) {
           setNameError(`An addon named "${duplicateAddon.name}" already exists`)
+        } else {
+          // Explicitly clear error if no duplicate found
+          setNameError('')
         }
       } catch (error) {
         console.error('Error checking addon name:', error)
         // Don't show error to user for validation checks
+        setNameError('')
       } finally {
         setIsCheckingName(false)
       }
     }
 
     const timeoutId = setTimeout(checkNameAvailability, 300)
-    return () => clearTimeout(timeoutId)
+    return () => {
+      clearTimeout(timeoutId)
+      // Clear error when effect is cleaned up (name changed)
+      setNameError('')
+    }
   }, [addonName])
 
   // Memoize version tag to prevent unnecessary re-renders
@@ -145,6 +159,12 @@ export default function AddonAddModal({
     
     return <VersionChip version={manifestData.version} size="sm" />
   }, [manifestData?.version])
+
+  // Get addon icon URL from manifest
+  const addonIconUrl = useMemo(() => {
+    if (!manifestData) return null
+    return manifestData.logo || manifestData.icon || manifestData.images?.logo || null
+  }, [manifestData])
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -164,7 +184,7 @@ export default function AddonAddModal({
     onAddAddon({
       name: addonName.trim(),
       url: addonUrl.trim(),
-      description: manifestData.description || '',
+      description: addonDescription.trim() || manifestData.description || '',
       groupIds: selectedGroupIds,
       manifestData: manifestData
     })
@@ -173,6 +193,7 @@ export default function AddonAddModal({
   const handleClose = () => {
     setAddonName('')
     setAddonUrl('')
+    setAddonDescription('')
     setSelectedGroupIds([])
     setIsLoadingManifest(false)
     setIsCheckingName(false)
@@ -197,42 +218,47 @@ export default function AddonAddModal({
         }
       }}
     >
-      <div className={`rounded-lg max-w-md w-full p-6 card`}>
-        <div className="flex items-center justify-between mb-4">
-          <h2 className={`text-lg font-semibold`}>Add New Addon</h2>
+      <div 
+        className={`rounded-lg max-w-md w-full card`}
+        style={{ background: 'var(--color-background)' }}
+      >
+        <div className="flex items-center justify-between p-6 border-b color-border">
+          <div className="flex items-center gap-4 relative flex-1">
+            <AddonIcon
+              name={addonName || 'Addon'}
+              iconUrl={addonIconUrl || undefined}
+              size="12"
+              className="flex-shrink-0"
+              colorIndex={1}
+            />
+            <div className="flex flex-col flex-1 min-w-0">
+              <div className="flex items-center gap-3">
+                <InlineEdit
+                  value={addonName}
+                  onSave={async (newValue) => {
+                    // Update state immediately for real-time duplicate checking
+                    setAddonName(newValue)
+                  }}
+                  placeholder="Addon Name *"
+                  className="text-lg font-semibold"
+                />
+                {versionTag}
+              </div>
+              {nameError && (
+                <p className={`text-xs mt-1 color-text`}>
+                  {nameError}
+                </p>
+              )}
+            </div>
+          </div>
           <button
             onClick={handleClose}
-            className={`w-8 h-8 flex items-center justify-center rounded transition-colors border-0 color-hover`}
+            className="w-8 h-8 flex items-center justify-center rounded transition-colors border-0 focus:outline-none ring-0 focus:ring-0 color-text-secondary color-hover"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className={`block text-sm font-medium mb-1`}>
-              Addon Name *
-            </label>
-            <div className="flex items-center gap-2">
-              <input
-                type="text"
-                value={addonName}
-                onChange={(e) => setAddonName(e.target.value)}
-                placeholder="Cinemeta"
-                required
-                className={`w-full px-3 py-2 border rounded-lg focus:outline-none input ${
-                  nameError 
-                    ? 'color-border' 
-                    : ''
-                }`}
-              />
-              {versionTag}
-            </div>
-            {nameError && (
-              <p className="text-xs mt-1 color-text">
-                {nameError}
-              </p>
-            )}
-          </div>
+        <form onSubmit={handleSubmit} className="p-6 space-y-4">
           <div>
             <label className={`block text-sm font-medium mb-1`}>
               Addon URL *
@@ -245,9 +271,21 @@ export default function AddonAddModal({
               required
               className={`w-full px-3 py-2 border rounded-lg focus:outline-none input`}
             />
-            <p className={`text-xs mt-1 ${urlError ? 'color-text' : 'color-text-secondary'}`}>
+            <p className={`text-xs mt-1 min-h-[1rem] ${urlError ? 'color-text' : 'color-text-secondary'}`}>
               {urlError ? urlError : 'Enter the full URL to the Stremio addon manifest'}
             </p>
+          </div>
+          <div>
+            <label className={`block text-sm font-medium mb-1`}>
+              Description
+            </label>
+            <textarea
+              value={addonDescription}
+              onChange={(e) => setAddonDescription(e.target.value)}
+              placeholder="Addon description"
+              rows={3}
+              className={`w-full px-3 py-2 border rounded-lg focus:outline-none input resize-none`}
+            />
           </div>
           {/* Groups selection - match AddonDetailModal style */}
           <div>
@@ -295,19 +333,19 @@ export default function AddonAddModal({
               })}
             </div>
           </div>
-          <div className="flex gap-3 pt-4">
+          <div className="flex justify-end gap-3 pt-4">
             <button
               type="button"
               onClick={handleClose}
               disabled={isCreating}
-              className={`flex-1 px-4 py-2 rounded-lg transition-colors color-text-secondary color-hover`}
+              className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors color-text-secondary color-hover`}
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={isCreating || !!urlError || !!nameError || isLoadingManifest || isCheckingName || !manifestData}
-              className="flex-1 px-4 py-2 color-surface rounded-lg transition-colors disabled:opacity-50"
+              className="px-4 py-2 text-sm font-medium rounded-lg transition-colors disabled:opacity-50 color-surface hover:opacity-90"
             >
               {isCreating ? 'Adding...' : isLoadingManifest ? 'Loading manifest...' : 'Add Addon'}
             </button>

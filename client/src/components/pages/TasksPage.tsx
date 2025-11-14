@@ -69,6 +69,67 @@ export default function TasksPage() {
     setConfirmOpen(true)
   }
 
+  const clearAllUserAddons = async () => {
+    openConfirm({
+      title: 'Clear All User Addons',
+      description: 'Clear addons from ALL users? This will remove all addons from all users but keep the users and addons themselves.',
+      isDanger: true,
+      onConfirm: async () => {
+        try {
+          // First get all users
+          const usersRes = await api.get('/users')
+          const users = usersRes.data || []
+          
+          if (users.length === 0) {
+            toast.success('No users found to clear addons from')
+            return
+          }
+
+          // Clear addons for each user using the same endpoint as individual clear
+          let successCount = 0
+          let errorCount = 0
+          
+          for (const user of users) {
+            try {
+              await api.post(`/users/${user.id}/stremio-addons/clear`)
+              successCount++
+            } catch (error) {
+              console.error(`Failed to clear addons for user ${user.id}:`, error)
+              errorCount++
+            }
+          }
+
+          if (errorCount === 0) {
+            toast.success(`Cleared addons from ${successCount} user${successCount !== 1 ? 's' : ''}`)
+          } else {
+            toast.error(`Cleared addons from ${successCount} user${successCount !== 1 ? 's' : ''}, ${errorCount} failed`)
+          }
+        } catch (e: any) {
+          const msg = e?.response?.data?.error || e?.message || 'Failed to clear user addons'
+          toast.error(msg)
+        }
+      }
+    })
+  }
+
+  const resetConfig = async () => {
+    openConfirm({
+      title: 'Reset Configuration',
+      description: 'Reset configuration (users, groups, addons)? This cannot be undone.',
+      isDanger: true,
+      onConfirm: async () => {
+        try {
+          const res = await api.post('/public-auth/reset')
+          if (res.status !== 200) throw new Error('Reset failed')
+          toast.success('Configuration reset')
+        } catch (e: any) {
+          const msg = e?.response?.data?.error || e?.message || 'Reset failed'
+          toast.error(msg)
+        }
+      }
+    })
+  }
+
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
     if (file) {
@@ -444,45 +505,6 @@ export default function TasksPage() {
     })
   }
 
-  const clearAllUserAddons = () => {
-    openConfirm({
-      title: 'Clear All User Addons',
-      description: 'Clear addons from ALL users? This will remove all addons from all users but keep the users and addons themselves.',
-      isDanger: true,
-      onConfirm: async () => {
-        try {
-          const usersRes = await api.get('/users')
-          const users = usersRes.data || []
-          
-          if (users.length === 0) {
-            toast.success('No users found to clear addons from')
-            return
-          }
-
-          let successCount = 0
-          let errorCount = 0
-          
-          for (const user of users) {
-            try {
-              await api.post(`/users/${user.id}/stremio-addons/clear`)
-              successCount++
-            } catch (error) {
-              console.error(`Failed to clear addons for user ${user.id}:`, error)
-              errorCount++
-            }
-          }
-
-          if (errorCount === 0) {
-            toast.success(`All user addons cleared successfully (${successCount} users)`)
-          } else {
-            toast.success(`Cleared addons for ${successCount} users, ${errorCount} failed`)
-          }
-        } catch (e: any) {
-          toast.error(e?.response?.data?.error || e?.message || 'Clear failed')
-        }
-      }
-    })
-  }
 
   const textColor = 'color-text'
   const mutedTextColor = 'color-text-secondary'
@@ -530,6 +552,12 @@ export default function TasksPage() {
             className="surface-interactive flex items-center px-4 py-2 rounded-lg"
           >
             <Trash2 className="w-5 h-5 mr-2" /> Delete All Users
+          </button>
+          <button 
+            onClick={clearAllUserAddons} 
+            className="surface-interactive flex items-center px-4 py-2 rounded-lg"
+          >
+            <RefreshCcw className="w-5 h-5 mr-2" /> Clear User Addons
           </button>
         </div>
       </div>
@@ -643,6 +671,12 @@ export default function TasksPage() {
           </button>
           <button onClick={exportConfig} className="surface-interactive flex items-center px-4 py-2 rounded-lg">
             <Upload className="w-5 h-5 mr-2" /> Export Configuration
+          </button>
+          <button 
+            onClick={resetConfig} 
+            className="surface-interactive flex items-center px-4 py-2 rounded-lg"
+          >
+            <RefreshCcw className="w-5 h-5 mr-2" /> Reset Configuration
           </button>
         </div>
 

@@ -169,8 +169,9 @@ export default function UserDetailModal({
   })
 
 
-  // Debug mode check
-  const isDebugMode = process.env.NEXT_PUBLIC_DEBUG === 'true' || process.env.NEXT_PUBLIC_DEBUG === '1'
+  // Debug mode check - show debug buttons in debug mode or private instances
+  const AUTH_ENABLED = process.env.NEXT_PUBLIC_AUTH_ENABLED === 'true'
+  const isDebugMode = process.env.NEXT_PUBLIC_DEBUG === 'true' || process.env.NEXT_PUBLIC_DEBUG === '1' || !AUTH_ENABLED
 
   // Debug function to show raw Stremio addons
   const handleDebugStremioAddons = async () => {
