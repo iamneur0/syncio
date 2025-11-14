@@ -624,6 +624,10 @@ export const publicAuthAPI = {
   },
   logout: async (): Promise<void> => {
     await api.post('/public-auth/logout')
+  },
+  unlinkStremio: async (): Promise<{ message: string }> => {
+    const res: AxiosResponse<{ message: string }> = await api.post('/public-auth/unlink-stremio')
+    return res.data
   }
 }
 
