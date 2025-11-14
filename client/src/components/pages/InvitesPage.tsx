@@ -4,7 +4,7 @@ import React, { useMemo } from 'react'
 import { format } from 'date-fns'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
-import { Users as UsersIcon } from 'lucide-react'
+import { Mail } from 'lucide-react'
 import { invitationsAPI, groupsAPI } from '@/services/api'
 import PageHeader from '@/components/layout/PageHeader'
 import InviteDetailModal from '@/components/modals/InviteDetailModal'
@@ -12,6 +12,7 @@ import { ConfirmDialog } from '@/components/modals'
 import DateTimePicker from '@/components/ui/DateTimePicker'
 import EntityCard from '@/components/entities/EntityCard'
 import { InvitationStatusBadge } from '@/components/ui/InvitationStatusBadge'
+import { EmptyState } from '@/components/ui'
 
 interface Invitation {
   id: string
@@ -59,6 +60,16 @@ export default function InvitesPage() {
       localStorage.setItem('invites-filter', statusFilter)
     }
   }, [statusFilter])
+
+  // Close create modal on Escape key
+  React.useEffect(() => {
+    if (!showCreateModal) return
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setShowCreateModal(false)
+    }
+    document.addEventListener('keydown', handleEscape)
+    return () => document.removeEventListener('keydown', handleEscape)
+  }, [showCreateModal])
   const [selectedInvitations, setSelectedInvitations] = React.useState<Set<string>>(new Set())
   const [viewMode, setViewMode] = React.useState<'card' | 'list'>('card')
   const [selectedInvitation, setSelectedInvitation] = React.useState<Invitation | null>(null)
@@ -504,13 +515,18 @@ export default function InvitesPage() {
 
 
       {/* Invitations List */}
-      <div className={`mt-6 ${viewMode === 'card' ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4' : 'space-y-2'}`}>
-        {filteredInvitations.length === 0 ? (
-          <div className="text-center py-12 color-text-secondary col-span-full">
-            <UsersIcon className="w-16 h-16 mx-auto mb-4 opacity-50" />
-            <p>No invites yet. Create your first invite to get started.</p>
-          </div>
-        ) : (
+      {filteredInvitations.length === 0 ? (
+        <EmptyState
+          icon={<Mail className="w-16 h-16" />}
+          title="No invites yet"
+          description="Create your first invite to get started."
+          action={{
+            label: 'Create Invite',
+            onClick: () => setShowCreateModal(true)
+          }}
+        />
+      ) : (
+        <div className={`mt-6 ${viewMode === 'card' ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4' : 'space-y-2'}`}>
           filteredInvitations.map((invitation: Invitation) => (
             <EntityCard
               key={invitation.id}
@@ -573,9 +589,9 @@ export default function InvitesPage() {
               }
               isListMode={viewMode === 'list'}
             />
-          ))
-        )}
-      </div>
+          ))}
+        </div>
+      )}
 
       {/* Invite Detail Modal */}
       <InviteDetailModal

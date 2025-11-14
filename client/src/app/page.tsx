@@ -189,9 +189,13 @@ export default function HomePage() {
                 title={sidebarCollapsed ? item.name : ''}
               >
                 <div className="flex items-center justify-center w-8 h-8 flex-shrink-0 absolute left-1 top-1/2 transform -translate-y-1/2">
-                  <item.icon className={`w-5 h-5 transition-all duration-200 ${
-                    isActive ? 'fill-current' : ''
-                  }`} />
+                  {item.id === 'invitations' && isActive ? (
+                    <item.icon className="w-5 h-5 transition-all duration-200 [&>path:nth-child(2)]:fill-current" />
+                  ) : (
+                    <item.icon className={`w-5 h-5 transition-all duration-200 ${
+                      isActive ? 'fill-current' : ''
+                    }`} />
+                  )}
                 </div>
                 {!sidebarCollapsed && <span className={`absolute left-11 top-1/2 transform -translate-y-1/2 text-sm transition-all duration-200 ${
                   isActive ? 'font-bold' : 'font-medium'
