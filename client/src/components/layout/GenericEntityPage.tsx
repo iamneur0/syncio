@@ -631,8 +631,17 @@ export default function GenericEntityPage({ config }: GenericEntityPageProps) {
       })
     }
     
+    // Sort addons alphabetically by name
+    if (finalConfig.entityType === 'addon') {
+      filtered = [...filtered].sort((a: any, b: any) => {
+        const nameA = (finalConfig.getEntityName?.(a) || a.name || '').toLowerCase()
+        const nameB = (finalConfig.getEntityName?.(b) || b.name || '').toLowerCase()
+        return nameA.localeCompare(nameB)
+      })
+    }
+    
     return filtered
-  }, [entities, searchTerm, statusFilter, finalConfig.searchFields, finalConfig.entityType, userSyncStatuses.data, groupSyncStatuses.data])
+  }, [entities, searchTerm, statusFilter, finalConfig.searchFields, finalConfig.entityType, finalConfig.getEntityName, userSyncStatuses.data, groupSyncStatuses.data])
 
   // Check if empty state
   const isEmpty = !isLoading && Array.isArray(entities) && entities.length === 0
