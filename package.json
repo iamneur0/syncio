@@ -8,7 +8,7 @@
     "dev:private": "concurrently \"npm run server:private:watch\" \"npm run client:dev:private\"",
     "dev:public": "concurrently \"npm run server:public:watch\" \"npm run client:dev:public\"",
     "server:watch": "nodemon server/index.js",
-    "server:private:watch": "cp prisma/schema.sqlite.prisma prisma/schema.prisma && npx prisma generate && QUIET=true NEXT_PUBLIC_DEBUG=true AUTH_ENABLED=false DATABASE_URL=\"file:./prisma/sqlite.db\" REDIS_URL=\"redis://localhost:6379\" JWT_SECRET=\"temp-jwt-secret-key\" ENCRYPTION_KEY=\"temp-encryption-key-32-chars-long\" nodemon server/index.js",
+    "server:private:watch": "cp prisma/schema.sqlite.prisma prisma/schema.prisma && npx prisma generate && QUIET=true NEXT_PUBLIC_DEBUG=true AUTH_ENABLED=false DATABASE_URL=\"file:./prisma/sqlite.db\" REDIS_URL=\"redis://localhost:6379\" JWT_SECRET=\"temp-jwt-secret-key\" ENCRYPTION_KEY=\"temp-encryption-key-32-chars-long\" SYNCIO_PRIVATE_USERNAME=\"${SYNCIO_PRIVATE_USERNAME}\" SYNCIO_PRIVATE_PASSWORD=\"${SYNCIO_PRIVATE_PASSWORD}\" nodemon server/index.js",
     "server:public:watch": "cp prisma/schema.postgres.prisma prisma/schema.prisma && npx prisma generate && QUIET=false NEXT_PUBLIC_DEBUG=true AUTH_ENABLED=true DATABASE_URL=\"postgresql://syncio:syncio@localhost:5432/syncio\" REDIS_URL=\"redis://localhost:6379\" JWT_SECRET=\"temp-jwt-secret-key\" ENCRYPTION_KEY=\"temp-encryption-key-32-chars-long\" nodemon server/index.js",
     "client:dev": "cd client && npm run dev",
     "client:dev:private": "cd client && NEXT_PUBLIC_AUTH_ENABLED=false npm run dev",
@@ -20,7 +20,9 @@
     "test:full": "node test-full-suite.js",
     "test:enhanced": "node test-suite-enhanced.js",
     "lint": "eslint server/ client/src/",
-    "lint:fix": "eslint server/ client/src/ --fix"
+    "lint:fix": "eslint server/ client/src/ --fix",
+    "studio": "cp prisma/schema.sqlite.prisma prisma/schema.prisma && npx prisma generate && DATABASE_URL=\"file:./prisma/sqlite.db\" npx prisma studio",
+    "studio:public": "cp prisma/schema.postgres.prisma prisma/schema.prisma && npx prisma generate && DATABASE_URL=\"postgresql://syncio:syncio@localhost:5432/syncio\" npx prisma studio"
   },
   "keywords": [
     "stremio",
