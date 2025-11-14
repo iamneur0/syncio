@@ -28,9 +28,10 @@ const settingsRouter = require('./routes/settings');
 const externalApiRouter = require('./routes/externalApi');
 const debugRouter = require('./routes/debug');
 const publicAuthRouter = require('./routes/publicAuth');
+const invitationsRouter = require('./routes/invitations');
 
 // Import configuration constants
-const { AUTH_ENABLED, JWT_SECRET, DEFAULT_ACCOUNT_ID, DEFAULT_ACCOUNT_UUID, defaultAddons, AUTH_ALLOWLIST, BACKUP_DIR, BACKUP_CFG, PEPPER, ENCRYPTION_KEY, allowedOrigins, QUIET, DEBUG_ENABLED, PORT } = require('./utils/config');
+const { AUTH_ENABLED, PRIVATE_AUTH_ENABLED, PRIVATE_AUTH_USERNAME, PRIVATE_AUTH_PASSWORD, JWT_SECRET, DEFAULT_ACCOUNT_ID, DEFAULT_ACCOUNT_UUID, defaultAddons, AUTH_ALLOWLIST, BACKUP_DIR, BACKUP_CFG, PEPPER, ENCRYPTION_KEY, allowedOrigins, QUIET, DEBUG_ENABLED, PORT } = require('./utils/config');
 
 // Import utility modules
 const { parseAddonIds, parseProtectedAddons, canonicalizeManifestUrl, normalizeUrl, isProdEnv, filterManifestByResources, filterManifestByCatalogs } = require('./utils/validation');
@@ -139,10 +140,10 @@ const { getServerKey, aesGcmEncrypt, aesGcmDecrypt, getAccountDek } = require('.
 
 // Global auth and CSRF gates via middleware factories
 const { createAuthGate, createCsrfGuard } = require('./middleware/auth')
-app.use(createAuthGate({ AUTH_ENABLED, JWT_SECRET, pathIsAllowlisted, parseCookies, cookieName, extractBearerToken, issueAccessToken, randomCsrfToken, isProdEnv }))
-app.use(createCsrfGuard({ AUTH_ENABLED, pathIsAllowlisted, parseCookies, cookieName }))
+app.use(createAuthGate({ AUTH_ENABLED, PRIVATE_AUTH_ENABLED, JWT_SECRET, pathIsAllowlisted, parseCookies, cookieName, extractBearerToken, issueAccessToken, randomCsrfToken, isProdEnv }))
+app.use(createCsrfGuard({ AUTH_ENABLED, PRIVATE_AUTH_ENABLED, pathIsAllowlisted, parseCookies, cookieName }))
 
-if (!AUTH_ENABLED) {
+if (!AUTH_ENABLED && !PRIVATE_AUTH_ENABLED) {
   app.use((req, res, next) => {
     if (!req.appAccountId) {
       req.appAccountId = DEFAULT_ACCOUNT_ID
@@ -187,7 +188,8 @@ app.use('/api/ext', externalApiRouter({
 if (!AUTH_ENABLED) {
   app.use('/', debugRouter({ prisma, getDecryptedManifestUrl, getAccountId }));
 }
-app.use('/api/public-auth', publicAuthRouter({ prisma, getAccountId, AUTH_ENABLED, issueAccessToken, issueRefreshToken, cookieName, isProdEnv, encrypt, decrypt, getDecryptedManifestUrl, scopedWhere, getAccountDek, decryptWithFallback, manifestUrlHmac, manifestHash, filterManifestByResources, filterManifestByCatalogs }));
+app.use('/api/public-auth', publicAuthRouter({ prisma, getAccountId, AUTH_ENABLED, PRIVATE_AUTH_ENABLED, PRIVATE_AUTH_USERNAME, PRIVATE_AUTH_PASSWORD, DEFAULT_ACCOUNT_ID, issueAccessToken, issueRefreshToken, cookieName, isProdEnv, encrypt, decrypt, getDecryptedManifestUrl, scopedWhere, getAccountDek, decryptWithFallback, manifestUrlHmac, manifestHash, filterManifestByResources, filterManifestByCatalogs }));
+app.use('/api/invitations', invitationsRouter({ prisma, getAccountId, AUTH_ENABLED, encrypt, decrypt, assignUserToGroup }));
 
 // Error handling
 app.use((error, req, res, next) => {

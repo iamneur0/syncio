@@ -149,7 +149,8 @@ module.exports = ({ prisma, AUTH_ENABLED, getAccountDek, getDecryptedManifestUrl
           frequency: (syncCfg && typeof syncCfg === 'object' && syncCfg.frequency) ? String(syncCfg.frequency).trim() : derivedFrequency,
           safe: (syncCfg && typeof syncCfg === 'object' && typeof syncCfg.safe === 'boolean') ? syncCfg.safe : true,
           mode: (syncCfg && typeof syncCfg === 'object' && syncCfg.mode === 'advanced') ? 'advanced' : 'normal',
-          webhookUrl: (syncCfg && typeof syncCfg === 'object' && typeof syncCfg.webhookUrl === 'string') ? syncCfg.webhookUrl : ''
+          webhookUrl: (syncCfg && typeof syncCfg === 'object' && typeof syncCfg.webhookUrl === 'string') ? syncCfg.webhookUrl : '',
+          useCustomFields: (syncCfg && typeof syncCfg === 'object' && typeof syncCfg.useCustomFields === 'boolean') ? syncCfg.useCustomFields : ((syncCfg && typeof syncCfg === 'object' && typeof syncCfg.useCustomNames === 'boolean') ? syncCfg.useCustomNames : true)
         }
 
         return res.json(response)
@@ -165,10 +166,10 @@ module.exports = ({ prisma, AUTH_ENABLED, getAccountDek, getDecryptedManifestUrl
         const frequency = (typeof syncCfg.frequency === 'string' && syncCfg.frequency.trim())
           ? syncCfg.frequency.trim()
           : '0'
-        const resp = { enabled: syncCfg.enabled !== false, safe, mode, frequency, lastRunAt: syncCfg.lastRunAt, webhookUrl: syncCfg.webhookUrl || '' }
+        const resp = { enabled: syncCfg.enabled !== false, safe, mode, frequency, lastRunAt: syncCfg.lastRunAt, webhookUrl: syncCfg.webhookUrl || '', useCustomFields: (typeof syncCfg.useCustomFields === 'boolean') ? syncCfg.useCustomFields : ((typeof syncCfg.useCustomNames === 'boolean') ? syncCfg.useCustomNames : true) }
         return res.json(resp)
       }
-      return res.json({ enabled: false, frequency: 0, safe: true, mode: 'normal' })
+      return res.json({ enabled: false, frequency: 0, safe: true, mode: 'normal', useCustomFields: true })
     } catch (e) {
       return res.status(500).json({ message: 'Failed to read account sync settings' })
     }
@@ -176,7 +177,9 @@ module.exports = ({ prisma, AUTH_ENABLED, getAccountDek, getDecryptedManifestUrl
 
   router.put('/account-sync', async (req, res) => {
     try {
-      const { enabled, frequency, mode, unsafe, safe, webhookUrl } = req.body || {}
+      const { enabled, frequency, mode, unsafe, safe, webhookUrl, useCustomFields, useCustomNames } = req.body || {}
+      // Support both useCustomFields (new) and useCustomNames (old) for backward compatibility
+      const useCustomFieldsValue = useCustomFields !== undefined ? useCustomFields : useCustomNames
       if (!AUTH_ENABLED) {
         await ensureDefaultAccount()
         const safeMinutes = (() => {
@@ -225,7 +228,8 @@ module.exports = ({ prisma, AUTH_ENABLED, getAccountDek, getDecryptedManifestUrl
           frequency: typeof frequency === 'string' && frequency.trim() ? frequency.trim() : baseCfg.frequency || '0',
           safe: safe !== undefined ? !!safe : (unsafe !== undefined ? !unsafe : baseCfg.safe !== false),
           mode: mode === 'advanced' ? 'advanced' : baseCfg.mode === 'advanced' ? 'advanced' : 'normal',
-          webhookUrl: webhookUrl !== undefined ? (webhookUrl || null) : (baseCfg.webhookUrl || null)
+          webhookUrl: webhookUrl !== undefined ? (webhookUrl || null) : (baseCfg.webhookUrl || null),
+          useCustomFields: useCustomFieldsValue !== undefined ? !!useCustomFieldsValue : ((baseCfg.useCustomFields !== undefined ? baseCfg.useCustomFields : (baseCfg.useCustomNames !== undefined ? baseCfg.useCustomNames : true)))
         }
 
         try {
@@ -255,6 +259,7 @@ module.exports = ({ prisma, AUTH_ENABLED, getAccountDek, getDecryptedManifestUrl
       if (safe !== undefined) partial.safe = !!safe
       else if (unsafe !== undefined) partial.safe = !unsafe
       if (webhookUrl !== undefined) partial.webhookUrl = webhookUrl || null
+      if (useCustomFieldsValue !== undefined) partial.useCustomFields = !!useCustomFieldsValue
 
       const nextCfg = { ...base, ...partial }
 

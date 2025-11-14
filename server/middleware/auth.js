@@ -1,8 +1,8 @@
 // Auth and CSRF middlewares (factory-style for DI/testing)
-module.exports.createAuthGate = function createAuthGate({ AUTH_ENABLED, JWT_SECRET, pathIsAllowlisted, parseCookies, cookieName, extractBearerToken, issueAccessToken, randomCsrfToken, isProdEnv, jsonwebtoken }) {
+module.exports.createAuthGate = function createAuthGate({ AUTH_ENABLED, PRIVATE_AUTH_ENABLED, JWT_SECRET, pathIsAllowlisted, parseCookies, cookieName, extractBearerToken, issueAccessToken, randomCsrfToken, isProdEnv, jsonwebtoken }) {
   const jwt = jsonwebtoken || require('jsonwebtoken')
   return function authGate(req, res, next) {
-    if (!AUTH_ENABLED) return next();
+    if (!AUTH_ENABLED && !PRIVATE_AUTH_ENABLED) return next();
     if (req.method === 'OPTIONS') return next();
     if (pathIsAllowlisted(req.path)) return next();
 
@@ -52,9 +52,9 @@ module.exports.createAuthGate = function createAuthGate({ AUTH_ENABLED, JWT_SECR
   }
 }
 
-module.exports.createCsrfGuard = function createCsrfGuard({ AUTH_ENABLED, pathIsAllowlisted, parseCookies, cookieName }) {
+module.exports.createCsrfGuard = function createCsrfGuard({ AUTH_ENABLED, PRIVATE_AUTH_ENABLED, pathIsAllowlisted, parseCookies, cookieName }) {
   return function csrfGuard(req, res, next) {
-    if (!AUTH_ENABLED) return next();
+    if (!AUTH_ENABLED && !PRIVATE_AUTH_ENABLED) return next();
     if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return next();
     if (pathIsAllowlisted(req.path)) return next();
     const cookies = parseCookies(req);
