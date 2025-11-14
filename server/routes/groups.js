@@ -31,6 +31,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
     // Read account-backed sync settings; fallback to headers only if unavailable
     let syncMode = 'normal'
     let unsafeMode = false
+    let useCustomFields = true
     try {
       const acct = await prisma.appAccount.findUnique({ where: { id: getAccountId(req) }, select: { sync: true } })
       let cfg = acct?.sync
@@ -38,6 +39,14 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
       if (cfg && typeof cfg === 'object') {
         if (cfg.mode === 'advanced') syncMode = 'advanced'
         if (typeof cfg.safe === 'boolean') unsafeMode = !cfg.safe
+        if (typeof cfg.useCustomFields === 'boolean') {
+          useCustomFields = cfg.useCustomFields
+        } else if (typeof cfg.useCustomNames === 'boolean') {
+          // Backward compatibility: migrate old useCustomNames to useCustomFields
+          useCustomFields = cfg.useCustomNames
+        } else {
+          useCustomFields = true
+        }
       } else {
         const headerMode = (req.headers['x-sync-mode'] || '').toString().toLowerCase()
         syncMode = headerMode === 'advanced' ? 'advanced' : 'normal'
@@ -90,7 +99,8 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
           parseProtectedAddons,
           canonicalizeManifestUrl,
           StremioAPIClient,
-          unsafeMode
+          unsafeMode,
+          useCustomFields
         })
 
         // If already synced, count and skip pushing
@@ -101,7 +111,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
         }
 
         // Otherwise perform sync (reload already handled above if advanced)
-        const result = await syncUserAddons(prisma, uid, [], unsafeMode, req, decrypt, getAccountId)
+        const result = await syncUserAddons(prisma, uid, [], unsafeMode, req, decrypt, getAccountId, useCustomFields)
         if (result?.success) {
           synced++
           console.log('✅ User now synced')
@@ -1166,9 +1176,10 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
     let userIds = []
     try { userIds = Array.isArray(group.userIds) ? group.userIds : JSON.parse(group.userIds || '[]') } catch {}
     const uniqueUserIds = [...new Set(userIds)]
-    // Mode/unsafe: prefer DB account sync config; fallback to request header/body
+    // Mode/unsafe/useCustomFields: prefer DB account sync config; fallback to request header/body
     let syncMode = 'normal'
     let unsafeMode = false
+    let useCustomFields = true
     try {
       const accountId = reqDep.appAccountId
       if (accountId) {
@@ -1178,6 +1189,14 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
         if (cfg && typeof cfg === 'object') {
           syncMode = cfg.mode === 'advanced' ? 'advanced' : 'normal'
           unsafeMode = (typeof cfg.safe === 'boolean') ? !cfg.safe : !!cfg.unsafe
+          if (typeof cfg.useCustomFields === 'boolean') {
+            useCustomFields = cfg.useCustomFields
+          } else if (typeof cfg.useCustomNames === 'boolean') {
+            // Backward compatibility: migrate old useCustomNames to useCustomFields
+            useCustomFields = cfg.useCustomNames
+          } else {
+            useCustomFields = true
+          }
         }
       }
     } catch {}
@@ -1201,7 +1220,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
     let synced = 0, failed = 0
     for (const uid of uniqueUserIds) {
       try {
-        const r = await syncUserAddons(prismaDep, uid, [], unsafeMode, reqDep, decryptDep, getAccountIdDep)
+        const r = await syncUserAddons(prismaDep, uid, [], unsafeMode, reqDep, decryptDep, getAccountIdDep, useCustomFields)
         if (r?.success) synced++; else failed++
       } catch { failed++ }
     }

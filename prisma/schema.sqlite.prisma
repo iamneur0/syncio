@@ -94,5 +94,53 @@ model AppAccount {
   sync         String?
   apiKeyHash     String?  // Encrypted API key
 
+  // Relationships
+  invitations  Invitation[]
+
   @@map("app_accounts")
+}
+
+model Invitation {
+  id          String   @id @default(cuid())
+  accountId   String
+  inviteCode  String   @unique // Short code for URL (e.g., "abc123")
+  groupName   String?  // Group name to assign users to when they join
+  maxUses     Int      @default(1) // Maximum number of uses
+  currentUses Int      @default(0) // Current number of uses
+  expiresAt   DateTime? // Optional expiry date
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  
+  // Relationships
+  account     AppAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  requests    InviteRequest[]
+
+  @@index([accountId])
+  @@index([inviteCode])
+  @@map("invitations")
+}
+
+model InviteRequest {
+  id              String    @id @default(cuid())
+  invitationId    String
+  accountId       String
+  email           String
+  username        String
+  status          String    @default("pending") // pending, accepted, rejected
+  groupName       String?   // Group name to assign user to when accepted
+  oauthCode       String?   // Stremio OAuth code when accepted
+  oauthLink       String?   // Stremio OAuth link when accepted
+  oauthExpiresAt  DateTime? // When OAuth link expires
+  createdAt       DateTime  @default(now())
+  respondedAt     DateTime?
+  respondedBy     String?   // accountId who responded
+  
+  // Relationships
+  invitation      Invitation @relation(fields: [invitationId], references: [id], onDelete: Cascade)
+
+  @@index([invitationId])
+  @@index([accountId])
+  @@index([email])
+  @@index([status])
+  @@map("invite_requests")
 }
