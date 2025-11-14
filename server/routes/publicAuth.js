@@ -8,7 +8,7 @@ const { responseUtils, dbUtils } = require('../utils/routeUtils');
 const { validateStremioAuthKey } = require('../utils/stremio');
 const { encrypt } = require('../utils/encryption');
 
-module.exports = ({ prisma, getAccountId, AUTH_ENABLED, issueAccessToken, issueRefreshToken, cookieName, isProdEnv, encrypt, decrypt, getDecryptedManifestUrl, scopedWhere, getAccountDek, decryptWithFallback, manifestUrlHmac, manifestHash, filterManifestByResources, filterManifestByCatalogs }) => {
+module.exports = ({ prisma, getAccountId, AUTH_ENABLED, PRIVATE_AUTH_ENABLED, PRIVATE_AUTH_USERNAME, PRIVATE_AUTH_PASSWORD, DEFAULT_ACCOUNT_ID, issueAccessToken, issueRefreshToken, cookieName, isProdEnv, encrypt, decrypt, getDecryptedManifestUrl, scopedWhere, getAccountDek, decryptWithFallback, manifestUrlHmac, manifestHash, filterManifestByResources, filterManifestByCatalogs }) => {
   console.log('PublicAuth router initialized, prisma available:', !!prisma);
   const router = express.Router();
 
@@ -201,6 +201,46 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, issueAccessToken, issueR
     }
   });
 
+  // Private instance username/password login
+  router.post('/private-login', async (req, res) => {
+    try {
+      if (!PRIVATE_AUTH_ENABLED) {
+        return res.status(400).json({ message: 'Private auth is not enabled' });
+      }
+
+      const { username, password } = req.body || {};
+      if (!username || !password) {
+        return responseUtils.badRequest(res, 'username and password are required');
+      }
+
+      // Compare with env vars (trim whitespace)
+      const trimmedUsername = (username || '').trim();
+      const trimmedPassword = (password || '').trim();
+      if (trimmedUsername !== PRIVATE_AUTH_USERNAME || trimmedPassword !== PRIVATE_AUTH_PASSWORD) {
+        return res.status(401).json({ message: 'Invalid credentials' });
+      }
+
+      // Use DEFAULT_ACCOUNT_ID for private instances
+      const accountId = DEFAULT_ACCOUNT_ID;
+
+      // Set access/refresh and CSRF cookies
+      const at = issueAccessToken(accountId);
+      const rt = issueRefreshToken(accountId);
+      const csrf = randomCsrfToken();
+      res.cookie(cookieName('sfm_at'), at, { httpOnly: true, secure: isProdEnv(), sameSite: isProdEnv() ? 'strict' : 'lax', path: '/', maxAge: 30 * 24 * 60 * 60 * 1000 });
+      res.cookie(cookieName('sfm_rt'), rt, { httpOnly: true, secure: isProdEnv(), sameSite: isProdEnv() ? 'strict' : 'lax', path: '/', maxAge: 365 * 24 * 60 * 60 * 1000 });
+      res.cookie(cookieName('sfm_csrf'), csrf, { httpOnly: false, secure: isProdEnv(), sameSite: isProdEnv() ? 'strict' : 'lax', path: '/', maxAge: 30 * 24 * 60 * 60 * 1000 });
+      
+      return res.json({
+        message: 'Login successful',
+        account: { id: accountId, uuid: null, email: null },
+      });
+    } catch (error) {
+      console.error('Private login error:', error);
+      return responseUtils.internalError(res, String(error && error.message || error));
+    }
+  });
+
   router.post('/stremio-login', async (req, res) => {
     try {
       if (!AUTH_ENABLED) {
@@ -320,12 +360,23 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, issueAccessToken, issueR
   // Session info endpoint
   router.get('/me', async (req, res) => {
     try {
-      if (!AUTH_ENABLED) {
+      if (!AUTH_ENABLED && !PRIVATE_AUTH_ENABLED) {
         return res.json({ account: null, message: 'Auth disabled' });
       }
 
       if (!req.appAccountId) {
         return res.status(401).json({ message: 'Not authenticated' });
+      }
+
+      // For private auth, return a simple account object
+      if (PRIVATE_AUTH_ENABLED && !AUTH_ENABLED) {
+        return res.json({ 
+          account: { 
+            id: req.appAccountId, 
+            uuid: null, 
+            email: null 
+          } 
+        });
       }
 
       const account = await prisma.appAccount.findUnique({
@@ -551,6 +602,22 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, issueAccessToken, issueR
           }
         }
       } catch {}
+      
+      // Ensure useCustomFields is included in export (default to true if not present)
+      // Migrate old useCustomNames to useCustomFields if present
+      if (accountSync && typeof accountSync === 'object') {
+        if (typeof accountSync.useCustomFields !== 'boolean') {
+          if (typeof accountSync.useCustomNames === 'boolean') {
+            accountSync.useCustomFields = accountSync.useCustomNames
+            delete accountSync.useCustomNames
+          } else {
+            accountSync.useCustomFields = true
+          }
+        }
+      } else if (accountSync === null) {
+        // If no sync config exists, create a minimal one with useCustomFields
+        accountSync = { useCustomFields: true }
+      }
 
       const payload = { users: decryptedUsers, groups: cleanedGroups, addons: exportedAddons, sync: accountSync }
       res.setHeader('Content-Disposition', 'attachment; filename="syncio-export.json"')
@@ -691,13 +758,31 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, issueAccessToken, issueR
       try {
         if (importedSync && (typeof importedSync === 'object' || typeof importedSync === 'string')) {
           const acct = await prisma.appAccount.findUnique({ where: { id: accountId }, select: { sync: true } })
-          let valueToStore = importedSync
+          let parsedSync = importedSync
+          if (typeof importedSync === 'string') {
+            try { parsedSync = JSON.parse(importedSync) } catch { parsedSync = { enabled: true, frequency: '0' } }
+          }
+          
+          // Ensure useCustomFields is included (default to true if not present for backward compatibility)
+          // Migrate old useCustomNames to useCustomFields if present
+          if (typeof parsedSync === 'object' && parsedSync !== null) {
+            if (typeof parsedSync.useCustomFields !== 'boolean') {
+              if (typeof parsedSync.useCustomNames === 'boolean') {
+                parsedSync.useCustomFields = parsedSync.useCustomNames
+                delete parsedSync.useCustomNames
+              } else {
+                parsedSync.useCustomFields = true
+              }
+            }
+          }
+          
+          let valueToStore = parsedSync
           if (typeof acct?.sync === 'string') {
             // DB expects string (SQLite)
-            valueToStore = (typeof importedSync === 'string') ? importedSync : JSON.stringify(importedSync)
+            valueToStore = JSON.stringify(parsedSync)
           } else {
             // DB expects JSON (Postgres)
-            valueToStore = (typeof importedSync === 'string') ? (() => { try { return JSON.parse(importedSync) } catch { return { enabled: true, frequency: '0' } } })() : importedSync
+            valueToStore = parsedSync
           }
           await prisma.appAccount.update({ where: { id: accountId }, data: { sync: valueToStore } })
         }

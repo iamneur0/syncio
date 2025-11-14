@@ -10,6 +10,66 @@ const { responseUtils, dbUtils } = require('../utils/routeUtils');
 module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, encrypt, parseAddonIds, parseProtectedAddons, getDecryptedManifestUrl, StremioAPIClient, StremioAPIStore, assignUserToGroup, debug, defaultAddons, canonicalizeManifestUrl, getAccountDek, getServerKey, aesGcmDecrypt, validateStremioAuthKey, manifestUrlHmac, manifestHash }) => {
   const router = express.Router();
 
+  // Check if user exists by email or username (for validation)
+  router.get('/check', async (req, res) => {
+    try {
+      const { email, username } = req.query
+      const accountId = getAccountId(req)
+      
+      if (!accountId) {
+        return res.status(401).json({ error: 'Unauthorized' })
+      }
+
+      if (!email && !username) {
+        return res.status(400).json({ error: 'Email or username is required' })
+      }
+
+      const where = { accountId }
+      
+      if (email && username) {
+        where.OR = [
+          { email: email.trim().toLowerCase() },
+          { username: username.trim() }
+        ]
+      } else if (email) {
+        where.email = email.trim().toLowerCase()
+      } else if (username) {
+        where.username = username.trim()
+      }
+
+      const existingUser = await prisma.user.findFirst({
+        where,
+        select: {
+          id: true,
+          email: true,
+          username: true
+        }
+      })
+
+      if (existingUser) {
+        const conflicts = {}
+        if (email && existingUser.email === email.trim().toLowerCase()) {
+          conflicts.email = true
+        }
+        if (username && existingUser.username === username.trim()) {
+          conflicts.username = true
+        }
+        return res.json({
+          exists: true,
+          conflicts
+        })
+      }
+
+      return res.json({
+        exists: false,
+        conflicts: {}
+      })
+    } catch (error) {
+      console.error('Error checking user existence:', error)
+      return res.status(500).json({ error: error?.message || 'Failed to check user existence' })
+    }
+  })
+
   // Get all users
   router.get('/', async (req, res) => {
     try {
@@ -232,7 +292,8 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
 
       // Handle group assignment
       if (groupId !== undefined) {
-        if (groupId === null) {
+        // Treat empty string as null (remove from all groups)
+        if (groupId === null || groupId === '') {
           // Remove user from all groups
           const allGroups = await prisma.group.findMany({
             where: { accountId: getAccountId(req) },
@@ -252,7 +313,26 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
             }
           }
         } else {
-        await assignUserToGroup(id, groupId, req)
+          // Validate groupId is a valid string before calling assignUserToGroup
+          if (typeof groupId === 'string' && groupId.trim() !== '') {
+            // First verify the group exists for this account
+            const accountId = getAccountId(req)
+            const groupExists = await prisma.group.findUnique({
+              where: { 
+                id: groupId,
+                accountId: accountId
+              },
+              select: { id: true }
+            })
+            
+            if (!groupExists) {
+              return res.status(404).json({ 
+                error: `Group not found: ${groupId} (accountId: ${accountId})` 
+              })
+            }
+            
+            await assignUserToGroup(id, groupId, req)
+          }
         }
       }
 
@@ -736,12 +816,24 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
       const { id } = req.params
       // Read account-backed sync settings; fallback to query/body only if unavailable
       let unsafeMode = false
+      let useCustomFields = true
       try {
         const acct = await prisma.appAccount.findUnique({ where: { id: getAccountId(req) }, select: { sync: true } })
         let cfg = acct?.sync
         if (typeof cfg === 'string') { try { cfg = JSON.parse(cfg) } catch { cfg = null } }
-        if (cfg && typeof cfg === 'object' && typeof cfg.safe === 'boolean') {
-          unsafeMode = !cfg.safe
+        if (cfg && typeof cfg === 'object') {
+          if (typeof cfg.safe === 'boolean') {
+            unsafeMode = !cfg.safe
+          }
+          if (typeof cfg.useCustomFields === 'boolean') {
+            useCustomFields = cfg.useCustomFields
+          } else if (typeof cfg.useCustomNames === 'boolean') {
+            // Backward compatibility: migrate old useCustomNames to useCustomFields
+            useCustomFields = cfg.useCustomNames
+          } else {
+            // Default to true if not set (backward compatibility)
+            useCustomFields = true
+          }
         } else {
           unsafeMode = req.query?.unsafe === 'true' || req.body?.unsafe === true
         }
@@ -750,7 +842,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
       }
 
       // Individual user sync - no reload needed, just sync
-      const result = await syncUserAddons(prisma, id, [], unsafeMode, req, decrypt, getAccountId)
+      const result = await syncUserAddons(prisma, id, [], unsafeMode, req, decrypt, getAccountId, useCustomFields)
 
       if (!result.success) {
         return res.status(400).json({ message: result.error || 'Failed to sync user' })
@@ -772,6 +864,28 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
   router.post('/sync-all', async (req, res) => {
     try {
       debug.log('🚀 Sync all users endpoint called')
+      
+      // Read account-backed sync settings
+      let unsafeMode = false
+      let useCustomFields = true
+      try {
+        const acct = await prisma.appAccount.findUnique({ where: { id: getAccountId(req) }, select: { sync: true } })
+        let cfg = acct?.sync
+        if (typeof cfg === 'string') { try { cfg = JSON.parse(cfg) } catch { cfg = null } }
+        if (cfg && typeof cfg === 'object') {
+          if (typeof cfg.safe === 'boolean') {
+            unsafeMode = !cfg.safe
+          }
+          if (typeof cfg.useCustomFields === 'boolean') {
+            useCustomFields = cfg.useCustomFields
+          } else if (typeof cfg.useCustomNames === 'boolean') {
+            // Backward compatibility: migrate old useCustomNames to useCustomFields
+            useCustomFields = cfg.useCustomNames
+          } else {
+            useCustomFields = true
+          }
+        }
+      } catch {}
       
       // Get all enabled users
       const users = await prisma.user.findMany({
@@ -798,7 +912,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
           debug.log(`🔄 Syncing user: ${user.username || user.email}`)
           
           // Use the reusable sync function
-          const syncResult = await syncUserAddons(user.id, [], 'normal', false, req, decrypt, getAccountId)
+          const syncResult = await syncUserAddons(prisma, user.id, [], unsafeMode, req, decrypt, getAccountId, useCustomFields)
           
           if (syncResult.success) {
             syncedCount++
@@ -2543,7 +2657,7 @@ async function reloadGroupAddons(prisma, getAccountId, groupId, req, decrypt) {
   }
 }
 
-async function syncUserAddons(prismaClient, userId, excludedManifestUrls = [], unsafeMode = false, req, decrypt, getAccountIdParam) {
+async function syncUserAddons(prismaClient, userId, excludedManifestUrls = [], unsafeMode = false, req, decrypt, getAccountIdParam, useCustomFields = true) {
   try {
     // Ensure req has appAccountId for account scoping
     if (!req.appAccountId) {
@@ -2605,7 +2719,8 @@ async function syncUserAddons(prismaClient, userId, excludedManifestUrls = [], u
         parseProtectedAddons: parseProtectedAddonsFn,
         canonicalizeManifestUrl: canonicalizeFn,
         StremioAPIClient,
-        unsafeMode
+        unsafeMode,
+        useCustomFields
       })
       if (!plan.success) return { success: false, error: plan.error || 'Failed to compute plan' }
 
