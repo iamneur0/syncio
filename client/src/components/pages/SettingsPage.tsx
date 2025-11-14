@@ -293,6 +293,7 @@ export default function SettingsPage() {
   const appVersion = (process.env.NEXT_PUBLIC_APP_VERSION as string) || 'dev'
   const [syncMode, setSyncMode] = React.useState<'normal' | 'advanced'>('normal')
   const [deleteMode, setDeleteMode] = React.useState<'safe' | 'unsafe'>('safe')
+  const [useCustomFields, setUseCustomFields] = React.useState<boolean>(true)
   const [importFile, setImportFile] = React.useState<File | null>(null)
   const [importText, setImportText] = React.useState<string>('')
   const [showAddonImport, setShowAddonImport] = React.useState<boolean>(false)
@@ -332,6 +333,9 @@ export default function SettingsPage() {
         // Extract webhook URL from sync config
         const whUrl = r.data?.webhookUrl || ''
         setWebhookUrl(whUrl)
+        // Extract useCustomFields from sync config (with backward compatibility for useCustomNames)
+        const customFields = r.data?.useCustomFields !== undefined ? !!r.data.useCustomFields : (r.data?.useCustomNames !== undefined ? !!r.data.useCustomNames : true)
+        setUseCustomFields(customFields)
       })
       .catch(() => {})
       // Fetch API key - decrypt and show if exists, auto-generate if missing
@@ -697,45 +701,6 @@ export default function SettingsPage() {
     }
   }
 
-  const resetConfig = async () => {
-    openConfirm({
-      title: 'Reset Configuration',
-      description: 'Reset configuration (users, groups, addons)? This cannot be undone.',
-      isDanger: true,
-      onConfirm: async () => {
-        try {
-          const res = await api.post('/public-auth/reset')
-          if (res.status !== 200) throw new Error('Reset failed')
-          toast.success('Configuration reset')
-        } catch (e: any) {
-          const msg = e?.response?.data?.error || e?.message || 'Reset failed'
-          toast.error(msg)
-        }
-      }
-    })
-  }
-
-  const deleteAccount = async () => {
-    openConfirm({
-      title: 'Delete Account',
-      description: 'Delete your Syncio account and all data? This cannot be undone.',
-      isDanger: true,
-      onConfirm: async () => {
-        try {
-          const res = await api.delete('/public-auth/account')
-          if (res.status !== 200) throw new Error('Delete failed')
-          toast.success('Account deleted')
-        } catch (e: any) {
-          const msg = e?.response?.data?.error || e?.message || 'Delete failed'
-          toast.error(msg)
-        } finally {
-          // token is cookie-based now; just notify UI to reset
-          try { window.dispatchEvent(new CustomEvent('sfm:auth:changed', { detail: { authed: false } })) } catch {}
-          window.dispatchEvent(new CustomEvent('sfm:auth:changed', { detail: { authed: false } }))
-        }
-      }
-    })
-  }
 
   // Bulk delete functions
   const deleteAllAddons = async () => {
@@ -873,51 +838,6 @@ export default function SettingsPage() {
     })
   }
 
-  const clearAllUserAddons = async () => {
-    openConfirm({
-      title: 'Clear All User Addons',
-      description: 'Clear addons from ALL users? This will remove all addons from all users but keep the users and addons themselves.',
-      isDanger: true,
-      onConfirm: async () => {
-        try {
-          // First get all users
-          const usersRes = await api.get('/users')
-          const users = usersRes.data || []
-          
-          if (users.length === 0) {
-            toast.success('No users found to clear addons from')
-            return
-          }
-
-          // Clear addons for each user using the same endpoint as individual clear
-          let successCount = 0
-          let errorCount = 0
-          
-          for (const user of users) {
-            try {
-              await api.post(`/users/${user.id}/stremio-addons/clear`)
-              successCount++
-            } catch (error) {
-              console.error(`Failed to clear addons for user ${user.id}:`, error)
-              errorCount++
-            }
-          }
-
-          if (errorCount === 0) {
-            toast.success(`All user addons cleared successfully (${successCount} users)`)
-          } else {
-            toast.success(`User addons cleared for ${successCount} users, ${errorCount} failed`)
-          }
-          
-          // Stay on settings page; UI will naturally update on next navigation
-        } catch (e: any) {
-          const msg = e?.response?.data?.error || e?.message || 'Clear failed'
-          toast.error(msg)
-        }
-      }
-    })
-  }
-
   return (
     <div ref={containerRef} className="p-4 sm:p-6" style={{ scrollbarGutter: 'stable' }}>
       {/* Header */}
@@ -938,132 +858,83 @@ export default function SettingsPage() {
 
       <div className="max-w-3xl">
 
-      <div className="p-4 rounded-lg border card">
-        <h2 className={`text-lg font-semibold`}>Privacy</h2>
-        <p className={`text-sm mt-1 color-text-secondary`}>
-          Control visibility of sensitive fields in the user details view.
-        </p>
-        <div className="mt-4 flex items-center justify-between">
-          <div>
-            <div className={`font-medium`}>Hide sensitive information</div>
-            <div className={`color-text-secondary text-sm`}>Mask username, email, webhook URL, and API key.</div>
-          </div>
-          <ToggleSwitch
-            checked={!!hideSensitive}
-            onChange={toggleHideSensitive}
-            title={hideSensitive ? 'Show sensitive information' : 'Hide sensitive information'}
-          />
-        </div>
-      </div>
-
-      {/* Sync Mode Setting */}
+      {/* Configuration */}
       <div className="p-4 rounded-lg border mt-6 card">
-        <h2 className={`text-lg font-semibold`}>Sync Behavior</h2>
-        <p className={`text-sm mt-1 color-text-secondary`}>
-          Control how addon synchronization works when syncing users or groups.
-        </p>
-        <div className="mt-4 space-y-3">
-          <div className="flex items-center">
-            <input
-              type="radio"
-              id="sync-normal"
-              name="sync-mode"
-              value="normal"
-              checked={syncMode === 'normal'}
-              onChange={() => onSyncModeChange('normal')}
-              className="control-radio mr-3"
-            />
-            <label htmlFor="sync-normal" className={``}>
-              <div className="font-medium">Normal Sync</div>
+        <h2 className={`text-lg font-semibold`}>Configuration</h2>
+        <div className="mt-4 space-y-4">
+          {/* Private Mode Toggle */}
+          <div className="flex items-center justify-between">
+            <div>
+              <div className={`font-medium`}>Private Mode</div>
               <div className={`text-sm color-text-secondary`}>
-                Push existing group addons to users
+                Hide sensitive information (username, email, webhook URL, and API key)
               </div>
-            </label>
+            </div>
+            <ToggleSwitch
+              checked={!!hideSensitive}
+              onChange={toggleHideSensitive}
+              title={hideSensitive ? 'Show sensitive information' : 'Hide sensitive information'}
+            />
           </div>
-          <div className="flex items-center">
-            <input
-              type="radio"
-              id="sync-advanced"
-              name="sync-mode"
-              value="advanced"
+
+          {/* Custom Addon Names and Descriptions Toggle */}
+          <div className="flex items-center justify-between">
+            <div>
+              <div className={`font-medium`}>Custom Addon Names and Descriptions</div>
+              <div className={`text-sm color-text-secondary`}>
+                When syncing addons, use the custom name and description set in Syncio.
+              </div>
+            </div>
+            <ToggleSwitch
+              checked={useCustomFields}
+              onChange={() => {
+                const newValue = !useCustomFields
+                setUseCustomFields(newValue)
+                api.put('/settings/account-sync', { useCustomFields: newValue })
+                  .then(() => toast.success('Sync settings updated'))
+                  .catch((err) => toast.error(err?.response?.data?.message || 'Failed to update sync settings'))
+              }}
+              title={useCustomFields ? 'Disable custom addon names and descriptions' : 'Enable custom addon names and descriptions'}
+            />
+          </div>
+
+          {/* Advanced Sync Toggle */}
+          <div className="flex items-center justify-between">
+            <div>
+              <div className={`font-medium`}>Advanced Sync</div>
+              <div className={`text-sm color-text-secondary`}>
+                Reload all group addons before syncing
+              </div>
+            </div>
+            <ToggleSwitch
               checked={syncMode === 'advanced'}
-              onChange={() => onSyncModeChange('advanced')}
-              className="control-radio mr-3"
+              onChange={() => {
+                const newMode = syncMode === 'advanced' ? 'normal' : 'advanced'
+                onSyncModeChange(newMode)
+              }}
+              title={syncMode === 'advanced' ? 'Disable advanced sync' : 'Enable advanced sync'}
             />
-            <label htmlFor="sync-advanced" className={``}>
-              <div className="font-medium">Advanced Sync</div>
+          </div>
+
+          {/* Unsafe Mode Toggle */}
+          <div className="flex items-center justify-between">
+            <div>
+              <div className={`font-medium`}>Unsafe Mode</div>
               <div className={`text-sm color-text-secondary`}>
-                Reload all group addons first, then sync the updated addons to users
+                Allow deletion and unprotection of default addons
               </div>
-            </label>
-          </div>
-        </div>
-      </div>
-
-      {/* Delete Mode Setting */}
-      <div className="p-4 rounded-lg border mt-6 card">
-        <h2 className={`text-lg font-semibold`}>Delete Protection</h2>
-        <p className={`text-sm mt-1 color-text-secondary`}>
-          Choose how delete protection behaves.
-        </p>
-        <div className="mt-4 space-y-3">
-          <div className="flex items-center">
-            <input
-              type="radio"
-              id="delete-safe"
-              name="delete-mode"
-              value="safe"
-              checked={deleteMode === 'safe'}
-              onChange={() => onDeleteModeChange('safe')}
-              className="control-radio mr-3"
-            />
-            <label htmlFor="delete-safe" className={``}>
-              <div className="font-medium">Safe mode</div>
-              <div className={`text-sm color-text-secondary`}>Can’t delete or unprotect Stremio default addons</div>
-            </label>
-          </div>
-          <div className="flex items-center">
-            <input
-              type="radio"
-              id="delete-unsafe"
-              name="delete-mode"
-              value="unsafe"
+            </div>
+            <ToggleSwitch
               checked={deleteMode === 'unsafe'}
-              onChange={() => onDeleteModeChange('unsafe')}
-              className="control-radio mr-3"
+              onChange={() => {
+                const newMode = deleteMode === 'unsafe' ? 'safe' : 'unsafe'
+                onDeleteModeChange(newMode)
+              }}
+              title={deleteMode === 'unsafe' ? 'Disable unsafe mode' : 'Enable unsafe mode'}
             />
-            <label htmlFor="delete-unsafe" className={``}>
-              <div className="font-medium">Unsafe mode</div>
-              <div className={`text-sm color-text-secondary`}>Can delete and unprotect all addons</div>
-            </label>
           </div>
         </div>
       </div>
-
-      {/* Theme Setting */}
-      <div className="p-4 rounded-lg border mt-6 card">
-        <h2 className={`text-lg font-semibold`}>Appearance</h2>
-        <p className={`text-sm mt-1 color-text-secondary`}>
-          Choose your preferred visual theme for the application.
-        </p>
-        <div className="mt-4">
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-            {THEME_OPTIONS.map((option) => (
-                <ThemeOptionCard
-                  key={option.id}
-                  option={option}
-                  selected={theme === option.id}
-                  onSelect={setTheme}
-                />
-              ))}
-          </div>
-        </div>
-      </div>
-
-      {/* Addon Import/Export - moved to Tasks page */}
-      {/* Configuration Import/Export - moved to Tasks page */}
-
-      {/* Maintenance moved to Tasks page */}
 
       {/* Discord Webhook */}
       <div className="p-4 rounded-lg border mt-6 card">
@@ -1209,38 +1080,30 @@ export default function SettingsPage() {
         </p>
       </div>
 
-      {/* Account Management */}
+      {/* Theme Setting */}
       <div className="p-4 rounded-lg border mt-6 card">
-        <h2 className="text-lg font-semibold">Account Management</h2>
-        <p className="text-sm mt-1 color-text-secondary">
-          Delete all items of a specific type or perform bulk operations. These operations cannot be undone.
+        <h2 className={`text-lg font-semibold`}>Appearance</h2>
+        <p className={`text-sm mt-1 color-text-secondary`}>
+          Choose your preferred visual theme for the application.
         </p>
-        <div className="mt-4 flex gap-4 flex-wrap">
-          <button 
-            onClick={clearAllUserAddons} 
-            className="flex items-center px-4 py-2 rounded-lg surface-interactive"
-          >
-            <RefreshCcw className="w-5 h-5 mr-2" /> Clear User Addons
-          </button>
-          <button 
-            onClick={resetConfig} 
-            className="flex items-center px-4 py-2 rounded-lg surface-interactive"
-          >
-            <RefreshCcw className="w-5 h-5 mr-2" /> Reset Configuration
-          </button>
-          {AUTH_ENABLED && (
-            <button 
-              onClick={deleteAccount} 
-              className="flex items-center px-4 py-2 rounded-lg surface-interactive"
-            >
-              <Trash2 className="w-5 h-5 mr-2" /> Delete Account
-            </button>
-          )}
-        </div>
-        <div className="text-xs mt-3 color-text-secondary">
-          ⚠️ These operations are permanent and cannot be undone. Consider exporting your data first.
+        <div className="mt-4">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {THEME_OPTIONS.map((option) => (
+                <ThemeOptionCard
+                  key={option.id}
+                  option={option}
+                  selected={theme === option.id}
+                  onSelect={setTheme}
+                />
+              ))}
+          </div>
         </div>
       </div>
+
+      {/* Addon Import/Export - moved to Tasks page */}
+      {/* Configuration Import/Export - moved to Tasks page */}
+
+      {/* Maintenance moved to Tasks page */}
 
       </div>
       
