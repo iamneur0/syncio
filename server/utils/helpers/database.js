@@ -242,13 +242,18 @@ async function assignUserToGroup(userId, groupId, req) {
   }
 
   // Then, add user to the target group
+  // Validate groupId is a valid string
+  if (!groupId || typeof groupId !== 'string' || groupId.trim() === '') {
+    throw new Error(`Invalid groupId: ${groupId}`);
+  }
+
   const targetGroup = await prisma.group.findUnique({
     where: { id: groupId, accountId: accId },
     select: { id: true, userIds: true }
   });
 
   if (!targetGroup) {
-    throw new Error('Target group not found');
+    throw new Error(`Target group not found: ${groupId} (accountId: ${accId})`);
   }
 
   const currentUserIds = targetGroup.userIds ? JSON.parse(targetGroup.userIds) : [];

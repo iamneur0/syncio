@@ -7,6 +7,17 @@ const BACKUP_DIR = path.join(process.cwd(), 'data', 'backup')
 const BACKUP_CFG = path.join(BACKUP_DIR, 'schedule.json')
 let backupTimer = null
 
+const DAY_MS = 24 * 60 * 60 * 1000
+
+/**
+ * Calculate next midnight from a given timestamp
+ */
+function nextMidnight(fromTs = Date.now()) {
+  const d = new Date(fromTs)
+  d.setHours(24, 0, 0, 0) // next local midnight
+  return d.getTime()
+}
+
 /**
  * Ensure backup directory exists
  */
@@ -78,20 +89,45 @@ async function performBackupOnce() {
  */
 function clearBackupSchedule() {
   if (backupTimer) { 
-    clearInterval(backupTimer); 
+    clearTimeout(backupTimer); 
     backupTimer = null 
   }
 }
 
 /**
  * Schedule backups at specified interval
+ * For day-based schedules, runs at midnight
  */
 function scheduleBackups(days) {
   clearBackupSchedule()
   if (!days || days <= 0) return
-  const ms = days * 24 * 60 * 60 * 1000
-  performBackupOnce()
-  backupTimer = setInterval(performBackupOnce, ms)
+  
+  const scheduleNext = () => {
+    const now = Date.now()
+    
+    let nextRun
+    if (days === 1) {
+      // Every day: next midnight
+      nextRun = nextMidnight(now)
+    } else {
+      // Multi-day (7d, 15d, 30d): schedule at next midnight, then add (days - 1) more days
+      // This ensures it runs at midnight every N days
+      const nextMidnightTime = nextMidnight(now)
+      nextRun = nextMidnightTime + (days - 1) * DAY_MS
+    }
+    
+    const delay = Math.max(0, nextRun - now)
+    
+    // Schedule the backup
+    backupTimer = setTimeout(async () => {
+      await performBackupOnce()
+      // Schedule the next run
+      scheduleNext()
+    }, delay)
+  }
+  
+  // Start scheduling
+  scheduleNext()
 }
 
 module.exports = {

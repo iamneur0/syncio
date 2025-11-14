@@ -7,6 +7,11 @@ const JWT_SECRET = process.env.JWT_SECRET || 'syncio-dev-secret-change-me';
 const DEFAULT_ACCOUNT_ID = 'default';
 const DEFAULT_ACCOUNT_UUID = '00000000-0000-4000-8000-000000000000';
 
+// Private instance auth (username/password from env vars)
+const PRIVATE_AUTH_USERNAME = process.env.SYNCIO_PRIVATE_USERNAME || null;
+const PRIVATE_AUTH_PASSWORD = process.env.SYNCIO_PRIVATE_PASSWORD || null;
+const PRIVATE_AUTH_ENABLED = !AUTH_ENABLED && PRIVATE_AUTH_USERNAME && PRIVATE_AUTH_PASSWORD;
+
 // Default Stremio addons that should be ignored in sync checks
 const defaultAddons = {
   names: [
@@ -31,6 +36,8 @@ const AUTH_ALLOWLIST = [
   '/api/public-auth/register',
   '/api/public-auth/generate-uuid',
   '/api/public-auth/suggest-uuid',
+  '/api/public-auth/private-login', // Private instance username/password login
+  '/api/invitations/public', // Public invitation endpoints (request submission, status check, OAuth completion)
   // Stremio endpoints require auth now (no allowlist)
 ];
 
@@ -68,6 +75,9 @@ const PORT = process.env.PORT || 4000;
 
 module.exports = {
   AUTH_ENABLED,
+  PRIVATE_AUTH_ENABLED,
+  PRIVATE_AUTH_USERNAME,
+  PRIVATE_AUTH_PASSWORD,
   JWT_SECRET,
   DEFAULT_ACCOUNT_ID,
   DEFAULT_ACCOUNT_UUID,

@@ -322,8 +322,20 @@ function scheduleSyncs(frequency, prisma, getAccountId, scopedWhere, decrypt, re
         const jitterMs = 0 // eliminate jitter to keep schedule predictable
         let nextRun
         if (due.intervalMs >= DAY_MS) {
-          nextRun = nextMidnight(Date.now() + due.intervalMs)
+          // For day-based schedules, always schedule at midnight
+          const days = Math.floor(due.intervalMs / DAY_MS)
+          if (days === 1) {
+            // Every day: next midnight
+            nextRun = nextMidnight(Date.now())
+          } else {
+            // Multi-day (7d, 15d, 30d): schedule at next midnight, then add (days - 1) more days
+            // This ensures it runs at midnight every N days
+            // Example: if interval is 7 days and we just ran, next run is next midnight + 6 days = 7 days from now at midnight
+            const nextMidnightTime = nextMidnight(Date.now())
+            nextRun = nextMidnightTime + (days - 1) * DAY_MS
+          }
         } else {
+          // For hour-based schedules (1h), add the interval to current time
           nextRun = Date.now() + due.intervalMs + jitterMs
         }
         pushHeap({ accountId: due.accountId, nextRunAt: nextRun, intervalMs: due.intervalMs })
