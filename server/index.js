@@ -188,7 +188,7 @@ app.use('/api/ext', externalApiRouter({
 if (!AUTH_ENABLED) {
   app.use('/', debugRouter({ prisma, getDecryptedManifestUrl, getAccountId }));
 }
-app.use('/api/public-auth', publicAuthRouter({ prisma, getAccountId, AUTH_ENABLED, PRIVATE_AUTH_ENABLED, PRIVATE_AUTH_USERNAME, PRIVATE_AUTH_PASSWORD, DEFAULT_ACCOUNT_ID, issueAccessToken, issueRefreshToken, cookieName, isProdEnv, encrypt, decrypt, getDecryptedManifestUrl, scopedWhere, getAccountDek, decryptWithFallback, manifestUrlHmac, manifestHash, filterManifestByResources, filterManifestByCatalogs }));
+app.use('/api/public-auth', publicAuthRouter({ prisma, getAccountId, AUTH_ENABLED, PRIVATE_AUTH_ENABLED, PRIVATE_AUTH_USERNAME, PRIVATE_AUTH_PASSWORD, DEFAULT_ACCOUNT_ID, issueAccessToken, issueRefreshToken, cookieName, isProdEnv, encrypt, decrypt, getDecryptedManifestUrl, scopedWhere, getAccountDek, decryptWithFallback, manifestUrlHmac, manifestHash, filterManifestByResources, filterManifestByCatalogs, parseCookies, JWT_SECRET }));
 app.use('/api/invitations', invitationsRouter({ prisma, getAccountId, AUTH_ENABLED, encrypt, decrypt, assignUserToGroup }));
 
 // Error handling

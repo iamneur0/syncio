@@ -38,7 +38,6 @@ async function getUserAddons(user, req, { decrypt, StremioAPIClient }) {
  * Get desired addons for a user (group addons + protected addons from Stremio)
  */
 async function getDesiredAddons(user, req, { prisma, getAccountId, decrypt, parseAddonIds, parseProtectedAddons, canonicalizeManifestUrl, StremioAPIClient, unsafeMode = false, useCustomFields = true }) {
-  console.log(`[getDesiredAddons] ENTRY - useCustomFields: ${useCustomFields}, unsafeMode: ${unsafeMode}`)
   try {
     // Get group addons
     const groups = await prisma.group.findMany({
@@ -60,14 +59,6 @@ async function getDesiredAddons(user, req, { prisma, getAccountId, decrypt, pars
     const { getGroupAddons } = require('../utils/helpers')
     // groupAddons are returned in collection shape: { transportUrl, transportName, manifest }
     const groupAddons = groups.length > 0 ? await getGroupAddons(prisma, groups[0].id, req) : []
-    
-    // Log group addons before processing
-    console.log(`[getDesiredAddons] useCustomFields: ${useCustomFields}`)
-    console.log(`[getDesiredAddons] Raw group addons count: ${groupAddons.length}`)
-    if (groupAddons.length > 0) {
-      const firstAddon = groupAddons[0]
-      console.log(`[getDesiredAddons] First group addon - DB name: "${firstAddon?.name}", DB description: "${firstAddon?.description}", manifest.name: "${firstAddon?.manifest?.name}", manifest.description: "${firstAddon?.manifest?.description}"`)
-    }
 
     // Get user's Stremio addons
     const { success, addons: userAddonsResponse, error } = await getUserAddons(user, req, { decrypt, StremioAPIClient })
@@ -122,33 +113,15 @@ async function getDesiredAddons(user, req, { prisma, getAccountId, decrypt, pars
         ? { ...addon.manifest }
         : addon?.manifest ? addon.manifest : {}
       
-      // Log before applying custom fields
-      if (index === 0) {
-        console.log(`[cleanGroupAddons] Before processing - useCustomFields: ${useCustomFields}`)
-        console.log(`[cleanGroupAddons] Addon DB name: "${addon?.name}", DB description: "${addon?.description}"`)
-        console.log(`[cleanGroupAddons] Manifest original name: "${manifestObj?.name}", original description: "${manifestObj?.description}"`)
-      }
-      
       if (addon && manifestObj && typeof manifestObj === 'object') {
         // Use custom name and description from DB if useCustomFields is enabled
         if (useCustomFields && typeof addon.name === 'string') {
           manifestObj.name = addon.name
-          if (index === 0) console.log(`[cleanGroupAddons] Applied custom name: "${addon.name}"`)
-        } else if (index === 0) {
-          console.log(`[cleanGroupAddons] NOT applying custom name (useCustomFields=${useCustomFields}, hasName=${typeof addon.name === 'string'})`)
         }
         // Update description if useCustomFields is enabled and it exists (even if empty string, preserve it)
         if (useCustomFields && addon.description !== undefined && addon.description !== null) {
           manifestObj.description = addon.description
-          if (index === 0) console.log(`[cleanGroupAddons] Applied custom description: "${addon.description}"`)
-        } else if (index === 0) {
-          console.log(`[cleanGroupAddons] NOT applying custom description (useCustomFields=${useCustomFields}, hasDescription=${addon.description !== undefined && addon.description !== null})`)
         }
-      }
-      
-      // Log after processing
-      if (index === 0) {
-        console.log(`[cleanGroupAddons] After processing - manifest.name: "${manifestObj?.name}", manifest.description: "${manifestObj?.description}"`)
       }
       
       return {
@@ -157,16 +130,9 @@ async function getDesiredAddons(user, req, { prisma, getAccountId, decrypt, pars
         manifest: manifestObj
       }
     })
-    
-    // Log final clean group addons
-    if (cleanGroupAddons.length > 0) {
-      const firstClean = cleanGroupAddons[0]
-      console.log(`[cleanGroupAddons] Final first addon - manifest.name: "${firstClean?.manifest?.name}", manifest.description: "${firstClean?.manifest?.description}"`)
-    }
 
     // 2) Keep only protected addons from userAddons
     const protectedUserAddons = (userAddons || []).filter(addon => isProtected(addon))
-    console.log(`[getDesiredAddons] Protected user addons count: ${protectedUserAddons.length}`)
 
     // Build a protected NAME set from userAddons (normalized)
     const protectedUserNameSet = new Set(
@@ -229,13 +195,6 @@ async function getDesiredAddons(user, req, { prisma, getAccountId, decrypt, pars
 
     // Remove nulls and return
     const finalDesiredAddons = finalDesiredCollection.filter(Boolean)
-    
-    // Log final desired addons
-    console.log(`[getDesiredAddons] Final desired addons count: ${finalDesiredAddons.length}`)
-    if (finalDesiredAddons.length > 0) {
-      const firstFinal = finalDesiredAddons[0]
-      console.log(`[getDesiredAddons] Final first desired addon - manifest.name: "${firstFinal?.manifest?.name}", manifest.description: "${firstFinal?.manifest?.description}"`)
-    }
     
     return { success: true, addons: finalDesiredAddons, error: null }
   } catch (error) {
@@ -360,7 +319,6 @@ function createGetGroupSyncStatus(deps) {
 async function computeUserSyncPlan(user, req, { prisma, getAccountId, decrypt, parseAddonIds, parseProtectedAddons, canonicalizeManifestUrl, StremioAPIClient, unsafeMode = false, useCustomFields = true, useCustomNames = undefined }) {
   // Backward compatibility: support both useCustomFields (new) and useCustomNames (old)
   const useCustomFieldsValue = useCustomFields !== undefined ? useCustomFields : (useCustomNames !== undefined ? useCustomNames : true)
-  console.log(`[computeUserSyncPlan] ENTRY - useCustomFields param: ${useCustomFields}, useCustomNames param: ${useCustomNames}, final value: ${useCustomFieldsValue}`)
   
   // 1) Current
   const currentRes = await getUserAddons(user, req, { decrypt, StremioAPIClient })

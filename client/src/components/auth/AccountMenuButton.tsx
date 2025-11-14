@@ -1,9 +1,10 @@
 'use client'
 
 import React from 'react'
-import { User as UserIcon, Users as GroupsIcon, User as UsersIcon, Puzzle as AddonsIcon } from 'lucide-react'
+import { User as UserIcon, Users as GroupsIcon, User as UsersIcon, Puzzle as AddonsIcon, Link2, Unlink } from 'lucide-react'
 import api, { publicAuthAPI, addonsAPI, usersAPI, groupsAPI } from '@/services/api'
 import toast from 'react-hot-toast'
+import { StremioOAuthCard } from '@/components/auth/StremioOAuthCard'
 
 type Props = {
   className?: string
@@ -27,6 +28,9 @@ export default function AccountMenuButton({ className = '' }: Props) {
   const [statsLoading, setStatsLoading] = React.useState(false)
   const [accountUuid, setAccountUuid] = React.useState<string | null>(null)
   const [accountEmail, setAccountEmail] = React.useState<string | null>(null)
+  const [showStremioLink, setShowStremioLink] = React.useState(false)
+  const [isLinkingStremio, setIsLinkingStremio] = React.useState(false)
+  const [isUnlinkingStremio, setIsUnlinkingStremio] = React.useState(false)
 
   React.useEffect(() => {
     const onAuthChanged = async (e: any) => {
@@ -202,6 +206,55 @@ export default function AccountMenuButton({ className = '' }: Props) {
     }
   }
 
+  const handleStremioAuthKey = async (authKey: string) => {
+    setIsLinkingStremio(true)
+    try {
+      await publicAuthAPI.loginWithStremio({ authKey })
+      toast.success('Stremio account linked successfully!')
+      setShowStremioLink(false)
+      await refreshAccountInfo()
+      // Refresh the page to update the UI
+      window.location.reload()
+    } catch (err: any) {
+      const errorCode = err?.response?.data?.error
+      const msg = err?.response?.data?.message || err?.message || 'Failed to link Stremio account'
+      
+      const errorMessages: Record<string, string> = {
+        EMAIL_ALREADY_LINKED: 'This Stremio account is already linked to another Syncio account. Please use a different Stremio account or log in with the account that owns this Stremio email.',
+        ACCOUNT_ALREADY_LINKED: 'Your account is already linked to a different Stremio account.',
+        STORED_AUTHKEY_EMAIL_MISMATCH: 'A user with this email already exists in your account, but their Stremio authentication does not match. Please contact support.',
+        NO_USER_WITH_EMAIL: 'No user found with this email address. Please create a user with this email first before linking your Stremio account.',
+        USER_NO_STREMIO_AUTH: 'User exists but has no Stremio authentication. Please connect the user to Stremio first before linking the account.',
+        INVALID_STORED_AUTHKEY: 'User exists but the stored Stremio authentication is invalid or expired. Please reconnect the user to Stremio first.'
+      }
+      
+      if (errorCode && errorMessages[errorCode]) {
+        toast.error(errorMessages[errorCode])
+        setShowStremioLink(false)
+      } else {
+        toast.error(msg)
+      }
+    } finally {
+      setIsLinkingStremio(false)
+    }
+  }
+
+  const handleUnlinkStremio = async () => {
+    setIsUnlinkingStremio(true)
+    try {
+      await publicAuthAPI.unlinkStremio()
+      toast.success('Stremio account unlinked successfully')
+      await refreshAccountInfo()
+      // Refresh the page to update the UI
+      window.location.reload()
+    } catch (err: any) {
+      const msg = err?.response?.data?.message || err?.message || 'Failed to unlink Stremio account'
+      toast.error(msg)
+    } finally {
+      setIsUnlinkingStremio(false)
+    }
+  }
+
   if ((AUTH_ENABLED || isPrivateAuth) && authState === 'guest') return null
 
   const btnClasses = `h-10 px-3 rounded-lg flex items-center justify-center focus:outline-none focus:ring-0 color-surface color-hover ${className}`
@@ -223,8 +276,21 @@ export default function AccountMenuButton({ className = '' }: Props) {
             >
               {accountEmail && (
                 <div className="mb-1">
-                  <div className="text-xs color-text-secondary text-center">Email</div>
-                  <div className="text-xs color-text text-center break-all">{accountEmail}</div>
+                  <div className="text-xs color-text-secondary text-center mb-1">Email</div>
+                  <div className="flex items-center justify-center gap-2">
+                    <div className="text-xs color-text text-center break-all flex-1">{accountEmail}</div>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleUnlinkStremio()
+                      }}
+                      disabled={isUnlinkingStremio}
+                      className="p-1 rounded color-hover flex-shrink-0"
+                      title="Unlink Stremio account"
+                    >
+                      <Unlink className="w-3 h-3" />
+                    </button>
+                  </div>
                 </div>
               )}
               <div className={`text-center mb-1`}>
@@ -233,6 +299,39 @@ export default function AccountMenuButton({ className = '' }: Props) {
               <code className={`text-xs color-text break-all block text-center`}>
                 {accountUuid || '—'}
               </code>
+            </div>
+          )}
+          {AUTH_ENABLED && !accountEmail && (
+            <div className="mb-2 p-3 rounded border color-border">
+              {!showStremioLink ? (
+                <button
+                  onClick={() => setShowStremioLink(true)}
+                  className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded color-surface color-hover"
+                  disabled={isLinkingStremio}
+                >
+                  <Link2 className="w-4 h-4" />
+                  Link Stremio Account
+                </button>
+              ) : (
+                <div className="space-y-2">
+                  <StremioOAuthCard
+                    active={true}
+                    autoStart={true}
+                    onAuthKey={handleStremioAuthKey}
+                    disabled={isLinkingStremio}
+                    showSubmitButton={false}
+                    withContainer={false}
+                    className="text-sm"
+                  />
+                  <button
+                    onClick={() => setShowStremioLink(false)}
+                    className="w-full px-3 py-2 rounded color-surface color-hover text-sm"
+                    disabled={isLinkingStremio}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              )}
             </div>
           )}
           <div className={`mb-1 rounded overflow-hidden border color-border`}>
@@ -250,7 +349,7 @@ export default function AccountMenuButton({ className = '' }: Props) {
               </div>
             ))}
           </div>
-          {(AUTH_ENABLED || isPrivateAuth) && (
+          {AUTH_ENABLED && (
             <button
               onClick={handleLogout}
               className={`color-surface color-hover color-text w-full text-center px-3 py-2 rounded`}
@@ -263,5 +362,3 @@ export default function AccountMenuButton({ className = '' }: Props) {
     </div>
   )
 }
-
-

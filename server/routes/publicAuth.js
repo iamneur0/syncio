@@ -8,7 +8,7 @@ const { responseUtils, dbUtils } = require('../utils/routeUtils');
 const { validateStremioAuthKey } = require('../utils/stremio');
 const { encrypt } = require('../utils/encryption');
 
-module.exports = ({ prisma, getAccountId, AUTH_ENABLED, PRIVATE_AUTH_ENABLED, PRIVATE_AUTH_USERNAME, PRIVATE_AUTH_PASSWORD, DEFAULT_ACCOUNT_ID, issueAccessToken, issueRefreshToken, cookieName, isProdEnv, encrypt, decrypt, getDecryptedManifestUrl, scopedWhere, getAccountDek, decryptWithFallback, manifestUrlHmac, manifestHash, filterManifestByResources, filterManifestByCatalogs }) => {
+module.exports = ({ prisma, getAccountId, AUTH_ENABLED, PRIVATE_AUTH_ENABLED, PRIVATE_AUTH_USERNAME, PRIVATE_AUTH_PASSWORD, DEFAULT_ACCOUNT_ID, issueAccessToken, issueRefreshToken, cookieName, isProdEnv, encrypt, decrypt, getDecryptedManifestUrl, scopedWhere, getAccountDek, decryptWithFallback, manifestUrlHmac, manifestHash, filterManifestByResources, filterManifestByCatalogs, parseCookies, JWT_SECRET }) => {
   console.log('PublicAuth router initialized, prisma available:', !!prisma);
   const router = express.Router();
 
@@ -93,6 +93,34 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, PRIVATE_AUTH_ENABLED, PR
       if (!existing) return candidate
       candidate = `${base}${suffix}`
       suffix += 1
+    }
+  }
+
+  async function validateUserStremioAuth(accountId, email, req) {
+    const user = await prisma.user.findFirst({
+      where: { accountId, email }
+    })
+    
+    if (!user) {
+      return { valid: false, user: null }
+    }
+    
+    if (!user.stremioAuthKey) {
+      return { valid: false, user }
+    }
+    
+    try {
+      const storedAuthKey = decrypt(user.stremioAuthKey, req)
+      const storedAuthKeyInfo = await validateStremioAuthKey(storedAuthKey)
+      const storedEmail = String(storedAuthKeyInfo?.user?.email || '').trim().toLowerCase()
+      
+      if (storedEmail !== email) {
+        return { valid: false, user }
+      }
+      
+      return { valid: true, user }
+    } catch (error) {
+      return { valid: false, user }
     }
   }
 
@@ -268,48 +296,193 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, PRIVATE_AUTH_ENABLED, PR
       if (!email) {
         return res.status(400).json({ message: 'Stremio account email not available' })
       }
-      let account = await prisma.appAccount.findUnique({ where: { email } })
-      if (!account) {
-        const legacyUuid = `stremio:${email}`
-        const legacyAccount = await prisma.appAccount.findUnique({ where: { uuid: legacyUuid } })
-        if (legacyAccount) {
-          const newUuid = await generateUniqueAccountUuid()
-          account = await prisma.appAccount.update({
-            where: { id: legacyAccount.id },
-            data: { uuid: newUuid, email }
-          })
-        } else if (req.appAccountId) {
-          const currentAccount = await prisma.appAccount.findUnique({ where: { id: req.appAccountId } })
-          if (currentAccount && currentAccount.email == null) {
+      
+      // Extract account ID from session cookies (since route is allowlisted, middleware might not set it)
+      // Only extract if user is actually logged in (has valid session)
+      let originalAccountId = req.appAccountId
+      if (!originalAccountId && AUTH_ENABLED && parseCookies && JWT_SECRET) {
+        try {
+          const cookies = parseCookies(req)
+          const accessCookie = cookies[cookieName('sfm_at')] || cookies['sfm_at']
+          const refreshCookie = cookies[cookieName('sfm_rt')] || cookies['sfm_rt']
+          const token = accessCookie || refreshCookie
+          if (token) {
+            const jwt = require('jsonwebtoken')
+            const decoded = jwt.verify(token, JWT_SECRET)
+            if (decoded && decoded.accId) {
+              // Verify the account actually exists before setting originalAccountId
+              const accountExists = await prisma.appAccount.findUnique({ where: { id: decoded.accId } })
+              if (accountExists) {
+                originalAccountId = decoded.accId
+                req.appAccountId = originalAccountId
+              }
+            }
+          }
+        } catch (e) {
+          // If we can't extract account ID from cookies, user is not logged in - that's OK
+          // This is expected for normal login flow
+        }
+      }
+      
+      let account
+      let isNewAccount = false
+      
+      // FIRST CHECK: If user is logged in and trying to link, verify Stremio account is not already linked to another account
+      if (originalAccountId) {
+        // Verify current account exists - if it doesn't, treat as not logged in (normal login flow)
+        const currentAccount = await prisma.appAccount.findUnique({ where: { id: originalAccountId } })
+        if (!currentAccount) {
+          // Account doesn't exist - treat as not logged in, proceed with normal login flow
+          originalAccountId = undefined
+        } else {
+          // Account exists - user is logged in, check if Stremio account is already linked elsewhere
+          const existingAccountWithEmail = await prisma.appAccount.findUnique({ where: { email } })
+          if (existingAccountWithEmail && existingAccountWithEmail.id !== originalAccountId) {
+            return res.status(409).json({ 
+              message: 'This Stremio account is already linked to another Syncio account',
+              error: 'EMAIL_ALREADY_LINKED'
+            })
+          }
+          
+          // Check for legacy account with this email (uuid format: stremio:${email})
+          const legacyUuid = `stremio:${email}`
+          const legacyAccount = await prisma.appAccount.findUnique({ where: { uuid: legacyUuid } })
+          if (legacyAccount && legacyAccount.id !== originalAccountId) {
+            return res.status(409).json({ 
+              message: 'This Stremio account is already linked to another Syncio account',
+              error: 'EMAIL_ALREADY_LINKED'
+            })
+          }
+          
+          // If current account already has an email, it must match
+          if (currentAccount.email && currentAccount.email !== email) {
+            return res.status(409).json({ 
+              message: 'Your account is already linked to a different Stremio account',
+              error: 'ACCOUNT_ALREADY_LINKED'
+            })
+          }
+          
+          const validation = await validateUserStremioAuth(currentAccount.id, email, req)
+          
+          if (!validation.user) {
+            return res.status(400).json({
+              message: 'No user found with this email address. Please create a user with this email first before linking your Stremio account.',
+              error: 'NO_USER_WITH_EMAIL'
+            })
+          }
+          
+          if (!validation.user.stremioAuthKey) {
+            return res.status(400).json({
+              message: 'User exists but has no Stremio authentication. Please connect the user to Stremio first before linking the account.',
+              error: 'USER_NO_STREMIO_AUTH'
+            })
+          }
+          
+          if (!validation.valid) {
+            const errorMsg = validation.user.stremioAuthKey 
+              ? 'A user with this email already exists in your account, but their Stremio authentication does not match. Please contact support.'
+              : 'User exists but the stored Stremio authentication is invalid or expired. Please reconnect the user to Stremio first.'
+            const errorCode = validation.user.stremioAuthKey 
+              ? 'STORED_AUTHKEY_EMAIL_MISMATCH'
+              : 'INVALID_STORED_AUTHKEY'
+            return res.status(validation.user.stremioAuthKey ? 409 : 400).json({
+              message: errorMsg,
+              error: errorCode
+            })
+          }
+          
+          if (currentAccount.email == null) {
             account = await prisma.appAccount.update({
               where: { id: currentAccount.id },
               data: { email }
             })
+          } else {
+            account = currentAccount
           }
+          req.appAccountId = account.id
+          
+          const encryptedAuthKey = encrypt(authKey.trim(), req)
+          await prisma.user.update({
+            where: { id: validation.user.id },
+            data: { stremioAuthKey: encryptedAuthKey, isActive: true }
+          })
+          
+          const at = issueAccessToken(account.id)
+          const rt = issueRefreshToken(account.id)
+          const csrf = randomCsrfToken()
+          res.cookie(cookieName('sfm_at'), at, { httpOnly: true, secure: isProdEnv(), sameSite: isProdEnv() ? 'strict' : 'lax', path: '/', maxAge: 30 * 24 * 60 * 60 * 1000 })
+          res.cookie(cookieName('sfm_rt'), rt, { httpOnly: true, secure: isProdEnv(), sameSite: isProdEnv() ? 'strict' : 'lax', path: '/', maxAge: 365 * 24 * 60 * 60 * 1000 })
+          res.cookie(cookieName('sfm_csrf'), csrf, { httpOnly: false, secure: isProdEnv(), sameSite: isProdEnv() ? 'strict' : 'lax', path: '/', maxAge: 30 * 24 * 60 * 60 * 1000 })
+          
+          return res.json({
+            message: 'Account already linked',
+            account: { id: account.id, uuid: account.uuid, email: account.email || null }
+          })
         }
       }
-
-      let isNewAccount = false
+      
+      // Normal login flow (user not logged in, or account from cookie doesn't exist)
       if (!account) {
-        const randomSecret = crypto.randomBytes(32).toString('hex')
-        const passwordHash = await bcrypt.hash(randomSecret, 12)
-        const newUuid = await generateUniqueAccountUuid()
-        account = await prisma.appAccount.create({
-          data: {
-            uuid: newUuid,
-            email,
-            passwordHash
+        // Not logged in - normal login flow (find or create account with email)
+        
+        account = await prisma.appAccount.findUnique({ where: { email } })
+        
+        if (account) {
+          const validation = await validateUserStremioAuth(account.id, email, req)
+          if (!validation.valid) {
+            await prisma.appAccount.update({
+              where: { id: account.id },
+              data: { email: null }
+            })
+            account = null
           }
-        })
-        isNewAccount = true
-      } else if (account.email == null) {
-        account = await prisma.appAccount.update({
-          where: { id: account.id },
-          data: { email }
-        })
-      }
+        }
+        
+        if (!account) {
+          const legacyUuid = `stremio:${email}`
+          const legacyAccount = await prisma.appAccount.findUnique({ where: { uuid: legacyUuid } })
+          if (legacyAccount) {
+            const validation = await validateUserStremioAuth(legacyAccount.id, email, req)
+            if (!validation.valid) {
+              const newUuid = await generateUniqueAccountUuid()
+              await prisma.appAccount.update({
+                where: { id: legacyAccount.id },
+                data: { uuid: newUuid, email: null }
+              })
+              account = null
+            } else {
+              const newUuid = await generateUniqueAccountUuid()
+              account = await prisma.appAccount.update({
+                where: { id: legacyAccount.id },
+                data: { uuid: newUuid, email }
+              })
+            }
+          }
+        }
 
-      req.appAccountId = account.id
+        // Create new account if none found or all were unlinked
+        if (!account) {
+          const randomSecret = crypto.randomBytes(32).toString('hex')
+          const passwordHash = await bcrypt.hash(randomSecret, 12)
+          const newUuid = await generateUniqueAccountUuid()
+          account = await prisma.appAccount.create({
+            data: {
+              uuid: newUuid,
+              email,
+              passwordHash
+            }
+          })
+          isNewAccount = true
+        } else if (account.email == null) {
+          // Account exists but email was unlinked - set it now
+          account = await prisma.appAccount.update({
+            where: { id: account.id },
+            data: { email }
+          })
+        }
+        
+        req.appAccountId = account.id
+      }
 
       const encryptedAuthKey = encrypt(authKey.trim(), req)
 
@@ -354,6 +527,39 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, PRIVATE_AUTH_ENABLED, PR
     } catch (error) {
       console.error('Stremio login error:', error);
       return responseUtils.internalError(res, String(error && error.message || error));
+    }
+  })
+
+  // Unlink Stremio account from current account
+  router.post('/unlink-stremio', async (req, res) => {
+    try {
+      if (!AUTH_ENABLED) {
+        return res.status(400).json({ message: 'Unlinking is only available in public auth mode' })
+      }
+
+      const accountId = req.appAccountId
+      if (!accountId) {
+        return res.status(401).json({ message: 'Authentication required' })
+      }
+
+      const account = await prisma.appAccount.findUnique({ where: { id: accountId } })
+      if (!account) {
+        return res.status(404).json({ message: 'Account not found' })
+      }
+
+      if (!account.email) {
+        return res.status(400).json({ message: 'Account is not linked to a Stremio account' })
+      }
+
+      await prisma.appAccount.update({
+        where: { id: accountId },
+        data: { email: null }
+      })
+
+      return res.json({ message: 'Stremio account unlinked successfully' })
+    } catch (error) {
+      console.error('Unlink Stremio error:', error)
+      return responseUtils.internalError(res, String(error && error.message || error))
     }
   })
 

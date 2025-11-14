@@ -350,13 +350,15 @@ export default function UserAddModal({
           </div>
           {authMode === 'oauth' ? (
             <>
-              <StremioOAuthCard
-                active={authMode === 'oauth'}
-                autoStart={true}
-                onAuthKey={handleOAuthAuthKey}
-                disabled={isCreating || isVerifyingOAuth}
-                showSubmitButton={false}
-              />
+              <div className={oauthVerified ? 'hidden' : ''}>
+                <StremioOAuthCard
+                  active={authMode === 'oauth' && !oauthVerified}
+                  autoStart={true}
+                  onAuthKey={handleOAuthAuthKey}
+                  disabled={isCreating || isVerifyingOAuth}
+                  showSubmitButton={false}
+                />
+              </div>
             </>
           ) : authMode === 'credentials' ? (
             <>

@@ -135,11 +135,14 @@ function LoginForm({ setAuthState, isPrivateAuth }: { setAuthState: (state: 'loa
   }
 
   const handleStremioAuth = React.useCallback(async (authKey: string) => {
-    await publicAuthAPI.loginWithStremio({ authKey })
     try {
+      await publicAuthAPI.loginWithStremio({ authKey })
       window.dispatchEvent(new CustomEvent('sfm:auth:changed', { detail: { authed: true } }))
-    } catch {}
-    setAuthState('authed')
+      setAuthState('authed')
+    } catch (err: any) {
+      console.error('Stremio login error:', err)
+      // Error will be handled by StremioOAuthCard's onError prop if provided
+    }
   }, [setAuthState])
 
   const handleSubmit = async (e: React.FormEvent) => {
