@@ -37,7 +37,8 @@ async function getUserAddons(user, req, { decrypt, StremioAPIClient }) {
 /**
  * Get desired addons for a user (group addons + protected addons from Stremio)
  */
-async function getDesiredAddons(user, req, { prisma, getAccountId, decrypt, parseAddonIds, parseProtectedAddons, canonicalizeManifestUrl, StremioAPIClient, unsafeMode = false }) {
+async function getDesiredAddons(user, req, { prisma, getAccountId, decrypt, parseAddonIds, parseProtectedAddons, canonicalizeManifestUrl, StremioAPIClient, unsafeMode = false, useCustomFields = true }) {
+  console.log(`[getDesiredAddons] ENTRY - useCustomFields: ${useCustomFields}, unsafeMode: ${unsafeMode}`)
   try {
     // Get group addons
     const groups = await prisma.group.findMany({
@@ -59,6 +60,14 @@ async function getDesiredAddons(user, req, { prisma, getAccountId, decrypt, pars
     const { getGroupAddons } = require('../utils/helpers')
     // groupAddons are returned in collection shape: { transportUrl, transportName, manifest }
     const groupAddons = groups.length > 0 ? await getGroupAddons(prisma, groups[0].id, req) : []
+    
+    // Log group addons before processing
+    console.log(`[getDesiredAddons] useCustomFields: ${useCustomFields}`)
+    console.log(`[getDesiredAddons] Raw group addons count: ${groupAddons.length}`)
+    if (groupAddons.length > 0) {
+      const firstAddon = groupAddons[0]
+      console.log(`[getDesiredAddons] First group addon - DB name: "${firstAddon?.name}", DB description: "${firstAddon?.description}", manifest.name: "${firstAddon?.manifest?.name}", manifest.description: "${firstAddon?.manifest?.description}"`)
+    }
 
     // Get user's Stremio addons
     const { success, addons: userAddonsResponse, error } = await getUserAddons(user, req, { decrypt, StremioAPIClient })
@@ -108,28 +117,56 @@ async function getDesiredAddons(user, req, { prisma, getAccountId, decrypt, pars
     
     // Strip database fields from filtered group addons for clean JSON
     // Ensure manifest.name and manifest.description match the addon name and description from DB
-    const cleanGroupAddons = groupAddonsFiltered.map(addon => {
+    const cleanGroupAddons = groupAddonsFiltered.map((addon, index) => {
       const manifestObj = (addon && addon.manifest && typeof addon.manifest === 'object')
         ? { ...addon.manifest }
         : addon?.manifest ? addon.manifest : {}
+      
+      // Log before applying custom fields
+      if (index === 0) {
+        console.log(`[cleanGroupAddons] Before processing - useCustomFields: ${useCustomFields}`)
+        console.log(`[cleanGroupAddons] Addon DB name: "${addon?.name}", DB description: "${addon?.description}"`)
+        console.log(`[cleanGroupAddons] Manifest original name: "${manifestObj?.name}", original description: "${manifestObj?.description}"`)
+      }
+      
       if (addon && manifestObj && typeof manifestObj === 'object') {
-        if (typeof addon.name === 'string') {
+        // Use custom name and description from DB if useCustomFields is enabled
+        if (useCustomFields && typeof addon.name === 'string') {
           manifestObj.name = addon.name
+          if (index === 0) console.log(`[cleanGroupAddons] Applied custom name: "${addon.name}"`)
+        } else if (index === 0) {
+          console.log(`[cleanGroupAddons] NOT applying custom name (useCustomFields=${useCustomFields}, hasName=${typeof addon.name === 'string'})`)
         }
-        // Update description if it exists (even if empty string, preserve it)
-        if (addon.description !== undefined && addon.description !== null) {
+        // Update description if useCustomFields is enabled and it exists (even if empty string, preserve it)
+        if (useCustomFields && addon.description !== undefined && addon.description !== null) {
           manifestObj.description = addon.description
+          if (index === 0) console.log(`[cleanGroupAddons] Applied custom description: "${addon.description}"`)
+        } else if (index === 0) {
+          console.log(`[cleanGroupAddons] NOT applying custom description (useCustomFields=${useCustomFields}, hasDescription=${addon.description !== undefined && addon.description !== null})`)
         }
       }
+      
+      // Log after processing
+      if (index === 0) {
+        console.log(`[cleanGroupAddons] After processing - manifest.name: "${manifestObj?.name}", manifest.description: "${manifestObj?.description}"`)
+      }
+      
       return {
         transportUrl: addon.transportUrl,
         transportName: addon.transportName,
         manifest: manifestObj
       }
     })
+    
+    // Log final clean group addons
+    if (cleanGroupAddons.length > 0) {
+      const firstClean = cleanGroupAddons[0]
+      console.log(`[cleanGroupAddons] Final first addon - manifest.name: "${firstClean?.manifest?.name}", manifest.description: "${firstClean?.manifest?.description}"`)
+    }
 
     // 2) Keep only protected addons from userAddons
     const protectedUserAddons = (userAddons || []).filter(addon => isProtected(addon))
+    console.log(`[getDesiredAddons] Protected user addons count: ${protectedUserAddons.length}`)
 
     // Build a protected NAME set from userAddons (normalized)
     const protectedUserNameSet = new Set(
@@ -193,6 +230,13 @@ async function getDesiredAddons(user, req, { prisma, getAccountId, decrypt, pars
     // Remove nulls and return
     const finalDesiredAddons = finalDesiredCollection.filter(Boolean)
     
+    // Log final desired addons
+    console.log(`[getDesiredAddons] Final desired addons count: ${finalDesiredAddons.length}`)
+    if (finalDesiredAddons.length > 0) {
+      const firstFinal = finalDesiredAddons[0]
+      console.log(`[getDesiredAddons] Final first desired addon - manifest.name: "${firstFinal?.manifest?.name}", manifest.description: "${firstFinal?.manifest?.description}"`)
+    }
+    
     return { success: true, addons: finalDesiredAddons, error: null }
   } catch (error) {
     return { success: false, addons: [], error: error.message || 'Failed to get desired addons' }
@@ -216,12 +260,23 @@ function createGetUserSyncStatus({ prisma, getAccountId, decrypt, parseAddonIds,
     if (!user) return { status: 'error', isSynced: false, message: 'User not found' }
     if (!user.stremioAuthKey) return { isSynced: false, status: 'connect', message: 'User not connected to Stremio' }
 
-    // Derive unsafe from DB-backed account sync (single source of truth)
+    // Derive unsafe and useCustomFields from DB-backed account sync (single source of truth)
+    let useCustomFields = true
     try {
       const acc = await prisma.appAccount.findUnique({ where: { id: getAccountId(req) }, select: { sync: true } })
       let cfg = acc?.sync
       if (typeof cfg === 'string') { try { cfg = JSON.parse(cfg) } catch { cfg = null } }
-      if (cfg && typeof cfg.safe === 'boolean') unsafe = !cfg.safe
+      if (cfg && typeof cfg === 'object') {
+        if (typeof cfg.safe === 'boolean') unsafe = !cfg.safe
+        if (typeof cfg.useCustomFields === 'boolean') {
+          useCustomFields = cfg.useCustomFields
+        } else if (typeof cfg.useCustomNames === 'boolean') {
+          // Backward compatibility: migrate old useCustomNames to useCustomFields
+          useCustomFields = cfg.useCustomNames
+        } else {
+          useCustomFields = true
+        }
+      }
     } catch {}
 
     // Get user's current Stremio addons
@@ -252,7 +307,8 @@ function createGetUserSyncStatus({ prisma, getAccountId, decrypt, parseAddonIds,
       parseProtectedAddons,
       canonicalizeManifestUrl,
       StremioAPIClient,
-      unsafeMode: unsafe
+      unsafeMode: unsafe,
+      useCustomFields
     })
     if (!desiredAddonsSuccess) {
       return { isSynced: false, status: 'error', message: desiredAddonsError }
@@ -301,13 +357,17 @@ function createGetGroupSyncStatus(deps) {
  * Compute a user's sync plan (shared by sync-status and actual sync)
  * Returns: { alreadySynced, current, desired }
  */
-async function computeUserSyncPlan(user, req, { prisma, getAccountId, decrypt, parseAddonIds, parseProtectedAddons, canonicalizeManifestUrl, StremioAPIClient, unsafeMode = false }) {
+async function computeUserSyncPlan(user, req, { prisma, getAccountId, decrypt, parseAddonIds, parseProtectedAddons, canonicalizeManifestUrl, StremioAPIClient, unsafeMode = false, useCustomFields = true, useCustomNames = undefined }) {
+  // Backward compatibility: support both useCustomFields (new) and useCustomNames (old)
+  const useCustomFieldsValue = useCustomFields !== undefined ? useCustomFields : (useCustomNames !== undefined ? useCustomNames : true)
+  console.log(`[computeUserSyncPlan] ENTRY - useCustomFields param: ${useCustomFields}, useCustomNames param: ${useCustomNames}, final value: ${useCustomFieldsValue}`)
+  
   // 1) Current
   const currentRes = await getUserAddons(user, req, { decrypt, StremioAPIClient })
   if (!currentRes.success) return { success: false, error: currentRes.error, alreadySynced: false, current: [], desired: [] }
   const current = currentRes.addons?.addons || currentRes.addons || []
   // 2) Desired
-  const desiredRes = await getDesiredAddons(user, req, { prisma, getAccountId, decrypt, parseAddonIds, parseProtectedAddons, canonicalizeManifestUrl, StremioAPIClient, unsafeMode })
+  const desiredRes = await getDesiredAddons(user, req, { prisma, getAccountId, decrypt, parseAddonIds, parseProtectedAddons, canonicalizeManifestUrl, StremioAPIClient, unsafeMode, useCustomFields: useCustomFieldsValue })
   if (!desiredRes.success) return { success: false, error: desiredRes.error, alreadySynced: false, current, desired: [] }
   const desired = desiredRes.addons || []
   // 3) Compare (set + order) using manifest fingerprint
@@ -323,34 +383,41 @@ function createManifestFingerprint(canonicalizeManifestUrl) {
   const normalizeUrl = (u) => {
     try { return canonicalizeManifestUrl ? canonicalizeManifestUrl(u) : String(u || '').trim().toLowerCase() } catch { return String(u || '').trim().toLowerCase() }
   }
+  
+  // Normalize manifest for comparison - sort arrays to ensure consistent comparison
   const normalizeManifest = (m) => {
     try {
       if (!m || typeof m !== 'object') return {}
-      const {
-        name,
-        id,
-        resources,
-        catalogs,
-        types,
-        behaviorHints,
-        idPrefixes
-      } = m
-      return {
-        name: String(name || ''),
-        id: String(id || ''),
-        resources: Array.isArray(resources) ? resources : [],
-        catalogs: Array.isArray(catalogs) ? catalogs.map(c => ({ type: c?.type, id: c?.id, name: c?.name })).sort((a,b)=>String(a.type+a.id).localeCompare(String(b.type+b.id))) : [],
-        types: Array.isArray(types) ? types.slice().sort() : [],
-        behaviorHints: behaviorHints && typeof behaviorHints === 'object' ? behaviorHints : {},
-        idPrefixes: Array.isArray(idPrefixes) ? idPrefixes.slice().sort() : []
+      
+      // Deep clone to avoid mutating original
+      const normalized = JSON.parse(JSON.stringify(m))
+      
+      // Sort arrays that should be order-independent for comparison
+      if (Array.isArray(normalized.catalogs)) {
+        normalized.catalogs = normalized.catalogs
+          .map(c => ({ type: c?.type, id: c?.id, name: c?.name, extra: c?.extra, extraSupported: c?.extraSupported }))
+          .sort((a, b) => String(a.type + a.id).localeCompare(String(b.type + b.id)))
       }
+      if (Array.isArray(normalized.types)) {
+        normalized.types = normalized.types.slice().sort()
+      }
+      if (Array.isArray(normalized.resources)) {
+        // Sort resources by name for consistency
+        normalized.resources = normalized.resources
+          .map(r => ({ name: r?.name, types: Array.isArray(r?.types) ? r.types.slice().sort() : r?.types, idPrefixes: Array.isArray(r?.idPrefixes) ? r.idPrefixes.slice().sort() : r?.idPrefixes }))
+          .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')))
+      }
+      
+      return normalized
     } catch {
-      return {}
+      return m || {}
     }
   }
+  
   return (addon) => {
     const url = normalizeUrl(addon?.transportUrl || addon?.manifestUrl || addon?.url || '')
     const manifestNorm = normalizeManifest(addon?.manifest || addon)
+    // Compare entire manifest - this catches all changes including name, description, and any other fields
     return url + '|' + JSON.stringify(manifestNorm)
   }
 }
