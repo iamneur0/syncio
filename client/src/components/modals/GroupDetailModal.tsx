@@ -8,6 +8,7 @@ import { getEntityColorStyles } from '@/utils/colorMapping'
 import { invalidateGroupQueries, invalidateSyncStatusQueries } from '@/utils/queryUtils'
 import { groupSuccessHandlers } from '@/utils/toastUtils'
 import { useModalState } from '@/hooks/useCommonState'
+import { useBodyScrollLock } from '@/hooks/useBodyScrollLock'
 import toast from 'react-hot-toast'
 import { VersionChip, SyncBadge } from '@/components/ui'
 import { EntityList, UserItem, AddonItem, InlineEdit, AddonIcon, SortableAddonItem } from '@/components/entities'
@@ -41,6 +42,9 @@ export default function GroupDetailModal({
 }: GroupDetailModalProps) {
   const { theme: themeName } = useTheme()
   const { mounted } = useModalState()
+  
+  useBodyScrollLock(isOpen)
+  
   const [addons, setAddons] = useState<any[]>([])
   const [refreshKey, setRefreshKey] = useState(0)
   const [showUserSelectModal, setShowUserSelectModal] = useState(false)

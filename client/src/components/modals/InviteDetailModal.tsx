@@ -4,6 +4,7 @@ import { useTheme } from '@/contexts/ThemeContext'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { invitationsAPI } from '@/services/api'
 import { useModalState } from '@/hooks/useCommonState'
+import { useBodyScrollLock } from '@/hooks/useBodyScrollLock'
 import toast from 'react-hot-toast'
 import { Mail, Copy, Check, X, ExternalLink, RefreshCw, RotateCcw } from 'lucide-react'
 import { ConfirmDialog } from '@/components/modals'
@@ -209,6 +210,8 @@ export default function InviteDetailModal({
   const justClearedOAuthRef = React.useRef<Set<string>>(new Set())
   
   const invitationColorStyles = getEntityColorStyles(themeName, 1)
+
+  useBodyScrollLock(isOpen)
 
   useEffect(() => {
     if (!isOpen) return
