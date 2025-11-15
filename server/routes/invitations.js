@@ -372,17 +372,21 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, encrypt, decrypt, assign
         return res.status(409).json({ error: 'User is already registered to Syncio' })
       }
 
-      // check for duplicate pending requests
+      // check for duplicate requests (any status)
       const existingRequest = await prisma.inviteRequest.findFirst({
         where: {
           invitationId: invitation.id,
           email: email.trim().toLowerCase(),
-          status: 'pending'
-        }
+          username: username.trim()
+        },
+        orderBy: { createdAt: 'desc' }
       })
 
       if (existingRequest) {
-        return res.status(409).json({ error: 'A pending request already exists for this email' })
+        return res.status(409).json({ 
+          error: 'A request already exists for this email and username',
+          status: existingRequest.status
+        })
       }
 
       const request = await prisma.inviteRequest.create({

@@ -64,7 +64,18 @@ const ENCRYPTION_KEY = (() => {
 })();
 
 // CORS allowed origins
-const allowedOrigins = [/^http:\/\/localhost:300\d$/, /^http:\/\/127\.0\.0\.1:300\d$/];
+// Allow localhost on any port for development (more permissive for local dev)
+// In production, this should be restricted to specific domains
+const isDevelopment = process.env.NODE_ENV !== 'production' || process.env.DEBUG === 'true'
+const allowedOrigins = isDevelopment
+  ? [
+      /^http:\/\/localhost:\d+$/,  // Allow any localhost port in dev
+      /^http:\/\/127\.0\.0\.1:\d+$/,  // Allow any 127.0.0.1 port in dev
+    ]
+  : [
+      /^http:\/\/localhost:300\d$/,  // Only specific ports in production
+      /^http:\/\/127\.0\.0\.1:300\d$/,
+    ];
 
 // Quiet mode
 const QUIET = process.env.QUIET === 'true' || process.env.QUIET === '1';

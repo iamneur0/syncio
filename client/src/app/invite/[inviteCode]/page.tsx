@@ -265,7 +265,23 @@ export default function InviteRequestPage() {
       toast.success('Request submitted successfully')
       refetchStatus()
     },
-    onError: (error: any) => {
+    onError: async (error: any) => {
+      // If duplicate request (409), check status and show existing request
+      if (error?.response?.status === 409) {
+        setRequestSubmitted(true)
+        // Save to localStorage
+        if (typeof window !== 'undefined') {
+          localStorage.setItem(storageKey, JSON.stringify({
+            email,
+            username,
+            submitted: true
+          }))
+        }
+        // Check status to get the existing request
+        await refetchStatus()
+        return
+      }
+      
       const errorMessage = error?.response?.data?.error || 'Failed to submit request'
       // Check if invitation is disabled
       if (errorMessage.toLowerCase().includes('not active') || (error?.response?.status === 400 && errorMessage.toLowerCase().includes('invitation'))) {
@@ -455,39 +471,36 @@ export default function InviteRequestPage() {
       return
     }
 
-    // First, check if a request already exists with this email and username
-    try {
-      const existingStatus = await invitationsAPI.checkStatus(inviteCode, email.trim(), username.trim())
-      
-      if (existingStatus && existingStatus.status) {
-        // Request already exists, navigate to its status page
-        setRequestSubmitted(true)
-        // Save to localStorage
-        if (typeof window !== 'undefined') {
-          localStorage.setItem(storageKey, JSON.stringify({
-            email: email.trim(),
-            username: username.trim(),
-            submitted: true
-          }))
-        }
-        // Refetch status to update the UI
-        await refetchStatus()
-        return
-      }
-    } catch (error: any) {
-      // If status check fails (404), it means no request exists, so we can proceed with submission
-      if (error?.response?.status !== 404) {
-        // Continue with submission anyway
-      }
-    }
-
-    // No existing request found, proceed with creating a new one
+    // Submit the request - backend will return 409 if a duplicate exists
     submitMutation.mutate()
   }
 
-  const handleOAuthAuthKey = (authKey: string) => {
+  const handleOAuthAuthKey = async (authKey: string) => {
+    console.log('[InvitePage] handleOAuthAuthKey called with authKey:', authKey ? 'present' : 'missing')
     setAuthKey(authKey)
-    completeMutation.mutate(authKey)
+    
+    // Mark that we're manually completing OAuth to prevent polling from interfering
+    setIsCreatingUser(true)
+    
+    // Stop OAuth polling since we're manually completing
+    if (oauthPollerRef.current) {
+      clearInterval(oauthPollerRef.current)
+      oauthPollerRef.current = null
+    }
+    
+    // Call the mutation to create the user
+    console.log('[InvitePage] Calling completeMutation.mutate')
+    completeMutation.mutate(authKey, {
+      onSuccess: () => {
+        console.log('[InvitePage] completeMutation succeeded')
+        setIsCreatingUser(false)
+      },
+      onError: (error: any) => {
+        console.error('[InvitePage] completeMutation failed:', error)
+        setIsCreatingUser(false)
+        // Error handling is already in completeMutation.onError
+      }
+    })
   }
 
   const pollOAuthCompletion = React.useCallback(async () => {
@@ -514,13 +527,18 @@ export default function InviteRequestPage() {
     }
 
     try {
+      // Use full origin for localhost to ensure Stremio recognizes it
       const host = window.location?.host || window.location?.hostname || 'syncio.app'
+      const origin = window.location?.origin || `http://${host}`
+      console.log('[InvitePage] Polling Stremio OAuth with host:', host, 'origin:', origin, 'code:', status.oauthCode?.substring(0, 4) + '...')
       const response = await fetch(
         `https://link.stremio.com/api/v2/read?type=Read&code=${encodeURIComponent(status.oauthCode)}`,
         {
           headers: {
             'X-Requested-With': host,
+            'Origin': origin,
           },
+          referrerPolicy: 'no-referrer',
         }
       )
 

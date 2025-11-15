@@ -55,6 +55,15 @@ export function StremioOAuthCard({
   initialCode = null,
   initialExpiresAt = null,
 }: StremioOAuthCardProps) {
+  console.log('🔵🔵🔵 [StremioOAuthCard] COMPONENT RENDERED', {
+    active,
+    hasInitialLink: !!initialLink,
+    hasInitialCode: !!initialCode,
+    initialExpiresAt,
+    disabled,
+    timestamp: new Date().toISOString()
+  })
+  
   const { isDark } = useTheme()
   const logoSrc = isDark ? '/logo-white.png' : '/logo-black.png'
 
@@ -70,11 +79,22 @@ export function StremioOAuthCard({
 
   // Update state when initial props change (e.g., admin refreshes OAuth link)
   useEffect(() => {
+    console.log('[StremioOAuthCard] Initial props effect:', {
+      initialLink: initialLink ? 'present' : 'null',
+      initialCode: initialCode ? initialCode.substring(0, 4) + '...' : 'null',
+      initialExpiresAt,
+      currentLink: stremioLink ? 'present' : 'null',
+      currentCode: stremioCode ? stremioCode.substring(0, 4) + '...' : 'null',
+      currentExpiresAt: stremioExpiresAt,
+      isPolling
+    })
+    
     let hasChanges = false
     
     // Always update if initialLink is provided and different from current
     if (initialLink !== null && initialLink !== undefined) {
       if (initialLink !== stremioLink) {
+        console.log('[StremioOAuthCard] Setting initialLink and starting polling')
         setStremioLink(initialLink)
         setIsPolling(true)
         setStremioError('') // Clear any errors when link changes
@@ -84,6 +104,7 @@ export function StremioOAuthCard({
     // Always update if initialCode is provided and different from current
     if (initialCode !== null && initialCode !== undefined) {
       if (initialCode !== stremioCode) {
+        console.log('[StremioOAuthCard] Setting initialCode and starting polling')
         setStremioCode(initialCode)
         setIsPolling(true) // Restart polling with new code
         hasChanges = true
@@ -92,6 +113,7 @@ export function StremioOAuthCard({
     // Always update if initialExpiresAt is provided and different from current
     if (initialExpiresAt !== null && initialExpiresAt !== undefined) {
       if (initialExpiresAt !== stremioExpiresAt) {
+        console.log('[StremioOAuthCard] Setting initialExpiresAt')
         setStremioExpiresAt(initialExpiresAt)
         setTick(0) // Reset timer when expiration changes
         hasChanges = true
@@ -100,6 +122,7 @@ export function StremioOAuthCard({
     
     // If any OAuth data changed, ensure polling is active
     if (hasChanges && initialLink && initialCode) {
+      console.log('[StremioOAuthCard] OAuth data changed, ensuring polling is active')
       setIsPolling(true)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -150,11 +173,16 @@ export function StremioOAuthCard({
     setTick(0)
 
     try {
+      // Use full origin for localhost to ensure Stremio recognizes it
       const host = window.location?.host || window.location?.hostname || 'syncio.app'
+      const origin = window.location?.origin || `http://${host}`
+      console.log('[StremioOAuthCard] Creating Stremio OAuth link with host:', host, 'origin:', origin)
       const res = await fetch('https://link.stremio.com/api/v2/create?type=Create', {
         headers: {
           'X-Requested-With': host,
+          'Origin': origin,
         },
+        referrerPolicy: 'no-referrer',
       })
       if (!res.ok) {
         throw new Error(`Stremio responded with ${res.status}`)
@@ -182,13 +210,17 @@ export function StremioOAuthCard({
 
   const completeStremioLogin = useCallback(async (authKey: string) => {
     if (!authKey || isCompleting || disabled) return
+    console.log('[StremioOAuthCard] completeStremioLogin called with authKey:', authKey ? 'present' : 'missing')
     setIsCompleting(true)
     setIsPolling(false)
     setStremioError('')
     try {
+      console.log('[StremioOAuthCard] Calling onAuthKey callback')
       await onAuthKey(authKey.trim())
+      console.log('[StremioOAuthCard] onAuthKey callback completed successfully')
       resetFlow()
     } catch (err: any) {
+      console.error('[StremioOAuthCard] Error in completeStremioLogin:', err)
       const message = err?.response?.data?.message || err?.message || 'Failed to complete Stremio login'
       setStremioError(message)
       if (onError) onError(message)
@@ -221,34 +253,68 @@ export function StremioOAuthCard({
 
   // Polling for auth key
   useEffect(() => {
-    if (!active) return
-    if (!stremioCode || !isPolling || isCompleting) return
+    if (!active) {
+      console.log('[StremioOAuthCard] Polling not active')
+      return
+    }
+    if (!stremioCode) {
+      console.log('[StremioOAuthCard] No stremioCode, skipping poll')
+      return
+    }
+    if (!isPolling) {
+      console.log('[StremioOAuthCard] Not polling, isPolling:', isPolling)
+      return
+    }
+    if (isCompleting) {
+      console.log('[StremioOAuthCard] Already completing, skipping poll')
+      return
+    }
     if (typeof window === 'undefined') return
+    
+    console.log('[StremioOAuthCard] Starting OAuth polling with code:', stremioCode.substring(0, 4) + '...')
     let cancelled = false
 
     const pollOnce = async () => {
-      if (cancelled) return
+      if (cancelled) {
+        console.log('[StremioOAuthCard] Poll cancelled')
+        return
+      }
       if (stremioExpiresAt && Date.now() >= stremioExpiresAt) {
+        console.log('[StremioOAuthCard] OAuth link expired')
         setIsPolling(false)
         setStremioError('Stremio link expired. Generate a new link to continue.')
         if (onError) onError('Stremio link expired. Generate a new link to continue.')
         return
       }
       try {
+        // Use full origin for localhost to ensure Stremio recognizes it
         const host = window.location?.host || window.location?.hostname || 'syncio.app'
+        const origin = window.location?.origin || `http://${host}`
+        console.log('[StremioOAuthCard] Polling Stremio with host:', host, 'origin:', origin, 'code:', stremioCode.substring(0, 4) + '...')
         const res = await fetch(`https://link.stremio.com/api/v2/read?type=Read&code=${encodeURIComponent(stremioCode)}`, {
           headers: {
             'X-Requested-With': host,
+            'Origin': origin,
           },
+          referrerPolicy: 'no-referrer',
         })
+        console.log('[StremioOAuthCard] Stremio response status:', res.status)
         const data = await res.json().catch(() => ({}))
+        console.log('[StremioOAuthCard] Stremio response data:', {
+          success: data?.result?.success,
+          hasAuthKey: !!data?.result?.authKey,
+          error: data?.error
+        })
         if (!data || cancelled) return
         if (data?.result?.success && data.result.authKey) {
+          console.log('[StremioOAuthCard] OAuth completed! AuthKey detected, calling completeStremioLogin')
           // OAuth code was used - try to complete login
           // If completion fails (e.g., email mismatch), mark as used/expired
           try {
             await completeStremioLogin(data.result.authKey)
+            console.log('[StremioOAuthCard] completeStremioLogin finished successfully')
           } catch (err: any) {
+            console.error('[StremioOAuthCard] completeStremioLogin failed:', err)
             // If completion fails, mark OAuth as used/expired
             setIsOAuthUsed(true)
             setIsPolling(false)
@@ -261,11 +327,15 @@ export function StremioOAuthCard({
             if (onError) onError('Stremio link expired. Generate a new link to continue.')
           }
         } else if (data?.error && data.error.code && data.error.code !== 101) {
+          console.log('[StremioOAuthCard] Stremio returned error:', data.error)
           const message = data.error.message || 'Stremio reported an error. Try again.'
           setStremioError(message)
           if (onError) onError(message)
+        } else {
+          console.log('[StremioOAuthCard] OAuth not completed yet (code 101 = pending)')
         }
       } catch (err: any) {
+        console.error('[StremioOAuthCard] Polling error:', err)
         if (!cancelled) {
           const message = 'Network error while checking Stremio status'
           setStremioError(message)
@@ -275,14 +345,27 @@ export function StremioOAuthCard({
     }
 
     const interval = window.setInterval(pollOnce, 5000)
+    console.log('[StremioOAuthCard] Polling interval set, calling pollOnce immediately')
     pollOnce()
     return () => {
+      console.log('[StremioOAuthCard] Cleaning up polling interval')
       cancelled = true
       window.clearInterval(interval)
     }
   }, [active, completeStremioLogin, isCompleting, isPolling, onError, stremioCode, stremioExpiresAt])
 
-  if (!active) return null
+  if (!active) {
+    console.log('🔴 [StremioOAuthCard] Component not active, returning null')
+    return null
+  }
+  
+  console.log('🟢 [StremioOAuthCard] Component is active, rendering. State:', {
+    stremioCode: stremioCode ? stremioCode.substring(0, 4) + '...' : 'null',
+    isPolling,
+    isCompleting,
+    hasLink: !!stremioLink,
+    hasInitialLink: !!initialLink
+  })
 
   const content = (
     <>
