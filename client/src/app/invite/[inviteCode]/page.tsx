@@ -9,6 +9,7 @@ import { invitationsAPI, usersAPI } from '@/services/api'
 import { InvitePageLayout } from './components/InvitePageLayout'
 import { RequestAccessForm } from './components/RequestAccessForm'
 import { RequestAcceptedPage } from './components/RequestAcceptedPage'
+import { RequestRenewedPage } from './components/RequestRenewedPage'
 import { StatusPage } from './components/StatusPage'
 
 export default function InviteRequestPage() {
@@ -80,11 +81,8 @@ export default function InviteRequestPage() {
   const emailCheckTimerRef = React.useRef<NodeJS.Timeout | null>(null)
   const usernameCheckTimerRef = React.useRef<NodeJS.Timeout | null>(null)
 
-  // Mark as mounted (state already initialized from localStorage synchronously)
   React.useEffect(() => {
     setIsMounted(true)
-    // Only update state if localStorage has changed (e.g., from another tab)
-    // requestSubmitted is already restored in getInitialState() if email/username and submitted flag exist
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem(storageKey)
       if (saved) {
@@ -109,7 +107,6 @@ export default function InviteRequestPage() {
     }
   }, [storageKey, email, username, emailMismatchError, requestSubmitted])
 
-  // Check if invitation is disabled on page load
   React.useEffect(() => {
     if (!isMounted || !inviteCode) {
       setIsCheckingInvitation(false)
@@ -117,7 +114,6 @@ export default function InviteRequestPage() {
     }
     
     setIsCheckingInvitation(true)
-    // Check if invitation is active without creating a request
     invitationsAPI.checkInvitation(inviteCode)
       .then((data) => {
         // Invitation exists, so it's not "not found"
@@ -128,13 +124,11 @@ export default function InviteRequestPage() {
         setIsInvitationDisabled(!data.isActive || isMaxUsesReached || isExpired)
       })
       .catch((error: any) => {
-        // Check if invitation not found (404)
         if (error?.response?.status === 404) {
           setIsInvitationNotFound(true)
-          setIsInvitationDisabled(false) // Don't show disabled message for not found
+          setIsInvitationDisabled(false)
         } else {
-          // Other errors, treat as disabled (but invitation exists)
-          setIsInvitationNotFound(false) // Invitation exists, just error checking it
+          setIsInvitationNotFound(false)
           setIsInvitationDisabled(true)
         }
       })
@@ -148,13 +142,12 @@ export default function InviteRequestPage() {
   const [isGeneratingOAuth, setIsGeneratingOAuth] = React.useState(false)
   const [lastOAuthLink, setLastOAuthLink] = React.useState<string | null>(null)
   const [lastOAuthCode, setLastOAuthCode] = React.useState<string | null>(null)
-  const [oauthKeyVersion, setOauthKeyVersion] = React.useState(0) // Track OAuth link/code changes for key
+  const [isRenewed, setIsRenewed] = React.useState(false)
+  const [oauthKeyVersion, setOauthKeyVersion] = React.useState(0)
   const oauthPollerRef = React.useRef<number | null>(null)
   const [isCreatingUser, setIsCreatingUser] = React.useState(false)
-  const hasAttemptedCreationRef = React.useRef<Set<string>>(new Set()) // Track which OAuth codes we've already tried
-  const verificationFailureCountRef = React.useRef<Map<string, number>>(new Map()) // Track verification failures per OAuth code
-
-  // check request status
+  const hasAttemptedCreationRef = React.useRef<Set<string>>(new Set())
+  const verificationFailureCountRef = React.useRef<Map<string, number>>(new Map())
   const { data: status, dataUpdatedAt, refetch: refetchStatus, error: statusError, isLoading: isLoadingStatus } = useQuery({
     queryKey: ['invite-status', inviteCode, email, username],
     queryFn: () => invitationsAPI.checkStatus(inviteCode, email, username),
@@ -187,10 +180,8 @@ export default function InviteRequestPage() {
           setLastOAuthCode((status as any).oauthCode)
         }
       } else {
-        // OAuth link was cleared - reset state and clear email mismatch error
         setOauthLinkGenerated(false)
         setEmailMismatchError(false)
-        // Clear from localStorage
         if (typeof window !== 'undefined') {
           const saved = localStorage.getItem(storageKey)
           if (saved) {
@@ -222,7 +213,6 @@ export default function InviteRequestPage() {
     }
   }, [statusError, storageKey])
 
-  // detect oauth link/code changes
   const prevDataUpdatedAtRef = React.useRef<number>(0)
   const prevLinkRef = React.useRef<string | null>(null)
   const prevCodeRef = React.useRef<string | null>(null)
@@ -230,7 +220,6 @@ export default function InviteRequestPage() {
   
   React.useEffect(() => {
     if (!status || !dataUpdatedAt) return
-    
     if (dataUpdatedAt <= prevDataUpdatedAtRef.current) return
     
     const statusData = status as any
@@ -244,19 +233,20 @@ export default function InviteRequestPage() {
     const linkChanged = currentLink !== null && currentLink !== prevLink
     const codeChanged = currentCode !== null && currentCode !== prevCode
     const statusChanged = currentStatus !== prevStatus
-    
-    // Detect when OAuth link is cleared (was present, now null)
     const linkCleared = prevLink !== null && currentLink === null
     
-    // Reset oauthLinkGenerated when OAuth link is cleared
     if (linkCleared) {
       setOauthLinkGenerated(false)
       setLastOAuthLink(null)
       setLastOAuthCode(null)
-      setOauthKeyVersion(prev => prev + 1) // Force OAuth card to re-render
-      // Update refs so next comparison works correctly
+      setOauthKeyVersion(prev => prev + 1)
+      setIsRenewed(true)
       prevLinkRef.current = currentLink
       prevCodeRef.current = currentCode
+    }
+    
+    if (statusChanged && currentStatus === 'completed') {
+      setIsRenewed(false)
     }
     
     if (linkChanged || codeChanged) {
@@ -1024,6 +1014,23 @@ export default function InviteRequestPage() {
           </StatusPage>
         )
       }
+      
+      if (isRenewed) {
+        return (
+          <RequestRenewedPage
+            oauthLink={statusData?.oauthLink || null}
+            oauthCode={statusData?.oauthCode || null}
+            oauthExpiresAt={statusData?.oauthExpiresAt || null}
+            oauthLinkGenerated={oauthLinkGenerated}
+            oauthKeyVersion={oauthKeyVersion}
+            isGeneratingOAuth={isGeneratingOAuth}
+            isCompleting={completeMutation.isPending}
+            onGenerateOAuth={handleGenerateOAuth}
+            onAuthKey={handleOAuthAuthKey}
+          />
+        )
+      }
+      
       return (
         <RequestAcceptedPage
           oauthLink={statusData?.oauthLink || null}
