@@ -69,7 +69,7 @@ export function RequestAccessForm({
         </div>
         <button
           type="submit"
-          disabled={isSubmitting || !!emailError || !!usernameError || isCheckingEmail || isCheckingUsername}
+          disabled={isSubmitting || !!emailError || !!usernameError}
           className="w-full px-4 py-3 rounded-lg transition-colors disabled:opacity-50 color-surface hover:opacity-90"
         >
           {isSubmitting ? 'Submitting...' : 'Submit Request'}

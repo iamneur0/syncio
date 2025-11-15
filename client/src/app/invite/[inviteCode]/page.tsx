@@ -34,10 +34,16 @@ export default function InviteRequestPage() {
     if (saved) {
       try {
         const parsed = JSON.parse(saved)
+        // Restore email/username
+        const restoredEmail = parsed.email || ''
+        const restoredUsername = parsed.username || ''
+        // Only restore requestSubmitted if we have both email and username AND submitted flag is true
+        // This allows refresh to restore the correct page, but prevents auto-redirect while typing
+        const shouldRestoreSubmitted = restoredEmail && restoredUsername && parsed.submitted === true
         return {
-          email: parsed.email || '',
-          username: parsed.username || '',
-          requestSubmitted: parsed.submitted === true || false,
+          email: restoredEmail,
+          username: restoredUsername,
+          requestSubmitted: shouldRestoreSubmitted,
           emailMismatchError: parsed.emailMismatchError === true || false
         }
       } catch {
@@ -78,6 +84,7 @@ export default function InviteRequestPage() {
   React.useEffect(() => {
     setIsMounted(true)
     // Only update state if localStorage has changed (e.g., from another tab)
+    // requestSubmitted is already restored in getInitialState() if email/username and submitted flag exist
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem(storageKey)
       if (saved) {
@@ -86,14 +93,21 @@ export default function InviteRequestPage() {
           // Only update if values differ (to avoid unnecessary re-renders)
           if (parsed.email && parsed.email !== email) setEmail(parsed.email)
           if (parsed.username && parsed.username !== username) setUsername(parsed.username)
-          if (parsed.submitted === true && !requestSubmitted) setRequestSubmitted(true)
-          if (parsed.emailMismatchError === true && !emailMismatchError) setEmailMismatchError(true)
+          // Restore requestSubmitted if we have email/username and submitted flag (for cross-tab sync)
+          if (parsed.submitted === true && parsed.email && parsed.username && !requestSubmitted) {
+            setRequestSubmitted(true)
+          }
+          // Only restore emailMismatchError if email and username match what's stored
+          if (parsed.emailMismatchError === true && !emailMismatchError &&
+              parsed.email === email.trim() && parsed.username === username.trim()) {
+            setEmailMismatchError(true)
+          }
         } catch {
           // Ignore parse errors
         }
       }
     }
-  }, [storageKey, email, username, requestSubmitted, emailMismatchError])
+  }, [storageKey, email, username, emailMismatchError, requestSubmitted])
 
   // Check if invitation is disabled on page load
   React.useEffect(() => {
@@ -163,16 +177,37 @@ export default function InviteRequestPage() {
 
   // handle oauth link when status changes
   React.useEffect(() => {
-    if (status && (status as any).status === 'accepted' && (status as any).oauthLink) {
-      setOauthLinkGenerated(true)
-      if (!lastOAuthLink && (status as any).oauthLink) {
-        setLastOAuthLink((status as any).oauthLink)
-      }
-      if (!lastOAuthCode && (status as any).oauthCode) {
-        setLastOAuthCode((status as any).oauthCode)
+    if (status && (status as any).status === 'accepted') {
+      if ((status as any).oauthLink) {
+        setOauthLinkGenerated(true)
+        if (!lastOAuthLink && (status as any).oauthLink) {
+          setLastOAuthLink((status as any).oauthLink)
+        }
+        if (!lastOAuthCode && (status as any).oauthCode) {
+          setLastOAuthCode((status as any).oauthCode)
+        }
+      } else {
+        // OAuth link was cleared - reset state and clear email mismatch error
+        setOauthLinkGenerated(false)
+        setEmailMismatchError(false)
+        // Clear from localStorage
+        if (typeof window !== 'undefined') {
+          const saved = localStorage.getItem(storageKey)
+          if (saved) {
+            try {
+              const parsed = JSON.parse(saved)
+              localStorage.setItem(storageKey, JSON.stringify({
+                ...parsed,
+                emailMismatchError: false
+              }))
+            } catch {
+              // Ignore parse errors
+            }
+          }
+        }
       }
     }
-  }, [status, lastOAuthLink, lastOAuthCode])
+  }, [status, lastOAuthLink, lastOAuthCode, storageKey])
 
   // handle status errors
   React.useEffect(() => {
@@ -513,6 +548,11 @@ export default function InviteRequestPage() {
       return
     }
     
+    // Don't poll if there's an email mismatch error (already failed once)
+    if (emailMismatchError) {
+      return
+    }
+    
     if (!statusData?.oauthCode || !statusData?.oauthLink || statusData?.status !== 'accepted') {
       return
     }
@@ -733,12 +773,17 @@ export default function InviteRequestPage() {
     } catch (error) {
       // Silently handle polling errors
     }
-  }, [status, inviteCode, email, username, isCreatingUser, completeMutation.isPending, refetchStatus])
+  }, [status, inviteCode, email, username, isCreatingUser, completeMutation.isPending, refetchStatus, emailMismatchError])
 
   React.useEffect(() => {
     if (oauthPollerRef.current) {
       clearInterval(oauthPollerRef.current)
       oauthPollerRef.current = null
+    }
+
+    // Don't poll if there's an email mismatch error
+    if (emailMismatchError) {
+      return
     }
 
     const statusData = status as any
@@ -762,7 +807,7 @@ export default function InviteRequestPage() {
         oauthPollerRef.current = null
       }
     }
-  }, [status, pollOAuthCompletion, isCreatingUser, completeMutation.isPending])
+  }, [status, pollOAuthCompletion, isCreatingUser, completeMutation.isPending, emailMismatchError])
 
   const handleGenerateOAuth = async () => {
     if (!email || !username) return
