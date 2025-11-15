@@ -173,7 +173,7 @@ function RequestItem({
                 href={request.oauthLink}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="p-2 rounded-lg color-hover text-blue-500"
+                className="p-2 rounded-lg transition-colors color-text color-hover"
                 title="Open OAuth link"
               >
                 <ExternalLink className="w-4 h-4" />
@@ -181,7 +181,7 @@ function RequestItem({
               <button
                 onClick={() => onRefreshOAuth(request.id)}
                 disabled={isRefreshingOAuth}
-                className="p-2 rounded-lg color-hover text-blue-500 disabled:opacity-50"
+                className="p-2 rounded-lg transition-colors color-text color-hover disabled:opacity-50"
                 title="Clear OAuth link (user can generate new one)"
               >
                 <RefreshCw className={`w-4 h-4 ${isRefreshingOAuth ? 'animate-spin' : ''}`} />
@@ -204,12 +204,12 @@ export default function InviteDetailModal({
   const queryClient = useQueryClient()
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [requestToReject, setRequestToReject] = useState<string | null>(null)
-  // track oauth codes that were used but user wasn't created
   const [oauthUsedRequests, setOauthUsedRequests] = useState<Set<string>>(new Set())
+  const [renewedRequests, setRenewedRequests] = useState<Set<string>>(new Set())
+  const justClearedOAuthRef = React.useRef<Set<string>>(new Set())
   
   const invitationColorStyles = getEntityColorStyles(themeName, 1)
 
-  // close on escape
   useEffect(() => {
     if (!isOpen) return
     const handleEscape = (e: KeyboardEvent) => {
@@ -233,18 +233,38 @@ export default function InviteDetailModal({
 
   const currentInvitation = invitationDetails || invitation
 
-  // check if oauth codes were used but user creation failed
   useEffect(() => {
     if (!isOpen || !currentInvitation?.requests) return
 
-    // remove completed requests from oauth used tracking
-    setOauthUsedRequests(prev => {
-      const completed = currentInvitation.requests
-        .filter((req: InviteRequest) => req.status === 'completed')
+    const completed = currentInvitation.requests
+      .filter((req: InviteRequest) => req.status === 'completed')
+      .map((req: InviteRequest) => req.id)
+    
+    if (completed.length > 0) {
+      setOauthUsedRequests(prev => {
+        const next = new Set(prev)
+        completed.forEach((id: string) => next.delete(id))
+        return next
+      })
+      setRenewedRequests(prev => {
+        const next = new Set(prev)
+        completed.forEach((id: string) => next.delete(id))
+        return next
+      })
+    }
+    
+    setRenewedRequests(prev => {
+      const withNewOAuth = currentInvitation.requests
+        .filter((req: InviteRequest) => 
+          req.status === 'accepted' && 
+          req.oauthLink && req.oauthCode &&
+          prev.has(req.id) &&
+          !justClearedOAuthRef.current.has(req.id)
+        )
         .map((req: InviteRequest) => req.id)
-      if (completed.length === 0) return prev
+      if (withNewOAuth.length === 0) return prev
       const next = new Set(prev)
-      completed.forEach((id: string) => next.delete(id))
+      withNewOAuth.forEach((id: string) => next.delete(id))
       return next
     })
 
@@ -271,7 +291,6 @@ export default function InviteDetailModal({
 
           const data = await response.json().catch(() => ({}))
           
-          // if oauth was used (has authKey) but still accepted, mark as expired
           if (data?.result?.success && data.result.authKey && request.status === 'accepted') {
             setOauthUsedRequests(prev => new Set(prev).add(request.id))
           }
@@ -282,7 +301,7 @@ export default function InviteDetailModal({
     }
 
     const interval = setInterval(checkOAuthUsage, 5000)
-    checkOAuthUsage() // check right away
+    checkOAuthUsage()
 
     return () => clearInterval(interval)
   }, [isOpen, currentInvitation?.requests, oauthUsedRequests])
@@ -326,22 +345,27 @@ export default function InviteDetailModal({
     }
   })
 
-  // clear oauth so user can make a new one
   const refreshOAuthMutation = useMutation({
     mutationFn: (requestId: string) => invitationsAPI.clearOAuth(requestId),
     onSuccess: async (_, requestId) => {
-      // Remove from expired tracking so it shows as "Accepted" again
       setOauthUsedRequests(prev => {
         const next = new Set(prev)
         next.delete(requestId)
         return next
       })
-      // Invalidate and refetch to get updated request data
+      
+      setRenewedRequests(prev => new Set(prev).add(requestId))
+      justClearedOAuthRef.current.add(requestId)
+      
       await queryClient.invalidateQueries({ queryKey: ['invitations'] })
       await queryClient.invalidateQueries({ queryKey: ['invitation', invitation?.id, 'details'] })
       await queryClient.invalidateQueries({ queryKey: ['invitation', invitation?.id, 'requests'] })
-      // Force refetch to ensure we get the latest data
       await queryClient.refetchQueries({ queryKey: ['invitation', invitation?.id, 'requests'] })
+      
+      setTimeout(() => {
+        justClearedOAuthRef.current.delete(requestId)
+      }, 1000)
+      
       toast.success('OAuth link cleared. User can now generate a new link.')
     },
     onError: (error: any) => {
@@ -407,11 +431,12 @@ export default function InviteDetailModal({
     toast.success('Invite link copied to clipboard')
   }
 
-  const getRequestStatusBadge = (status: string, request: InviteRequest) => {
+  const getRequestStatusBadge = React.useCallback((status: string, request: InviteRequest) => {
     const isOAuthExpired = request.oauthExpiresAt && new Date(request.oauthExpiresAt) < new Date()
     const isOAuthUsedButNotCompleted = oauthUsedRequests.has(request.id) && status === 'accepted'
+    const isRenewed = status === 'accepted' && renewedRequests.has(request.id)
     
-    let badgeStatus: 'pending' | 'accepted' | 'joined' | 'rejected'
+    let badgeStatus: 'pending' | 'accepted' | 'joined' | 'rejected' | 'renewed'
     let dotColor: string
     let text: string
     
@@ -424,8 +449,11 @@ export default function InviteDetailModal({
       dotColor = '#ef4444'
       text = 'Rejected'
     } else if (status === 'accepted') {
-      // oauth expired or used but failed
-      if (isOAuthUsedButNotCompleted || isOAuthExpired) {
+      if (isRenewed) {
+        badgeStatus = 'renewed'
+        dotColor = '#3b82f6'
+        text = 'Renewed'
+      } else if (isOAuthUsedButNotCompleted || isOAuthExpired) {
         badgeStatus = 'rejected'
         dotColor = '#ef4444'
         text = 'Expired'
@@ -464,7 +492,7 @@ export default function InviteDetailModal({
         {text}
       </div>
     )
-  }
+  }, [renewedRequests, oauthUsedRequests, themeName])
 
   if (!isOpen || !mounted) return null
 
