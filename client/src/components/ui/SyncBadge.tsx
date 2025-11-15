@@ -10,7 +10,7 @@ import { getEntityColorStyles } from '@/utils/colorMapping'
 
 interface SyncBadgeProps {
   // Simple mode - just show status
-  status?: 'synced' | 'unsynced' | 'stale' | 'connect' | 'syncing' | 'checking' | 'error'
+  status?: 'synced' | 'unsynced' | 'stale' | 'connect' | 'syncing' | 'checking' | 'error' | 'expired' | 'full' | 'incomplete'
   isClickable?: boolean
   onClick?: () => void
   title?: string
@@ -337,6 +337,27 @@ export default function SyncBadge({
         return {
           text: 'Error',
           background: `color-mix(in srgb, ${accentBackground} 65%, ${unsyncedDot} 35%)`,
+          dot: unsyncedDot,
+          textColor: accentTextColor
+        }
+      case 'expired':
+        return {
+          text: 'Expired',
+          background: baseBackground,
+          dot: unsyncedDot,
+          textColor: accentTextColor
+        }
+      case 'full':
+        return {
+          text: 'Full',
+          background: baseBackground,
+          dot: syncedDot,
+          textColor: accentTextColor
+        }
+      case 'incomplete':
+        return {
+          text: 'Incomplete',
+          background: baseBackground,
           dot: unsyncedDot,
           textColor: accentTextColor
         }

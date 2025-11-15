@@ -11,7 +11,7 @@ import InviteDetailModal from '@/components/modals/InviteDetailModal'
 import { ConfirmDialog } from '@/components/modals'
 import DateTimePicker from '@/components/ui/DateTimePicker'
 import EntityCard from '@/components/entities/EntityCard'
-import { InvitationStatusBadge } from '@/components/ui/InvitationStatusBadge'
+import { SyncBadge } from '@/components/ui'
 import { EmptyState } from '@/components/ui'
 
 interface Invitation {
@@ -71,7 +71,21 @@ export default function InvitesPage() {
     return () => document.removeEventListener('keydown', handleEscape)
   }, [showCreateModal])
   const [selectedInvitations, setSelectedInvitations] = React.useState<Set<string>>(new Set())
-  const [viewMode, setViewMode] = React.useState<'card' | 'list'>('card')
+  const [viewMode, setViewMode] = React.useState<'card' | 'list'>(() => {
+    if (typeof window !== 'undefined') {
+      const raw = String(localStorage.getItem('global-view-mode') || 'card').toLowerCase().trim()
+      return (raw === 'list' ? 'list' : 'card') as 'card' | 'list'
+    }
+    return 'card'
+  })
+  
+  const handleViewModeChange = (mode: 'card' | 'list') => {
+    setViewMode(mode)
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('global-view-mode', mode)
+    }
+  }
+  
   const [selectedInvitation, setSelectedInvitation] = React.useState<Invitation | null>(null)
   const [showDetailModal, setShowDetailModal] = React.useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = React.useState(false)
@@ -260,8 +274,14 @@ export default function InvitesPage() {
       return
     }
 
+    const finalMaxUses = Math.min(Math.max(maxUses || 1, 1), 10)
+    if (maxUses > 10) {
+      toast.error('Maximum uses cannot exceed 10')
+      return
+    }
+
     createMutation.mutate({
-      maxUses: maxUses || 1,
+      maxUses: finalMaxUses,
       expiresAt: expiresAt,
       groupName: selectedGroupForCreate || undefined
     })
@@ -338,7 +358,7 @@ export default function InvitesPage() {
         onSync={() => clearAllOAuthMutation.mutate()}
         onDelete={handleDelete}
         viewMode={viewMode}
-        onViewModeChange={setViewMode}
+        onViewModeChange={handleViewModeChange}
         isSyncing={clearAllOAuthMutation.isPending}
         isSyncDisabled={clearAllOAuthMutation.isPending}
         isDeleteDisabled={selectedInvitations.size === 0}
@@ -381,8 +401,12 @@ export default function InvitesPage() {
                 <input
                   type="number"
                   min="1"
+                  max="10"
                   value={maxUses}
-                  onChange={(e) => setMaxUses(parseInt(e.target.value) || 1)}
+                  onChange={(e) => {
+                    const value = parseInt(e.target.value) || 1
+                    setMaxUses(Math.min(Math.max(value, 1), 10))
+                  }}
                   className="w-full px-3 py-2 border rounded-lg focus:outline-none input"
                 />
               </div>
@@ -527,7 +551,7 @@ export default function InvitesPage() {
         />
       ) : (
         <div className={`mt-6 ${viewMode === 'card' ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4' : 'space-y-2'}`}>
-          filteredInvitations.map((invitation: Invitation) => (
+          {filteredInvitations.map((invitation: Invitation) => (
             <EntityCard
               key={invitation.id}
               variant="invitation"
@@ -539,7 +563,7 @@ export default function InvitesPage() {
                 colorIndex: 1,
                 maxUses: invitation.maxUses,
                 currentUses: invitation.currentUses,
-                expiresAt: invitation.expiresAt,
+                expiresAt: invitation.expiresAt ?? undefined,
                 groupName: invitation.groupName || undefined,
                 requests: invitation.requests
               }}
@@ -582,9 +606,22 @@ export default function InvitesPage() {
               }}
               isRefreshingOAuth={refreshAllUnusedOAuth.isPending}
               customBadge={
-                <InvitationStatusBadge 
-                  isComplete={invitation.currentUses >= invitation.maxUses}
-                  isExpired={invitation.expiresAt ? new Date(invitation.expiresAt) < new Date() : false}
+                <SyncBadge 
+                  status={
+                    invitation.expiresAt && new Date(invitation.expiresAt) < new Date()
+                      ? 'expired'
+                      : invitation.currentUses >= invitation.maxUses
+                      ? 'full'
+                      : 'incomplete'
+                  }
+                  isListMode={viewMode === 'list'}
+                  title={
+                    invitation.expiresAt && new Date(invitation.expiresAt) < new Date()
+                      ? 'Expired (invitation has expired)'
+                      : invitation.currentUses >= invitation.maxUses
+                      ? 'Full (max uses reached)'
+                      : 'Incomplete (not all invites used)'
+                  }
                 />
               }
               isListMode={viewMode === 'list'}

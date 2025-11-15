@@ -10,7 +10,7 @@ import { ConfirmDialog } from '@/components/modals'
 import { EntityList } from '@/components/entities'
 import { getEntityColorStyles } from '@/utils/colorMapping'
 import { formatDate } from '@/utils/dateUtils'
-import { InvitationStatusBadge } from '@/components/ui/InvitationStatusBadge'
+import { SyncBadge } from '@/components/ui'
 
 interface Invitation {
   id: string
@@ -97,7 +97,7 @@ function RequestItem({
   }, [oauthExpiresAtTimestamp, request.status, isOAuthExpired])
   
   return (
-    <div className="flex items-center justify-between p-4 rounded-lg border color-border">
+    <div className="flex items-center justify-between p-4 rounded-lg border color-border card hover:shadow-lg transition-all">
       <div className="flex items-center gap-3 flex-1 min-w-0">
         <div className="flex-shrink-0">
           <div
@@ -496,9 +496,21 @@ export default function InviteDetailModal({
                 <h2 className="font-medium transition-colors truncate text-xl" title={currentInvitation?.inviteCode}>
                   {currentInvitation?.inviteCode || 'Invitation'}
                 </h2>
-                <InvitationStatusBadge
-                  isComplete={(currentInvitation?.currentUses || 0) >= (currentInvitation?.maxUses || 0)}
-                  isExpired={currentInvitation?.expiresAt ? new Date(currentInvitation.expiresAt) < new Date() : false}
+                <SyncBadge
+                  status={
+                    currentInvitation?.expiresAt && new Date(currentInvitation.expiresAt) < new Date()
+                      ? 'expired'
+                      : (currentInvitation?.currentUses || 0) >= (currentInvitation?.maxUses || 0)
+                      ? 'full'
+                      : 'incomplete'
+                  }
+                  title={
+                    currentInvitation?.expiresAt && new Date(currentInvitation.expiresAt) < new Date()
+                      ? 'Expired (invitation has expired)'
+                      : (currentInvitation?.currentUses || 0) >= (currentInvitation?.maxUses || 0)
+                      ? 'Full (max uses reached)'
+                      : 'Incomplete (not all invites used)'
+                  }
                 />
               </div>
               <p className="text-sm mt-1 truncate color-text-secondary">
@@ -557,25 +569,26 @@ export default function InviteDetailModal({
                   </div>
                 </div>
 
-                <div className="mb-4">
-                  <h4 className="text-sm font-semibold mb-2">Created</h4>
-                  <div className="px-3 py-2 rounded-lg input">
-                    <p className="text-sm color-text-secondary">
-                      {formatDate(currentInvitation?.createdAt || null)}
-                    </p>
-                  </div>
-                </div>
-
-                {currentInvitation?.expiresAt && (
-                  <div className="mb-4">
-                    <h4 className="text-sm font-semibold mb-2">Expires</h4>
+                <div className="mb-4 flex gap-4">
+                  <div className="flex-1">
+                    <h4 className="text-sm font-semibold mb-2">Created</h4>
                     <div className="px-3 py-2 rounded-lg input">
                       <p className="text-sm color-text-secondary">
-                        {formatDate(currentInvitation.expiresAt)}
+                        {formatDate(currentInvitation?.createdAt || null)}
                       </p>
                     </div>
                   </div>
-                )}
+                  {currentInvitation?.expiresAt && (
+                    <div className="flex-1">
+                      <h4 className="text-sm font-semibold mb-2">Expires</h4>
+                      <div className="px-3 py-2 rounded-lg input">
+                        <p className="text-sm color-text-secondary">
+                          {formatDate(currentInvitation.expiresAt)}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
 
               <EntityList
