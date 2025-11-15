@@ -476,14 +476,18 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, encrypt, decrypt, assign
 
       if (!request) return res.status(404).json({ error: 'Request not found' })
       if (request.invitation.accountId !== accountId) return res.status(403).json({ error: 'Forbidden' })
-      if (request.status !== 'accepted') return res.status(400).json({ error: 'Request is not accepted' })
+      // Allow clearing OAuth for accepted requests (or expired ones that were accepted)
+      if (request.status !== 'accepted' && request.status !== 'completed') {
+        return res.status(400).json({ error: 'Request must be accepted to clear OAuth link' })
+      }
 
       const updatedRequest = await prisma.inviteRequest.update({
         where: { id: requestId },
         data: {
           oauthCode: null,
           oauthLink: null,
-          oauthExpiresAt: null
+          oauthExpiresAt: null,
+          status: 'accepted' // Reset to accepted so user can generate new OAuth link
         }
       })
 

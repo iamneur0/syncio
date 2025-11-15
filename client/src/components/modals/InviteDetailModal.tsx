@@ -329,9 +329,19 @@ export default function InviteDetailModal({
   // clear oauth so user can make a new one
   const refreshOAuthMutation = useMutation({
     mutationFn: (requestId: string) => invitationsAPI.clearOAuth(requestId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['invitations'] })
-      queryClient.invalidateQueries({ queryKey: ['invitation', invitation?.id, 'details'] })
+    onSuccess: async (_, requestId) => {
+      // Remove from expired tracking so it shows as "Accepted" again
+      setOauthUsedRequests(prev => {
+        const next = new Set(prev)
+        next.delete(requestId)
+        return next
+      })
+      // Invalidate and refetch to get updated request data
+      await queryClient.invalidateQueries({ queryKey: ['invitations'] })
+      await queryClient.invalidateQueries({ queryKey: ['invitation', invitation?.id, 'details'] })
+      await queryClient.invalidateQueries({ queryKey: ['invitation', invitation?.id, 'requests'] })
+      // Force refetch to ensure we get the latest data
+      await queryClient.refetchQueries({ queryKey: ['invitation', invitation?.id, 'requests'] })
       toast.success('OAuth link cleared. User can now generate a new link.')
     },
     onError: (error: any) => {
