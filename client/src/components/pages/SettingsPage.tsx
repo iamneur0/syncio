@@ -839,7 +839,37 @@ export default function SettingsPage() {
   }
 
   return (
-    <div ref={containerRef} className="p-4 sm:p-6" style={{ scrollbarGutter: 'stable' }}>
+    <div ref={containerRef} className="p-4 sm:p-6 relative" style={{ scrollbarGutter: 'stable' }}>
+      {/* Desktop Support Buttons - Fixed on Right */}
+      <div className="hidden lg:flex flex-row gap-3 fixed right-6 bottom-6 z-10">
+        <a
+          href="https://buymeacoffee.com/neur0"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-block hover:opacity-80 transition-opacity"
+          title="Buy me a coffee"
+        >
+          <img 
+            src="/assets/bmc-small.png" 
+            alt="Buy me a coffee" 
+            className="h-10 w-auto"
+          />
+        </a>
+        <a
+          href="https://ko-fi.com/neur0"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-block hover:opacity-80 transition-opacity"
+          title="Support me on Ko-fi"
+        >
+          <img 
+            src="/assets/kofi-small.png" 
+            alt="Support me on Ko-fi" 
+            className="h-10 w-auto"
+          />
+        </a>
+      </div>
+
       {/* Header */}
       <div className="mb-6 sm:mb-8">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4 gap-4">
@@ -1097,6 +1127,42 @@ export default function SettingsPage() {
                 />
               ))}
           </div>
+        </div>
+      </div>
+
+      {/* Support - Mobile Only */}
+      <div className="lg:hidden p-4 rounded-lg border mt-6 card">
+        <h2 className={`text-lg font-semibold`}>Support</h2>
+        <p className={`text-sm mt-1 color-text-secondary`}>
+          If you find Syncio useful, consider supporting the project.
+        </p>
+        <div className="mt-4 flex flex-wrap gap-4">
+          <a
+            href="https://buymeacoffee.com/neur0"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-block hover:opacity-80 transition-opacity"
+            title="Buy me a coffee"
+          >
+            <img 
+              src="/assets/bmc.png" 
+              alt="Buy me a coffee" 
+              className="h-10 w-auto"
+            />
+          </a>
+          <a
+            href="https://ko-fi.com/neur0"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-block hover:opacity-80 transition-opacity"
+            title="Support me on Ko-fi"
+          >
+            <img 
+              src="/assets/kofi.png" 
+              alt="Support me on Ko-fi" 
+              className="h-10 w-auto"
+            />
+          </a>
         </div>
       </div>
 

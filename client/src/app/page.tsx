@@ -134,15 +134,15 @@ export default function HomePage() {
         {/* Version badge */}
         <div className="px-3 pb-0 mt-auto">
           <div className="flex items-center justify-center gap-2 py-2">
-            {appVersion !== 'dev' && (
-              <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: isUpToDate ? 'var(--color-positive)' : 'var(--color-negative)' }} />
-            )}
-            <span className="text-xs font-medium theme-text-3">v{appVersion}</span>
             <button
               onClick={() => activateTab('changelog', true)}
-              className="p-1.5 hover:opacity-80 transition-opacity theme-text-3"
+              className="flex items-center gap-1.5 hover:opacity-80 transition-opacity theme-text-3"
               title="What's New"
             >
+              {appVersion !== 'dev' && (
+                <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: isUpToDate ? '#22c55e' : '#ef4444' }} />
+              )}
+              <span className="text-xs font-medium">v{appVersion}</span>
               <ScrollText className="w-4 h-4" />
             </button>
             <a
@@ -211,15 +211,15 @@ export default function HomePage() {
         <div className={`${sidebarCollapsed ? 'px-1' : 'px-3'} pb-0 flex-shrink-0 mt-auto`}>
           {sidebarCollapsed ? (
             <div className="flex flex-col items-center gap-1 py-1">
-              {appVersion !== 'dev' && (
-                <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: isUpToDate ? 'var(--color-positive)' : 'var(--color-negative)' }} />
-              )}
-              <span className="text-xs font-medium leading-tight break-all text-center theme-text-3">v{appVersion}</span>
               <button
                 onClick={() => activateTab('changelog')}
-                className="p-1.5 hover:opacity-80 transition-opacity theme-text-3"
+                className="flex flex-col items-center gap-1 hover:opacity-80 transition-opacity theme-text-3"
                 title="What's New"
               >
+                {appVersion !== 'dev' && (
+                  <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: isUpToDate ? '#22c55e' : '#ef4444' }} />
+                )}
+                <span className="text-xs font-medium leading-tight break-all text-center">v{appVersion}</span>
                 <ScrollText className="w-4 h-4" />
               </button>
               <a
@@ -234,15 +234,15 @@ export default function HomePage() {
             </div>
           ) : (
             <div className="flex items-center justify-center gap-2 py-2">
-              {appVersion !== 'dev' && (
-                <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: isUpToDate ? 'var(--color-positive)' : 'var(--color-negative)' }} />
-              )}
-              <span className="text-xs font-medium theme-text-3">v{appVersion}</span>
               <button
                 onClick={() => activateTab('changelog')}
-                className="p-1.5 hover:opacity-80 transition-opacity theme-text-3"
+                className="flex items-center gap-1.5 hover:opacity-80 transition-opacity theme-text-3"
                 title="What's New"
               >
+                {appVersion !== 'dev' && (
+                  <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: isUpToDate ? '#22c55e' : '#ef4444' }} />
+                )}
+                <span className="text-xs font-medium">v{appVersion}</span>
                 <ScrollText className="w-4 h-4" />
               </button>
               <a
