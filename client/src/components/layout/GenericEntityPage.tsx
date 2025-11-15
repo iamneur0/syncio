@@ -657,7 +657,7 @@ export default function GenericEntityPage({ config }: GenericEntityPageProps) {
 
   return (
     <>
-      <div className="p-4 sm:p-6 space-y-6">
+      <div className="pt-2 px-4 pb-4 sm:p-6 space-y-6">
         <PageHeader
           title={finalConfig.title}
           description={finalConfig.description}
