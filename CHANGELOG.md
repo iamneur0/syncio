@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.3.0](https://github.com/iamneur0/syncio/compare/v0.2.2...v0.3.0) (2025-11-15)
+
+
+### Features
+
+* added option for custom addon names and descriptions ([daacec3](https://github.com/iamneur0/syncio/commit/daacec3584fb69f1edb0e3f3787a5d3cc3b41d6c))
+* better handling of invite edge cases like existing user, different emails from request and stremio ([6076e1b](https://github.com/iamneur0/syncio/commit/6076e1b2640fc6fbfbe1170d0152bf32be1865f7))
+* filters + improved page headr for desktop and mobile ([33ab1fa](https://github.com/iamneur0/syncio/commit/33ab1fa5de67805b7f54227e09753f7b3bcbdbf3))
+* invite users with OAuth ([09d9ac0](https://github.com/iamneur0/syncio/commit/09d9ac058b40eb1e9ac2876d4da7b253de83e150))
+* new settings + missing invite utils ([4e7be71](https://github.com/iamneur0/syncio/commit/4e7be7139b366078cc12a32afb2d04b1ee9cda10))
+* oauth account creation ([87eb621](https://github.com/iamneur0/syncio/commit/87eb62155ad39222c4638b52b56ac0d074e1e8dd))
+* oauth user creation ([5c0a443](https://github.com/iamneur0/syncio/commit/5c0a4435a5f6c94a32b0d6e51a39a9bc0c679e55))
+* stremio account linking for uuid only users ([2da55f4](https://github.com/iamneur0/syncio/commit/2da55f4d8cf75929652b8d76c6a39eac12637d6e))
+* user invitation ([eb4b765](https://github.com/iamneur0/syncio/commit/eb4b7652a56fdc895ed2a8bc62dafe3cdf407178))
+
+
+### Bug Fixes
+
+* account button now showing email from oauth and updated account db fiedls ([3d3f397](https://github.com/iamneur0/syncio/commit/3d3f397905003ef468537d9fbab0d7603630ca81))
+* addons ordered in alphabetical order for Hamtaro ([8d992ae](https://github.com/iamneur0/syncio/commit/8d992ae796be10e0de3191d2300c90daeba7a78c))
+* better handling of no invites ([79129a9](https://github.com/iamneur0/syncio/commit/79129a90098199b1551a2df690e522e3df806cf7))
+* description and version changes now properly detected, sync now comparing full manifests ([4a8059f](https://github.com/iamneur0/syncio/commit/4a8059f1a51aad3ee91ed53ebef6fd20acdfbbfe))
+* sync and backup auto sync delay respected (to test for +1d) ([1b8213e](https://github.com/iamneur0/syncio/commit/1b8213e18024e869d281871737c14c568e22a02c))
+* UI tweaks for invite page ([3dd99f2](https://github.com/iamneur0/syncio/commit/3dd99f2277d17f877fe3d408c62edc868e5b90a3))
+
+
+### Miscellaneous Chores
+
+* release 0.3.0 ([bfefdd8](https://github.com/iamneur0/syncio/commit/bfefdd89d88c4256f127ad601530b38ecaa47236))
+
 ## [0.2.2](https://github.com/iamneur0/syncio/compare/v0.2.1...v0.2.2) (2025-11-12)
 
 
