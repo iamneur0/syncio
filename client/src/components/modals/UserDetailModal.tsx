@@ -7,6 +7,7 @@ import { getEntityColorStyles } from '@/utils/colorMapping'
 import { invalidateUserQueries, invalidateSyncStatusQueries } from '@/utils/queryUtils'
 import { userSuccessHandlers } from '@/utils/toastUtils'
 import { useModalState } from '@/hooks/useCommonState'
+import { useBodyScrollLock } from '@/hooks/useBodyScrollLock'
 import toast from 'react-hot-toast'
 import { VersionChip, SyncBadge } from '@/components/ui'
 import { EntityList, InlineEdit, AddonIcon, SortableAddonItem } from '@/components/entities'
@@ -54,6 +55,8 @@ export default function UserDetailModal({
   const { hideSensitive, theme: themeName } = useTheme()
   const queryClient = useQueryClient()
   const { mounted } = useModalState()
+  
+  useBodyScrollLock(isOpen)
   const [showColorPicker, setShowColorPicker] = useState(false)
   const logoRef = useRef<HTMLDivElement>(null)
   const { refreshAllSyncStatus } = useSyncStatusRefresh()

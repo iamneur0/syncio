@@ -4,6 +4,7 @@ import { X, Loader2, Copy, RefreshCw, Send, CheckCircle2, XCircle, Clock } from 
 import toast from 'react-hot-toast'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { usersAPI, groupsAPI } from '@/services/api'
+import { useBodyScrollLock } from '@/hooks/useBodyScrollLock'
 
 interface UserInviteModalProps {
   isOpen: boolean
@@ -39,6 +40,9 @@ export default function UserInviteModal({
   maxInvites = MAX_INVITES_DEFAULT,
 }: UserInviteModalProps) {
   const [mounted, setMounted] = useState(false)
+  
+  useBodyScrollLock(isOpen)
+  
   const [inviteCount, setInviteCount] = useState(1)
   const [invites, setInvites] = useState<InviteLink[]>([])
   const [isGeneratingAll, setIsGeneratingAll] = useState(false)

@@ -33,7 +33,7 @@ import { AddonDetailModal, UserDetailModal, GroupDetailModal, AddonAddModal, Use
 import { LoadingSkeleton, EmptyState } from '@/components/ui'
 
 // Types
-export type EntityType = 'addon' | 'user' | 'group'
+export type EntityType = 'addon' | 'user' | 'group' | 'invite'
 
 export interface EntityPageConfig {
   entityType: EntityType
@@ -67,6 +67,15 @@ export interface EntityPageConfig {
   getEntityId?: (entity: any) => string
   searchFields?: string[]
   customContent?: React.ReactNode | ((viewMode: 'card' | 'list') => React.ReactNode)
+  customFilter?: (entities: any[], statusFilter: string, searchTerm: string) => any[]
+  customSort?: (entities: any[]) => any[]
+  customSync?: () => void
+  customSyncLabel?: string
+  refetchInterval?: number
+  customEntityTransform?: (entity: any) => any
+  customToggleHandler?: (id: string, isActive: boolean, entity: any) => void
+  customBadgeRenderer?: (entity: any, viewMode: 'card' | 'list') => React.ReactNode
+  customRefreshOAuth?: (entity: any) => void
 }
 
 interface GenericEntityPageProps {
@@ -131,7 +140,9 @@ export default function GenericEntityPage({ config }: GenericEntityPageProps) {
   // Data fetching
   const { data: entities, isLoading, error } = useQuery({
     queryKey: [finalConfig.entityType],
-    queryFn: finalConfig.api.getAll
+    queryFn: finalConfig.api.getAll,
+    staleTime: finalConfig.entityType === 'invite' ? 0 : undefined,
+    refetchInterval: finalConfig.refetchInterval
   })
 
   // Get related data for modals
@@ -584,55 +595,63 @@ export default function GenericEntityPage({ config }: GenericEntityPageProps) {
     
     let filtered = entities
     
-    // Apply status filter for addons, users and groups
-    if (statusFilter !== 'all') {
-      filtered = filtered.filter((entity: any) => {
-        // For addons, only check active/inactive status
-        if (finalConfig.entityType === 'addon') {
-          if (statusFilter === 'active' || statusFilter === 'inactive') {
-            const isActive = finalConfig.getEntityStatus?.(entity) ?? (entity.status === 'active' || entity.isActive === true)
-            return statusFilter === 'active' ? isActive : !isActive
-          }
-          return true
-        }
-        
-        // For users and groups
-        if (finalConfig.entityType === 'user' || finalConfig.entityType === 'group') {
-          // Check active/inactive status
-          if (statusFilter === 'active' || statusFilter === 'inactive') {
-            const isActive = entity.isActive === true
-            return statusFilter === 'active' ? isActive : !isActive
+    // Use custom filter if provided
+    if (finalConfig.customFilter) {
+      filtered = finalConfig.customFilter(filtered, statusFilter, searchTerm)
+    } else {
+      // Apply status filter for addons, users and groups
+      if (statusFilter !== 'all') {
+        filtered = filtered.filter((entity: any) => {
+          // For addons, only check active/inactive status
+          if (finalConfig.entityType === 'addon') {
+            if (statusFilter === 'active' || statusFilter === 'inactive') {
+              const isActive = finalConfig.getEntityStatus?.(entity) ?? (entity.status === 'active' || entity.isActive === true)
+              return statusFilter === 'active' ? isActive : !isActive
+            }
+            return true
           }
           
-          // Check sync status
-          if (statusFilter === 'synced' || statusFilter === 'unsynced' || statusFilter === 'stale') {
-            const syncStatusMap = finalConfig.entityType === 'user' 
-              ? userSyncStatuses.data 
-              : groupSyncStatuses.data
-            const entitySyncStatus = syncStatusMap?.[entity.id] || 'unsynced'
-            return entitySyncStatus === statusFilter
+          // For users and groups
+          if (finalConfig.entityType === 'user' || finalConfig.entityType === 'group') {
+            // Check active/inactive status
+            if (statusFilter === 'active' || statusFilter === 'inactive') {
+              const isActive = entity.isActive === true
+              return statusFilter === 'active' ? isActive : !isActive
+            }
+            
+            // Check sync status
+            if (statusFilter === 'synced' || statusFilter === 'unsynced' || statusFilter === 'stale') {
+              const syncStatusMap = finalConfig.entityType === 'user' 
+                ? userSyncStatuses.data 
+                : groupSyncStatuses.data
+              const entitySyncStatus = syncStatusMap?.[entity.id] || 'unsynced'
+              return entitySyncStatus === statusFilter
+            }
           }
-        }
-        
-        return true
-      })
-    }
-    
-    // Apply search filter
-    if (searchTerm.trim()) {
-      const searchLower = searchTerm.toLowerCase()
-      const searchFields = finalConfig.searchFields || ['name', 'description']
-      
-      filtered = filtered.filter((entity: any) => {
-        return searchFields.some(field => {
-          const value = entity[field]
-          return value && String(value).toLowerCase().includes(searchLower)
+          
+          return true
         })
-      })
+      }
+      
+      // Apply search filter
+      if (searchTerm.trim()) {
+        const searchLower = searchTerm.toLowerCase()
+        const searchFields = finalConfig.searchFields || ['name', 'description']
+        
+        filtered = filtered.filter((entity: any) => {
+          return searchFields.some(field => {
+            const value = entity[field]
+            return value && String(value).toLowerCase().includes(searchLower)
+          })
+        })
+      }
     }
     
-    // Sort addons alphabetically by name
-    if (finalConfig.entityType === 'addon') {
+    // Use custom sort if provided
+    if (finalConfig.customSort) {
+      filtered = finalConfig.customSort(filtered)
+    } else if (finalConfig.entityType === 'addon') {
+      // Sort addons alphabetically by name
       filtered = [...filtered].sort((a: any, b: any) => {
         const nameA = (finalConfig.getEntityName?.(a) || a.name || '').toLowerCase()
         const nameB = (finalConfig.getEntityName?.(b) || b.name || '').toLowerCase()
@@ -641,7 +660,7 @@ export default function GenericEntityPage({ config }: GenericEntityPageProps) {
     }
     
     return filtered
-  }, [entities, searchTerm, statusFilter, finalConfig.searchFields, finalConfig.entityType, finalConfig.getEntityName, userSyncStatuses.data, groupSyncStatuses.data])
+  }, [entities, searchTerm, statusFilter, finalConfig.searchFields, finalConfig.entityType, finalConfig.getEntityName, finalConfig.customFilter, finalConfig.customSort, userSyncStatuses.data, groupSyncStatuses.data])
 
   // Check if empty state
   const isEmpty = !isLoading && Array.isArray(entities) && entities.length === 0
@@ -670,7 +689,7 @@ export default function GenericEntityPage({ config }: GenericEntityPageProps) {
           onAdd={() => setShowAddModal(true)}
           onInvite={undefined}
           onReload={finalConfig.entityType === 'addon' ? () => reloadAllMutation.mutate() : undefined}
-          onSync={finalConfig.entityType === 'group' || finalConfig.entityType === 'user' ? () => syncAllMutation.mutate() : undefined}
+          onSync={finalConfig.customSync ? finalConfig.customSync : (finalConfig.entityType === 'group' || finalConfig.entityType === 'user' ? () => syncAllMutation.mutate() : undefined)}
           onDelete={handleBulkDelete}
           viewMode={viewMode}
           onViewModeChange={handleViewModeChange}
@@ -695,6 +714,15 @@ export default function GenericEntityPage({ config }: GenericEntityPageProps) {
                   { value: 'inactive', label: 'Inactive' },
                   { value: 'active', label: 'Active' }
                 ]
+              : finalConfig.entityType === 'invite'
+              ? [
+                  { value: 'all', label: 'All' },
+                  { value: 'incomplete', label: 'Incomplete' },
+                  { value: 'expired', label: 'Expired' },
+                  { value: 'full', label: 'Full' },
+                  { value: 'inactive', label: 'Inactive' },
+                  { value: 'active', label: 'Active' }
+                ]
               : undefined
           }
           filterValue={statusFilter}
@@ -713,30 +741,42 @@ export default function GenericEntityPage({ config }: GenericEntityPageProps) {
           />
         ) : viewMode === 'card' ? (
           <div className="grid [grid-template-columns:repeat(auto-fill,minmax(320px,1fr))] gap-4 items-start max-w-full">
-            {displayEntities.map((entity: any) => (
-              <EntityCard
-                key={finalConfig.getEntityId?.(entity) || entity.id}
-                variant={finalConfig.entityType}
-                entity={{
-                  ...entity,
-                  isActive: finalConfig.getEntityStatus?.(entity) ?? (entity.status === 'active' || entity.isActive)
-                }}
-                isSelected={selectedEntities.includes(finalConfig.getEntityId?.(entity) || entity.id)}
-                onSelect={handleEntityToggle}
-                onToggle={finalConfig.api.enable && finalConfig.api.disable ? handleToggleEntityStatus : () => {}}
-                onDelete={(id) => handleDeleteEntity(id, finalConfig.getEntityName?.(entity) || entity.name)}
-                onView={handleViewEntity}
-                onSync={finalConfig.api.sync && !deletingEntities.has(finalConfig.getEntityId?.(entity) || entity.id) ? handleSync : undefined}
-                onClone={finalConfig.api.clone ? handleClone : undefined}
-                onImport={finalConfig.api.import ? handleImport : undefined}
-                onReload={finalConfig.api.reload ? handleReload : undefined}
-                isSyncing={syncingEntities.has(finalConfig.getEntityId?.(entity) || entity.id)}
-                isReloading={reloadingEntities.has(finalConfig.getEntityId?.(entity) || entity.id)}
-                isImporting={importingEntities.has(finalConfig.getEntityId?.(entity) || entity.id)}
-                userProtectedSet={new Set(entity?.protectedAddons || [])}
-                userExcludedSet={new Set(entity?.excludedAddons || [])}
-              />
-            ))}
+            {displayEntities.map((entity: any) => {
+              const transformedEntity = finalConfig.customEntityTransform 
+                ? finalConfig.customEntityTransform(entity)
+                : {
+                    ...entity,
+                    name: finalConfig.getEntityName?.(entity) || entity.name,
+                    isActive: finalConfig.getEntityStatus?.(entity) ?? (entity.status === 'active' || entity.isActive)
+                  }
+              const handleToggle = finalConfig.customToggleHandler
+                ? (id: string, isActive: boolean) => finalConfig.customToggleHandler!(id, isActive, entity)
+                : (finalConfig.api.enable && finalConfig.api.disable ? handleToggleEntityStatus : () => {})
+              
+              return (
+                <EntityCard
+                  key={finalConfig.getEntityId?.(entity) || entity.id}
+                  variant={finalConfig.entityType}
+                  entity={transformedEntity}
+                  isSelected={selectedEntities.includes(finalConfig.getEntityId?.(entity) || entity.id)}
+                  onSelect={handleEntityToggle}
+                  onToggle={handleToggle}
+                  onDelete={(id) => handleDeleteEntity(id, finalConfig.getEntityName?.(entity) || entity.name)}
+                  onView={handleViewEntity}
+                  onSync={finalConfig.api.sync && !deletingEntities.has(finalConfig.getEntityId?.(entity) || entity.id) ? handleSync : undefined}
+                  onClone={finalConfig.api.clone ? handleClone : undefined}
+                  onImport={finalConfig.api.import ? handleImport : undefined}
+                  onReload={finalConfig.api.reload ? handleReload : undefined}
+                  onRefreshOAuth={finalConfig.customRefreshOAuth ? () => finalConfig.customRefreshOAuth!(entity) : undefined}
+                  isSyncing={syncingEntities.has(finalConfig.getEntityId?.(entity) || entity.id)}
+                  isReloading={reloadingEntities.has(finalConfig.getEntityId?.(entity) || entity.id)}
+                  isImporting={importingEntities.has(finalConfig.getEntityId?.(entity) || entity.id)}
+                  customBadge={finalConfig.customBadgeRenderer ? finalConfig.customBadgeRenderer(entity, viewMode) : undefined}
+                  userProtectedSet={new Set(entity?.protectedAddons || [])}
+                  userExcludedSet={new Set(entity?.excludedAddons || [])}
+                />
+              )
+            })}
             
             {finalConfig.customContent && typeof finalConfig.customContent === 'function' 
               ? finalConfig.customContent(viewMode)
@@ -745,31 +785,43 @@ export default function GenericEntityPage({ config }: GenericEntityPageProps) {
           </div>
         ) : (
           <div className="space-y-2">
-            {displayEntities.map((entity: any) => (
-              <EntityCard
-                key={finalConfig.getEntityId?.(entity) || entity.id}
-                variant={finalConfig.entityType}
-                entity={{
-                  ...entity,
-                  isActive: finalConfig.getEntityStatus?.(entity) ?? (entity.status === 'active' || entity.isActive)
-                }}
-                isSelected={selectedEntities.includes(finalConfig.getEntityId?.(entity) || entity.id)}
-                onSelect={handleEntityToggle}
-                onToggle={finalConfig.api.enable && finalConfig.api.disable ? handleToggleEntityStatus : () => {}}
-                onDelete={(id) => handleDeleteEntity(id, finalConfig.getEntityName?.(entity) || entity.name)}
-                onView={handleViewEntity}
-                onSync={finalConfig.api.sync && !deletingEntities.has(finalConfig.getEntityId?.(entity) || entity.id) ? handleSync : undefined}
-                onClone={finalConfig.api.clone ? handleClone : undefined}
-                onImport={finalConfig.api.import ? handleImport : undefined}
-                onReload={finalConfig.api.reload ? handleReload : undefined}
-                isSyncing={syncingEntities.has(finalConfig.getEntityId?.(entity) || entity.id)}
-                isReloading={reloadingEntities.has(finalConfig.getEntityId?.(entity) || entity.id)}
-                isImporting={importingEntities.has(finalConfig.getEntityId?.(entity) || entity.id)}
-                userProtectedSet={new Set(entity?.protectedAddons || [])}
-                userExcludedSet={new Set(entity?.excludedAddons || [])}
-                isListMode={true}
-              />
-            ))}
+            {displayEntities.map((entity: any) => {
+              const transformedEntity = finalConfig.customEntityTransform 
+                ? finalConfig.customEntityTransform(entity)
+                : {
+                    ...entity,
+                    name: finalConfig.getEntityName?.(entity) || entity.name,
+                    isActive: finalConfig.getEntityStatus?.(entity) ?? (entity.status === 'active' || entity.isActive)
+                  }
+              const handleToggle = finalConfig.customToggleHandler
+                ? (id: string, isActive: boolean) => finalConfig.customToggleHandler!(id, isActive, entity)
+                : (finalConfig.api.enable && finalConfig.api.disable ? handleToggleEntityStatus : () => {})
+              
+              return (
+                <EntityCard
+                  key={finalConfig.getEntityId?.(entity) || entity.id}
+                  variant={finalConfig.entityType}
+                  entity={transformedEntity}
+                  isSelected={selectedEntities.includes(finalConfig.getEntityId?.(entity) || entity.id)}
+                  onSelect={handleEntityToggle}
+                  onToggle={handleToggle}
+                  onDelete={(id) => handleDeleteEntity(id, finalConfig.getEntityName?.(entity) || entity.name)}
+                  onView={handleViewEntity}
+                  onSync={finalConfig.api.sync && !deletingEntities.has(finalConfig.getEntityId?.(entity) || entity.id) ? handleSync : undefined}
+                  onClone={finalConfig.api.clone ? handleClone : undefined}
+                  onImport={finalConfig.api.import ? handleImport : undefined}
+                  onReload={finalConfig.api.reload ? handleReload : undefined}
+                  onRefreshOAuth={finalConfig.customRefreshOAuth ? () => finalConfig.customRefreshOAuth!(entity) : undefined}
+                  isSyncing={syncingEntities.has(finalConfig.getEntityId?.(entity) || entity.id)}
+                  isReloading={reloadingEntities.has(finalConfig.getEntityId?.(entity) || entity.id)}
+                  isImporting={importingEntities.has(finalConfig.getEntityId?.(entity) || entity.id)}
+                  customBadge={finalConfig.customBadgeRenderer ? finalConfig.customBadgeRenderer(entity, viewMode) : undefined}
+                  userProtectedSet={new Set(entity?.protectedAddons || [])}
+                  userExcludedSet={new Set(entity?.excludedAddons || [])}
+                  isListMode={true}
+                />
+              )
+            })}
             
             {finalConfig.customContent && typeof finalConfig.customContent === 'function' 
               ? finalConfig.customContent(viewMode)
@@ -884,7 +936,7 @@ export default function GenericEntityPage({ config }: GenericEntityPageProps) {
 }
 
 // Helper function to create entity page configs
-export function createEntityPageConfig(entityType: EntityType): EntityPageConfig {
+export function createEntityPageConfig(entityType: Exclude<EntityType, 'invite'>): EntityPageConfig {
   const baseConfigs = {
     addon: {
       entityType: 'addon' as const,

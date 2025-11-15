@@ -6,6 +6,7 @@ import { getEntityColorStyles } from '@/utils/colorMapping'
 import { ColorPicker } from '@/components/layout'
 import { StremioOAuthCard } from '@/components/auth/StremioOAuthCard'
 import { usersAPI } from '@/services/api'
+import { useBodyScrollLock } from '@/hooks/useBodyScrollLock'
 
 interface UserAddModalProps {
   isOpen: boolean
@@ -41,6 +42,9 @@ export default function UserAddModal({
 }: UserAddModalProps) {
   const { theme } = useTheme()
   const logoRef = useRef<HTMLDivElement>(null)
+  
+  useBodyScrollLock(isOpen)
+  
   const [showColorPicker, setShowColorPicker] = useState(false)
   const [mounted, setMounted] = useState(false)
   const [stremioEmail, setStremioEmail] = useState('')

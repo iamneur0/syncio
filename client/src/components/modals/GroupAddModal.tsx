@@ -4,6 +4,7 @@ import { X, Users, Puzzle, Plus } from 'lucide-react'
 import { useTheme } from '@/contexts/ThemeContext'
 import { getEntityColorStyles } from '@/utils/colorMapping'
 import { useModalState, useFormState } from '@/hooks/useCommonState'
+import { useBodyScrollLock } from '@/hooks/useBodyScrollLock'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { groupsAPI, usersAPI, addonsAPI } from '@/services/api'
 import { invalidateGroupQueries } from '@/utils/queryUtils'
@@ -43,6 +44,9 @@ export default function GroupAddModal({
   })
   const { theme } = useTheme()
   const logoRef = useRef<HTMLDivElement>(null)
+  
+  useBodyScrollLock(isOpen)
+  
   const [showColorPicker, setShowColorPicker] = useState(false)
   const [selectedUsers, setSelectedUsers] = useState<any[]>([])
   const [selectedAddons, setSelectedAddons] = useState<any[]>([])

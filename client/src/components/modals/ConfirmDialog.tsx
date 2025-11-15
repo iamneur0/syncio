@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { AlertTriangle } from 'lucide-react'
+import { useBodyScrollLock } from '@/hooks/useBodyScrollLock'
 
 interface ConfirmDialogProps {
   open: boolean
@@ -26,6 +27,8 @@ export default function ConfirmDialog({
   onCancel,
 }: ConfirmDialogProps) {
   const [mounted, setMounted] = useState(false)
+
+  useBodyScrollLock(open)
 
   useEffect(() => {
     setMounted(true)

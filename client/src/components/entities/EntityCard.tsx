@@ -86,7 +86,7 @@ const buildCandidateUrls = (addon: Record<string, any>): string[] => {
   return result
 }
 
-type Variant = 'user' | 'group' | 'addon' | 'invitation'
+type Variant = 'user' | 'group' | 'addon' | 'invite'
 
 interface BaseEntity {
   id: string
@@ -305,7 +305,7 @@ export default function EntityCard({
   // Get display name and subtitle
   const displayName = variant === 'user' 
     ? (entity.username || entity.email || 'Unknown User')
-    : variant === 'invitation'
+    : variant === 'invite'
     ? (entity.inviteCode || entity.name || 'Invitation')
     : entity.name
 
@@ -315,7 +315,7 @@ export default function EntityCard({
     ? '' // Never show description for groups
     : variant === 'addon'
     ? '' // Never show description for addons
-    : variant === 'invitation'
+    : variant === 'invite'
     ? '' // Never show description for invitations
     : ''
 
@@ -325,7 +325,7 @@ export default function EntityCard({
       return (entity.username || entity.email || 'U').charAt(0).toUpperCase()
     } else if (variant === 'group') {
       return entity.name ? entity.name.charAt(0).toUpperCase() : 'G'
-    } else if (variant === 'invitation') {
+    } else if (variant === 'invite') {
       return entity.inviteCode ? entity.inviteCode.charAt(0).toUpperCase() : 'I'
     } else {
       return entity.name ? entity.name.charAt(0).toUpperCase() : 'A'
@@ -400,12 +400,12 @@ export default function EntityCard({
     <div 
       onClick={handleCardClick}
       className={isListMode ? 
-        `card card-selectable p-4 hover:shadow-lg transition-all flex items-center justify-between relative group ${(!entity.isActive || (variant === 'invitation' && ((entity.maxUses != null && entity.currentUses != null && entity.currentUses >= entity.maxUses) || (entity.expiresAt && new Date(entity.expiresAt) < new Date())))) ? 'opacity-50' : ''} cursor-pointer min-w-[320px] ${
+        `card card-selectable p-4 hover:shadow-lg transition-all flex items-center justify-between relative group ${(!entity.isActive || (variant === 'invite' && ((entity.maxUses != null && entity.currentUses != null && entity.currentUses >= entity.maxUses) || (entity.expiresAt && new Date(entity.expiresAt) < new Date())))) ? 'opacity-50' : ''} cursor-pointer min-w-[320px] ${
           isSelected 
             ? 'card-selected' 
             : ''
         }` :
-        `card card-selectable p-6 hover:shadow-lg transition-all flex flex-col h-full relative group min-w-[320px] ${(!entity.isActive || (variant === 'invitation' && ((entity.maxUses != null && entity.currentUses != null && entity.currentUses >= entity.maxUses) || (entity.expiresAt && new Date(entity.expiresAt) < new Date())))) ? 'opacity-50' : ''} cursor-pointer ${
+        `card card-selectable p-6 hover:shadow-lg transition-all flex flex-col h-full relative group min-w-[320px] ${(!entity.isActive || (variant === 'invite' && ((entity.maxUses != null && entity.currentUses != null && entity.currentUses >= entity.maxUses) || (entity.expiresAt && new Date(entity.expiresAt) < new Date())))) ? 'opacity-50' : ''} cursor-pointer ${
           isSelected 
             ? 'card-selected' 
             : ''
@@ -459,7 +459,7 @@ export default function EntityCard({
                     isListMode={true}
                   />
                 )}
-                {variant === 'invitation' && customBadge && customBadge}
+                {variant === 'invite' && customBadge && customBadge}
               </div>
               <p className={`text-sm color-text-secondary truncate` }>
                 {subtitle}
@@ -503,13 +503,13 @@ export default function EntityCard({
                     <span>{groupUsersCount}</span>
                   </div>
                 )}
-                {variant === 'invitation' && (
+                {variant === 'invite' && (
                   <div className="flex items-center gap-1 text-xs color-text-secondary">
                     <Mail className="w-4 h-4" />
                     <span>{entity.currentUses || 0} / {entity.maxUses || 0}</span>
                   </div>
                 )}
-                {variant === 'invitation' && (
+                {variant === 'invite' && (
                   <div className="flex items-center gap-1 text-xs color-text-secondary">
                     <GroupIcon className="w-4 h-4" />
                     <span>{entity.groupName || 'No group'}</span>
@@ -560,13 +560,13 @@ export default function EntityCard({
                   <span>{groupUsersCount}</span>
                 </div>
               )}
-              {variant === 'invitation' && (
+              {variant === 'invite' && (
                 <div className="flex items-center gap-1 text-xs color-text-secondary">
                   <Mail className="w-4 h-4" />
                   <span>{entity.currentUses || 0} / {entity.maxUses || 0}</span>
                 </div>
               )}
-              {variant === 'invitation' && (
+              {variant === 'invite' && (
                 <div className="flex items-center gap-1 text-xs color-text-secondary">
                   <GroupIcon className="w-4 h-4" />
                   <span>{entity.groupName || 'No group'}</span>
@@ -575,7 +575,7 @@ export default function EntityCard({
             </div>
             
             {/* Toggle is always visible; does not wrap into the button grid */}
-            {!(variant === 'invitation' && ((entity.maxUses != null && entity.currentUses != null && entity.currentUses >= entity.maxUses) || (entity.expiresAt && new Date(entity.expiresAt) < new Date()))) && (
+            {!(variant === 'invite' && ((entity.maxUses != null && entity.currentUses != null && entity.currentUses >= entity.maxUses) || (entity.expiresAt && new Date(entity.expiresAt) < new Date()))) && (
               <ToggleSwitch
                 checked={entity.isActive}
                 onChange={() => handleToggle({} as React.MouseEvent)}
@@ -674,7 +674,7 @@ export default function EntityCard({
                 </button>
               )}
               
-              {variant === 'invitation' && onRefreshOAuth && (
+              {variant === 'invite' && onRefreshOAuth && (
                 <button
                   onClick={(e) => {
                     e.stopPropagation()
@@ -756,7 +756,7 @@ export default function EntityCard({
               </div>
             )}
             {/* Custom Badge for invitations */}
-            {variant === 'invitation' && customBadge && (
+            {variant === 'invite' && customBadge && (
               <div className="mt-1 mb-0">
                 {customBadge}
               </div>
@@ -765,7 +765,7 @@ export default function EntityCard({
         </div>
         
         <div className="flex items-center gap-2 flex-shrink-0 ml-3">
-          {!(variant === 'invitation' && ((entity.maxUses != null && entity.currentUses != null && entity.currentUses >= entity.maxUses) || (entity.expiresAt && new Date(entity.expiresAt) < new Date()))) && (
+          {!(variant === 'invite' && ((entity.maxUses != null && entity.currentUses != null && entity.currentUses >= entity.maxUses) || (entity.expiresAt && new Date(entity.expiresAt) < new Date()))) && (
             <ToggleSwitch
               checked={!!entity.isActive}
               onChange={() => handleToggle({} as React.MouseEvent)}
@@ -839,7 +839,7 @@ export default function EntityCard({
             </div>
           </>
         )}
-        {variant === 'invitation' && (
+        {variant === 'invite' && (
           <>
             <div className="flex items-center">
               <Mail className="w-4 h-4 color-text-secondary mr-2 flex-shrink-0" />
@@ -943,7 +943,7 @@ export default function EntityCard({
           </button>
         )}
         
-        {variant === 'invitation' && onRefreshOAuth && (
+        {variant === 'invite' && onRefreshOAuth && (
           <button
             onClick={(e) => {
               e.stopPropagation()

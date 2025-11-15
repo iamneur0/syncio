@@ -24,6 +24,8 @@ export default function AddonSelectModal({
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedAddonIds, setSelectedAddonIds] = useState<string[]>([])
 
+  useBodyScrollLock(isOpen)
+
   useEffect(() => {
     setMounted(true)
   }, [])

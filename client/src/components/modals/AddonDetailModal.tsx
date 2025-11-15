@@ -12,6 +12,7 @@ import { EntityList, InlineEdit, ResourceItem, CatalogItem } from '@/components/
 import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query'
 import { addonsAPI, groupsAPI } from '@/services/api'
 import toast from 'react-hot-toast'
+import { useBodyScrollLock } from '@/hooks/useBodyScrollLock'
 
 const normalizeManifestUrl = (raw?: string | null): string => {
   if (!raw) return ''
@@ -50,6 +51,8 @@ export default function AddonDetailModal({
 }: AddonDetailModalProps) {
   const { hideSensitive, theme } = useTheme()
   const [mounted, setMounted] = useState(false)
+
+  useBodyScrollLock(isOpen)
 
   // Handle escape key
   useEffect(() => {

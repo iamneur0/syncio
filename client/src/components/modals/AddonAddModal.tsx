@@ -5,6 +5,7 @@ import { useTheme } from '@/contexts/ThemeContext'
 import { getEntityColorStyles } from '@/utils/colorMapping'
 import { addonsAPI } from '@/services/api'
 import { VersionChip } from '@/components/ui'
+import { useBodyScrollLock } from '@/hooks/useBodyScrollLock'
 import { AddonIcon, InlineEdit } from '@/components/entities'
 
 interface AddonAddModalProps {
@@ -30,6 +31,8 @@ export default function AddonAddModal({
 }: AddonAddModalProps) {
   const [mounted, setMounted] = useState(false)
   const { theme } = useTheme()
+  
+  useBodyScrollLock(isOpen)
   
   const [addonName, setAddonName] = useState('')
   const [addonUrl, setAddonUrl] = useState('')

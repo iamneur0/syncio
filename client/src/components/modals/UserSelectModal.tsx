@@ -5,6 +5,7 @@ import { useTheme } from '@/contexts/ThemeContext'
 import { useQuery } from '@tanstack/react-query'
 import { usersAPI } from '@/services/api'
 import { getEntityColorStyles } from '@/utils/colorMapping'
+import { useBodyScrollLock } from '@/hooks/useBodyScrollLock'
 import { EntityList } from '@/components/entities'
 
 interface UserSelectModalProps {
@@ -26,6 +27,8 @@ export default function UserSelectModal({
   const [mounted, setMounted] = useState(false)
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([])
+
+  useBodyScrollLock(isOpen)
 
   useEffect(() => {
     setMounted(true)
