@@ -37,7 +37,7 @@ const AUTH_ALLOWLIST = [
   '/api/public-auth/generate-uuid',
   '/api/public-auth/suggest-uuid',
   '/api/public-auth/private-login', // Private instance username/password login
-  '/api/invitations/public', // Public invitation endpoints (request submission, status check, OAuth completion)
+  '/invite', // Public invitation endpoints (request submission, status check, OAuth completion)
   // Stremio endpoints require auth now (no allowlist)
 ];
 

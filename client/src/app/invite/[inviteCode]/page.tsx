@@ -35,16 +35,13 @@ export default function InviteRequestPage() {
     if (saved) {
       try {
         const parsed = JSON.parse(saved)
-        // Restore email/username
-        const restoredEmail = parsed.email || ''
-        const restoredUsername = parsed.username || ''
-        // Only restore requestSubmitted if we have both email and username AND submitted flag is true
-        // This allows refresh to restore the correct page, but prevents auto-redirect while typing
-        const shouldRestoreSubmitted = restoredEmail && restoredUsername && parsed.submitted === true
+        // Restore email/username for convenience, but NEVER restore requestSubmitted
+        // requestSubmitted should only be true when user explicitly clicks submit
+        // This prevents auto-redirect when typing matching email/username
         return {
-          email: restoredEmail,
-          username: restoredUsername,
-          requestSubmitted: shouldRestoreSubmitted,
+          email: parsed.email || '',
+          username: parsed.username || '',
+          requestSubmitted: false, // Always start as false, never restore from localStorage
           emailMismatchError: parsed.emailMismatchError === true || false
         }
       } catch {
@@ -68,44 +65,19 @@ export default function InviteRequestPage() {
   const [isCheckingInvitation, setIsCheckingInvitation] = React.useState(true)
   const [isInvitationNotFound, setIsInvitationNotFound] = React.useState(false) // Start as false (optimistic) until we confirm it doesn't exist
   
-  // Validation state
-  const [emailError, setEmailError] = React.useState<string | null>(null)
-  const [usernameError, setUsernameError] = React.useState<string | null>(null)
-  const [isCheckingEmail, setIsCheckingEmail] = React.useState(false)
-  const [isCheckingUsername, setIsCheckingUsername] = React.useState(false)
   
   // Email mismatch error state - initialized from localStorage synchronously
   const [emailMismatchError, setEmailMismatchError] = React.useState(initialState.emailMismatchError)
   
-  // Debounce timers
-  const emailCheckTimerRef = React.useRef<NodeJS.Timeout | null>(null)
-  const usernameCheckTimerRef = React.useRef<NodeJS.Timeout | null>(null)
+  // Validation errors for form fields
+  const [emailError, setEmailError] = React.useState<string | null>(null)
+  const [usernameError, setUsernameError] = React.useState<string | null>(null)
 
   React.useEffect(() => {
     setIsMounted(true)
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem(storageKey)
-      if (saved) {
-        try {
-          const parsed = JSON.parse(saved)
-          // Only update if values differ (to avoid unnecessary re-renders)
-          if (parsed.email && parsed.email !== email) setEmail(parsed.email)
-          if (parsed.username && parsed.username !== username) setUsername(parsed.username)
-          // Restore requestSubmitted if we have email/username and submitted flag (for cross-tab sync)
-          if (parsed.submitted === true && parsed.email && parsed.username && !requestSubmitted) {
-            setRequestSubmitted(true)
-          }
-          // Only restore emailMismatchError if email and username match what's stored
-          if (parsed.emailMismatchError === true && !emailMismatchError &&
-              parsed.email === email.trim() && parsed.username === username.trim()) {
-            setEmailMismatchError(true)
-          }
-        } catch {
-          // Ignore parse errors
-        }
-      }
-    }
-  }, [storageKey, email, username, emailMismatchError, requestSubmitted])
+    // Don't sync requestSubmitted from localStorage here - only restore on initial mount via getInitialState()
+    // This prevents auto-submission when user types matching email/username
+  }, [storageKey])
 
   React.useEffect(() => {
     if (!isMounted || !inviteCode) {
@@ -145,15 +117,19 @@ export default function InviteRequestPage() {
   const [isRenewed, setIsRenewed] = React.useState(false)
   const [oauthKeyVersion, setOauthKeyVersion] = React.useState(0)
   const oauthPollerRef = React.useRef<number | null>(null)
+  const currentPollingOAuthCodeRef = React.useRef<string | null>(null)
   const [isCreatingUser, setIsCreatingUser] = React.useState(false)
   const hasAttemptedCreationRef = React.useRef<Set<string>>(new Set())
   const verificationFailureCountRef = React.useRef<Map<string, number>>(new Map())
+  // Only check status when request has been submitted, not while typing
+  const shouldCheckStatus = requestSubmitted
+  
   const { data: status, dataUpdatedAt, refetch: refetchStatus, error: statusError, isLoading: isLoadingStatus } = useQuery({
     queryKey: ['invite-status', inviteCode, email, username],
     queryFn: () => invitationsAPI.checkStatus(inviteCode, email, username),
     enabled:
       isMounted &&
-      requestSubmitted &&
+      shouldCheckStatus &&
       !!email &&
       !!username &&
       !isInvitationNotFound,
@@ -161,10 +137,26 @@ export default function InviteRequestPage() {
     refetchOnWindowFocus: true,
     refetchInterval: (query) => {
       const queryData = query.state?.data as any
+      // Stop polling if completed
       if (queryData?.status === 'completed') {
         return false
       }
-      return 2000
+      // Stop polling if rejected (no point checking)
+      if (queryData?.status === 'rejected') {
+        return false
+      }
+      // Only poll if we're waiting for something:
+      // - pending: waiting for admin to accept/reject
+      // - accepted (with or without OAuth link): waiting for OAuth link generation, completion, or expiration
+      if (queryData?.status === 'pending') {
+        return 2000 // Poll every 2s for pending requests
+      }
+      if (queryData?.status === 'accepted') {
+        // Poll every 5s for accepted requests (renewed or with OAuth link)
+        return 5000
+      }
+      // Default: don't poll
+      return false
     }
   })
 
@@ -235,7 +227,17 @@ export default function InviteRequestPage() {
     const statusChanged = currentStatus !== prevStatus
     const linkCleared = prevLink !== null && currentLink === null
     
-    if (linkCleared) {
+    // Detect renewed state: if status is 'accepted' but oauthLink is null
+    // This can happen on initial load (refresh) when OAuth was cleared
+    const isInitialLoad = prevLink === null && prevCode === null && prevStatus === null
+    // On initial load, if status is 'accepted' but oauthLink is null, it means OAuth was cleared (renewed)
+    const isRenewedState = currentStatus === 'accepted' && currentLink === null
+    
+    if (linkCleared || (isInitialLoad && isRenewedState)) {
+      // Also set requestSubmitted to true so status query continues to run
+      if (!requestSubmitted) {
+        setRequestSubmitted(true)
+      }
       setOauthLinkGenerated(false)
       setLastOAuthLink(null)
       setLastOAuthCode(null)
@@ -272,7 +274,11 @@ export default function InviteRequestPage() {
     prevDataUpdatedAtRef.current = dataUpdatedAt
     if (!linkChanged && currentLink !== null) prevLinkRef.current = currentLink
     if (!codeChanged && currentCode !== null) prevCodeRef.current = currentCode
-  }, [status, dataUpdatedAt])
+    // Initialize refs on first load
+    if (prevLinkRef.current === null && currentLink !== null) prevLinkRef.current = currentLink
+    if (prevCodeRef.current === null && currentCode !== null) prevCodeRef.current = currentCode
+    if (prevStatusRef.current === null && currentStatus !== null) prevStatusRef.current = currentStatus
+  }, [status, dataUpdatedAt, requestSubmitted])
 
   // Submit request mutation
   const submitMutation = useMutation({
@@ -291,27 +297,54 @@ export default function InviteRequestPage() {
       refetchStatus()
     },
     onError: async (error: any) => {
-      // If duplicate request (409), check status and show existing request
+      const errorMessage = error?.response?.data?.error || 'Failed to submit request'
+      
+      // If 409, check what type of error it is
       if (error?.response?.status === 409) {
-        setRequestSubmitted(true)
-        // Save to localStorage
-        if (typeof window !== 'undefined') {
-          localStorage.setItem(storageKey, JSON.stringify({
-            email,
-            username,
-            submitted: true
-          }))
+        const errorCode = error?.response?.data?.error
+        
+        // If user already exists, show error under appropriate field and stay on form
+        if (errorCode === 'EMAIL_EXISTS' || errorCode === 'EMAIL_AND_USERNAME_EXIST') {
+          setEmailError(error?.response?.data?.message || 'This email is already registered')
         }
-        // Check status to get the existing request
-        await refetchStatus()
-        return
+        if (errorCode === 'USERNAME_EXISTS' || errorCode === 'EMAIL_AND_USERNAME_EXIST') {
+          setUsernameError(error?.response?.data?.message || 'This username is already taken')
+        }
+        if (errorCode === 'EMAIL_EXISTS' || errorCode === 'USERNAME_EXISTS' || errorCode === 'EMAIL_AND_USERNAME_EXIST') {
+          return // Don't navigate, stay on form
+        }
+        
+        // If duplicate request exists, navigate to status page
+        if (errorMessage.toLowerCase().includes('request already exists')) {
+          setRequestSubmitted(true)
+          setEmailError('')
+          setUsernameError('')
+          // Save to localStorage
+          if (typeof window !== 'undefined') {
+            localStorage.setItem(storageKey, JSON.stringify({
+              email,
+              username,
+              submitted: true
+            }))
+          }
+          // Wait a bit for state to update, then check status
+          setTimeout(async () => {
+            try {
+              await refetchStatus()
+            } catch (err) {
+              console.error('Failed to refetch status:', err)
+            }
+          }, 100)
+          return // Don't show error toast, we're handling it
+        }
       }
       
-      const errorMessage = error?.response?.data?.error || 'Failed to submit request'
       // Check if invitation is disabled
       if (errorMessage.toLowerCase().includes('not active') || (error?.response?.status === 400 && errorMessage.toLowerCase().includes('invitation'))) {
         setIsInvitationDisabled(true)
       }
+      
+      // Only show error toast if we haven't handled it above
       toast.error(errorMessage)
     }
   })
@@ -320,10 +353,39 @@ export default function InviteRequestPage() {
     mutationFn: (authKey: string) => {
       const statusData = status as any
       const groupName = statusData?.groupName || undefined
-      return invitationsAPI.complete(inviteCode, email, username, authKey, groupName)
+      
+      // Use email/username from status if form state is missing (e.g., on "Request Renewed" page)
+      const finalEmail = email || statusData?.email || ''
+      const finalUsername = username || statusData?.username || ''
+      
+      console.log('[InvitePage] completeMutation.mutationFn called with:', {
+        inviteCode,
+        email: finalEmail,
+        username: finalUsername,
+        emailFromForm: email,
+        emailFromStatus: statusData?.email,
+        usernameFromForm: username,
+        usernameFromStatus: statusData?.username,
+        authKeyLength: authKey?.length,
+        groupName
+      })
+      
+      if (!finalEmail || !finalUsername) {
+        throw new Error('Email and username are required')
+      }
+      if (!authKey) {
+        throw new Error('Auth key is required')
+      }
+      return invitationsAPI.complete(inviteCode, finalEmail, finalUsername, authKey, groupName)
     },
     onSuccess: async (response) => {
-      toast.success('Account created successfully! You can now log in.')
+      setIsCreatingUser(false)
+      
+      // Stop OAuth polling
+      if (oauthPollerRef.current) {
+        clearInterval(oauthPollerRef.current)
+        oauthPollerRef.current = null
+      }
       
       // Invalidate the status query cache to force a fresh fetch
       await queryClient.invalidateQueries({ 
@@ -331,7 +393,13 @@ export default function InviteRequestPage() {
       })
       
       // Immediately refetch status with fresh data
-      await refetchStatus()
+      const result = await refetchStatus()
+      
+      // If status is already completed, we're done
+      if (result.data?.status === 'completed') {
+        toast.success('Account created successfully! You can now log in.')
+        return
+      }
       
       // Keep polling for a bit to ensure we get the updated status (in case of any delay)
       let pollCount = 0
@@ -344,12 +412,15 @@ export default function InviteRequestPage() {
         const result = await refetchStatus()
         if (result.data?.status === 'completed') {
           clearInterval(pollInterval)
+          toast.success('Account created successfully! You can now log in.')
         }
         // Stop polling after 10 attempts (10 seconds)
         if (pollCount >= 10) {
           clearInterval(pollInterval)
+          // Even if polling times out, try one more refetch
+          await refetchStatus()
         }
-      }, 1000)
+      }, 500) // Poll more frequently (500ms instead of 1000ms)
     },
     onError: (error: any) => {
       const errorCode = error?.response?.data?.error
@@ -383,106 +454,16 @@ export default function InviteRequestPage() {
     }
   })
 
-  // Check if email exists
-  const checkEmail = React.useCallback(async (emailValue: string) => {
-    if (!emailValue.trim()) {
-      setEmailError(null)
-      setIsCheckingEmail(false)
-      return
-    }
-
-    // Basic email validation
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-    if (!emailRegex.test(emailValue.trim())) {
-      setEmailError(null) // Don't show error for invalid format, let browser handle it
-      setIsCheckingEmail(false)
-      return
-    }
-
-    setIsCheckingEmail(true)
-    try {
-      const result = await usersAPI.check(emailValue.trim(), undefined)
-      if (result.exists && result.conflicts.email) {
-        setEmailError('This email is already registered')
-      } else {
-        setEmailError(null)
-      }
-    } catch (error: any) {
-      // Silently fail validation check - don't show error toast
-      setEmailError(null)
-    } finally {
-      setIsCheckingEmail(false)
-    }
-  }, [])
-
-  // Check if username exists
-  const checkUsername = React.useCallback(async (usernameValue: string) => {
-    if (!usernameValue.trim()) {
-      setUsernameError(null)
-      setIsCheckingUsername(false)
-      return
-    }
-
-    setIsCheckingUsername(true)
-    try {
-      const result = await usersAPI.check(undefined, usernameValue.trim())
-      if (result.exists && result.conflicts.username) {
-        setUsernameError('This username is already taken')
-      } else {
-        setUsernameError(null)
-      }
-    } catch (error: any) {
-      // Silently fail validation check - don't show error toast
-      setUsernameError(null)
-    } finally {
-      setIsCheckingUsername(false)
-    }
-  }, [])
-
-  // Handle email change with debounce
+  // Handle email change
   const handleEmailChange = React.useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.value
-    setEmail(value)
-    setEmailError(null) // Clear error immediately when typing
-    
-    // Clear existing timer
-    if (emailCheckTimerRef.current) {
-      clearTimeout(emailCheckTimerRef.current)
-    }
-    
-    // Debounce the check
-    emailCheckTimerRef.current = setTimeout(() => {
-      checkEmail(value)
-    }, 500) // Wait 500ms after user stops typing
-  }, [checkEmail])
+    setEmail(e.target.value)
+    setEmailError(null) // Clear error when user types
+  }, [])
 
-  // Handle username change with debounce
+  // Handle username change
   const handleUsernameChange = React.useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.value
-    setUsername(value)
-    setUsernameError(null) // Clear error immediately when typing
-    
-    // Clear existing timer
-    if (usernameCheckTimerRef.current) {
-      clearTimeout(usernameCheckTimerRef.current)
-    }
-    
-    // Debounce the check
-    usernameCheckTimerRef.current = setTimeout(() => {
-      checkUsername(value)
-    }, 500) // Wait 500ms after user stops typing
-  }, [checkUsername])
-
-  // Cleanup timers on unmount
-  React.useEffect(() => {
-    return () => {
-      if (emailCheckTimerRef.current) {
-        clearTimeout(emailCheckTimerRef.current)
-      }
-      if (usernameCheckTimerRef.current) {
-        clearTimeout(usernameCheckTimerRef.current)
-      }
-    }
+    setUsername(e.target.value)
+    setUsernameError(null) // Clear error when user types
   }, [])
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -491,17 +472,43 @@ export default function InviteRequestPage() {
       toast.error('Please fill in all fields')
       return
     }
-    if (emailError || usernameError) {
-      toast.error('Please fix the errors before submitting')
-      return
-    }
 
-    // Submit the request - backend will return 409 if a duplicate exists
+    // Submit the request - backend will validate and return errors if needed
     submitMutation.mutate()
   }
 
   const handleOAuthAuthKey = async (authKey: string) => {
     console.log('[InvitePage] handleOAuthAuthKey called with authKey:', authKey ? 'present' : 'missing')
+    const statusData = status as any
+    // Use email/username from status if form state is missing (e.g., on "Request Renewed" page)
+    const finalEmail = email || statusData?.email || ''
+    const finalUsername = username || statusData?.username || ''
+    console.log('[InvitePage] Current state - email:', finalEmail, 'username:', finalUsername, 'inviteCode:', inviteCode)
+    console.log('[InvitePage] Email sources - form:', email, 'status:', statusData?.email)
+    console.log('[InvitePage] Username sources - form:', username, 'status:', statusData?.username)
+    
+    // Validate required fields
+    if (!finalEmail || !finalUsername) {
+      const error = new Error('Email and username are required to complete OAuth')
+      console.error('[InvitePage] Missing email or username:', { 
+        email: finalEmail, 
+        username: finalUsername,
+        emailFromForm: email,
+        emailFromStatus: statusData?.email,
+        usernameFromForm: username,
+        usernameFromStatus: statusData?.username
+      })
+      toast.error('Email and username are required. Please submit a request first.')
+      throw error
+    }
+    
+    if (!authKey) {
+      const error = new Error('Auth key is required')
+      console.error('[InvitePage] Missing authKey')
+      toast.error('Authentication key is missing. Please try again.')
+      throw error
+    }
+    
     setAuthKey(authKey)
     
     // Mark that we're manually completing OAuth to prevent polling from interfering
@@ -513,19 +520,33 @@ export default function InviteRequestPage() {
       oauthPollerRef.current = null
     }
     
-    // Call the mutation to create the user
-    console.log('[InvitePage] Calling completeMutation.mutate')
-    completeMutation.mutate(authKey, {
-      onSuccess: () => {
-        console.log('[InvitePage] completeMutation succeeded')
-        setIsCreatingUser(false)
-      },
-      onError: (error: any) => {
-        console.error('[InvitePage] completeMutation failed:', error)
-        setIsCreatingUser(false)
-        // Error handling is already in completeMutation.onError
-      }
+    // Call the mutation to create the user and wait for it to complete
+    // Using mutateAsync to get a promise that resolves when the mutation completes
+    console.log('[InvitePage] Calling completeMutation.mutateAsync with:', {
+      inviteCode,
+      email,
+      username,
+      authKeyLength: authKey?.length,
+      hasGroupName: !!(status as any)?.groupName
     })
+    try {
+      const result = await completeMutation.mutateAsync(authKey)
+      console.log('[InvitePage] completeMutation completed successfully, result:', result)
+      // The mutation's onSuccess handler will handle refetching status and showing success
+    } catch (error: any) {
+      console.error('[InvitePage] completeMutation failed:', error)
+      console.error('[InvitePage] Error details:', {
+        message: error?.message,
+        response: error?.response,
+        status: error?.response?.status,
+        data: error?.response?.data
+      })
+      setIsCreatingUser(false)
+      // The mutation's onError handler will handle error display, but we also show a toast here
+      const errorMessage = error?.response?.data?.error || error?.response?.data?.message || error?.message || 'Failed to complete account creation'
+      toast.error(errorMessage)
+      throw error // Re-throw so StremioOAuthCard can handle it
+    }
   }
 
   const pollOAuthCompletion = React.useCallback(async () => {
@@ -604,30 +625,13 @@ export default function InviteRequestPage() {
         hasAttemptedCreationRef.current.add(oauthCodeKey)
 
         // Get user info from Stremio response
-        const stremioUser =
+        const verifiedUser =
           data.result.user && typeof data.result.user === 'object'
             ? {
                 username: data.result.user.username,
                 email: data.result.user.email,
               }
             : undefined
-
-        // Try to verify authKey, but don't fail if it doesn't work
-        let verifiedUser: { username?: string; email?: string } | undefined
-        try {
-          const verification = await usersAPI.verifyAuthKey({
-            authKey: data.result.authKey,
-          })
-          verifiedUser = verification?.user || undefined
-        } catch (error) {
-          // Silently fallback to Stremio user data if verification fails
-          // This is expected in some cases (e.g., new Stremio accounts)
-        }
-
-        // Use verified user if available, otherwise fallback to Stremio user data
-        if (!verifiedUser && stremioUser) {
-          verifiedUser = stremioUser
-        }
 
         if (!verifiedUser) {
           setIsCreatingUser(false)
@@ -766,28 +770,82 @@ export default function InviteRequestPage() {
   }, [status, inviteCode, email, username, isCreatingUser, completeMutation.isPending, refetchStatus, emailMismatchError])
 
   React.useEffect(() => {
-    if (oauthPollerRef.current) {
-      clearInterval(oauthPollerRef.current)
-      oauthPollerRef.current = null
-    }
-
     // Don't poll if there's an email mismatch error
     if (emailMismatchError) {
+      if (oauthPollerRef.current) {
+        clearInterval(oauthPollerRef.current)
+        oauthPollerRef.current = null
+        currentPollingOAuthCodeRef.current = null
+      }
       return
     }
 
     const statusData = status as any
     if (statusData?.status === 'completed') {
+      if (oauthPollerRef.current) {
+        clearInterval(oauthPollerRef.current)
+        oauthPollerRef.current = null
+        currentPollingOAuthCodeRef.current = null
+      }
       return
     }
 
-    if (statusData?.status === 'accepted' && statusData?.oauthCode && statusData?.oauthLink && !isCreatingUser && !completeMutation.isPending) {
-      if (!statusData.oauthExpiresAt || new Date(statusData.oauthExpiresAt) > new Date()) {
-        const pollHandler = () => {
-          pollOAuthCompletion()
+    // Don't set up polling if StremioOAuthCard is active (it handles its own polling)
+    // StremioOAuthCard is rendered on "Request Accepted" and "Request Renewed" pages when there's an OAuth link
+    // So we skip pollOAuthCompletion when we have a valid OAuth link to avoid duplicate polling
+    const hasOAuthLink = statusData?.oauthCode && statusData?.oauthLink
+    const isOAuthValid = !statusData?.oauthExpiresAt || new Date(statusData.oauthExpiresAt) > new Date()
+    const isStremioOAuthCardActive = statusData?.status === 'accepted' && hasOAuthLink && isOAuthValid
+    
+    // Only poll if StremioOAuthCard is NOT active (fallback for edge cases)
+    if (statusData?.status === 'accepted' && hasOAuthLink && !isCreatingUser && !completeMutation.isPending && !isStremioOAuthCardActive) {
+      if (isOAuthValid) {
+        const currentOAuthCode = statusData.oauthCode
+        
+        // Only set up polling if we're not already polling this OAuth code
+        if (currentPollingOAuthCodeRef.current === currentOAuthCode && oauthPollerRef.current) {
+          return // Already polling this code, don't recreate interval
         }
+        
+        // Clean up any existing interval
+        if (oauthPollerRef.current) {
+          clearInterval(oauthPollerRef.current)
+          oauthPollerRef.current = null
+        }
+        
+        // Track which OAuth code we're polling
+        currentPollingOAuthCodeRef.current = currentOAuthCode
+        
+        const pollHandler = () => {
+          // Only poll if OAuth code hasn't changed (prevent polling with stale code)
+          const currentStatus = status as any
+          if (currentStatus?.oauthCode === currentOAuthCode) {
+            pollOAuthCompletion()
+          } else {
+            // OAuth code changed, stop polling
+            if (oauthPollerRef.current) {
+              clearInterval(oauthPollerRef.current)
+              oauthPollerRef.current = null
+              currentPollingOAuthCodeRef.current = null
+            }
+          }
+        }
+        // Don't call immediately - let the interval handle it to avoid duplicate calls
         oauthPollerRef.current = window.setInterval(pollHandler, 5000)
-        pollHandler() // Poll immediately
+      } else {
+        // OAuth expired, stop polling
+        if (oauthPollerRef.current) {
+          clearInterval(oauthPollerRef.current)
+          oauthPollerRef.current = null
+          currentPollingOAuthCodeRef.current = null
+        }
+      }
+    } else {
+      // Not in accepted state, missing OAuth, or StremioOAuthCard is handling it - stop polling
+      if (oauthPollerRef.current) {
+        clearInterval(oauthPollerRef.current)
+        oauthPollerRef.current = null
+        currentPollingOAuthCodeRef.current = null
       }
     }
 
@@ -795,6 +853,7 @@ export default function InviteRequestPage() {
       if (oauthPollerRef.current) {
         clearInterval(oauthPollerRef.current)
         oauthPollerRef.current = null
+        currentPollingOAuthCodeRef.current = null
       }
     }
   }, [status, pollOAuthCompletion, isCreatingUser, completeMutation.isPending, emailMismatchError])
@@ -866,7 +925,6 @@ export default function InviteRequestPage() {
   }
 
   const statusData = status as any
-  const showNewRequestButton = requestSubmitted || emailMismatchError || statusData?.status || statusError || isInvitationDisabled
 
   // determine which page to show
   const renderPageContent = () => {
@@ -1053,8 +1111,6 @@ export default function InviteRequestPage() {
           username={username}
           emailError={emailError}
           usernameError={usernameError}
-          isCheckingEmail={isCheckingEmail}
-          isCheckingUsername={isCheckingUsername}
           isSubmitting={submitMutation.isPending}
           onEmailChange={handleEmailChange}
           onUsernameChange={handleUsernameChange}
@@ -1096,12 +1152,20 @@ export default function InviteRequestPage() {
     return null
   }
 
+  const pageContent = renderPageContent()
+  
+  // Only show "New Request" button after we've determined the page content
+  // Don't show it while checking invitation or if we're on the initial request form
+  const showNewRequestButton = !isCheckingInvitation && 
+    pageContent !== null && 
+    (requestSubmitted || emailMismatchError || statusData?.status || statusError || isInvitationDisabled)
+
   return (
     <InvitePageLayout
       showNewRequestButton={showNewRequestButton}
       onNewRequest={handleNewRequest}
     >
-      {renderPageContent()}
+      {pageContent}
     </InvitePageLayout>
   )
 }

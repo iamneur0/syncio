@@ -8,8 +8,6 @@ interface RequestAccessFormProps {
   username: string
   emailError: string | null
   usernameError: string | null
-  isCheckingEmail: boolean
-  isCheckingUsername: boolean
   isSubmitting: boolean
   onEmailChange: (e: React.ChangeEvent<HTMLInputElement>) => void
   onUsernameChange: (e: React.ChangeEvent<HTMLInputElement>) => void
@@ -21,8 +19,6 @@ export function RequestAccessForm({
   username,
   emailError,
   usernameError,
-  isCheckingEmail,
-  isCheckingUsername,
   isSubmitting,
   onEmailChange,
   onUsernameChange,

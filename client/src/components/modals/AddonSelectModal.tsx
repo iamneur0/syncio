@@ -4,6 +4,7 @@ import { X, Search, Puzzle } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { addonsAPI } from '@/services/api'
 import { EntityList, AddonIcon } from '@/components/entities'
+import { useBodyScrollLock } from '@/hooks/useBodyScrollLock'
 
 interface AddonSelectModalProps {
   isOpen: boolean

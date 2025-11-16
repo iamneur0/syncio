@@ -86,6 +86,27 @@ const nextConfig = {
         source: '/api/:path*',
         destination: `http://localhost:4000/api/:path*`,
       },
+      // Proxy invite API endpoints (not the page route)
+      {
+        source: '/invite/:inviteCode/check',
+        destination: `http://localhost:4000/invite/:inviteCode/check`,
+      },
+      {
+        source: '/invite/:inviteCode/request',
+        destination: `http://localhost:4000/invite/:inviteCode/request`,
+      },
+      {
+        source: '/invite/:inviteCode/status',
+        destination: `http://localhost:4000/invite/:inviteCode/status`,
+      },
+      {
+        source: '/invite/:inviteCode/generate-oauth',
+        destination: `http://localhost:4000/invite/:inviteCode/generate-oauth`,
+      },
+      {
+        source: '/invite/:inviteCode/complete',
+        destination: `http://localhost:4000/invite/:inviteCode/complete`,
+      },
     ]
   },
 

@@ -18,7 +18,7 @@ function pathIsAllowlisted(path) {
     '/api/public-auth/private-login', // Private instance username/password login
     '/api/public-auth/suggest-uuid',
     '/api/ext', // External API uses API key auth (handled by externalApi router)
-    '/api/invitations/public', // Public invitation endpoints (request submission, status check, OAuth completion)
+    '/invite', // Public invitation endpoints (request submission, status check, OAuth completion)
     // Stremio helpers are NOT allowlisted; require auth
     // Note: addons endpoints are NOT allowlisted; they require auth/CSRF
   ];
