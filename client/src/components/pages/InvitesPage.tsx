@@ -253,8 +253,7 @@ export default function InvitesPage() {
     },
     customRefreshOAuth: (entity: any) => {
       refreshOAuthMutation.mutate(entity as Invite)
-    },
-    refetchInterval: 3000
+    }
   }
 
   return <GenericEntityPage config={config} />

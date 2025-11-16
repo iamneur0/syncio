@@ -234,23 +234,23 @@ export default function DateTimePicker({
       {/* Input field */}
       <div
         onClick={() => setIsOpen(!isOpen)}
-        className="w-full px-3 py-2 border rounded-lg focus:outline-none input cursor-pointer flex items-center justify-between"
+        className="px-3 py-2 rounded-lg input cursor-pointer relative"
         style={{
-          color: value ? 'var(--color-text)' : 'var(--color-text-secondary)',
-          minHeight: '2.5rem'
+          color: value ? 'var(--color-text)' : 'var(--color-text-secondary)'
         }}
       >
-        <div className="flex items-center gap-2 flex-1 min-w-0">
+        <div className="flex items-center gap-2">
           <Calendar className="w-4 h-4 flex-shrink-0" style={{ color: 'var(--color-text-secondary)' }} />
-          <span className="truncate">{displayValue}</span>
+          <p className="text-sm color-text-secondary" style={{ color: 'inherit', margin: 0 }}>{displayValue}</p>
         </div>
         {value && (
           <button
+            type="button"
             onClick={(e) => {
               e.stopPropagation()
               handleClear()
             }}
-            className="p-1 rounded hover:opacity-70 transition-opacity flex-shrink-0"
+            className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded hover:opacity-70 transition-opacity"
             style={{ color: 'var(--color-text-secondary)' }}
           >
             <X className="w-4 h-4" />
@@ -271,6 +271,7 @@ export default function DateTimePicker({
           <div className="p-4 border-r" style={{ borderColor: 'var(--color-border)' }}>
             <div className="flex items-center justify-between mb-4">
               <button
+                type="button"
                 onClick={() => navigateMonth('prev')}
                 disabled={!monthHasSelectableDays(subMonths(currentMonth, 1))}
                 className="p-1 rounded hover:opacity-70 transition-opacity disabled:opacity-30 disabled:cursor-not-allowed"
@@ -284,6 +285,7 @@ export default function DateTimePicker({
                 </span>
               </div>
               <button
+                type="button"
                 onClick={() => navigateMonth('next')}
                 disabled={!monthHasSelectableDays(addMonths(currentMonth, 1))}
                 className="p-1 rounded hover:opacity-70 transition-opacity disabled:opacity-30 disabled:cursor-not-allowed"
@@ -318,6 +320,7 @@ export default function DateTimePicker({
 
                 return (
                   <button
+                    type="button"
                     key={day.toISOString()}
                     onClick={() => !isDisabled && !isOtherMonth && handleDateSelect(day)}
                     disabled={isDisabled || isOtherMonth}
@@ -373,6 +376,7 @@ export default function DateTimePicker({
                     const isSelected = selectedTime?.hour === hour
                     return (
                       <button
+                        type="button"
                         key={hour}
                         data-hour={hour}
                         onClick={() => handleTimeChange(hour, selectedTime?.minute ?? getMinutes(minDate))}
@@ -409,6 +413,7 @@ export default function DateTimePicker({
                     const isSelected = selectedTime?.minute === minute
                     return (
                       <button
+                        type="button"
                         key={minute}
                         data-minute={minute}
                         onClick={() => handleTimeChange(selectedTime?.hour ?? getHours(minDate), minute)}
