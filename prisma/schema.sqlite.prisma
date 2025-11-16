@@ -109,6 +109,7 @@ model Invitation {
   currentUses Int      @default(0) // Current number of uses
   expiresAt   DateTime? // Optional expiry date
   isActive    Boolean  @default(true)
+  syncOnJoin  Boolean  @default(false) // Automatically sync user addons when they join
   createdAt   DateTime @default(now())
   
   // Relationships
