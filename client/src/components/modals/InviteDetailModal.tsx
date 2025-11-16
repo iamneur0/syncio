@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { useTheme } from '@/contexts/ThemeContext'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { invitationsAPI } from '@/services/api'
+import { invitationsAPI, groupsAPI } from '@/services/api'
 import { useModalState } from '@/hooks/useCommonState'
 import { useBodyScrollLock } from '@/hooks/useBodyScrollLock'
 import toast from 'react-hot-toast'
@@ -12,6 +12,8 @@ import { EntityList } from '@/components/entities'
 import { getEntityColorStyles } from '@/utils/colorMapping'
 import { formatDate } from '@/utils/dateUtils'
 import { SyncBadge } from '@/components/ui'
+import DateTimePicker from '@/components/ui/DateTimePicker'
+import { format } from 'date-fns'
 
 interface Invitation {
   id: string
@@ -21,6 +23,7 @@ interface Invitation {
   currentUses: number
   expiresAt: string | null
   isActive: boolean
+  syncOnJoin: boolean
   createdAt: string
   requests: InviteRequest[]
 }
@@ -51,9 +54,11 @@ function RequestItem({
   onAccept, 
   onReject, 
   onUndoRejection,
-  onRefreshOAuth, 
+  onRefreshOAuth,
+  onDelete,
   isRefreshingOAuth,
   isUndoingRejection,
+  isDeleting,
   getRequestStatusBadge,
   isOAuthUsed 
 }: { 
@@ -63,8 +68,10 @@ function RequestItem({
   onReject: (id: string) => void
   onUndoRejection: (id: string) => void
   onRefreshOAuth: (requestId: string) => void
+  onDelete: (id: string) => void
   isRefreshingOAuth: boolean
   isUndoingRejection: boolean
+  isDeleting: boolean
   getRequestStatusBadge: (status: string, request: InviteRequest) => React.ReactNode
   isOAuthUsed: boolean
 }) {
@@ -159,36 +166,58 @@ function RequestItem({
           </>
         )}
         {request.status === 'rejected' && (
-          <button
-            onClick={() => onUndoRejection(request.id)}
-            disabled={isUndoingRejection}
-            className="p-2 rounded-lg transition-colors color-text color-hover disabled:opacity-50"
-            title="Undo rejection"
-          >
-            <RotateCcw className={`w-4 h-4 ${isUndoingRejection ? 'animate-spin' : ''}`} />
-          </button>
+          <>
+            <button
+              onClick={() => onUndoRejection(request.id)}
+              disabled={isUndoingRejection}
+              className="p-2 rounded-lg transition-colors color-text color-hover disabled:opacity-50"
+              title="Undo rejection"
+            >
+              <RotateCcw className={`w-4 h-4 ${isUndoingRejection ? 'animate-spin' : ''}`} />
+            </button>
+            <button
+              onClick={() => onDelete(request.id)}
+              disabled={isDeleting}
+              className="p-2 rounded-lg transition-colors color-text color-hover disabled:opacity-50"
+              title="Delete request"
+            >
+              <X className={`w-4 h-4 ${isDeleting ? 'animate-spin' : ''}`} />
+            </button>
+          </>
         )}
-        {request.status === 'accepted' && request.oauthLink && (
-            <>
-              <a
-                href={request.oauthLink}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="p-2 rounded-lg transition-colors color-text color-hover"
-                title="Open OAuth link"
-              >
-                <ExternalLink className="w-4 h-4" />
-              </a>
-              <button
-                onClick={() => onRefreshOAuth(request.id)}
-                disabled={isRefreshingOAuth}
-                className="p-2 rounded-lg transition-colors color-text color-hover disabled:opacity-50"
-                title="Clear OAuth link (user can generate new one)"
-              >
-                <RefreshCw className={`w-4 h-4 ${isRefreshingOAuth ? 'animate-spin' : ''}`} />
-              </button>
-            </>
-          )}
+        {request.status === 'accepted' && (
+          <>
+            {request.oauthLink && (
+              <>
+                <a
+                  href={request.oauthLink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="p-2 rounded-lg transition-colors color-text color-hover"
+                  title="Open OAuth link"
+                >
+                  <ExternalLink className="w-4 h-4" />
+                </a>
+                <button
+                  onClick={() => onRefreshOAuth(request.id)}
+                  disabled={isRefreshingOAuth}
+                  className="p-2 rounded-lg transition-colors color-text color-hover disabled:opacity-50"
+                  title="Clear OAuth link (user can generate new one)"
+                >
+                  <RefreshCw className={`w-4 h-4 ${isRefreshingOAuth ? 'animate-spin' : ''}`} />
+                </button>
+              </>
+            )}
+            <button
+              onClick={() => onDelete(request.id)}
+              disabled={isDeleting}
+              className="p-2 rounded-lg transition-colors color-text color-hover disabled:opacity-50"
+              title="Delete request"
+            >
+              <X className={`w-4 h-4 ${isDeleting ? 'animate-spin' : ''}`} />
+            </button>
+          </>
+        )}
         </div>
       </div>
     </div>
@@ -209,7 +238,19 @@ export default function InviteDetailModal({
   const [renewedRequests, setRenewedRequests] = useState<Set<string>>(new Set())
   const justClearedOAuthRef = React.useRef<Set<string>>(new Set())
   
+  // Form state for editing
+  const [editGroupName, setEditGroupName] = useState<string>('')
+  const [editSyncOnJoin, setEditSyncOnJoin] = useState<boolean>(false)
+  const [editExpiresAt, setEditExpiresAt] = useState<string>('')
+  
   const invitationColorStyles = getEntityColorStyles(themeName, 1)
+  
+  // Fetch groups for selector
+  const { data: groups = [] } = useQuery({
+    queryKey: ['groups'],
+    queryFn: groupsAPI.getAll,
+    enabled: isOpen
+  })
 
   useBodyScrollLock(isOpen)
 
@@ -225,16 +266,23 @@ export default function InviteDetailModal({
   // poll for updates while modal is open
   const { data: invitationDetails, isLoading } = useQuery({
     queryKey: ['invitation', invitation?.id, 'details'],
-    queryFn: () => invitationsAPI.getAll().then(invitations => 
-      invitations.find((inv: Invitation) => inv.id === invitation!.id)
-    ),
+    queryFn: () => invitationsAPI.getById(invitation!.id),
     enabled: !!invitation?.id && isOpen,
     initialData: invitation,
-    refetchInterval: isOpen ? 3000 : false,
+    refetchInterval: isOpen ? 5000 : false,
     staleTime: 0
   })
 
   const currentInvitation = invitationDetails || invitation
+
+  // Initialize form state when invitation changes
+  useEffect(() => {
+    if (currentInvitation) {
+      setEditGroupName(currentInvitation.groupName || '')
+      setEditSyncOnJoin(currentInvitation.syncOnJoin || false)
+      setEditExpiresAt(currentInvitation.expiresAt ? format(new Date(currentInvitation.expiresAt), "yyyy-MM-dd'T'HH:mm") : '')
+    }
+  }, [currentInvitation])
 
   useEffect(() => {
     if (!isOpen || !currentInvitation?.requests) return
@@ -286,8 +334,11 @@ export default function InviteDetailModal({
     if (acceptedRequests.length === 0) return
 
     const checkOAuthUsage = async () => {
+      let shouldRefetch = false
+      
       for (const request of acceptedRequests) {
         // Skip if already marked as used, completed, or renewed (renewed requests get fresh OAuth)
+        // Also skip if status is completed - no need to check OAuth usage for completed requests
         if (oauthUsedRequests.has(request.id) || request.status === 'completed' || renewedRequests.has(request.id)) continue
 
         try {
@@ -307,11 +358,19 @@ export default function InviteDetailModal({
             // Only mark as used if not renewed (renewed requests have a fresh OAuth link)
             if (!renewedRequests.has(request.id)) {
               setOauthUsedRequests(prev => new Set(prev).add(request.id))
+              // Trigger immediate refetch to get latest status (might already be 'completed')
+              shouldRefetch = true
             }
           }
         } catch (error) {
           // ignore errors
         }
+      }
+      
+      // If we detected OAuth usage, immediately refetch to get the latest status
+      // This prevents showing "Expired" if the backend has already updated status to 'completed'
+      if (shouldRefetch && currentInvitation?.id) {
+        queryClient.refetchQueries({ queryKey: ['invitation', currentInvitation.id, 'details'] })
       }
     }
 
@@ -388,6 +447,18 @@ export default function InviteDetailModal({
     }
   })
 
+  const deleteRequestMutation = useMutation({
+    mutationFn: (requestId: string) => invitationsAPI.deleteRequest(requestId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['invitations'] })
+      queryClient.invalidateQueries({ queryKey: ['invitation', invitation?.id, 'details'] })
+      toast.success('Request deleted successfully')
+    },
+    onError: (error: any) => {
+      toast.error(error?.response?.data?.error || 'Failed to delete request')
+    }
+  })
+
   const deleteMutation = useMutation({
     mutationFn: invitationsAPI.delete,
     onSuccess: () => {
@@ -399,6 +470,53 @@ export default function InviteDetailModal({
       toast.error(error?.response?.data?.error || 'Failed to delete invitation')
     }
   })
+
+  const updateMutation = useMutation({
+    mutationFn: (data: { groupName?: string | null; syncOnJoin?: boolean; expiresAt?: string | null; createdAt?: string }) =>
+      invitationsAPI.update(currentInvitation!.id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['invitation'] })
+      queryClient.invalidateQueries({ queryKey: ['invitations'] })
+      queryClient.invalidateQueries({ queryKey: ['invitation', currentInvitation?.id, 'details'] })
+      toast.success('Invitation updated successfully')
+      onClose()
+    },
+    onError: (error: any) => {
+      toast.error(error?.response?.data?.message || 'Failed to update invitation')
+    }
+  })
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!currentInvitation) return
+
+    const updateData: any = {}
+    if (editGroupName !== (currentInvitation.groupName || '')) {
+      updateData.groupName = editGroupName || null
+    }
+    if (editSyncOnJoin !== (currentInvitation.syncOnJoin || false)) {
+      updateData.syncOnJoin = editSyncOnJoin
+    }
+    if (editExpiresAt !== (currentInvitation.expiresAt ? format(new Date(currentInvitation.expiresAt), "yyyy-MM-dd'T'HH:mm") : '')) {
+      updateData.expiresAt = editExpiresAt || null
+    }
+
+    if (Object.keys(updateData).length === 0) {
+      toast('No changes to save', { icon: 'ℹ️' })
+      return
+    }
+
+    await updateMutation.mutateAsync(updateData)
+  }
+
+  const handleCancel = () => {
+    if (currentInvitation) {
+      setEditGroupName(currentInvitation.groupName || '')
+      setEditSyncOnJoin(currentInvitation.syncOnJoin || false)
+      setEditExpiresAt(currentInvitation.expiresAt ? format(new Date(currentInvitation.expiresAt), "yyyy-MM-dd'T'HH:mm") : '')
+    }
+    onClose()
+  }
 
   const handleAcceptRequest = (requestId: string) => {
     const finalGroupName = currentInvitation?.groupName || undefined
@@ -426,6 +544,10 @@ export default function InviteDetailModal({
 
   const handleRefreshOAuth = (requestId: string) => {
     refreshOAuthMutation.mutate(requestId)
+  }
+
+  const handleDeleteRequest = (requestId: string) => {
+    deleteRequestMutation.mutate(requestId)
   }
 
   const handleDelete = () => {
@@ -456,6 +578,7 @@ export default function InviteDetailModal({
     let dotColor: string
     let text: string
     
+    // Always prioritize completed status first - prevents showing "Expired" for completed requests
     if (status === 'completed') {
       badgeStatus = 'joined'
       dotColor = '#22c55e'
@@ -586,7 +709,7 @@ export default function InviteDetailModal({
           {isLoading ? (
             <div className="text-center py-8">Loading...</div>
           ) : (
-            <>
+            <form onSubmit={handleSave} className="flex flex-col h-full">
               <div className="p-4 rounded-lg mb-6 section-panel">
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="text-lg font-semibold">Details</h3>
@@ -614,12 +737,38 @@ export default function InviteDetailModal({
                   </div>
                 </div>
 
-                <div className="mb-4">
-                  <h4 className="text-sm font-semibold mb-2">Group</h4>
-                  <div className="px-3 py-2 rounded-lg input">
-                    <p className="text-sm color-text-secondary">
-                      {currentInvitation?.groupName || 'No group assigned'}
-                    </p>
+                <div className="mb-4 flex gap-4">
+                  <div className="flex-1">
+                    <h4 className="text-sm font-semibold mb-2">Group</h4>
+                    <select
+                      value={editGroupName}
+                      onChange={(e) => {
+                        setEditGroupName(e.target.value)
+                        if (!e.target.value) {
+                          setEditSyncOnJoin(false)
+                        }
+                      }}
+                      className="input w-full px-3 py-2"
+                    >
+                      <option value="">No group assigned</option>
+                      {groups.map((group: any) => (
+                        <option key={group.id} value={group.name}>
+                          {group.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="flex-1">
+                    <h4 className="text-sm font-semibold mb-2">Sync on Join</h4>
+                    <select
+                      value={editSyncOnJoin ? 'yes' : 'no'}
+                      onChange={(e) => setEditSyncOnJoin(e.target.value === 'yes')}
+                      disabled={!editGroupName}
+                      className="input w-full px-3 py-2"
+                    >
+                      <option value="no">No</option>
+                      <option value="yes">Yes</option>
+                    </select>
                   </div>
                 </div>
 
@@ -632,16 +781,14 @@ export default function InviteDetailModal({
                       </p>
                     </div>
                   </div>
-                  {currentInvitation?.expiresAt && (
-                    <div className="flex-1">
-                      <h4 className="text-sm font-semibold mb-2">Expires</h4>
-                      <div className="px-3 py-2 rounded-lg input">
-                        <p className="text-sm color-text-secondary">
-                          {formatDate(currentInvitation.expiresAt)}
-                        </p>
-                      </div>
-                    </div>
-                  )}
+                  <div className="flex-1">
+                    <h4 className="text-sm font-semibold mb-2">Expires</h4>
+                    <DateTimePicker
+                      value={editExpiresAt}
+                      onChange={setEditExpiresAt}
+                      min={new Date()}
+                    />
+                  </div>
                 </div>
               </div>
 
@@ -660,14 +807,33 @@ export default function InviteDetailModal({
                     onReject={handleRejectRequest}
                     onUndoRejection={handleUndoRejection}
                     onRefreshOAuth={handleRefreshOAuth}
+                    onDelete={handleDeleteRequest}
                     isRefreshingOAuth={refreshOAuthMutation.isPending}
                     isUndoingRejection={undoRejectionMutation.isPending}
+                    isDeleting={deleteRequestMutation.isPending}
                     getRequestStatusBadge={getRequestStatusBadge}
                     isOAuthUsed={oauthUsedRequests.has(request.id)}
                   />
                 )}
               />
-            </>
+
+              <div className="flex justify-end gap-3 pt-4">
+                <button
+                  type="button"
+                  onClick={handleCancel}
+                  className="px-4 py-2 text-sm font-medium rounded-lg transition-colors color-text-secondary color-hover"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={updateMutation.isPending}
+                  className="px-4 py-2 text-sm font-medium rounded-lg transition-colors disabled:opacity-50 color-surface hover:opacity-90"
+                >
+                  {updateMutation.isPending ? 'Saving...' : 'Save Changes'}
+                </button>
+              </div>
+            </form>
           )}
         </div>
       </div>

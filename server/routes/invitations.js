@@ -40,7 +40,7 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, encrypt, decrypt, assign
       const accountId = getAccountId(req)
       if (!accountId) return res.status(401).json({ error: 'Unauthorized' })
 
-      const { maxUses, expiresAt, groupName } = req.body
+      const { maxUses, expiresAt, groupName, syncOnJoin } = req.body
 
       // make sure code is unique
       let inviteCode
@@ -61,7 +61,8 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, encrypt, decrypt, assign
           maxUses: maxUses || 1,
           currentUses: 0,
           expiresAt: expiresAt ? new Date(expiresAt) : null,
-          isActive: true
+          isActive: true,
+          syncOnJoin: syncOnJoin === true
         }
       })
 
@@ -151,6 +152,40 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, encrypt, decrypt, assign
     }
   })
 
+  router.patch('/:id', async (req, res) => {
+    try {
+      const accountId = getAccountId(req)
+      if (!accountId) return res.status(401).json({ error: 'Unauthorized' })
+
+      const { id } = req.params
+      const { groupName, syncOnJoin, expiresAt, createdAt } = req.body
+
+      const invitation = await prisma.invitation.findFirst({ where: { id, accountId } })
+      if (!invitation) return res.status(404).json({ error: 'Invitation not found' })
+
+      const updateData = {}
+      if (groupName !== undefined) updateData.groupName = groupName || null
+      if (syncOnJoin !== undefined) updateData.syncOnJoin = syncOnJoin === true
+      if (expiresAt !== undefined) updateData.expiresAt = expiresAt ? new Date(expiresAt) : null
+      if (createdAt !== undefined) updateData.createdAt = createdAt ? new Date(createdAt) : invitation.createdAt
+
+      const updated = await prisma.invitation.update({
+        where: { id },
+        data: updateData,
+        include: {
+          requests: {
+            orderBy: { createdAt: 'desc' }
+          }
+        }
+      })
+
+      res.json(updated)
+    } catch (error) {
+      console.error('Error updating invitation:', error)
+      res.status(500).json({ error: 'Failed to update invitation' })
+    }
+  })
+
   router.delete('/:id', async (req, res) => {
     try {
       const accountId = getAccountId(req)
@@ -189,6 +224,31 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, encrypt, decrypt, assign
     } catch (error) {
       console.error('Error fetching requests:', error)
       res.status(500).json({ error: 'Failed to fetch requests' })
+    }
+  })
+
+  router.get('/:id', async (req, res) => {
+    try {
+      const accountId = getAccountId(req)
+      if (!accountId) return res.status(401).json({ error: 'Unauthorized' })
+
+      const { id } = req.params
+
+      const invitation = await prisma.invitation.findFirst({
+        where: { id, accountId },
+        include: {
+          requests: {
+            orderBy: { createdAt: 'desc' }
+          }
+        }
+      })
+
+      if (!invitation) return res.status(404).json({ error: 'Invitation not found' })
+
+      res.json(invitation)
+    } catch (error) {
+      console.error('Error fetching invitation:', error)
+      res.status(500).json({ error: 'Failed to fetch invitation' })
     }
   })
 
@@ -351,6 +411,41 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, encrypt, decrypt, assign
     }
   })
 
+  // delete an invitation request
+  router.delete('/requests/:requestId', async (req, res) => {
+    try {
+      const accountId = getAccountId(req)
+      if (!accountId) return res.status(401).json({ error: 'Unauthorized' })
+
+      const { requestId } = req.params
+      const request = await prisma.inviteRequest.findUnique({
+        where: { id: requestId },
+        include: { invitation: true }
+      })
+
+      if (!request) return res.status(404).json({ error: 'Request not found' })
+      if (request.invitation.accountId !== accountId) return res.status(403).json({ error: 'Forbidden' })
+
+      // Only allow deletion for rejected or accepted requests (not completed or pending)
+      if (request.status === 'completed') {
+        return res.status(400).json({ error: 'Cannot delete completed requests' })
+      }
+      if (request.status === 'pending') {
+        return res.status(400).json({ error: 'Cannot delete pending requests. Reject them instead.' })
+      }
+
+      // Delete the request
+      await prisma.inviteRequest.delete({
+        where: { id: requestId }
+      })
+
+      res.json({ message: 'Request deleted successfully' })
+    } catch (error) {
+      console.error('Error deleting request:', error)
+      res.status(500).json({ error: 'Failed to delete request' })
+    }
+  })
+
   return router
 }
 
@@ -388,7 +483,7 @@ async function getStremioUserInfo(authKey, username, email) {
 
 // Public invite routes (no auth required)
 // These routes are mounted at /invite/:inviteCode/*
-module.exports.createPublicRouter = ({ prisma, encrypt, assignUserToGroup }) => {
+module.exports.createPublicRouter = ({ prisma, encrypt, assignUserToGroup, decrypt }) => {
   const publicRouter = express.Router()
 
   publicRouter.get('/:inviteCode/check', async (req, res) => {
@@ -882,6 +977,23 @@ module.exports.createPublicRouter = ({ prisma, encrypt, assignUserToGroup }) => 
             }
             
             await assignUserToGroupWithPrisma(newUser.id, group.id, { appAccountId: invitation.accountId })
+            
+            // Sync user addons if syncOnJoin is enabled
+            if (invitation.syncOnJoin) {
+              try {
+                const { syncUserAddons } = require('./users')
+                const reqLike = { appAccountId: invitation.accountId, headers: {} }
+                const syncResult = await syncUserAddons(prisma, newUser.id, [], false, reqLike, decrypt, () => invitation.accountId, true)
+                if (syncResult?.success) {
+                  console.log('✅ User synced on join')
+                } else {
+                  console.warn('⚠️ Sync on join failed:', syncResult?.error)
+                }
+              } catch (syncError) {
+                console.error('❌ Error syncing user on join:', syncError)
+                // Don't fail the whole thing if sync fails
+              }
+            }
           }
         } catch (error) {
           console.error('Error assigning user to group:', error)
