@@ -844,6 +844,7 @@ export default function GenericEntityPage({ config }: GenericEntityPageProps) {
           onAddUser={(data: any) => createMutation.mutate(data)}
           onAddAddon={(data: any) => createMutation.mutate(data)}
           onCreateGroup={(data: any) => createMutation.mutate(data)}
+          onCreate={(data: any) => createMutation.mutate(data)}
           isCreating={createMutation.isPending}
           groups={groups || []}
           users={users || []}
@@ -855,7 +856,10 @@ export default function GenericEntityPage({ config }: GenericEntityPageProps) {
         <finalConfig.detailModal
           isOpen={showDetailModal}
           onClose={handleCloseDetailModal}
-          {...{ [finalConfig.entityType]: selectedEntity }}
+          {...(finalConfig.entityType === 'invite' 
+            ? { invitation: selectedEntity }
+            : { [finalConfig.entityType]: selectedEntity }
+          )}
           groups={groups || []}
           users={users || []}
           userExcludedSet={new Set(selectedEntity?.excludedAddons || [])}

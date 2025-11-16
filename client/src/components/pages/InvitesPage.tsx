@@ -194,10 +194,10 @@ export default function InvitesPage() {
     customFilter,
     customSort,
     customSync: async () => {
-      const { data: invites = [] } = await queryClient.fetchQuery({
+      const invites = await queryClient.fetchQuery({
         queryKey: ['invitations'],
         queryFn: invitationsAPI.getAll
-      })
+      }) || []
       clearAllOAuthMutation.mutate(invites as Invite[])
     },
     customEntityTransform: (entity: any) => ({

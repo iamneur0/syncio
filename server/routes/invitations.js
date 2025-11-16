@@ -315,9 +315,83 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, encrypt, decrypt, assign
     }
   })
 
-  // ===== PUBLIC ENDPOINTS (no auth required) =====
+  // clear oauth link so user can generate a new one
+  router.post('/requests/:requestId/clear-oauth', async (req, res) => {
+    try {
+      const accountId = getAccountId(req)
+      if (!accountId) return res.status(401).json({ error: 'Unauthorized' })
 
-  router.get('/public/:inviteCode/check', async (req, res) => {
+      const { requestId } = req.params
+      const request = await prisma.inviteRequest.findUnique({
+        where: { id: requestId },
+        include: { invitation: true }
+      })
+
+      if (!request) return res.status(404).json({ error: 'Request not found' })
+      if (request.invitation.accountId !== accountId) return res.status(403).json({ error: 'Forbidden' })
+      // Allow clearing OAuth for accepted requests (or expired ones that were accepted)
+      if (request.status !== 'accepted' && request.status !== 'completed') {
+        return res.status(400).json({ error: 'Request must be accepted to clear OAuth link' })
+      }
+
+      const updatedRequest = await prisma.inviteRequest.update({
+        where: { id: requestId },
+        data: {
+          oauthCode: null,
+          oauthLink: null,
+          oauthExpiresAt: null,
+          status: 'accepted' // Reset to accepted so user can generate new OAuth link
+        }
+      })
+
+      res.json(updatedRequest)
+    } catch (error) {
+      console.error('Error clearing OAuth link:', error)
+      res.status(500).json({ error: 'Failed to clear OAuth link' })
+    }
+  })
+
+  return router
+}
+
+// Helper function to get Stremio user info from authKey
+async function getStremioUserInfo(authKey, username, email) {
+  const { validateStremioAuthKey } = require('../utils/stremio')
+  
+  let verifiedUser = null
+  try {
+    const validation = await validateStremioAuthKey(authKey)
+    verifiedUser = validation && validation.user ? validation.user : null
+  } catch (e) {
+    const msg = (e && (e.message || e.error || '')) || ''
+    const code = (e && e.code) || 0
+    if (code === 1 || /session does not exist/i.test(String(msg))) {
+      throw new Error('Invalid or expired Stremio auth key')
+    }
+    throw new Error('Could not validate auth key')
+  }
+
+  const normalizedEmail = (verifiedUser?.email || email || '').toLowerCase()
+  const requestedUsername = typeof username === 'string' ? username.trim() : ''
+  const emailPart = normalizedEmail ? normalizedEmail.split('@')[0] : ''
+  let baseUsername = (requestedUsername || verifiedUser?.username || emailPart || `user_${Math.random().toString(36).slice(2, 8)}`).trim()
+  if (!baseUsername) {
+    baseUsername = `user_${Math.random().toString(36).slice(2, 8)}`
+  }
+  const finalUsername = baseUsername
+
+  return {
+    username: finalUsername,
+    email: normalizedEmail
+  }
+}
+
+// Public invite routes (no auth required)
+// These routes are mounted at /invite/:inviteCode/*
+module.exports.createPublicRouter = ({ prisma, encrypt, assignUserToGroup }) => {
+  const publicRouter = express.Router()
+
+  publicRouter.get('/:inviteCode/check', async (req, res) => {
     try {
       const { inviteCode } = req.params
       const invitation = await prisma.invitation.findUnique({
@@ -338,7 +412,7 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, encrypt, decrypt, assign
     }
   })
 
-  router.post('/public/:inviteCode/request', async (req, res) => {
+  publicRouter.post('/:inviteCode/request', async (req, res) => {
     try {
       const { inviteCode } = req.params
       const { email, username } = req.body
@@ -360,16 +434,29 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, encrypt, decrypt, assign
         return res.status(400).json({ error: 'Invitation has reached maximum uses' })
       }
 
-      // check if user already exists
-      const existingUser = await prisma.user.findFirst({
+      // check if user already exists (by email or username)
+      const existingUserByEmail = await prisma.user.findFirst({
         where: {
           accountId: invitation.accountId,
           email: email.trim().toLowerCase()
         }
       })
 
-      if (existingUser) {
-        return res.status(409).json({ error: 'User is already registered to Syncio' })
+      const existingUserByUsername = await prisma.user.findFirst({
+        where: {
+          accountId: invitation.accountId,
+          username: username.trim()
+        }
+      })
+
+      if (existingUserByEmail && existingUserByUsername) {
+        return res.status(409).json({ error: 'EMAIL_AND_USERNAME_EXIST', message: 'Both email and username are already registered' })
+      }
+      if (existingUserByEmail) {
+        return res.status(409).json({ error: 'EMAIL_EXISTS', message: 'This email is already registered' })
+      }
+      if (existingUserByUsername) {
+        return res.status(409).json({ error: 'USERNAME_EXISTS', message: 'This username is already taken' })
       }
 
       // check for duplicate requests (any status)
@@ -406,7 +493,7 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, encrypt, decrypt, assign
     }
   })
 
-  router.get('/public/:inviteCode/status', async (req, res) => {
+  publicRouter.get('/:inviteCode/status', async (req, res) => {
     try {
       const { inviteCode } = req.params
       const { email, username } = req.query
@@ -462,43 +549,7 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, encrypt, decrypt, assign
     }
   })
 
-  // clear oauth link so user can generate a new one
-  router.post('/requests/:requestId/clear-oauth', async (req, res) => {
-    try {
-      const accountId = getAccountId(req)
-      if (!accountId) return res.status(401).json({ error: 'Unauthorized' })
-
-      const { requestId } = req.params
-      const request = await prisma.inviteRequest.findUnique({
-        where: { id: requestId },
-        include: { invitation: true }
-      })
-
-      if (!request) return res.status(404).json({ error: 'Request not found' })
-      if (request.invitation.accountId !== accountId) return res.status(403).json({ error: 'Forbidden' })
-      // Allow clearing OAuth for accepted requests (or expired ones that were accepted)
-      if (request.status !== 'accepted' && request.status !== 'completed') {
-        return res.status(400).json({ error: 'Request must be accepted to clear OAuth link' })
-      }
-
-      const updatedRequest = await prisma.inviteRequest.update({
-        where: { id: requestId },
-        data: {
-          oauthCode: null,
-          oauthLink: null,
-          oauthExpiresAt: null,
-          status: 'accepted' // Reset to accepted so user can generate new OAuth link
-        }
-      })
-
-      res.json(updatedRequest)
-    } catch (error) {
-      console.error('Error clearing OAuth link:', error)
-      res.status(500).json({ error: 'Failed to clear OAuth link' })
-    }
-  })
-
-  router.post('/public/:inviteCode/generate-oauth', async (req, res) => {
+  publicRouter.post('/:inviteCode/generate-oauth', async (req, res) => {
     try {
       const { inviteCode } = req.params
       const { email, username } = req.body
@@ -588,7 +639,7 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, encrypt, decrypt, assign
     }
   })
 
-  router.post('/public/:inviteCode/complete', async (req, res) => {
+  publicRouter.post('/:inviteCode/complete', async (req, res) => {
     try {
       const { inviteCode } = req.params
       const { email, username, authKey, groupName } = req.body
@@ -781,7 +832,56 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, encrypt, decrypt, assign
             }
           })
           if (group) {
-            await assignUserToGroup(newUser.id, group.id, { appAccountId: invitation.accountId })
+            // Create a wrapper that binds prisma to assignUserToGroup
+            // assignUserToGroup expects prisma in scope, so we need to call it with prisma bound
+            const assignUserToGroupWithPrisma = async (userId, groupId, req) => {
+              // Temporarily set prisma in the function's scope by creating a bound version
+              // Since assignUserToGroup uses prisma directly, we need to ensure it's available
+              const { assignUserToGroup: originalAssign } = require('../utils/helpers/database')
+              // The function uses prisma from closure, but we need to pass it
+              // Actually, let's manually do the assignment since we have prisma here
+              const accId = invitation.accountId
+              
+              // Remove user from all other groups
+              const allGroups = await prisma.group.findMany({
+                where: { accountId: accId },
+                select: { id: true, userIds: true }
+              })
+              
+              for (const g of allGroups) {
+                if (g.userIds) {
+                  const userIds = JSON.parse(g.userIds)
+                  const updatedUserIds = userIds.filter(id => id !== userId)
+                  if (updatedUserIds.length !== userIds.length) {
+                    await prisma.group.update({
+                      where: { id: g.id },
+                      data: { userIds: JSON.stringify(updatedUserIds) }
+                    })
+                  }
+                }
+              }
+              
+              // Add user to target group
+              const targetGroup = await prisma.group.findUnique({
+                where: { id: groupId, accountId: accId },
+                select: { id: true, userIds: true }
+              })
+              
+              if (!targetGroup) {
+                throw new Error(`Target group not found: ${groupId}`)
+              }
+              
+              const currentUserIds = targetGroup.userIds ? JSON.parse(targetGroup.userIds) : []
+              if (!currentUserIds.includes(userId)) {
+                currentUserIds.push(userId)
+                await prisma.group.update({
+                  where: { id: groupId },
+                  data: { userIds: JSON.stringify(currentUserIds) }
+                })
+              }
+            }
+            
+            await assignUserToGroupWithPrisma(newUser.id, group.id, { appAccountId: invitation.accountId })
           }
         } catch (error) {
           console.error('Error assigning user to group:', error)
@@ -865,6 +965,51 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, encrypt, decrypt, assign
     }
   })
 
-  return router
+  // Get Stremio user info from authKey (public endpoint for invite flow)
+  publicRouter.post('/:inviteCode/user-info', async (req, res) => {
+    try {
+      const { inviteCode } = req.params
+      const { authKey, username, email } = req.body
+
+      if (!authKey) {
+        return res.status(400).json({ error: 'authKey is required' })
+      }
+
+      // Verify the invite exists and is active
+      const invitation = await prisma.invitation.findUnique({
+        where: { inviteCode }
+      })
+
+      if (!invitation) {
+        return res.status(404).json({ error: 'Invitation not found' })
+      }
+
+      if (!invitation.isActive) {
+        return res.status(403).json({ error: 'Invitation is disabled' })
+      }
+
+      // Get user info from authKey
+      const userInfo = await getStremioUserInfo(authKey, username, email)
+
+      return res.json({
+        message: 'Stremio account verified',
+        user: userInfo
+      })
+    } catch (error) {
+      if (error.message === 'Invalid or expired Stremio auth key') {
+        return res.status(401).json({ error: error.message })
+      }
+      if (error.message === 'Could not validate auth key') {
+        return res.status(400).json({ error: error.message })
+      }
+      console.error('Error verifying auth key:', error)
+      res.status(500).json({ error: 'Failed to verify auth key' })
+    }
+  })
+
+  return publicRouter
 }
+
+// Export the helper for use in other routes
+module.exports.getStremioUserInfo = getStremioUserInfo
 

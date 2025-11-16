@@ -684,42 +684,101 @@ export const invitationsAPI = {
 
   // Public: Check if invitation is active
   checkInvitation: async (inviteCode: string): Promise<any> => {
-    const response: AxiosResponse<any> = await api.get(`/invitations/public/${inviteCode}/check`)
-    return response.data
+    const response = await fetch(`/invite/${inviteCode}/check`, {
+      method: 'GET',
+      credentials: 'include'
+    })
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: `HTTP ${response.status}` }))
+      const err: any = new Error(error.error || `HTTP ${response.status}`)
+      err.response = { status: response.status, data: error }
+      throw err
+    }
+    return response.json()
   },
 
   // Public: Submit an invite request
   submitRequest: async (inviteCode: string, email: string, username: string): Promise<any> => {
-    const response: AxiosResponse<any> = await api.post(`/invitations/public/${inviteCode}/request`, { email, username })
-    return response.data
+    const response = await fetch(`/invite/${inviteCode}/request`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ email, username })
+    })
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: `HTTP ${response.status}` }))
+      const err: any = new Error(error.error || `HTTP ${response.status}`)
+      err.response = { status: response.status, data: error }
+      throw err
+    }
+    return response.json()
   },
 
   // Public: Check request status
   checkStatus: async (inviteCode: string, email: string, username: string): Promise<any> => {
-    const response: AxiosResponse<any> = await api.get(`/invitations/public/${inviteCode}/status`, {
-      params: { email, username }
+    const params = new URLSearchParams({ email, username })
+    const response = await fetch(`/invite/${inviteCode}/status?${params}`, {
+      method: 'GET',
+      credentials: 'include'
     })
-    return response.data
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: `HTTP ${response.status}` }))
+      const err: any = new Error(error.error || `HTTP ${response.status}`)
+      err.response = { status: response.status, data: error }
+      throw err
+    }
+    return response.json()
+  },
+
+  // Public: Get Stremio user info from authKey
+  getUserInfo: async (inviteCode: string, authKey: string, username?: string, email?: string): Promise<any> => {
+    const response = await fetch(`/invite/${inviteCode}/user-info`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ authKey, username, email })
+    })
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: `HTTP ${response.status}` }))
+      const err: any = new Error(error.error || `HTTP ${response.status}`)
+      err.response = { status: response.status, data: error }
+      throw err
+    }
+    return response.json()
   },
 
   // Public: Generate OAuth link for accepted request
   generateOAuth: async (inviteCode: string, email: string, username: string): Promise<any> => {
-    const response: AxiosResponse<any> = await api.post(`/invitations/public/${inviteCode}/generate-oauth`, {
-      email,
-      username
+    const response = await fetch(`/invite/${inviteCode}/generate-oauth`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ email, username })
     })
-    return response.data
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: `HTTP ${response.status}` }))
+      const err: any = new Error(error.error || `HTTP ${response.status}`)
+      err.response = { status: response.status, data: error }
+      throw err
+    }
+    return response.json()
   },
 
   // Public: Complete OAuth and create user
   complete: async (inviteCode: string, email: string, username: string, authKey: string, groupName?: string): Promise<any> => {
-    const response: AxiosResponse<any> = await api.post(`/invitations/public/${inviteCode}/complete`, {
-      email,
-      username,
-      authKey,
-      groupName
+    const response = await fetch(`/invite/${inviteCode}/complete`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ email, username, authKey, groupName })
     })
-    return response.data
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: `HTTP ${response.status}` }))
+      const err: any = new Error(error.error || `HTTP ${response.status}`)
+      err.response = { status: response.status, data: error }
+      throw err
+    }
+    return response.json()
   },
 }
 

@@ -481,47 +481,40 @@ module.exports = ({ prisma, getAccountId, encrypt, decrypt, assignUserToGroup, A
       const { username, email, authKey, groupName, colorIndex, create } = req.body
       if (!authKey) return res.status(400).json({ message: 'authKey is required' })
 
-      // Validate auth key against Stremio (must be an active session)
-      let addonsData = {}
-      let verifiedUser = null
+      // Use shared helper to get user info
+      const { getStremioUserInfo } = require('./invitations')
+      let userInfo
       try {
-        const validation = await validateStremioAuthKey(authKey)
-        addonsData = (validation && validation.addons) || {}
-        verifiedUser = validation && validation.user ? validation.user : null
+        userInfo = await getStremioUserInfo(authKey, username, email)
       } catch (e) {
-        const msg = (e && (e.message || e.error || '')) || ''
-        const code = (e && e.code) || 0
-        if (code === 1 || /session does not exist/i.test(String(msg))) {
-          return res.status(401).json({ message: 'Invalid or expired Stremio auth key' })
+        if (e.message === 'Invalid or expired Stremio auth key') {
+          return res.status(401).json({ message: e.message })
         }
-        // Treat unknown function/other errors as invalid
-        return res.status(400).json({ message: 'Could not validate auth key' })
+        return res.status(400).json({ message: e.message || 'Could not validate auth key' })
       }
 
-      const normalizedEmail = (verifiedUser?.email || email || '').toLowerCase()
-      const requestedUsername = typeof username === 'string' ? username.trim() : ''
-      const emailPart = normalizedEmail ? normalizedEmail.split('@')[0] : ''
-      // Preserve exact username from Stremio (case-sensitive) - use requestedUsername first (from frontend which uses Stremio username)
-      let baseUsername = (requestedUsername || verifiedUser?.username || emailPart || `user_${Math.random().toString(36).slice(2, 8)}`).trim()
-      if (!baseUsername) {
-        baseUsername = `user_${Math.random().toString(36).slice(2, 8)}`
+      // Get addons data if needed (for create flow)
+      let addonsData = {}
+      if (create) {
+        try {
+          const validation = await validateStremioAuthKey(authKey)
+          addonsData = (validation && validation.addons) || {}
+        } catch (e) {
+          // Ignore addons fetch errors, we already have user info
+        }
       }
-      // Preserve original case - don't lowercase
-      let finalUsername = baseUsername
 
       if (!create) {
         return res.json({
           message: 'Stremio account verified',
           authKey,
-          user: {
-            username: finalUsername,
-            email: normalizedEmail
-          }
+          user: userInfo
         })
       }
 
       // When create flag is true, persist the user
       const accountId = getAccountId(req)
+      const normalizedEmail = userInfo.email
 
       // For invite-based creation, check if user with this email already exists first
       if (normalizedEmail) {
@@ -537,6 +530,8 @@ module.exports = ({ prisma, getAccountId, encrypt, decrypt, assignUserToGroup, A
       }
 
       // Check username uniqueness and append number if needed
+      let finalUsername = userInfo.username
+      let baseUsername = finalUsername
       let attempt = 0
       while (await prisma.user.findFirst({ where: { accountId, username: finalUsername } })) {
         attempt += 1

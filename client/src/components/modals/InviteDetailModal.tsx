@@ -267,7 +267,15 @@ export default function InviteDetailModal({
         .map((req: InviteRequest) => req.id)
       if (withNewOAuth.length === 0) return prev
       const next = new Set(prev)
-      withNewOAuth.forEach((id: string) => next.delete(id))
+      withNewOAuth.forEach((id: string) => {
+        next.delete(id)
+        // Also remove from oauthUsedRequests when OAuth is renewed (fresh start)
+        setOauthUsedRequests(prevUsed => {
+          const nextUsed = new Set(prevUsed)
+          nextUsed.delete(id)
+          return nextUsed
+        })
+      })
       return next
     })
 
@@ -279,7 +287,8 @@ export default function InviteDetailModal({
 
     const checkOAuthUsage = async () => {
       for (const request of acceptedRequests) {
-        if (oauthUsedRequests.has(request.id) || request.status === 'completed') continue
+        // Skip if already marked as used, completed, or renewed (renewed requests get fresh OAuth)
+        if (oauthUsedRequests.has(request.id) || request.status === 'completed' || renewedRequests.has(request.id)) continue
 
         try {
           const host = typeof window !== 'undefined' ? (window.location?.host || window.location?.hostname || 'syncio.app') : 'syncio.app'
@@ -295,7 +304,10 @@ export default function InviteDetailModal({
           const data = await response.json().catch(() => ({}))
           
           if (data?.result?.success && data.result.authKey && request.status === 'accepted') {
-            setOauthUsedRequests(prev => new Set(prev).add(request.id))
+            // Only mark as used if not renewed (renewed requests have a fresh OAuth link)
+            if (!renewedRequests.has(request.id)) {
+              setOauthUsedRequests(prev => new Set(prev).add(request.id))
+            }
           }
         } catch (error) {
           // ignore errors
@@ -307,7 +319,7 @@ export default function InviteDetailModal({
     checkOAuthUsage()
 
     return () => clearInterval(interval)
-  }, [isOpen, currentInvitation?.requests, oauthUsedRequests])
+  }, [isOpen, currentInvitation?.requests, oauthUsedRequests, renewedRequests])
 
   const acceptMutation = useMutation({
     mutationFn: ({ requestId, groupName }: { requestId: string; groupName?: string }) =>
@@ -436,8 +448,9 @@ export default function InviteDetailModal({
 
   const getRequestStatusBadge = React.useCallback((status: string, request: InviteRequest) => {
     const isOAuthExpired = request.oauthExpiresAt && new Date(request.oauthExpiresAt) < new Date()
-    const isOAuthUsedButNotCompleted = oauthUsedRequests.has(request.id) && status === 'accepted'
     const isRenewed = status === 'accepted' && renewedRequests.has(request.id)
+    // Only mark as used/expired if NOT renewed (renewed requests get a fresh OAuth link)
+    const isOAuthUsedButNotCompleted = oauthUsedRequests.has(request.id) && status === 'accepted' && !isRenewed
     
     let badgeStatus: 'pending' | 'accepted' | 'joined' | 'rejected' | 'renewed'
     let dotColor: string

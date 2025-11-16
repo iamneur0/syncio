@@ -68,7 +68,8 @@ export function StremioOAuthCard({
   const logoSrc = isDark ? '/logo-white.png' : '/logo-black.png'
 
   const [isCreating, setIsCreating] = useState(false)
-  const [isPolling, setIsPolling] = useState(false)
+  // Start polling if we have initial link and code (e.g., from admin-generated OAuth link)
+  const [isPolling, setIsPolling] = useState(!!(initialLink && initialCode))
   const [isCompleting, setIsCompleting] = useState(false)
   const [stremioLink, setStremioLink] = useState<string | null>(initialLink)
   const [stremioCode, setStremioCode] = useState(initialCode || '')
@@ -120,9 +121,9 @@ export function StremioOAuthCard({
       }
     }
     
-    // If any OAuth data changed, ensure polling is active
-    if (hasChanges && initialLink && initialCode) {
-      console.log('[StremioOAuthCard] OAuth data changed, ensuring polling is active')
+    // If we have initial link and code, ensure polling is active (even on first mount)
+    if (initialLink && initialCode) {
+      console.log('[StremioOAuthCard] Has initial OAuth data, ensuring polling is active')
       setIsPolling(true)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
