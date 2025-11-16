@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.1](https://github.com/iamneur0/syncio/compare/v0.3.0...v0.3.1) (2025-11-16)
+
+
+### Bug Fixes
+
+* handling renewed invites ([0e5d3d1](https://github.com/iamneur0/syncio/commit/0e5d3d1d7b53e0a61915d74450f183d31beca781))
+* invite being stuck on oauth ([544a83e](https://github.com/iamneur0/syncio/commit/544a83edd073d8a0b0aba4bd911452978437cd23))
+* many invite bugs ([3a5b1ff](https://github.com/iamneur0/syncio/commit/3a5b1ff8dc0a3c65b70085291e05669fc31b56f0))
+* modals now locked with invite page using gneeric layout for uniformity ([57e844a](https://github.com/iamneur0/syncio/commit/57e844a1b4ab33e9ed17e9db549c1fc1b36256b7))
+* redundant discord webhook on wrong stremio account + other tweaks ([4c608f6](https://github.com/iamneur0/syncio/commit/4c608f6b0a6ea9bbd1218e9ab91314e21e1b0a5b))
+* removed debug buttons in private mode ([f264036](https://github.com/iamneur0/syncio/commit/f264036019797bdc0daca65800c0f7d1501ba396))
+
 ## [0.3.0](https://github.com/iamneur0/syncio/compare/v0.2.2...v0.3.0) (2025-11-15)
 
 
