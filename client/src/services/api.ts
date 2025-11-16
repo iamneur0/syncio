@@ -639,8 +639,14 @@ export const invitationsAPI = {
     return response.data
   },
 
+  // Get a single invitation by ID
+  getById: async (id: string): Promise<any> => {
+    const response: AxiosResponse<any> = await api.get(`/invitations/${id}`)
+    return response.data
+  },
+
   // Create a new invitation
-  create: async (data: { maxUses?: number; expiresAt?: string; groupName?: string }): Promise<any> => {
+  create: async (data: { maxUses?: number; expiresAt?: string; groupName?: string; syncOnJoin?: boolean }): Promise<any> => {
     const response: AxiosResponse<any> = await api.post('/invitations', data)
     return response.data
   },
@@ -648,6 +654,12 @@ export const invitationsAPI = {
   // Delete an invitation
   delete: async (id: string): Promise<void> => {
     await api.delete(`/invitations/${id}`)
+  },
+
+  // Update an invitation
+  update: async (id: string, data: { groupName?: string | null; syncOnJoin?: boolean; expiresAt?: string | null; createdAt?: string }): Promise<any> => {
+    const response: AxiosResponse<any> = await api.patch(`/invitations/${id}`, data)
+    return response.data
   },
 
   // Toggle invitation status (enable/disable)
@@ -680,6 +692,11 @@ export const invitationsAPI = {
   clearOAuth: async (requestId: string): Promise<any> => {
     const response: AxiosResponse<any> = await api.post(`/invitations/requests/${requestId}/clear-oauth`)
     return response.data
+  },
+
+  // Delete an invitation request
+  deleteRequest: async (requestId: string): Promise<void> => {
+    await api.delete(`/invitations/requests/${requestId}`)
   },
 
   // Public: Check if invitation is active
