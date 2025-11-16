@@ -75,9 +75,13 @@ export default function InviteRequestPage() {
 
   React.useEffect(() => {
     setIsMounted(true)
+    // Mark that we've restored state if email/username exist from localStorage
+    if (initialState.email && initialState.username) {
+      setHasRestoredState(true)
+    }
     // Don't sync requestSubmitted from localStorage here - only restore on initial mount via getInitialState()
     // This prevents auto-submission when user types matching email/username
-  }, [storageKey])
+  }, [storageKey, initialState.email, initialState.username])
 
   React.useEffect(() => {
     if (!isMounted || !inviteCode) {
@@ -121,7 +125,11 @@ export default function InviteRequestPage() {
   const [isCreatingUser, setIsCreatingUser] = React.useState(false)
   const hasAttemptedCreationRef = React.useRef<Set<string>>(new Set())
   const verificationFailureCountRef = React.useRef<Map<string, number>>(new Map())
-  // Only check status when request has been submitted, not while typing
+  // Track if we've restored state from localStorage (for refresh restoration)
+  const [hasRestoredState, setHasRestoredState] = React.useState(false)
+  
+  // Check status only when request has been submitted
+  // hasRestoredState is only used to set requestSubmitted on initial load, not for enabling the query
   const shouldCheckStatus = requestSubmitted
   
   const { data: status, dataUpdatedAt, refetch: refetchStatus, error: statusError, isLoading: isLoadingStatus } = useQuery({
@@ -132,7 +140,9 @@ export default function InviteRequestPage() {
       shouldCheckStatus &&
       !!email &&
       !!username &&
-      !isInvitationNotFound,
+      !isInvitationNotFound &&
+      !emailError &&
+      !usernameError,
     staleTime: 0,
     refetchOnWindowFocus: true,
     refetchInterval: (query) => {
@@ -193,8 +203,13 @@ export default function InviteRequestPage() {
   }, [status, lastOAuthLink, lastOAuthCode, storageKey])
 
   // handle status errors
+  // Only clear fields if we don't have validation errors (user is not on the form)
   React.useEffect(() => {
     if (statusError && (statusError as any)?.response?.status === 404) {
+      // Don't clear fields if we have validation errors - user is still on the form
+      if (emailError || usernameError) {
+        return
+      }
       if (typeof window !== 'undefined') {
         localStorage.removeItem(storageKey)
       }
@@ -203,7 +218,7 @@ export default function InviteRequestPage() {
       setUsername('')
       setOauthLinkGenerated(false)
     }
-  }, [statusError, storageKey])
+  }, [statusError, storageKey, emailError, usernameError])
 
   const prevDataUpdatedAtRef = React.useRef<number>(0)
   const prevLinkRef = React.useRef<string | null>(null)
@@ -232,6 +247,14 @@ export default function InviteRequestPage() {
     const isInitialLoad = prevLink === null && prevCode === null && prevStatus === null
     // On initial load, if status is 'accepted' but oauthLink is null, it means OAuth was cleared (renewed)
     const isRenewedState = currentStatus === 'accepted' && currentLink === null
+    
+    // On refresh, if we have a valid status, set requestSubmitted to true so the page shows the correct state
+    if (isInitialLoad && currentStatus && (currentStatus === 'pending' || currentStatus === 'accepted' || currentStatus === 'rejected' || currentStatus === 'completed')) {
+      if (!requestSubmitted) {
+        setRequestSubmitted(true)
+        setHasRestoredState(true) // Mark that we've restored state
+      }
+    }
     
     if (linkCleared || (isInitialLoad && isRenewedState)) {
       // Also set requestSubmitted to true so status query continues to run
@@ -885,6 +908,7 @@ export default function InviteRequestPage() {
     }
     setEmailMismatchError(false)
     setRequestSubmitted(false)
+    setHasRestoredState(false) // Reset restored state flag
     setEmail('')
     setUsername('')
     setOauthLinkGenerated(false)
@@ -1156,9 +1180,12 @@ export default function InviteRequestPage() {
   
   // Only show "New Request" button after we've determined the page content
   // Don't show it while checking invitation or if we're on the initial request form
+  // Also don't show it if we have validation errors (user is still on the form)
   const showNewRequestButton = !isCheckingInvitation && 
     pageContent !== null && 
-    (requestSubmitted || emailMismatchError || statusData?.status || statusError || isInvitationDisabled)
+    !emailError &&
+    !usernameError &&
+    (requestSubmitted || emailMismatchError || statusData?.status || (statusError && !emailError && !usernameError) || isInvitationDisabled)
 
   return (
     <InvitePageLayout
