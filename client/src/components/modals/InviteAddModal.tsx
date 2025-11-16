@@ -4,6 +4,7 @@ import React from 'react'
 import { createPortal } from 'react-dom'
 import { format } from 'date-fns'
 import DateTimePicker from '@/components/ui/DateTimePicker'
+import { ToggleSwitch } from '@/components/ui'
 import { groupsAPI } from '@/services/api'
 import { useQuery } from '@tanstack/react-query'
 import { useBodyScrollLock } from '@/hooks/useBodyScrollLock'
@@ -11,7 +12,7 @@ import { useBodyScrollLock } from '@/hooks/useBodyScrollLock'
 interface InviteAddModalProps {
   isOpen: boolean
   onClose: () => void
-  onCreate: (data: { maxUses?: number; expiresAt?: string; groupName?: string }) => void
+  onCreate: (data: { maxUses?: number; expiresAt?: string; groupName?: string; syncOnJoin?: boolean }) => void
   isCreating: boolean
 }
 
@@ -24,6 +25,7 @@ export default function InviteAddModal({
   const [maxUses, setMaxUses] = React.useState<number>(1)
   const [expiresAt, setExpiresAt] = React.useState<string>('')
   const [selectedGroupForCreate, setSelectedGroupForCreate] = React.useState<string>('')
+  const [syncOnJoin, setSyncOnJoin] = React.useState<boolean>(false)
 
   const { data: groups = [] } = useQuery({
     queryKey: ['groups'],
@@ -37,8 +39,16 @@ export default function InviteAddModal({
       setMaxUses(1)
       setExpiresAt('')
       setSelectedGroupForCreate('')
+      setSyncOnJoin(false)
     }
   }, [isOpen])
+
+  // Reset syncOnJoin when group is cleared
+  React.useEffect(() => {
+    if (!selectedGroupForCreate) {
+      setSyncOnJoin(false)
+    }
+  }, [selectedGroupForCreate])
 
   React.useEffect(() => {
     if (!isOpen) return
@@ -58,7 +68,8 @@ export default function InviteAddModal({
     onCreate({
       maxUses: finalMaxUses,
       expiresAt: expiresAt,
-      groupName: selectedGroupForCreate || undefined
+      groupName: selectedGroupForCreate || undefined,
+      syncOnJoin: selectedGroupForCreate ? syncOnJoin : false
     })
   }
 
@@ -111,104 +122,69 @@ export default function InviteAddModal({
                 min={new Date()}
                 placeholder="Select expiration date and time"
               />
-              <div className="flex gap-2 mt-2 flex-wrap">
-                <button
-                  type="button"
-                  onClick={() => {
-                    const date = new Date()
-                    date.setMinutes(date.getMinutes() + 5)
-                    setExpiresAt(format(date, "yyyy-MM-dd'T'HH:mm"))
-                  }}
-                  className="px-3 py-1 text-xs rounded transition-colors color-hover"
-                  style={{ color: 'var(--color-text-secondary)' }}
-                >
-                  5m
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const date = new Date()
-                    date.setMinutes(date.getMinutes() + 30)
-                    setExpiresAt(format(date, "yyyy-MM-dd'T'HH:mm"))
-                  }}
-                  className="px-3 py-1 text-xs rounded transition-colors color-hover"
-                  style={{ color: 'var(--color-text-secondary)' }}
-                >
-                  30m
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const date = new Date()
-                    date.setHours(date.getHours() + 1)
-                    setExpiresAt(format(date, "yyyy-MM-dd'T'HH:mm"))
-                  }}
-                  className="px-3 py-1 text-xs rounded transition-colors color-hover"
-                  style={{ color: 'var(--color-text-secondary)' }}
-                >
-                  1h
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const date = new Date()
-                    date.setHours(date.getHours() + 12)
-                    setExpiresAt(format(date, "yyyy-MM-dd'T'HH:mm"))
-                  }}
-                  className="px-3 py-1 text-xs rounded transition-colors color-hover"
-                  style={{ color: 'var(--color-text-secondary)' }}
-                >
-                  12h
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const date = new Date()
-                    date.setDate(date.getDate() + 1)
-                    setExpiresAt(format(date, "yyyy-MM-dd'T'HH:mm"))
-                  }}
-                  className="px-3 py-1 text-xs rounded transition-colors color-hover"
-                  style={{ color: 'var(--color-text-secondary)' }}
-                >
-                  1d
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const date = new Date()
-                    date.setDate(date.getDate() + 7)
-                    setExpiresAt(format(date, "yyyy-MM-dd'T'HH:mm"))
-                  }}
-                  className="px-3 py-1 text-xs rounded transition-colors color-hover"
-                  style={{ color: 'var(--color-text-secondary)' }}
-                >
-                  1w
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const date = new Date()
-                    date.setDate(date.getDate() + 14)
-                    setExpiresAt(format(date, "yyyy-MM-dd'T'HH:mm"))
-                  }}
-                  className="px-3 py-1 text-xs rounded transition-colors color-hover"
-                  style={{ color: 'var(--color-text-secondary)' }}
-                >
-                  2w
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const date = new Date()
-                    date.setDate(date.getDate() + 30)
-                    setExpiresAt(format(date, "yyyy-MM-dd'T'HH:mm"))
-                  }}
-                  className="px-3 py-1 text-xs rounded transition-colors color-hover"
-                  style={{ color: 'var(--color-text-secondary)' }}
-                >
-                  30d
-                </button>
+              <div className="flex gap-1.5 mt-2 flex-nowrap overflow-x-auto">
+                {[
+                  { label: '5m', minutes: 5 },
+                  { label: '30m', minutes: 30 },
+                  { label: '1h', hours: 1 },
+                  { label: '12h', hours: 12 },
+                  { label: '1d', days: 1 },
+                  { label: '1w', days: 7 },
+                  { label: '2w', days: 14 },
+                  { label: '30d', days: 30 }
+                ].map(({ label, minutes, hours, days }) => {
+                  const isSelected = (() => {
+                    if (!expiresAt) return false
+                    const selectedDate = new Date(expiresAt)
+                    const now = new Date()
+                    const diff = selectedDate.getTime() - now.getTime()
+                    if (minutes) {
+                      return Math.abs(diff - minutes * 60 * 1000) < 60000 // within 1 minute
+                    }
+                    if (hours) {
+                      return Math.abs(diff - hours * 60 * 60 * 1000) < 60000 // within 1 minute
+                    }
+                    if (days) {
+                      const diffDays = Math.round(diff / (1000 * 60 * 60 * 24))
+                      return diffDays === days
+                    }
+                    return false
+                  })()
+                  
+                  return (
+                    <button
+                      key={label}
+                      type="button"
+                      onClick={() => {
+                        const date = new Date()
+                        if (minutes) date.setMinutes(date.getMinutes() + minutes)
+                        else if (hours) date.setHours(date.getHours() + hours)
+                        else if (days) date.setDate(date.getDate() + days)
+                        setExpiresAt(format(date, "yyyy-MM-dd'T'HH:mm"))
+                      }}
+                      className="px-2 py-1 rounded transition-all color-hover flex-shrink-0"
+                      style={{
+                        color: isSelected ? 'var(--color-text)' : 'var(--color-text-secondary)',
+                        fontSize: '0.75rem',
+                        fontWeight: isSelected ? '600' : '400',
+                        width: '2.5rem',
+                        textAlign: 'center'
+                      }}
+                    >
+                      {label}
+                    </button>
+                  )
+                })}
               </div>
+            </div>
+            <div className="flex items-center justify-between">
+              <label className="block text-sm font-medium">Sync on Join</label>
+              <ToggleSwitch
+                checked={syncOnJoin}
+                onChange={() => setSyncOnJoin(!syncOnJoin)}
+                disabled={!selectedGroupForCreate}
+                title={selectedGroupForCreate ? "Automatically sync user addons when they join via this invite" : "Select a group to enable sync on join"}
+              />
             </div>
             <div className="flex justify-end gap-3 pt-4">
               <button
