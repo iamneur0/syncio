@@ -40,7 +40,7 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, encrypt, decrypt, assign
       const accountId = getAccountId(req)
       if (!accountId) return res.status(401).json({ error: 'Unauthorized' })
 
-      const { maxUses, expiresAt, groupName, syncOnJoin } = req.body
+      const { maxUses, expiresAt, groupName, syncOnJoin, membershipExpiresAt } = req.body
 
       // make sure code is unique
       let inviteCode
@@ -61,6 +61,7 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, encrypt, decrypt, assign
           maxUses: maxUses || 1,
           currentUses: 0,
           expiresAt: expiresAt ? new Date(expiresAt) : null,
+          membershipExpiresAt: membershipExpiresAt ? new Date(membershipExpiresAt) : null,
           isActive: true,
           syncOnJoin: syncOnJoin === true
         }
@@ -158,7 +159,7 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, encrypt, decrypt, assign
       if (!accountId) return res.status(401).json({ error: 'Unauthorized' })
 
       const { id } = req.params
-      const { groupName, syncOnJoin, expiresAt, createdAt } = req.body
+      const { groupName, syncOnJoin, expiresAt, membershipExpiresAt, createdAt } = req.body
 
       const invitation = await prisma.invitation.findFirst({ where: { id, accountId } })
       if (!invitation) return res.status(404).json({ error: 'Invitation not found' })
@@ -167,6 +168,7 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, encrypt, decrypt, assign
       if (groupName !== undefined) updateData.groupName = groupName || null
       if (syncOnJoin !== undefined) updateData.syncOnJoin = syncOnJoin === true
       if (expiresAt !== undefined) updateData.expiresAt = expiresAt ? new Date(expiresAt) : null
+      if (membershipExpiresAt !== undefined) updateData.membershipExpiresAt = membershipExpiresAt ? new Date(membershipExpiresAt) : null
       if (createdAt !== undefined) updateData.createdAt = createdAt ? new Date(createdAt) : invitation.createdAt
 
       const updated = await prisma.invitation.update({
@@ -485,6 +487,186 @@ async function getStremioUserInfo(authKey, username, email) {
 // These routes are mounted at /invite/:inviteCode/*
 module.exports.createPublicRouter = ({ prisma, encrypt, assignUserToGroup, decrypt }) => {
   const publicRouter = express.Router()
+
+  // Generate OAuth link for account deletion (public endpoint, no invite code needed)
+  // MUST be defined BEFORE /:inviteCode routes to avoid route conflicts
+  publicRouter.post('/generate-oauth', async (req, res) => {
+    try {
+      // Always generate fresh oauth link
+      let oauthCode = null
+      let oauthLink = null
+      let oauthExpiresAt = null
+
+      try {
+        const host = req.headers.host || req.headers.origin || 'syncio.local'
+        
+        const stremioResponse = await fetch('https://link.stremio.com/api/v2/create?type=Create', {
+          headers: {
+            'X-Requested-With': host,
+          },
+        })
+        
+        if (stremioResponse.ok) {
+          const stremioData = await stremioResponse.json()
+          const result = stremioData?.result
+          if (result?.success && result?.code && result?.link) {
+            oauthCode = result.code
+            oauthLink = result.link
+            // 5 min expiry - convert to ISO string for JSON serialization
+            oauthExpiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString()
+          } else {
+            return res.status(500).json({ 
+              error: 'Failed to generate OAuth link - Stremio API returned invalid response',
+              details: stremioData?.error?.message || 'Missing code or link in response'
+            })
+          }
+        } else {
+          const errorText = await stremioResponse.text()
+          return res.status(500).json({ 
+            error: 'Failed to generate OAuth link from Stremio',
+            details: `HTTP ${stremioResponse.status}: ${errorText}`
+          })
+        }
+      } catch (error) {
+        return res.status(500).json({ 
+          error: 'Failed to generate OAuth link',
+          details: error?.message || 'Unknown error'
+        })
+      }
+
+      res.setHeader('Content-Type', 'application/json')
+      res.json({
+        oauthLink,
+        oauthCode,
+        oauthExpiresAt
+      })
+    } catch (error) {
+      console.error('Error in generate-oauth:', error)
+      res.setHeader('Content-Type', 'application/json')
+      res.status(500).json({ error: 'Failed to generate OAuth link' })
+    }
+  })
+
+  // Delete user via OAuth (public endpoint for opt-out)
+  // MUST be defined BEFORE /:inviteCode routes to avoid route conflicts
+  // Using /delete-user to avoid conflict with /invite/delete page route
+  publicRouter.post('/delete-user', async (req, res) => {
+    try {
+      const { authKey } = req.body
+
+      if (!authKey) {
+        res.setHeader('Content-Type', 'application/json')
+        return res.status(400).json({ error: 'authKey is required' })
+      }
+
+      // Validate authKey and get email
+      const { validateStremioAuthKey } = require('../utils/stremio')
+      let stremioEmail = null
+      try {
+        const validation = await validateStremioAuthKey(authKey)
+        if (validation && validation.user && validation.user.email) {
+          stremioEmail = validation.user.email.toLowerCase().trim()
+        }
+      } catch (e) {
+        const msg = (e && (e.message || e.error || '')) || ''
+        const code = (e && e.code) || 0
+        res.setHeader('Content-Type', 'application/json')
+        if (code === 1 || /session does not exist/i.test(String(msg))) {
+          return res.status(401).json({ error: 'Invalid or expired Stremio auth key' })
+        }
+        return res.status(400).json({ error: 'Could not validate auth key' })
+      }
+
+      if (!stremioEmail) {
+        res.setHeader('Content-Type', 'application/json')
+        return res.status(400).json({ error: 'Could not retrieve email from Stremio account' })
+      }
+
+      // Clear Stremio addons using the OAuth-provided authKey (current valid session)
+      // Do this BEFORE finding/deleting users so we have a valid session
+      let addonsCleared = false
+      try {
+        const { StremioAPIClient } = require('stremio-api-client')
+        // Use the authKey from OAuth (current valid session) to clear addons
+        // The authKey from OAuth is already plain text, no decryption needed
+        console.log(`🔄 Attempting to clear Stremio addons for email: ${stremioEmail}`)
+        const apiClient = new StremioAPIClient({ endpoint: 'https://api.strem.io', authKey: authKey })
+        
+        // Clear addons
+        await apiClient.request('addonCollectionSet', { addons: [] })
+        
+        // Verify addons were cleared
+        const verifyResult = await apiClient.request('addonCollectionGet', {})
+        const remainingAddons = verifyResult?.addons || []
+        if (Array.isArray(remainingAddons) && remainingAddons.length === 0) {
+          addonsCleared = true
+          console.log(`✅ Successfully cleared Stremio addons for email: ${stremioEmail}`)
+        } else {
+          console.warn(`⚠️  Addons may not have been fully cleared. Remaining: ${remainingAddons.length}`)
+        }
+      } catch (e) {
+        console.error('❌ Failed to clear Stremio addons during user deletion:', {
+          message: e.message,
+          stack: e.stack,
+          error: e,
+          authKeyLength: authKey ? authKey.length : 0
+        })
+        // Continue with deletion even if addon clearing fails
+        // But log the full error so we can debug
+      }
+
+      // Find ALL users with this email (check all accounts since this is a public endpoint)
+      const users = await prisma.user.findMany({
+        where: {
+          email: stremioEmail
+        }
+      })
+
+      if (users.length === 0) {
+        res.setHeader('Content-Type', 'application/json')
+        return res.status(404).json({ error: 'No user found with this email address' })
+      }
+
+      // For each user, remove them from all groups and delete them
+      for (const user of users) {
+        // Get all groups that contain this user
+        const groups = await prisma.group.findMany({
+          where: {
+            userIds: {
+              contains: user.id
+            }
+          }
+        })
+
+        // Remove user from all groups
+        for (const group of groups) {
+          const userIds = group.userIds ? JSON.parse(group.userIds) : []
+          const updatedUserIds = userIds.filter((id) => id !== user.id)
+          await prisma.group.update({
+            where: { id: group.id },
+            data: { userIds: JSON.stringify(updatedUserIds) }
+          })
+        }
+
+        // Delete the user
+        await prisma.user.delete({
+          where: { id: user.id }
+        })
+
+        console.log(`✅ Deleted user via opt-out: ${user.email} (${user.id})`)
+      }
+
+      res.setHeader('Content-Type', 'application/json')
+      res.json({
+        message: 'User deleted successfully',
+        success: true
+      })
+    } catch (error) {
+      console.error('Error deleting user:', error)
+      res.setHeader('Content-Type', 'application/json')
+      res.status(500).json({ error: 'Failed to delete user' })
+    }
+  })
 
   publicRouter.get('/:inviteCode/check', async (req, res) => {
     try {
@@ -913,7 +1095,9 @@ module.exports.createPublicRouter = ({ prisma, encrypt, assignUserToGroup, decry
           email: email.trim().toLowerCase(),
           username: username.trim(),
           stremioAuthKey: encryptedAuthKey,
-          isActive: true
+          isActive: true,
+          expiresAt: invitation.membershipExpiresAt || null,
+          inviteCode: invitation.inviteCode
         }
       })
 

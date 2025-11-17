@@ -25,6 +25,7 @@ export default function DateTimePicker({
   const [currentMonth, setCurrentMonth] = useState(new Date())
   const [selectedDate, setSelectedDate] = useState<Date | null>(null)
   const [selectedTime, setSelectedTime] = useState<{ hour: number; minute: number } | null>(null)
+  const [timeExplicitlySelected, setTimeExplicitlySelected] = useState(false) // Track if user explicitly selected time
   const containerRef = useRef<HTMLDivElement>(null)
   const hourScrollRef = useRef<HTMLDivElement>(null)
   const minuteScrollRef = useRef<HTMLDivElement>(null)
@@ -38,6 +39,7 @@ export default function DateTimePicker({
           setSelectedDate(date)
           setSelectedTime({ hour: getHours(date), minute: getMinutes(date) })
           setCurrentMonth(date)
+          setTimeExplicitlySelected(true) // Time is set from value, so it's explicit
         }
       } catch {
         // Invalid date, ignore
@@ -45,10 +47,11 @@ export default function DateTimePicker({
     } else {
       setSelectedDate(null)
       setSelectedTime(null)
+      setTimeExplicitlySelected(false) // Reset when value is cleared
     }
   }, [value])
 
-  // Set current time when opening picker if no value is set
+  // Set current time when opening picker if no value is set (for display only, don't call onChange)
   useEffect(() => {
     if (isOpen && !value && !selectedDate) {
       const now = new Date()
@@ -56,11 +59,12 @@ export default function DateTimePicker({
       const currentHour = getHours(now)
       const currentMinute = getMinutes(now)
       setSelectedTime({ hour: currentHour, minute: currentMinute })
-      setSelectedDate(now)
       const finalDate = now < minDateValue ? minDateValue : now
-      onChange(format(finalDate, "yyyy-MM-dd'T'HH:mm"))
+      setSelectedDate(finalDate)
+      setTimeExplicitlySelected(false) // Time is set for display only, not explicitly selected
+      // Don't call onChange here - only update when user actually selects a date
     }
-  }, [isOpen, value, selectedDate, min, onChange])
+  }, [isOpen, value, selectedDate, min])
 
   // Close on outside click and Escape key
   useEffect(() => {
@@ -134,8 +138,8 @@ export default function DateTimePicker({
     
     setSelectedDate(date)
     
-    // If time is already selected, update the full datetime
-    if (selectedTime) {
+    // Only call onChange if time was explicitly selected by user (not just set for display)
+    if (selectedTime && timeExplicitlySelected) {
       const newDateTime = set(date, { hours: selectedTime.hour, minutes: selectedTime.minute })
       if (newDateTime < minDate) {
         // If the selected date+time is in the past, set to minDate
@@ -144,16 +148,18 @@ export default function DateTimePicker({
         onChange(format(newDateTime, "yyyy-MM-dd'T'HH:mm"))
       }
     } else {
-      // If no time selected yet, set to start of day or minDate if later
+      // If no time explicitly selected yet, don't call onChange - just set the date for display
+      // User must select both date and time before value changes
       const startOfDay = set(date, { hours: 0, minutes: 0 })
       const finalDate = startOfDay < minDate ? minDate : startOfDay
-      onChange(format(finalDate, "yyyy-MM-dd'T'HH:mm"))
       setSelectedTime({ hour: getHours(finalDate), minute: getMinutes(finalDate) })
+      // Don't call onChange here - wait for user to explicitly select time
     }
   }
 
   const handleTimeChange = (hour: number, minute: number) => {
     setSelectedTime({ hour, minute })
+    setTimeExplicitlySelected(true) // Mark that user explicitly selected time
     
     if (selectedDate) {
       const newDateTime = set(selectedDate, { hours: hour, minutes: minute })
@@ -181,6 +187,7 @@ export default function DateTimePicker({
   const handleClear = () => {
     setSelectedDate(null)
     setSelectedTime(null)
+    setTimeExplicitlySelected(false)
     onChange('')
     setIsOpen(false)
   }

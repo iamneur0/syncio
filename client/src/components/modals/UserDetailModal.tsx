@@ -20,6 +20,9 @@ import { restrictToParentElement } from '@dnd-kit/modifiers'
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
+import DateTimePicker from '@/components/ui/DateTimePicker'
+import { format } from 'date-fns'
+import { formatDate } from '@/utils/dateUtils'
 
 interface UserDetailModalProps {
   isOpen: boolean
@@ -34,6 +37,9 @@ interface UserDetailModalProps {
     groups?: Array<{ id: string; name: string; colorIndex?: number }>
     isActive: boolean
     colorIndex?: number
+    expiresAt?: string | null
+    inviteCode?: string | null
+    createdAt?: string | null
   } | null
   onUpdate: (userData: any) => void
   onSync: (userId: string) => void
@@ -91,6 +97,7 @@ export default function UserDetailModal({
   const [desiredAddonsData, setDesiredAddonsData] = useState<any>({})
   const [groupAddonsData, setGroupAddonsData] = useState<any>({})
   const [confirmDeleteAllOpen, setConfirmDeleteAllOpen] = useState(false)
+  const [editExpiresAt, setEditExpiresAt] = useState<string>('')
 
   // Initialize local state when opening the modal or switching user
   useEffect(() => {
@@ -103,8 +110,15 @@ export default function UserDetailModal({
         : (Array.isArray(userProtectedSet) ? userProtectedSet : Array.from(userProtectedSet))
       setLocalExcludedSet(new Set(excludedArray))
       setLocalProtectedSet(new Set(protectedArray))
+      
+      // Initialize expiresAt edit state
+      if (currentUser?.expiresAt) {
+        setEditExpiresAt(format(new Date(currentUser.expiresAt), "yyyy-MM-dd'T'HH:mm"))
+      } else {
+        setEditExpiresAt('')
+      }
     }
-  }, [isOpen, user?.id])
+  }, [isOpen, user?.id, currentUser?.expiresAt])
 
   // Build a protected name set sourced from DB, with local optimistic overlay
   const protectedNameSet: Set<string> = (() => {
@@ -270,6 +284,27 @@ export default function UserDetailModal({
       await updateUserMutation.mutateAsync({
         id: currentUser.id,
         userData: { username: newUsername }
+      })
+    }
+  }
+
+  // Handle expiresAt update (called automatically on change)
+  const handleExpiresAtChange = (newValue: string) => {
+    setEditExpiresAt(newValue)
+    
+    if (!currentUser) return
+    
+    const updateData: any = {}
+    const currentExpiresAt = currentUser.expiresAt ? format(new Date(currentUser.expiresAt), "yyyy-MM-dd'T'HH:mm") : ''
+    
+    if (newValue !== currentExpiresAt) {
+      updateData.expiresAt = newValue || null
+    }
+
+    if (Object.keys(updateData).length > 0) {
+      updateUserMutation.mutate({
+        id: currentUser.id,
+        userData: updateData
       })
     }
   }
@@ -558,7 +593,42 @@ export default function UserDetailModal({
             </button>
           </div>
 
-          {/* Removed legacy user info block */}
+          {/* Details Section */}
+          <div className="p-4 rounded-lg mb-6 section-panel">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-lg font-semibold">Details</h3>
+            </div>
+            
+            <div className="mb-4 flex gap-4">
+              <div className="flex-1">
+                <h4 className="text-sm font-semibold mb-2">Membership Expires At</h4>
+                <DateTimePicker
+                  value={editExpiresAt}
+                  onChange={handleExpiresAtChange}
+                  min={new Date()}
+                  placeholder="No expiry"
+                />
+              </div>
+              <div className="flex-1">
+                <h4 className="text-sm font-semibold mb-2">Invite</h4>
+                <div className="px-3 py-2 rounded-lg input">
+                  <p className="text-sm color-text-secondary">
+                    {currentUser?.inviteCode || 'Created manually'}
+                  </p>
+                </div>
+              </div>
+            </div>
+            <div className="mb-4 flex gap-4">
+              <div className="flex-1">
+                <h4 className="text-sm font-semibold mb-2">Joined</h4>
+                <div className="px-3 py-2 rounded-lg input">
+                  <p className="text-sm color-text-secondary">
+                    {currentUser?.createdAt ? formatDate(currentUser.createdAt) : 'N/A'}
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
 
           {/* Group Addons Section */}
           <EntityList

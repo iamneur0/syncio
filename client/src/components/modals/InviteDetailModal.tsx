@@ -22,6 +22,7 @@ interface Invitation {
   maxUses: number
   currentUses: number
   expiresAt: string | null
+  membershipExpiresAt: string | null
   isActive: boolean
   syncOnJoin: boolean
   createdAt: string
@@ -242,6 +243,7 @@ export default function InviteDetailModal({
   const [editGroupName, setEditGroupName] = useState<string>('')
   const [editSyncOnJoin, setEditSyncOnJoin] = useState<boolean>(false)
   const [editExpiresAt, setEditExpiresAt] = useState<string>('')
+  const [editMembershipExpiresAt, setEditMembershipExpiresAt] = useState<string>('')
   
   const invitationColorStyles = getEntityColorStyles(themeName, 1)
   
@@ -281,6 +283,7 @@ export default function InviteDetailModal({
       setEditGroupName(currentInvitation.groupName || '')
       setEditSyncOnJoin(currentInvitation.syncOnJoin || false)
       setEditExpiresAt(currentInvitation.expiresAt ? format(new Date(currentInvitation.expiresAt), "yyyy-MM-dd'T'HH:mm") : '')
+      setEditMembershipExpiresAt(currentInvitation.membershipExpiresAt ? format(new Date(currentInvitation.membershipExpiresAt), "yyyy-MM-dd'T'HH:mm") : '')
     }
   }, [currentInvitation])
 
@@ -472,7 +475,7 @@ export default function InviteDetailModal({
   })
 
   const updateMutation = useMutation({
-    mutationFn: (data: { groupName?: string | null; syncOnJoin?: boolean; expiresAt?: string | null; createdAt?: string }) =>
+    mutationFn: (data: { groupName?: string | null; syncOnJoin?: boolean; expiresAt?: string | null; membershipExpiresAt?: string | null; createdAt?: string }) =>
       invitationsAPI.update(currentInvitation!.id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['invitation'] })
@@ -500,6 +503,9 @@ export default function InviteDetailModal({
     if (editExpiresAt !== (currentInvitation.expiresAt ? format(new Date(currentInvitation.expiresAt), "yyyy-MM-dd'T'HH:mm") : '')) {
       updateData.expiresAt = editExpiresAt || null
     }
+    if (editMembershipExpiresAt !== (currentInvitation.membershipExpiresAt ? format(new Date(currentInvitation.membershipExpiresAt), "yyyy-MM-dd'T'HH:mm") : '')) {
+      updateData.membershipExpiresAt = editMembershipExpiresAt || null
+    }
 
     if (Object.keys(updateData).length === 0) {
       toast('No changes to save', { icon: 'ℹ️' })
@@ -514,6 +520,7 @@ export default function InviteDetailModal({
       setEditGroupName(currentInvitation.groupName || '')
       setEditSyncOnJoin(currentInvitation.syncOnJoin || false)
       setEditExpiresAt(currentInvitation.expiresAt ? format(new Date(currentInvitation.expiresAt), "yyyy-MM-dd'T'HH:mm") : '')
+      setEditMembershipExpiresAt(currentInvitation.membershipExpiresAt ? format(new Date(currentInvitation.membershipExpiresAt), "yyyy-MM-dd'T'HH:mm") : '')
     }
     onClose()
   }
@@ -782,13 +789,22 @@ export default function InviteDetailModal({
                     </div>
                   </div>
                   <div className="flex-1">
-                    <h4 className="text-sm font-semibold mb-2">Expires</h4>
+                    <h4 className="text-sm font-semibold mb-2">Invitation Expires</h4>
                     <DateTimePicker
                       value={editExpiresAt}
                       onChange={setEditExpiresAt}
                       min={new Date()}
                     />
                   </div>
+                </div>
+                <div className="mb-4">
+                  <h4 className="text-sm font-semibold mb-2">User Membership Expires (optional)</h4>
+                  <p className="text-xs color-text-secondary mb-2">Users created from this invite will be automatically deleted after this date. Leave empty for permanent membership.</p>
+                  <DateTimePicker
+                    value={editMembershipExpiresAt}
+                    onChange={setEditMembershipExpiresAt}
+                    min={new Date()}
+                  />
                 </div>
               </div>
 

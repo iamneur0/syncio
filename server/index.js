@@ -39,6 +39,7 @@ const { sha256Hex, hmacHex, manifestUrlHash, manifestUrlHmac, getAccountHmacKey,
 const { validateStremioAuthKey, filterDefaultAddons, buildAddonDbData } = require('./utils/stremio');
 const { ensureBackupDir, readBackupFrequencyDays, scheduleBackups } = require('./utils/backup');
 const { scheduleSyncs, readSyncFrequencyMinutes } = require('./utils/syncScheduler');
+const { scheduleUserExpiration } = require('./utils/userExpiration');
 const { pathIsAllowlisted, extractBearerToken, parseCookies, cookieName, issueAccessToken, issueRefreshToken, issuePublicToken, randomCsrfToken } = require('./utils/auth');
 const { getAccountId: getAccountIdHelper, scopedWhere, assignUserToGroup } = require('./utils/helpers');
 const { selectKeyForRequest, encrypt, decrypt, getAccountHmacKey: getAccountHmacKeyEnc, encryptIf, decryptIf, getDecryptedManifestUrl, decryptWithFallback } = require('./utils/encryption');
@@ -231,6 +232,13 @@ scheduleSyncs(
   schedulerReq,
   AUTH_ENABLED
   )
+
+  // Schedule user expiration cleanup (runs at midnight)
+  try {
+    scheduleUserExpiration(prisma, decrypt, StremioAPIClient)
+  } catch (err) {
+    console.error('⚠️ Failed to initialize user expiration scheduler:', err)
+  }
 
   const storageLabel = process.env.PRISMA_PROVIDER === 'sqlite' ? 'SQLite with Prisma' : 'PostgreSQL with Prisma'
 
