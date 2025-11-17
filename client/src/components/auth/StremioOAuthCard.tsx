@@ -188,7 +188,20 @@ export function StremioOAuthCard({
       if (!res.ok) {
         throw new Error(`Stremio responded with ${res.status}`)
       }
-      const data = await res.json()
+      let data: any = {}
+      try {
+        const contentType = res.headers.get('content-type')
+        if (contentType && contentType.includes('application/json')) {
+          data = await res.json()
+        } else {
+          const text = await res.text()
+          console.error('[StremioOAuthCard] Non-JSON response from Stremio create:', text.substring(0, 100))
+          throw new Error('Invalid response format from Stremio')
+        }
+      } catch (parseError) {
+        console.error('[StremioOAuthCard] Failed to parse Stremio create response:', parseError)
+        throw new Error('Failed to parse response from Stremio')
+      }
       const result = data?.result
       if (result?.success && result?.code && result?.link) {
         setStremioLink(result.link)
@@ -401,16 +414,7 @@ export function StremioOAuthCard({
         >
           {isCompleting ? (
             <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <img
-              src={logoSrc}
-              alt="Syncio"
-              className="h-4 w-4"
-              onError={(e) => {
-                e.currentTarget.src = '/favicon-32x32.png'
-              }}
-            />
-          )}
+          ) : null}
           {authorizeLabel}
         </button>
         <div className="text-xs uppercase color-text-secondary">or</div>

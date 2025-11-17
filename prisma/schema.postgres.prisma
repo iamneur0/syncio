@@ -9,21 +9,24 @@ datasource db {
 }
 
 model User {
-  id              String   @id @default(cuid())
+  id              String    @id @default(cuid())
   username        String
   email           String
-  isActive        Boolean  @default(true)
-  stremioAuthKey  String?  // Encrypted Stremio auth key
-  excludedAddons  String?  // JSON array of addon IDs that user has excluded
-  protectedAddons String?  // JSON array of addon IDs that user has protected
-  colorIndex      Int?     // UI color theme index
-  accountId       String?  // For multi-tenant support
+  isActive        Boolean   @default(true)
+  stremioAuthKey  String?   // Encrypted Stremio auth key
+  excludedAddons  String?   // JSON array of addon IDs that user has excluded
+  protectedAddons String?   // JSON array of addon IDs that user has protected
+  colorIndex      Int?      // UI color theme index
+  accountId       String?   // For multi-tenant support
+  expiresAt       DateTime? // When user membership expires (null = never expires)
+  inviteCode      String?   // Invite code used to create this user (null if created manually)
 
   // Relationships
 
   @@map("users")
   @@unique([accountId, email])
   @@unique([accountId, username])
+  @@index([expiresAt])
 }
 
 model Group {
@@ -102,16 +105,17 @@ model AppAccount {
 }
 
 model Invitation {
-  id          String   @id @default(cuid())
-  accountId   String
-  inviteCode  String   @unique // Short code for URL (e.g., "abc123")
-  groupName   String?  // Group name to assign users to when they join
-  maxUses     Int      @default(1) // Maximum number of uses
-  currentUses Int      @default(0) // Current number of uses
-  expiresAt   DateTime? // Optional expiry date
-  isActive    Boolean  @default(true)
-  syncOnJoin  Boolean  @default(false) // Automatically sync user addons when they join
-  createdAt   DateTime @default(now())
+  id                String    @id @default(cuid())
+  accountId         String
+  inviteCode        String     @unique // Short code for URL (e.g., "abc123")
+  groupName         String?    // Group name to assign users to when they join
+  maxUses           Int        @default(1) // Maximum number of uses
+  currentUses       Int        @default(0) // Current number of uses
+  expiresAt         DateTime?  // Optional expiry date for the invitation
+  membershipExpiresAt DateTime? // When user membership expires (null = never expires)
+  isActive          Boolean    @default(true)
+  syncOnJoin        Boolean    @default(false) // Automatically sync user addons when they join
+  createdAt         DateTime   @default(now())
   
   // Relationships
   account     AppAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)

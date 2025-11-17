@@ -221,7 +221,10 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
         stremioAddons: stremioAddons,
         excludedAddons: excludedAddons,
         protectedAddons: protectedAddons,
-        colorIndex: user.colorIndex
+        colorIndex: user.colorIndex,
+        expiresAt: user.expiresAt,
+        inviteCode: user.inviteCode,
+        createdAt: user.createdAt
       }
 
       res.json(transformedUser)
@@ -235,7 +238,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
   router.put('/:id', async (req, res) => {
     try {
       const { id } = req.params
-      const { username, email, password, groupId, colorIndex } = req.body
+      const { username, email, password, groupId, colorIndex, expiresAt } = req.body
       
 
       // Check if user exists
@@ -282,6 +285,10 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
 
       if (colorIndex !== undefined) {
         updateData.colorIndex = colorIndex
+      }
+
+      if (expiresAt !== undefined) {
+        updateData.expiresAt = expiresAt ? new Date(expiresAt) : null
       }
 
       // Update user

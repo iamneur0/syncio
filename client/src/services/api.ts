@@ -249,7 +249,7 @@ export const usersAPI = {
   },
 
   // Update user
-  update: async (id: string, userData: { username?: string; email?: string; password?: string; groupName?: string; groupId?: string }): Promise<User> => {
+  update: async (id: string, userData: { username?: string; email?: string; password?: string; groupName?: string; groupId?: string; expiresAt?: string | null }): Promise<User> => {
     const response: AxiosResponse<User> = await api.put(`/users/${id}`, userData)
     // Handle axios response wrapper
     if (response.data && typeof response.data === 'object' && (response.data as any).data) {
@@ -646,7 +646,7 @@ export const invitationsAPI = {
   },
 
   // Create a new invitation
-  create: async (data: { maxUses?: number; expiresAt?: string; groupName?: string; syncOnJoin?: boolean }): Promise<any> => {
+  create: async (data: { maxUses?: number; expiresAt?: string; groupName?: string; syncOnJoin?: boolean; membershipExpiresAt?: string }): Promise<any> => {
     const response: AxiosResponse<any> = await api.post('/invitations', data)
     return response.data
   },
@@ -657,7 +657,7 @@ export const invitationsAPI = {
   },
 
   // Update an invitation
-  update: async (id: string, data: { groupName?: string | null; syncOnJoin?: boolean; expiresAt?: string | null; createdAt?: string }): Promise<any> => {
+  update: async (id: string, data: { groupName?: string | null; syncOnJoin?: boolean; expiresAt?: string | null; membershipExpiresAt?: string | null; createdAt?: string }): Promise<any> => {
     const response: AxiosResponse<any> = await api.patch(`/invitations/${id}`, data)
     return response.data
   },
@@ -765,7 +765,49 @@ export const invitationsAPI = {
   },
 
   // Public: Generate OAuth link for accepted request
-  generateOAuth: async (inviteCode: string, email: string, username: string): Promise<any> => {
+  generateOAuth: async (inviteCode?: string, email?: string, username?: string): Promise<any> => {
+    // If no inviteCode provided, use the simple delete endpoint
+    if (!inviteCode) {
+      const response = await fetch(`/invite/generate-oauth`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include'
+      })
+      
+      const contentType = response.headers.get('content-type')
+      const isJson = contentType && contentType.includes('application/json')
+      
+      if (!response.ok) {
+        let error: any
+        if (isJson) {
+          try {
+            error = await response.json()
+          } catch {
+            error = { error: `HTTP ${response.status}` }
+          }
+        } else {
+          const text = await response.text()
+          error = { error: text || `HTTP ${response.status}` }
+        }
+        const err: any = new Error(error.error || error.details || `HTTP ${response.status}`)
+        err.response = { status: response.status, data: error }
+        throw err
+      }
+      
+      if (!isJson) {
+        const text = await response.text()
+        throw new Error(`Expected JSON response but got: ${text.substring(0, 100)}`)
+      }
+      
+      try {
+        return await response.json()
+      } catch (parseError) {
+        const text = await response.text()
+        throw new Error(`Failed to parse JSON response: ${text.substring(0, 100)}`)
+      }
+    }
+    
+    // Otherwise use the invite-specific endpoint
     const response = await fetch(`/invite/${inviteCode}/generate-oauth`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -796,6 +838,48 @@ export const invitationsAPI = {
       throw err
     }
     return response.json()
+  },
+
+  // Public: Delete user via OAuth
+  deleteUser: async (authKey: string): Promise<any> => {
+    const response = await fetch(`/invite/delete-user`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ authKey })
+    })
+    
+    const contentType = response.headers.get('content-type')
+    const isJson = contentType && contentType.includes('application/json')
+    
+    if (!response.ok) {
+      let error: any
+      if (isJson) {
+        try {
+          error = await response.json()
+        } catch {
+          error = { error: `HTTP ${response.status}` }
+        }
+      } else {
+        const text = await response.text()
+        error = { error: text || `HTTP ${response.status}` }
+      }
+      const err: any = new Error(error.error || error.details || `HTTP ${response.status}`)
+      err.response = { status: response.status, data: error }
+      throw err
+    }
+    
+    if (!isJson) {
+      const text = await response.text()
+      throw new Error(`Expected JSON response but got: ${text.substring(0, 100)}`)
+    }
+    
+    try {
+      return await response.json()
+    } catch (parseError) {
+      const text = await response.text()
+      throw new Error(`Failed to parse JSON response: ${text.substring(0, 100)}`)
+    }
   },
 }
 

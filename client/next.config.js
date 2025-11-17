@@ -107,6 +107,15 @@ const nextConfig = {
         source: '/invite/:inviteCode/complete',
         destination: `http://localhost:4000/invite/:inviteCode/complete`,
       },
+      // Proxy delete/opt-out endpoints (no invite code)
+      {
+        source: '/invite/generate-oauth',
+        destination: `http://localhost:4000/invite/generate-oauth`,
+      },
+      {
+        source: '/invite/delete-user',
+        destination: `http://localhost:4000/invite/delete-user`,
+      },
     ]
   },
 

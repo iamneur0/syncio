@@ -12,7 +12,7 @@ import { useBodyScrollLock } from '@/hooks/useBodyScrollLock'
 interface InviteAddModalProps {
   isOpen: boolean
   onClose: () => void
-  onCreate: (data: { maxUses?: number; expiresAt?: string; groupName?: string; syncOnJoin?: boolean }) => void
+  onCreate: (data: { maxUses?: number; expiresAt?: string; groupName?: string; syncOnJoin?: boolean; membershipExpiresAt?: string }) => void
   isCreating: boolean
 }
 
@@ -24,6 +24,7 @@ export default function InviteAddModal({
 }: InviteAddModalProps) {
   const [maxUses, setMaxUses] = React.useState<number>(1)
   const [expiresAt, setExpiresAt] = React.useState<string>('')
+  const [membershipExpiresAt, setMembershipExpiresAt] = React.useState<string>('')
   const [selectedGroupForCreate, setSelectedGroupForCreate] = React.useState<string>('')
   const [syncOnJoin, setSyncOnJoin] = React.useState<boolean>(false)
 
@@ -38,6 +39,7 @@ export default function InviteAddModal({
     if (!isOpen) {
       setMaxUses(1)
       setExpiresAt('')
+      setMembershipExpiresAt('')
       setSelectedGroupForCreate('')
       setSyncOnJoin(false)
     }
@@ -68,6 +70,7 @@ export default function InviteAddModal({
     onCreate({
       maxUses: finalMaxUses,
       expiresAt: expiresAt,
+      membershipExpiresAt: membershipExpiresAt || undefined,
       groupName: selectedGroupForCreate || undefined,
       syncOnJoin: selectedGroupForCreate ? syncOnJoin : false
     })
@@ -115,7 +118,7 @@ export default function InviteAddModal({
               />
             </div>
             <div>
-              <label className="block text-sm font-medium mb-1">Expires At</label>
+              <label className="block text-sm font-medium mb-1">Invitation Expires At</label>
               <DateTimePicker
                 value={expiresAt}
                 onChange={setExpiresAt}
@@ -176,6 +179,16 @@ export default function InviteAddModal({
                   )
                 })}
               </div>
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">User Membership Expires At (optional)</label>
+              <p className="text-xs color-text-secondary mb-2">Users created from this invite will be automatically deleted after this date. Leave empty for permanent membership.</p>
+              <DateTimePicker
+                value={membershipExpiresAt}
+                onChange={setMembershipExpiresAt}
+                min={new Date()}
+                placeholder="Select date and time (optional)"
+              />
             </div>
             <div className="flex items-center justify-between">
               <label className="block text-sm font-medium">Sync on Join</label>
