@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.3.2](https://github.com/iamneur0/syncio/compare/v0.3.1...v0.3.2) (2025-12-04)
+
+
+### Features
+
+* complete invite system with opt out ([8104440](https://github.com/iamneur0/syncio/commit/8104440e1766afd469fe632630da4591ad8b6b81))
+* delete invited user from invite ([eb1e88c](https://github.com/iamneur0/syncio/commit/eb1e88c4a5828720c69c7b305fbdaef7054b8744))
+* expiry of users is now handled for limited time users on invite ([2d5c978](https://github.com/iamneur0/syncio/commit/2d5c9788ab2e60bcdc33a01ee7ae99e4c45178ac))
+* sync invited users on join ([351b258](https://github.com/iamneur0/syncio/commit/351b258f922a355a50f4791c89cfad583f4d4407))
+* users can now opt out of a server ([4d48e48](https://github.com/iamneur0/syncio/commit/4d48e48ef298aebf04b1bcfcc7c6629390b52056))
+
+
+### Bug Fixes
+
+* misc invite page and component improvements ([d4b7f37](https://github.com/iamneur0/syncio/commit/d4b7f373622cb8de293fd4c1a8177dd98e2d4c4f))
+
 ## [0.3.1](https://github.com/iamneur0/syncio/compare/v0.3.0...v0.3.1) (2025-11-16)
 
 
