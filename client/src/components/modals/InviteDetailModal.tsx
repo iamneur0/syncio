@@ -22,7 +22,7 @@ interface Invitation {
   maxUses: number
   currentUses: number
   expiresAt: string | null
-  membershipExpiresAt: string | null
+  membershipDurationDays?: number | null
   isActive: boolean
   syncOnJoin: boolean
   createdAt: string
@@ -151,6 +151,7 @@ function RequestItem({
         {request.status === 'pending' && (
           <>
             <button
+              type="button"
               onClick={() => onAccept(request.id)}
               className="p-2 rounded-lg transition-colors color-text color-hover"
               title="Accept"
@@ -158,6 +159,7 @@ function RequestItem({
               <Check className="w-4 h-4" />
             </button>
             <button
+              type="button"
               onClick={() => onReject(request.id)}
               className="p-2 rounded-lg transition-colors color-text color-hover"
               title="Reject"
@@ -169,6 +171,7 @@ function RequestItem({
         {request.status === 'rejected' && (
           <>
             <button
+              type="button"
               onClick={() => onUndoRejection(request.id)}
               disabled={isUndoingRejection}
               className="p-2 rounded-lg transition-colors color-text color-hover disabled:opacity-50"
@@ -177,6 +180,7 @@ function RequestItem({
               <RotateCcw className={`w-4 h-4 ${isUndoingRejection ? 'animate-spin' : ''}`} />
             </button>
             <button
+              type="button"
               onClick={() => onDelete(request.id)}
               disabled={isDeleting}
               className="p-2 rounded-lg transition-colors color-text color-hover disabled:opacity-50"
@@ -200,6 +204,7 @@ function RequestItem({
                   <ExternalLink className="w-4 h-4" />
                 </a>
                 <button
+                  type="button"
                   onClick={() => onRefreshOAuth(request.id)}
                   disabled={isRefreshingOAuth}
                   className="p-2 rounded-lg transition-colors color-text color-hover disabled:opacity-50"
@@ -210,6 +215,7 @@ function RequestItem({
               </>
             )}
             <button
+              type="button"
               onClick={() => onDelete(request.id)}
               disabled={isDeleting}
               className="p-2 rounded-lg transition-colors color-text color-hover disabled:opacity-50"
@@ -243,7 +249,8 @@ export default function InviteDetailModal({
   const [editGroupName, setEditGroupName] = useState<string>('')
   const [editSyncOnJoin, setEditSyncOnJoin] = useState<boolean>(false)
   const [editExpiresAt, setEditExpiresAt] = useState<string>('')
-  const [editMembershipExpiresAt, setEditMembershipExpiresAt] = useState<string>('')
+  const [editMembershipDurationDays, setEditMembershipDurationDays] = useState<string>('')
+  const DEBUG_MODE = process.env.NEXT_PUBLIC_DEBUG === 'true'
   
   const invitationColorStyles = getEntityColorStyles(themeName, 1)
   
@@ -282,8 +289,24 @@ export default function InviteDetailModal({
     if (currentInvitation) {
       setEditGroupName(currentInvitation.groupName || '')
       setEditSyncOnJoin(currentInvitation.syncOnJoin || false)
-      setEditExpiresAt(currentInvitation.expiresAt ? format(new Date(currentInvitation.expiresAt), "yyyy-MM-dd'T'HH:mm") : '')
-      setEditMembershipExpiresAt(currentInvitation.membershipExpiresAt ? format(new Date(currentInvitation.membershipExpiresAt), "yyyy-MM-dd'T'HH:mm") : '')
+      setEditExpiresAt(
+        currentInvitation.expiresAt ? format(new Date(currentInvitation.expiresAt), "yyyy-MM-dd'T'HH:mm") : ''
+      )
+      // Map existing duration to one of the presets; default to "lifetime" when not set or unknown
+      const knownPresets = ['1', '7', '15', '30', '90', '180', '365']
+      const raw = currentInvitation.membershipDurationDays
+      let durationValue: string
+      if (raw == null || Number.isNaN(raw)) {
+        durationValue = 'lifetime'
+      } else if (DEBUG_MODE && raw === -1) {
+        // Sentinel -1 is treated as the debug 1-minute preset
+        durationValue = 'debug-1m'
+      } else {
+        durationValue = String(raw)
+      }
+      setEditMembershipDurationDays(
+        durationValue === 'debug-1m' || knownPresets.includes(durationValue) ? durationValue : 'lifetime'
+      )
     }
   }, [currentInvitation])
 
@@ -475,7 +498,7 @@ export default function InviteDetailModal({
   })
 
   const updateMutation = useMutation({
-    mutationFn: (data: { groupName?: string | null; syncOnJoin?: boolean; expiresAt?: string | null; membershipExpiresAt?: string | null; createdAt?: string }) =>
+    mutationFn: (data: { groupName?: string | null; syncOnJoin?: boolean; expiresAt?: string | null; membershipDurationDays?: number | null; createdAt?: string }) =>
       invitationsAPI.update(currentInvitation!.id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['invitation'] })
@@ -500,11 +523,31 @@ export default function InviteDetailModal({
     if (editSyncOnJoin !== (currentInvitation.syncOnJoin || false)) {
       updateData.syncOnJoin = editSyncOnJoin
     }
-    if (editExpiresAt !== (currentInvitation.expiresAt ? format(new Date(currentInvitation.expiresAt), "yyyy-MM-dd'T'HH:mm") : '')) {
+    if (
+      editExpiresAt !==
+      (currentInvitation.expiresAt ? format(new Date(currentInvitation.expiresAt), "yyyy-MM-dd'T'HH:mm") : '')
+    ) {
       updateData.expiresAt = editExpiresAt || null
     }
-    if (editMembershipExpiresAt !== (currentInvitation.membershipExpiresAt ? format(new Date(currentInvitation.membershipExpiresAt), "yyyy-MM-dd'T'HH:mm") : '')) {
-      updateData.membershipExpiresAt = editMembershipExpiresAt || null
+    const currentDuration =
+      currentInvitation.membershipDurationDays != null && !Number.isNaN(currentInvitation.membershipDurationDays)
+        ? String(currentInvitation.membershipDurationDays)
+        : 'lifetime'
+    if (editMembershipDurationDays !== currentDuration) {
+      let parsed: number | null
+      if (editMembershipDurationDays === 'lifetime') {
+        parsed = null
+      } else if (DEBUG_MODE && editMembershipDurationDays === 'debug-1m') {
+        // Use sentinel value -1 to represent 1-minute debug duration
+        parsed = -1
+      } else if (editMembershipDurationDays) {
+        parsed = Number(editMembershipDurationDays)
+      } else {
+        parsed = null
+      }
+      // Allow sentinel -1 (debug 1-minute) and positive durations; null means Lifetime
+      updateData.membershipDurationDays =
+        parsed === null || Number.isNaN(parsed) ? null : parsed
     }
 
     if (Object.keys(updateData).length === 0) {
@@ -520,7 +563,19 @@ export default function InviteDetailModal({
       setEditGroupName(currentInvitation.groupName || '')
       setEditSyncOnJoin(currentInvitation.syncOnJoin || false)
       setEditExpiresAt(currentInvitation.expiresAt ? format(new Date(currentInvitation.expiresAt), "yyyy-MM-dd'T'HH:mm") : '')
-      setEditMembershipExpiresAt(currentInvitation.membershipExpiresAt ? format(new Date(currentInvitation.membershipExpiresAt), "yyyy-MM-dd'T'HH:mm") : '')
+      const knownPresets = ['1', '7', '15', '30', '90', '180', '365']
+      const raw = currentInvitation.membershipDurationDays
+      let durationValue: string
+      if (raw == null || Number.isNaN(raw)) {
+        durationValue = 'lifetime'
+      } else if (DEBUG_MODE && raw > 0 && raw < 1) {
+        durationValue = 'debug-1m'
+      } else {
+        durationValue = String(raw)
+      }
+      setEditMembershipDurationDays(
+        durationValue === 'debug-1m' || knownPresets.includes(durationValue) ? durationValue : 'lifetime'
+      )
     }
     onClose()
   }
@@ -798,19 +853,34 @@ export default function InviteDetailModal({
                   </div>
                 </div>
                 <div className="mb-4">
-                  <h4 className="text-sm font-semibold mb-2">User Membership Expires (optional)</h4>
-                  <p className="text-xs color-text-secondary mb-2">Users created from this invite will be automatically deleted after this date. Leave empty for permanent membership.</p>
-                  <DateTimePicker
-                    value={editMembershipExpiresAt}
-                    onChange={setEditMembershipExpiresAt}
-                    min={new Date()}
-                  />
+                  <h4 className="text-sm font-semibold mb-2">
+                    Membership Duration <span className="text-red-500">*</span>
+                  </h4>
+                  <p className="text-xs color-text-secondary mb-2">
+                    Choose how long users created from this invite will keep their membership. Select
+                    <span className="font-semibold"> Lifetime</span> for permanent membership.
+                  </p>
+                  <select
+                    required
+                    value={editMembershipDurationDays}
+                    onChange={(e) => setEditMembershipDurationDays(e.target.value)}
+                    className="w-full px-3 py-2 border rounded-lg focus:outline-none input"
+                  >
+                    <option value="1">1 day</option>
+                    <option value="7">7 days</option>
+                    <option value="15">15 days</option>
+                    <option value="30">1 month</option>
+                    <option value="90">3 months</option>
+                    <option value="180">6 months</option>
+                    <option value="365">1 year</option>
+                    <option value="lifetime">Lifetime</option>
+                  </select>
                 </div>
               </div>
 
               <EntityList
                 title="Invited Users"
-                count={currentInvitation?.requests.length || 0}
+                count={(currentInvitation?.requests || []).length}
                 items={currentInvitation?.requests || []}
                 isLoading={isLoading}
                 emptyIcon={<Mail className="w-12 h-12 mx-auto mb-4 color-text-secondary" />}

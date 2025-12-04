@@ -40,7 +40,7 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, encrypt, decrypt, assign
       const accountId = getAccountId(req)
       if (!accountId) return res.status(401).json({ error: 'Unauthorized' })
 
-      const { maxUses, expiresAt, groupName, syncOnJoin, membershipExpiresAt } = req.body
+      const { maxUses, expiresAt, groupName, syncOnJoin, membershipDurationDays } = req.body
 
       // make sure code is unique
       let inviteCode
@@ -61,7 +61,10 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, encrypt, decrypt, assign
           maxUses: maxUses || 1,
           currentUses: 0,
           expiresAt: expiresAt ? new Date(expiresAt) : null,
-          membershipExpiresAt: membershipExpiresAt ? new Date(membershipExpiresAt) : null,
+          membershipDurationDays:
+            typeof membershipDurationDays === 'number' && !Number.isNaN(membershipDurationDays)
+              ? Number(membershipDurationDays)
+              : null,
           isActive: true,
           syncOnJoin: syncOnJoin === true
         }
@@ -159,7 +162,7 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, encrypt, decrypt, assign
       if (!accountId) return res.status(401).json({ error: 'Unauthorized' })
 
       const { id } = req.params
-      const { groupName, syncOnJoin, expiresAt, membershipExpiresAt, createdAt } = req.body
+      const { groupName, syncOnJoin, expiresAt, membershipDurationDays, createdAt } = req.body
 
       const invitation = await prisma.invitation.findFirst({ where: { id, accountId } })
       if (!invitation) return res.status(404).json({ error: 'Invitation not found' })
@@ -168,7 +171,12 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, encrypt, decrypt, assign
       if (groupName !== undefined) updateData.groupName = groupName || null
       if (syncOnJoin !== undefined) updateData.syncOnJoin = syncOnJoin === true
       if (expiresAt !== undefined) updateData.expiresAt = expiresAt ? new Date(expiresAt) : null
-      if (membershipExpiresAt !== undefined) updateData.membershipExpiresAt = membershipExpiresAt ? new Date(membershipExpiresAt) : null
+      if (membershipDurationDays !== undefined) {
+        updateData.membershipDurationDays =
+          membershipDurationDays === null || Number.isNaN(Number(membershipDurationDays))
+            ? null
+            : Number(membershipDurationDays)
+      }
       if (createdAt !== undefined) updateData.createdAt = createdAt ? new Date(createdAt) : invitation.createdAt
 
       const updated = await prisma.invitation.update({
@@ -1089,6 +1097,25 @@ module.exports.createPublicRouter = ({ prisma, encrypt, assignUserToGroup, decry
       // encrypt and create the user
       const encryptedAuthKey = encrypt(authKey, { appAccountId: invitation.accountId })
 
+      let computedExpiresAt = null
+      const now = new Date()
+      const durationRaw = invitation.membershipDurationDays
+      if (durationRaw != null && !Number.isNaN(durationRaw)) {
+        const days = Number(durationRaw)
+        const debugMode =
+          process.env.DEBUG === 'true' ||
+          process.env.DEBUG === '1' ||
+          process.env.NEXT_PUBLIC_DEBUG === 'true' ||
+          process.env.NEXT_PUBLIC_DEBUG === '1'
+
+        if (debugMode && days === -1) {
+          // Special-case debug: 1 minute membership
+          computedExpiresAt = new Date(now.getTime() + 60 * 1000)
+        } else if (days > 0) {
+          computedExpiresAt = new Date(now.getTime() + days * 24 * 60 * 60 * 1000)
+        }
+      }
+
       const newUser = await prisma.user.create({
         data: {
           accountId: invitation.accountId,
@@ -1096,7 +1123,7 @@ module.exports.createPublicRouter = ({ prisma, encrypt, assignUserToGroup, decry
           username: username.trim(),
           stremioAuthKey: encryptedAuthKey,
           isActive: true,
-          expiresAt: invitation.membershipExpiresAt || null,
+          expiresAt: computedExpiresAt,
           inviteCode: invitation.inviteCode
         }
       })

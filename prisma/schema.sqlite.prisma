@@ -20,6 +20,7 @@ model User {
   accountId       String?   // For multi-tenant support
   expiresAt       DateTime? // When user membership expires (null = never expires)
   inviteCode      String?   // Invite code used to create this user (null if created manually)
+  createdAt       DateTime  @default(now())
   
   // Relationships
 
@@ -104,17 +105,17 @@ model AppAccount {
 }
 
 model Invitation {
-  id                String    @id @default(cuid())
-  accountId         String
-  inviteCode        String    @unique // Short code for URL (e.g., "abc123")
-  groupName         String?   // Group name to assign users to when they join
-  maxUses           Int       @default(1) // Maximum number of uses
-  currentUses       Int       @default(0) // Current number of uses
-  expiresAt         DateTime? // Optional expiry date for the invitation
-  membershipExpiresAt DateTime? // When user membership expires (null = never expires)
-  isActive          Boolean   @default(true)
-  syncOnJoin        Boolean   @default(false) // Automatically sync user addons when they join
-  createdAt         DateTime  @default(now())
+  id                  String    @id @default(cuid())
+  accountId           String
+  inviteCode          String    @unique // Short code for URL (e.g., "abc123")
+  groupName           String?   // Group name to assign users to when they join
+  maxUses             Int       @default(1) // Maximum number of uses
+  currentUses         Int       @default(0) // Current number of uses
+  expiresAt           DateTime? // Optional expiry date for the invitation
+  membershipDurationDays Int?   // Membership duration in days, applied from user join time
+  isActive            Boolean   @default(true)
+  syncOnJoin          Boolean   @default(false) // Automatically sync user addons when they join
+  createdAt           DateTime  @default(now())
   
   // Relationships
   account     AppAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)

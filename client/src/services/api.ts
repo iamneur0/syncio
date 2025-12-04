@@ -646,7 +646,7 @@ export const invitationsAPI = {
   },
 
   // Create a new invitation
-  create: async (data: { maxUses?: number; expiresAt?: string; groupName?: string; syncOnJoin?: boolean; membershipExpiresAt?: string }): Promise<any> => {
+  create: async (data: { maxUses?: number; expiresAt?: string; groupName?: string; syncOnJoin?: boolean; membershipDurationDays?: number | null }): Promise<any> => {
     const response: AxiosResponse<any> = await api.post('/invitations', data)
     return response.data
   },
@@ -657,7 +657,7 @@ export const invitationsAPI = {
   },
 
   // Update an invitation
-  update: async (id: string, data: { groupName?: string | null; syncOnJoin?: boolean; expiresAt?: string | null; membershipExpiresAt?: string | null; createdAt?: string }): Promise<any> => {
+  update: async (id: string, data: { groupName?: string | null; syncOnJoin?: boolean; expiresAt?: string | null; membershipDurationDays?: number | null; createdAt?: string }): Promise<any> => {
     const response: AxiosResponse<any> = await api.patch(`/invitations/${id}`, data)
     return response.data
   },
