@@ -606,7 +606,7 @@ export default function UserDetailModal({
                   value={editExpiresAt}
                   onChange={handleExpiresAtChange}
                   min={new Date()}
-                  placeholder="No expiry"
+                  placeholder="Lifetime"
                 />
               </div>
               <div className="flex-1">

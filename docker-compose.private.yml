@@ -1,12 +1,13 @@
-version: '3.9'
 services:
   syncio:
     image: ghcr.io/iamneur0/syncio:private
     environment:
       JWT_SECRET: 'temp-jwt-secret-key'
       ENCRYPTION_KEY: 'temp-encryption-key-32-chars-long'
-      DEBUG: 'false'
-      NEXT_PUBLIC_DEBUG: 'false'
+      
+      # To enable private instance authentication, uncomment the following variables
+      # SYNCIO_PRIVATE_USERNAME: ''
+      # SYNCIO_PRIVATE_PASSWORD: ''
     user: "1001:1001"
     # volumes:
       # - ./data:/app/data

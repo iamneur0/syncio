@@ -12,7 +12,7 @@ import { useBodyScrollLock } from '@/hooks/useBodyScrollLock'
 interface InviteAddModalProps {
   isOpen: boolean
   onClose: () => void
-  onCreate: (data: { maxUses?: number; expiresAt?: string; groupName?: string; syncOnJoin?: boolean; membershipExpiresAt?: string }) => void
+  onCreate: (data: { maxUses?: number; expiresAt?: string; groupName?: string; syncOnJoin?: boolean; membershipDurationDays?: number | null }) => void
   isCreating: boolean
 }
 
@@ -24,7 +24,8 @@ export default function InviteAddModal({
 }: InviteAddModalProps) {
   const [maxUses, setMaxUses] = React.useState<number>(1)
   const [expiresAt, setExpiresAt] = React.useState<string>('')
-  const [membershipExpiresAt, setMembershipExpiresAt] = React.useState<string>('')
+  // Store selected preset as string; "lifetime" represents permanent membership
+  const [membershipDurationPreset, setMembershipDurationPreset] = React.useState<string>('30')
   const [selectedGroupForCreate, setSelectedGroupForCreate] = React.useState<string>('')
   const [syncOnJoin, setSyncOnJoin] = React.useState<boolean>(false)
 
@@ -39,7 +40,7 @@ export default function InviteAddModal({
     if (!isOpen) {
       setMaxUses(1)
       setExpiresAt('')
-      setMembershipExpiresAt('')
+      setMembershipDurationPreset('30')
       setSelectedGroupForCreate('')
       setSyncOnJoin(false)
     }
@@ -61,16 +62,30 @@ export default function InviteAddModal({
     return () => document.removeEventListener('keydown', handleEscape)
   }, [isOpen, onClose])
 
+  const DEBUG_MODE = process.env.NEXT_PUBLIC_DEBUG === 'true'
+
   const handleCreate = () => {
-    if (!expiresAt) {
+    if (!expiresAt || !membershipDurationPreset) {
       return
     }
 
     const finalMaxUses = Math.min(Math.max(maxUses || 1, 1), 10)
+    let parsedDuration: number | null
+    if (membershipDurationPreset === 'lifetime') {
+      parsedDuration = null
+    } else if (DEBUG_MODE && membershipDurationPreset === 'debug-1m') {
+      // Use sentinel value -1 to represent 1-minute debug duration
+      parsedDuration = -1
+    } else {
+      parsedDuration = Number(membershipDurationPreset)
+    }
+
     onCreate({
       maxUses: finalMaxUses,
       expiresAt: expiresAt,
-      membershipExpiresAt: membershipExpiresAt || undefined,
+      // Allow sentinel -1 (debug 1-minute) and positive durations; null means Lifetime
+      membershipDurationDays:
+        parsedDuration === null || Number.isNaN(parsedDuration) ? null : parsedDuration,
       groupName: selectedGroupForCreate || undefined,
       syncOnJoin: selectedGroupForCreate ? syncOnJoin : false
     })
@@ -181,14 +196,28 @@ export default function InviteAddModal({
               </div>
             </div>
             <div>
-              <label className="block text-sm font-medium mb-1">User Membership Expires At (optional)</label>
-              <p className="text-xs color-text-secondary mb-2">Users created from this invite will be automatically deleted after this date. Leave empty for permanent membership.</p>
-              <DateTimePicker
-                value={membershipExpiresAt}
-                onChange={setMembershipExpiresAt}
-                min={new Date()}
-                placeholder="Select date and time (optional)"
-              />
+              <label className="block text-sm font-medium mb-1">
+                Membership Duration <span className="text-red-500">*</span>
+              </label>
+              <p className="text-xs color-text-secondary mb-2">
+                Choose how long users created from this invite will keep their membership. Select
+                <span className="font-semibold"> Lifetime</span> for permanent membership.
+              </p>
+              <select
+                required
+                value={membershipDurationPreset}
+                onChange={(e) => setMembershipDurationPreset(e.target.value)}
+                className="w-full px-3 py-2 border rounded-lg focus:outline-none input"
+              >
+                <option value="1">1 day</option>
+                <option value="7">7 days</option>
+                <option value="15">15 days</option>
+                <option value="30">1 month</option>
+                <option value="90">3 months</option>
+                <option value="180">6 months</option>
+                <option value="365">1 year</option>
+                <option value="lifetime">Lifetime</option>
+              </select>
             </div>
             <div className="flex items-center justify-between">
               <label className="block text-sm font-medium">Sync on Join</label>
@@ -208,7 +237,7 @@ export default function InviteAddModal({
               </button>
               <button
                 onClick={handleCreate}
-                disabled={isCreating || !expiresAt}
+                disabled={isCreating || !expiresAt || !membershipDurationPreset}
                 className="px-4 py-2 text-sm font-medium rounded-lg transition-colors disabled:opacity-50 color-surface hover:opacity-90"
               >
                 {isCreating ? 'Creating...' : 'Create'}

@@ -185,10 +185,16 @@ export default function GenericEntityPage({ config }: GenericEntityPageProps) {
   })
   const createMutation = useMutation({
     mutationFn: (data: any) => finalConfig.api.create(data),
-    onSuccess: () => {
+    onSuccess: (createdEntity: any) => {
       invalidateEntityQueries(queryClient, { entityType: finalConfig.entityType })
       genericSuccessHandlers.sync(finalConfig.title.slice(0, -1))
       setShowAddModal(false)
+
+      // For invites, immediately open the detail modal for the newly created invite
+      if (finalConfig.entityType === 'invite' && createdEntity) {
+        setSelectedEntity(createdEntity)
+        setShowDetailModal(true)
+      }
     },
     onError: (error: any) => {
       // Check both 'message' and 'error' fields from backend response

@@ -1,8 +1,8 @@
 'use client'
 
 import React from 'react'
-import { User as UserIcon, Users as GroupsIcon, User as UsersIcon, Puzzle as AddonsIcon, Link2, Unlink } from 'lucide-react'
-import api, { publicAuthAPI, addonsAPI, usersAPI, groupsAPI } from '@/services/api'
+import { User as UserIcon, Users as GroupsIcon, User as UsersIcon, Puzzle as AddonsIcon, Mail, Link2, Unlink } from 'lucide-react'
+import api, { publicAuthAPI, addonsAPI, usersAPI, groupsAPI, invitationsAPI } from '@/services/api'
 import toast from 'react-hot-toast'
 import { StremioOAuthCard } from '@/components/auth/StremioOAuthCard'
 
@@ -24,7 +24,7 @@ export default function AccountMenuButton({ className = '' }: Props) {
   const [authState, setAuthState] = React.useState<AuthState>(initialState)
   const [showMenu, setShowMenu] = React.useState(false)
   const wrapperRef = React.useRef<HTMLDivElement | null>(null)
-  const [stats, setStats] = React.useState<{ addons: number; users: number; groups: number } | null>(null)
+  const [stats, setStats] = React.useState<{ addons: number; users: number; groups: number; invites: number } | null>(null)
   const [statsLoading, setStatsLoading] = React.useState(false)
   const [accountUuid, setAccountUuid] = React.useState<string | null>(null)
   const [accountEmail, setAccountEmail] = React.useState<string | null>(null)
@@ -136,14 +136,24 @@ export default function AccountMenuButton({ className = '' }: Props) {
       if (AUTH_ENABLED && authState !== 'authed') return
       setStatsLoading(true)
       try {
-        const [addons, users, groups, accountInfo] = await Promise.all([
+        const [addons, users, groups, invites, accountInfo] = await Promise.all([
           addonsAPI.getAll().catch(() => []),
           usersAPI.getAll().catch(() => []),
           groupsAPI.getAll().catch(() => []),
+          invitationsAPI.getAll().catch(() => []),
           AUTH_ENABLED ? publicAuthAPI.me().catch(() => null) : api.get('/settings/account-info').catch(() => null),
         ])
         if (!cancelled) {
-          setStats({ addons: addons.length, users: users.length, groups: groups.length })
+          // Active invites: isActive && not expired && not full (same logic as Invites page)
+          const now = new Date()
+          const activeInvites = (invites || []).filter((inv: any) => {
+            if (!inv) return false
+            const isExpired = inv.expiresAt && new Date(inv.expiresAt) < now
+            const isFull = inv.maxUses != null && inv.currentUses >= inv.maxUses
+            return inv.isActive && !isExpired && !isFull
+          }).length
+
+          setStats({ addons: addons.length, users: users.length, groups: groups.length, invites: activeInvites })
           if (AUTH_ENABLED && accountInfo?.account) {
             const acct = accountInfo.account
             setAccountUuid(acct?.uuid || null)
@@ -339,6 +349,7 @@ export default function AccountMenuButton({ className = '' }: Props) {
               ['Addons', stats?.addons, <AddonsIcon key="a" className="w-4 h-4" />],
               ['Users', stats?.users, <UsersIcon key="u" className="w-4 h-4" />],
               ['Groups', stats?.groups, <GroupsIcon key="g" className="w-4 h-4" />],
+              ['Invites', stats?.invites, <Mail key="i" className="w-4 h-4" />],
             ].map(([label, value, IconEl], idx) => (
               <div key={label as string} className={`flex items-center justify-between px-3 py-2 ${idx>0 ? 'border-t color-border' : ''}`}>
                 <span className={`flex items-center gap-2 color-text-secondary`}>
