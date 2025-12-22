@@ -1,17 +1,22 @@
 'use client'
 
 import React from 'react'
-import { User as UserIcon, Users as GroupsIcon, User as UsersIcon, Puzzle as AddonsIcon, Mail, Link2, Unlink } from 'lucide-react'
+import { useRouter, usePathname } from 'next/navigation'
+import { User as UserIcon, Link2, Unlink, Puzzle as AddonsIcon, Users as GroupsIcon, Mail as InvitesIcon, Settings, Home, LogOut } from 'lucide-react'
 import api, { publicAuthAPI, addonsAPI, usersAPI, groupsAPI, invitationsAPI } from '@/services/api'
 import toast from 'react-hot-toast'
 import { StremioOAuthCard } from '@/components/auth/StremioOAuthCard'
+import UserAvatar from '@/components/ui/UserAvatar'
 
 type Props = {
   className?: string
 }
 
 export default function AccountMenuButton({ className = '' }: Props) {
+  const router = useRouter()
+  const pathname = usePathname()
   const AUTH_ENABLED = process.env.NEXT_PUBLIC_AUTH_ENABLED === 'true'
+  const isUserPage = pathname?.startsWith('/user/') || pathname === '/user'
   const [isPrivateAuth, setIsPrivateAuth] = React.useState(false)
   type AuthState = 'unknown' | 'authed' | 'guest'
   const initialState: AuthState = (() => {
@@ -24,13 +29,15 @@ export default function AccountMenuButton({ className = '' }: Props) {
   const [authState, setAuthState] = React.useState<AuthState>(initialState)
   const [showMenu, setShowMenu] = React.useState(false)
   const wrapperRef = React.useRef<HTMLDivElement | null>(null)
-  const [stats, setStats] = React.useState<{ addons: number; users: number; groups: number; invites: number } | null>(null)
-  const [statsLoading, setStatsLoading] = React.useState(false)
   const [accountUuid, setAccountUuid] = React.useState<string | null>(null)
   const [accountEmail, setAccountEmail] = React.useState<string | null>(null)
   const [showStremioLink, setShowStremioLink] = React.useState(false)
   const [isLinkingStremio, setIsLinkingStremio] = React.useState(false)
   const [isUnlinkingStremio, setIsUnlinkingStremio] = React.useState(false)
+  const [stats, setStats] = React.useState<{ users?: number; groups?: number; addons?: number; invites?: number } | null>(null)
+  const [statsLoading, setStatsLoading] = React.useState(false)
+  const [userInfo, setUserInfo] = React.useState<any>(null)
+  const [hasPrivateAuthCredentials, setHasPrivateAuthCredentials] = React.useState<boolean | null>(null)
 
   React.useEffect(() => {
     const onAuthChanged = async (e: any) => {
@@ -55,26 +62,24 @@ export default function AccountMenuButton({ className = '' }: Props) {
     ;(async () => {
       try {
         if (!AUTH_ENABLED) {
-          // Check if private auth is enabled
+          // Private instance - check if auth is required
+          setIsPrivateAuth(true)
           try {
             const me = await publicAuthAPI.me()
-            // If /me succeeds, we're authenticated (private auth enabled)
+            // If /me returns "Auth disabled" → Private with no auth
+            // Otherwise → Private with auth (credentials configured)
+            const hasAuth = me?.message !== 'Auth disabled'
+            setHasPrivateAuthCredentials(hasAuth)
             setAuthState('authed')
-            setIsPrivateAuth(true)
             if (typeof window !== 'undefined') (window as any).__SYNCIO_AUTHED = true
           } catch (err: any) {
-            // If /me fails with 401, private auth is enabled but not authenticated
-            if (err?.response?.status === 401) {
-              setAuthState('guest')
-              setIsPrivateAuth(true)
-              if (typeof window !== 'undefined') (window as any).__SYNCIO_AUTHED = false
-            } else {
-              // Other error or no auth - assume no auth needed
-              const info = await api.get('/settings/account-info')
-              setAuthState('authed')
-              setIsPrivateAuth(false)
-              if (typeof window !== 'undefined') (window as any).__SYNCIO_AUTHED = true
-            }
+            // 401 means Private with auth (not logged in)
+            // Other errors fallback to no auth
+            const hasAuth = err?.response?.status === 401
+            setHasPrivateAuthCredentials(hasAuth)
+            setAuthState(hasAuth ? 'guest' : 'authed')
+            setIsPrivateAuth(hasAuth)
+            if (typeof window !== 'undefined') (window as any).__SYNCIO_AUTHED = !hasAuth
           }
         } else {
         const me = await publicAuthAPI.me()
@@ -87,6 +92,7 @@ export default function AccountMenuButton({ className = '' }: Props) {
         if (!AUTH_ENABLED) {
           setAuthState('authed')
           setIsPrivateAuth(false)
+          setHasPrivateAuthCredentials(false)
           if (typeof window !== 'undefined') (window as any).__SYNCIO_AUTHED = true
         } else {
         setAuthState('guest')
@@ -136,30 +142,42 @@ export default function AccountMenuButton({ className = '' }: Props) {
       if (AUTH_ENABLED && authState !== 'authed') return
       setStatsLoading(true)
       try {
-        const [addons, users, groups, invites, accountInfo] = await Promise.all([
-          addonsAPI.getAll().catch(() => []),
+        const [users, groups, addons, invites, accountInfo] = await Promise.all([
           usersAPI.getAll().catch(() => []),
           groupsAPI.getAll().catch(() => []),
+          addonsAPI.getAll().catch(() => []),
           invitationsAPI.getAll().catch(() => []),
           AUTH_ENABLED ? publicAuthAPI.me().catch(() => null) : api.get('/settings/account-info').catch(() => null),
         ])
         if (!cancelled) {
-          // Active invites: isActive && not expired && not full (same logic as Invites page)
+          // Filter to only count enabled items
+          const enabledUsers = (users || []).filter((u: any) => u.isActive === true)
+          const enabledGroups = (groups || []).filter((g: any) => g.isActive === true)
+          const enabledAddons = (addons || []).filter((a: any) => a.isActive !== false && a.status !== 'inactive')
+          
+          // Filter active invites: isActive && not expired && not full
           const now = new Date()
           const activeInvites = (invites || []).filter((inv: any) => {
-            if (!inv) return false
+            if (!inv || !inv.isActive) return false
             const isExpired = inv.expiresAt && new Date(inv.expiresAt) < now
             const isFull = inv.maxUses != null && inv.currentUses >= inv.maxUses
-            return inv.isActive && !isExpired && !isFull
-          }).length
-
-          setStats({ addons: addons.length, users: users.length, groups: groups.length, invites: activeInvites })
+            return !isExpired && !isFull
+          })
+          
+          setStats({ 
+            users: enabledUsers.length, 
+            groups: enabledGroups.length, 
+            addons: enabledAddons.length,
+            invites: activeInvites.length
+          })
           if (AUTH_ENABLED && accountInfo?.account) {
             const acct = accountInfo.account
             setAccountUuid(acct?.uuid || null)
             setAccountEmail(acct?.email || null)
           }
         }
+      } catch (error) {
+        // Silently fail
       } finally {
         if (!cancelled) setStatsLoading(false)
       }
@@ -192,7 +210,58 @@ export default function AccountMenuButton({ className = '' }: Props) {
 
   const handleLogout = async () => {
     setShowMenu(false)
-    // cookie-based logout is handled server-side - do this first
+    
+    // Helper function to logout from Stremio by clearing localStorage
+    // StremioAPIStore uses localStorage to persist user and addon data
+    const logoutFromStremio = () => {
+      if (typeof window === 'undefined') return
+      
+      // Clear StremioAPIStore localStorage keys
+      // Based on stremio-api-client implementation, it stores data with these keys:
+      localStorage.removeItem('stremio_user')
+      localStorage.removeItem('stremio_addons')
+      localStorage.removeItem('stremio_auth_key')
+      
+      // Also clear any other Stremio-related keys
+      const keysToRemove: string[] = []
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i)
+        if (key && (key.startsWith('stremio_') || key.includes('stremio'))) {
+          keysToRemove.push(key)
+        }
+      }
+      keysToRemove.forEach(key => localStorage.removeItem(key))
+    }
+
+    if (isUserPage) {
+      // User mode: Use StremioAPIStore.logout()
+      await logoutFromStremio()
+      
+      // Clear user-specific localStorage items
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('public-library-user')
+        localStorage.removeItem('stremio_auth_key')
+        localStorage.removeItem('syncio_user_info')
+        localStorage.removeItem('user-activity-view-type')
+        localStorage.removeItem('user-activity-view-mode')
+        localStorage.removeItem('user-addons-view-mode')
+      }
+      
+      toast.success('Logged out successfully')
+      // Redirect to user login page
+      window.location.href = '/login?mode=user'
+      return
+    }
+    
+    // Admin mode: Check if logged in with Stremio or UUID/password
+    const hasStremioAuth = accountEmail !== null
+    
+    if (hasStremioAuth) {
+      // Admin logged in with Stremio: Use StremioAPIStore.logout()
+      await logoutFromStremio()
+    }
+    
+    // Admin UUID/password logout: cookie-based logout handled server-side
     try { 
       await publicAuthAPI.logout()
     } catch {}
@@ -203,6 +272,9 @@ export default function AccountMenuButton({ className = '' }: Props) {
     setAccountEmail(null)
     // Dispatch event after logout completes
     try { window.dispatchEvent(new CustomEvent('sfm:auth:changed', { detail: { authed: false } })) } catch {}
+    
+    // Redirect to admin login page
+    window.location.href = '/login?mode=admin'
   }
 
   const handleCopyUuid = async () => {
@@ -265,11 +337,26 @@ export default function AccountMenuButton({ className = '' }: Props) {
     }
   }
 
-  if ((AUTH_ENABLED || isPrivateAuth) && authState === 'guest') return null
+  // Load user info for user pages
+  React.useEffect(() => {
+    if (isUserPage && typeof window !== 'undefined') {
+      const stored = localStorage.getItem('public-library-user')
+      if (stored) {
+        try {
+          const data = JSON.parse(stored)
+          setUserInfo(data.userInfo || null)
+        } catch {}
+      }
+    }
+  }, [isUserPage])
 
-  const btnClasses = `h-10 px-3 rounded-lg flex items-center justify-center focus:outline-none focus:ring-0 color-surface color-hover ${className}`
+  // For admin/private-auth pages we hide the button when not authenticated,
+  // but on user pages we always show it so users can access their own menu/logout.
+  if (!isUserPage && (AUTH_ENABLED || isPrivateAuth) && authState === 'guest') return null
 
-  const menuClasses = `absolute right-0 mt-2 w-72 rounded-xl shadow-xl p-3 text-sm border z-[400] card`
+  const btnClasses = `h-10 px-2 rounded-lg flex items-center justify-center focus:outline-none focus:ring-0 color-surface color-hover ${className}`
+
+  const menuClasses = `absolute right-0 mt-2 w-64 rounded-xl shadow-xl p-3 text-sm border z-[400] card`
 
   return (
     <div className="relative z-[10]" ref={wrapperRef}>
@@ -278,7 +365,96 @@ export default function AccountMenuButton({ className = '' }: Props) {
       </button>
       {showMenu && (
         <div className={menuClasses}>
-          {AUTH_ENABLED && (accountUuid || accountEmail) && (
+          {/* Top bar with User/Admin Panel button (left) and Logout button (right) */}
+          <div className="flex justify-between items-center mb-3">
+            {/* User Panel / Admin Panel button - top left, icon only */}
+            {isUserPage ? (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setShowMenu(false)
+                  // Check if admin is logged in
+                  if (authState === 'authed') {
+                    router.push('/users')
+                  } else {
+                    // Not logged in as admin, go to login page with forced admin mode
+                    router.push('/login?mode=admin')
+                  }
+                }}
+                className="p-2 rounded color-surface color-hover color-text"
+                title="Admin Panel"
+              >
+                <Settings className="w-4 h-4" />
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setShowMenu(false)
+                  // Check if user is logged in
+                  if (typeof window !== 'undefined') {
+                    const stored = localStorage.getItem('public-library-user')
+                    if (stored) {
+                      try {
+                        const data = JSON.parse(stored)
+                        if (data.userId && data.authKey) {
+                          // User is logged in, go to user home
+                          router.push('/user/home')
+                          return
+                        }
+                      } catch (e) {
+                        // Invalid stored data
+                      }
+                    }
+                  }
+                  // Not logged in as user, go to login page with forced user mode
+                  router.push('/login?mode=user')
+                }}
+                className="p-2 rounded color-surface color-hover color-text"
+                title="User Panel"
+              >
+                <Home className="w-4 h-4" />
+              </button>
+            )}
+            
+            {/* Logout button - top right corner, icon only */}
+            {/* Hide logout in private mode without credentials (no login = no logout) */}
+            {!(isPrivateAuth && hasPrivateAuthCredentials === false) && (
+              <button
+                onClick={handleLogout}
+                className="p-2 rounded color-surface color-hover color-text"
+                title="Logout"
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+          
+          {/* User mode: Show user name and avatar */}
+          {isUserPage && userInfo && (
+            <div className="mb-2 px-3 py-2 rounded border color-border flex items-center gap-2">
+              <UserAvatar
+                email={userInfo.email}
+                username={userInfo.username}
+                colorIndex={userInfo.colorIndex || 0}
+                size="sm"
+              />
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-medium color-text truncate">
+                  {userInfo.username || userInfo.email || 'User'}
+                </div>
+                {userInfo.email && userInfo.username && (
+                  <div className="text-xs color-text-secondary truncate">
+                    {userInfo.email}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+          {/* Admin-only: UUID, Email, and Stremio linking - HIDDEN in user mode */}
+          {!isUserPage && AUTH_ENABLED && (accountUuid || accountEmail) && (
             <div 
               className={`mb-2 px-3 py-2 rounded border color-border cursor-pointer`} 
               onClick={handleCopyUuid} 
@@ -311,7 +487,26 @@ export default function AccountMenuButton({ className = '' }: Props) {
               </code>
             </div>
           )}
-          {AUTH_ENABLED && !accountEmail && (
+          {!isUserPage && (
+            <div className={`mb-1 rounded overflow-hidden border color-border`}>
+              {[
+                ['Users', stats?.users, <UserIcon key="u" className="w-4 h-4" />],
+                ['Groups', stats?.groups, <GroupsIcon key="g" className="w-4 h-4" />],
+                ['Addons', stats?.addons, <AddonsIcon key="a" className="w-4 h-4" />],
+                ['Invites', stats?.invites, <InvitesIcon key="i" className="w-4 h-4" />],
+              ].map(([label, value, IconEl], idx) => (
+                <div key={label as string} className={`flex items-center justify-between px-3 py-2 ${idx>0 ? 'border-t color-border' : ''}`}>
+                  <span className={`flex items-center gap-2 color-text-secondary`}>
+                    {IconEl as any}
+                    {label}
+                  </span>
+                  <span className={`color-text font-medium`}>{statsLoading ? '…' : (value ?? '—')}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {/* Admin-only: Stremio linking - HIDDEN in user mode */}
+          {!isUserPage && AUTH_ENABLED && !accountEmail && (
             <div className="mb-2 p-3 rounded border color-border">
               {!showStremioLink ? (
                 <button
@@ -343,30 +538,6 @@ export default function AccountMenuButton({ className = '' }: Props) {
                 </div>
               )}
             </div>
-          )}
-          <div className={`mb-1 rounded overflow-hidden border color-border`}>
-            {[
-              ['Addons', stats?.addons, <AddonsIcon key="a" className="w-4 h-4" />],
-              ['Users', stats?.users, <UsersIcon key="u" className="w-4 h-4" />],
-              ['Groups', stats?.groups, <GroupsIcon key="g" className="w-4 h-4" />],
-              ['Invites', stats?.invites, <Mail key="i" className="w-4 h-4" />],
-            ].map(([label, value, IconEl], idx) => (
-              <div key={label as string} className={`flex items-center justify-between px-3 py-2 ${idx>0 ? 'border-t color-border' : ''}`}>
-                <span className={`flex items-center gap-2 color-text-secondary`}>
-                  {IconEl as any}
-                  {label}
-                </span>
-                <span className={`color-text font-medium`}>{statsLoading ? '…' : (value ?? '—')}</span>
-              </div>
-            ))}
-          </div>
-          {AUTH_ENABLED && (
-            <button
-              onClick={handleLogout}
-              className={`color-surface color-hover color-text w-full text-center px-3 py-2 rounded`}
-            >
-              Logout
-            </button>
           )}
         </div>
       )}
