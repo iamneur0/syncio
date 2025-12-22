@@ -11,6 +11,11 @@
   .scrollbar-hide::-webkit-scrollbar {
     display: none;  /* Chrome, Safari and Opera */
   }
+
+  /* Reserve space for scrollbar to prevent layout shift */
+  .scrollbar-stable {
+    scrollbar-gutter: stable;
+  }
 }
 
 @layer base {
@@ -184,14 +189,104 @@
     --toggle-knob-off: var(--color-text-secondary);
   }
 
-  html, body {
+  /* Chart colors - using theme colors for consistency */
+  :root {
+    --chart-1: 220 14% 96%;
+    --chart-2: 220 13% 91%;
+    --chart-3: 216 12% 84%;
+    --chart-4: 218 11% 65%;
+    --chart-5: 220 9% 46%;
+  }
+
+  html.dark {
+    --chart-1: 220 20% 30%;
+    --chart-2: 220 18% 35%;
+    --chart-3: 220 16% 40%;
+    --chart-4: 220 14% 45%;
+    --chart-5: 220 12% 50%;
+  }
+
+  html.mono {
+    --chart-1: 0 0% 15%;
+    --chart-2: 0 0% 20%;
+    --chart-3: 0 0% 25%;
+    --chart-4: 0 0% 30%;
+    --chart-5: 0 0% 35%;
+  }
+
+  html.aubergine {
+    --chart-1: 280 25% 35%;
+    --chart-2: 280 23% 40%;
+    --chart-3: 280 21% 45%;
+    --chart-4: 280 19% 50%;
+    --chart-5: 280 17% 55%;
+  }
+
+  html.hoth {
+    --chart-1: 200 30% 85%;
+    --chart-2: 200 28% 80%;
+    --chart-3: 200 26% 75%;
+    --chart-4: 200 24% 70%;
+    --chart-5: 200 22% 65%;
+  }
+
+  html.aurora {
+    --chart-1: 250 30% 35%;
+    --chart-2: 250 28% 40%;
+    --chart-3: 250 26% 45%;
+    --chart-4: 250 24% 50%;
+    --chart-5: 250 22% 55%;
+  }
+
+  html.choco-mint {
+    --chart-1: 120 20% 35%;
+    --chart-2: 120 18% 40%;
+    --chart-3: 120 16% 45%;
+    --chart-4: 120 14% 50%;
+    --chart-5: 120 12% 55%;
+  }
+
+  html.ochin {
+    --chart-1: 210 35% 35%;
+    --chart-2: 210 33% 40%;
+    --chart-3: 210 31% 45%;
+    --chart-4: 210 29% 50%;
+    --chart-5: 210 27% 55%;
+  }
+
+  html.work-hard {
+    --chart-1: 40 30% 35%;
+    --chart-2: 40 28% 40%;
+    --chart-3: 40 26% 45%;
+    --chart-4: 40 24% 50%;
+    --chart-5: 40 22% 55%;
+  }
+
+  html {
     @apply min-h-screen;
+    /* Reserve space for scrollbar to prevent layout shift when it appears/disappears */
+    scrollbar-gutter: stable;
   }
 
   body {
+    @apply min-h-screen;
+    /* Reserve space for scrollbar to prevent layout shift - applies globally */
+    scrollbar-gutter: stable;
     background-color: var(--color-background);
     color: var(--color-text);
     transition: background-color 0.2s ease, color 0.2s ease;
+  }
+
+  /* Apply to common scrollable containers to prevent layout shift everywhere */
+  main,
+  [role="main"],
+  .overflow-auto,
+  .overflow-y-auto,
+  .overflow-x-auto,
+  .overflow-scroll,
+  .overflow-y-scroll,
+  .overflow-x-scroll {
+    scrollbar-gutter: stable;
   }
 }
 
@@ -302,6 +397,11 @@
     border-color: color-mix(in srgb, var(--color-text) 25%, transparent);
     outline: 2px solid color-mix(in srgb, var(--color-text) 25%, transparent);
     outline-offset: -2px;
+  }
+  /* Selection style for backgroundless cards (activity card view) */
+  .card-selectable.card-selected {
+    outline: 3px solid color-mix(in srgb, var(--color-text) 50%, transparent);
+    outline-offset: 0px;
   }
 
 .section-panel {
