@@ -4,6 +4,7 @@ import { useTheme } from '@/contexts/ThemeContext'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import api, { usersAPI, groupsAPI } from '@/services/api'
 import { getEntityColorStyles } from '@/utils/colorMapping'
+import UserAvatar from '@/components/ui/UserAvatar'
 import { invalidateUserQueries, invalidateSyncStatusQueries } from '@/utils/queryUtils'
 import { userSuccessHandlers } from '@/utils/toastUtils'
 import { useModalState } from '@/hooks/useCommonState'
@@ -14,7 +15,7 @@ import { EntityList, InlineEdit, AddonIcon, SortableAddonItem } from '@/componen
 import { ColorPicker } from '@/components/layout'
 import { ConfirmDialog } from '@/components/modals'
 import { useSyncStatusRefresh } from '@/hooks/useSyncStatusRefresh'
-import { Puzzle, X, Eye, EyeOff, LockKeyhole, Unlock, Bug, Copy } from 'lucide-react'
+import { Puzzle, X, Eye, EyeOff, LockKeyhole, Unlock, Bug, Copy, Film, Tv, Clock, Download } from 'lucide-react'
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors } from '@dnd-kit/core'
 import { restrictToParentElement } from '@dnd-kit/modifiers'
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy } from '@dnd-kit/sortable'
@@ -93,11 +94,20 @@ export default function UserDetailModal({
   const [showCurrentModal, setShowCurrentModal] = useState(false)
   const [showDesiredModal, setShowDesiredModal] = useState(false)
   const [showGroupAddonsModal, setShowGroupAddonsModal] = useState(false)
+  const [showLibraryModal, setShowLibraryModal] = useState(false)
   const [currentAddonsData, setCurrentAddonsData] = useState<any>({})
   const [desiredAddonsData, setDesiredAddonsData] = useState<any>({})
   const [groupAddonsData, setGroupAddonsData] = useState<any>({})
+  const [libraryDebugData, setLibraryDebugData] = useState<any>({})
   const [confirmDeleteAllOpen, setConfirmDeleteAllOpen] = useState(false)
   const [editExpiresAt, setEditExpiresAt] = useState<string>('')
+
+  // Fetch library/watch history
+  const { data: libraryData, isLoading: isLoadingLibrary } = useQuery({
+    queryKey: ['user', user?.id, 'library'],
+    queryFn: () => usersAPI.getLibrary(user!.id),
+    enabled: !!user?.id && isOpen && !!(currentUser as any)?.hasStremioConnection,
+  })
 
   // Initialize local state when opening the modal or switching user
   useEffect(() => {
@@ -185,6 +195,18 @@ export default function UserDetailModal({
     enabled: !!user?.id,
   })
 
+  // Extract addons array from the response (handles both array and object formats)
+  const stremioAddons = React.useMemo(() => {
+    if (!stremioAddonsData) return []
+    if (Array.isArray(stremioAddonsData)) {
+      return stremioAddonsData
+    }
+    if (stremioAddonsData && typeof stremioAddonsData === 'object') {
+      return Array.isArray(stremioAddonsData.addons) ? stremioAddonsData.addons : []
+    }
+    return []
+  }, [stremioAddonsData])
+
 
   // Debug mode check - show debug buttons only in debug mode
   const isDebugMode = process.env.NEXT_PUBLIC_DEBUG === 'true' || process.env.NEXT_PUBLIC_DEBUG === '1'
@@ -192,15 +214,46 @@ export default function UserDetailModal({
   // Debug function to show raw Stremio addons
   const handleDebugStremioAddons = async () => {
     try {
-      // Call getUserAddons directly to get the exact response
+      // Call getUserAddons to get the completely unmodified response from Stremio API
       const response = await usersAPI.getUserAddons(user!.id)
-      setCurrentAddonsData(response || {})
+      // Ensure response is always an object with addons array (never null)
+      if (response && typeof response === 'object') {
+        if (response.addons === null || response.addons === undefined) {
+          setCurrentAddonsData({ ...response, addons: [] })
+        } else {
+          setCurrentAddonsData(response)
+        }
+      } else {
+        setCurrentAddonsData({ addons: [] })
+      }
       setShowCurrentModal(true)
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to fetch user addons:', error)
-      toast.error('Failed to fetch user addons')
+      const errorMsg = error?.response?.data?.message || error?.message || 'Failed to fetch user addons'
+      toast.error(errorMsg)
+      // Set empty data on error so modal can still show something
+      setCurrentAddonsData({ addons: [] })
+      setShowCurrentModal(true)
     }
   }
+
+  // Debug function to show raw library/watch history data
+  const handleDebugLibrary = async () => {
+    try {
+      // Call getLibrary to get the raw response from Stremio API
+      const response = await usersAPI.getLibrary(user!.id)
+      setLibraryDebugData(response || { library: [], count: 0 })
+      setShowLibraryModal(true)
+    } catch (error: any) {
+      console.error('Failed to fetch library data:', error)
+      const errorMsg = error?.response?.data?.message || error?.message || 'Failed to fetch library data'
+      toast.error(errorMsg)
+      // Set empty data on error so modal can still show something
+      setLibraryDebugData({ library: [], count: 0 })
+      setShowLibraryModal(true)
+    }
+  }
+
 
   // Debug function to show desired addons
   const handleDebugDesiredAddons = async () => {
@@ -236,6 +289,7 @@ export default function UserDetailModal({
       .then(() => {
         // Refresh local list and any dependent UI
         queryClient.invalidateQueries({ queryKey: ['user', currentUser.id, 'stremio-addons'] })
+        queryClient.invalidateQueries({ queryKey: ['user', currentUser.id, 'user-addons'] })
         refreshAllSyncStatus(undefined, currentUser.id)
         toast.success('Stremio addons cleared')
       })
@@ -360,7 +414,7 @@ export default function UserDetailModal({
   const handleDragEnd = (event: any) => {
     const { active, over } = event
     if (active.id !== over?.id) {
-      const currentAddons = stremioAddonsData?.addons || []
+      const currentAddons = stremioAddons
       
       // Extract index from the unique ID (format: "index-transportUrl")
       const activeIndex = parseInt(active.id.split('-')[0])
@@ -433,7 +487,7 @@ export default function UserDetailModal({
       // nameOrId may be a name already; if it's a URL, try to resolve to name
       let name = nameOrId
       if (/^https?:\/\//i.test(nameOrId)) {
-        const currentAddons = stremioAddonsData?.addons || []
+        const currentAddons = stremioAddons
         const match = currentAddons.find((a: any) => (a?.transportUrl || a?.manifestUrl) === nameOrId)
         name = match?.manifest?.name || match?.transportName || 'Addon'
       }
@@ -534,19 +588,15 @@ export default function UserDetailModal({
           <div className="flex flex-wrap items-start justify-between mb-6 gap-4">
             <div className="flex items-center gap-4 relative">
               {/* User Logo */}
-              <div 
-                ref={logoRef}
+              <div ref={logoRef}>
+                <UserAvatar
+                  email={currentUser.email}
+                  username={currentUser.username}
+                  colorIndex={currentUser.colorIndex || 0}
+                  size="md"
+                  className="cursor-pointer transition-all hover:scale-105"
                 onClick={() => setShowColorPicker(!showColorPicker)}
-                className="w-12 h-12 rounded-full flex items-center justify-center flex-shrink-0 cursor-pointer transition-all hover:scale-105"
-                title="Click to change color"
-                style={{ 
-                  background: userColorStyles.background,
-                  color: userColorStyles.textColor,
-                }}
-              >
-                <span className="font-semibold text-lg" style={{ color: userColorStyles.textColor }}>
-                  {(currentUser.username || currentUser.email || 'U').charAt(0).toUpperCase()}
-                </span>
+                />
               </div>
               
               {/* Color Picker */}
@@ -555,7 +605,7 @@ export default function UserDetailModal({
             onColorChange={handleColorChange}
             isOpen={showColorPicker}
             onClose={() => setShowColorPicker(false)}
-            triggerRef={logoRef}
+            triggerRef={logoRef as React.RefObject<HTMLElement>}
           />
               
               <div className="flex flex-col">
@@ -690,10 +740,11 @@ export default function UserDetailModal({
           {/* Stremio Account Addons Section */}
           <EntityList
             title="Stremio Account Addons"
-            count={stremioAddonsData?.addons?.length || 0}
-            items={stremioAddonsData?.addons || []}
+            count={stremioAddons.length}
+            items={stremioAddons}
             isLoading={false}
             onClear={handleResetStremioAddons}
+            onTitleClick={isDebugMode ? handleDebugStremioAddons : undefined}
             confirmReset={{
               title: 'Reset Stremio Addons',
               description: "This will clear all addons from this user's Stremio account. Continue?",
@@ -752,12 +803,12 @@ export default function UserDetailModal({
               modifiers={[restrictToParentElement]}
               onDragEnd={handleDragEnd}
             >
-              <SortableContext items={(stremioAddonsData?.addons || []).map((addon: any, index: number) => {
+              <SortableContext items={stremioAddons.map((addon: any, index: number) => {
                 const addonId = addon.transportUrl || addon.manifestUrl || addon.url || addon.id
                 return `${index}-${addonId}`
               })} strategy={verticalListSortingStrategy}>
                 <div className="space-y-3">
-                  {(stremioAddonsData?.addons || []).map((addon: any, index: number) => {
+                  {stremioAddons.map((addon: any, index: number) => {
                     const addonId = addon.transportUrl || addon.manifestUrl || addon.url || addon.id
                     const uniqueId = `${index}-${addonId}`
                     const addonName = addon.manifest?.name || addon.transportName || addon.name || 'Unknown Addon'
@@ -782,6 +833,106 @@ export default function UserDetailModal({
               </SortableContext>
             </DndContext>
           </EntityList>
+
+          {/* Watch History / Library Section */}
+          {(currentUser as any)?.hasStremioConnection && (() => {
+            // Backend already processes and sorts items correctly
+            // Only keep items whose ID starts with an IMDb id ("tt...")
+            const processedLibrary = (libraryData?.library || []).filter((item: any) => {
+              const itemId = item._id || item.id
+              return typeof itemId === 'string' && itemId.startsWith('tt')
+            })
+            
+            return (
+              <EntityList
+                title="Watch History"
+                count={processedLibrary.length}
+                items={processedLibrary}
+                isLoading={isLoadingLibrary}
+                onTitleClick={isDebugMode ? handleDebugLibrary : undefined}
+              renderItem={(item: any, index: number) => {
+                const isMovie = item.type === 'movie'
+                // Get watch date: prefer _mtime (modification time) which is per-item, 
+                // then lastWatched from state, then _ctime (creation time)
+                // Note: For series episodes, Stremio may not provide per-episode watch dates,
+                // so all episodes might have the same timestamp (the show's last watched date)
+                const watchDate = item._mtime ? new Date(item._mtime) : 
+                                 (item.state?.lastWatched ? new Date(item.state.lastWatched) : 
+                                 (item._ctime ? new Date(item._ctime) : null))
+                const timesWatched = item.state?.timesWatched || 0
+                const timeWatched = item.state?.timeWatched || 0
+                const duration = item.state?.duration || 0
+                const progress = duration > 0 ? Math.round((timeWatched / duration) * 100) : 0
+
+                // Format year: remove trailing dash if no end year, handle empty/null years
+                const formatYear = (year: string | null | undefined): string | null => {
+                  if (!year) return null
+                  const yearStr = String(year).trim()
+                  // Remove trailing dash and any whitespace after it (e.g., "1999–" -> "1999")
+                  const cleaned = yearStr.replace(/–\s*$/, '').replace(/-\s*$/, '')
+                  return cleaned || null
+                }
+
+                const formattedYear = formatYear(item.year)
+                
+                // Don't show season/episode for shows (user requested)
+                const seasonEpisode = null
+
+                return (
+                  <div
+                    key={item._id || item.id || index}
+                    className="rounded-lg border p-4 hover:shadow-md transition-all card"
+                  >
+                    <div className="flex items-start gap-4">
+                      {item.poster && (
+                        <div className="relative flex-shrink-0 w-16 h-24">
+                        <img
+                          src={item.poster}
+                          alt={item.name}
+                            className="w-full h-full object-cover rounded"
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).style.display = 'none'
+                          }}
+                        />
+                        </div>
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          {isMovie ? (
+                            <Film className="w-4 h-4 color-text-secondary flex-shrink-0" />
+                          ) : (
+                            <Tv className="w-4 h-4 color-text-secondary flex-shrink-0" />
+                          )}
+                          <h4 className="font-medium truncate">{item.name}</h4>
+                          {seasonEpisode && (
+                            <span className="text-sm color-text-secondary font-medium">{seasonEpisode}</span>
+                          )}
+                          {formattedYear && (
+                            <span className="text-sm color-text-secondary">({formattedYear})</span>
+                          )}
+        </div>
+                        <div className="space-y-1 text-sm color-text-secondary">
+                          {watchDate && (
+                            <div className="flex items-center gap-1">
+                              <Clock className="w-3 h-3" />
+                              <span>{formatDate(watchDate.toISOString())}</span>
+                            </div>
+                          )}
+                          {/* Don't show timesWatched or progress for shows (user requested) */}
+                          {item.state?.videoId && (
+                            <div className="text-xs">Video ID: {item.state.videoId}</div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )
+              }}
+              emptyIcon={<Film className={`w-12 h-12 mx-auto mb-4 color-text-secondary`} />}
+              emptyMessage="No watch history found"
+            />
+            )
+          })()}
 
         </div>
       </div>
@@ -818,8 +969,8 @@ export default function UserDetailModal({
               </div>
             </div>
             <div className="space-y-2">
-              {(!currentAddonsData || (Array.isArray(currentAddonsData) && currentAddonsData.length === 0) || (!Array.isArray(currentAddonsData) && !currentAddonsData.addons)) ? (
-                <p className={`color-text-secondary`}>No addons found</p>
+              {currentAddonsData === null || currentAddonsData === undefined ? (
+                <p className={`color-text-secondary`}>No data available</p>
               ) : (
                 <div className="relative">
                   <pre className={`p-4 rounded-lg border text-xs overflow-auto max-h-96 card`}>
@@ -916,6 +1067,52 @@ export default function UserDetailModal({
                 <div className="relative">
                   <pre className={`p-4 rounded-lg border text-xs overflow-auto max-h-96 card`}>
                     {JSON.stringify(groupAddonsData, null, 2)}
+                  </pre>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Library/Watch History Debug Modal */}
+      {showLibraryModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className={`bg-card rounded-lg shadow-xl max-w-4xl w-full mx-4 max-h-[90vh] flex flex-col`}>
+            <div className="flex items-center justify-between p-4 border-b">
+              <h3 className={`text-lg font-semibold`}>
+                Library/Watch History ({Array.isArray(libraryDebugData) ? libraryDebugData.length : (libraryDebugData?.library?.length || libraryDebugData?.count || 0)})
+              </h3>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(JSON.stringify(libraryDebugData, null, 2))
+                    toast.success('JSON copied to clipboard')
+                  }}
+                  className={`p-2 rounded-lg transition-colors ${
+                    'color-text-secondary color-hover'
+                  }`}
+                  title="Copy JSON to clipboard"
+                >
+                  <Copy className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => setShowLibraryModal(false)}
+                  className={`p-2 rounded-lg transition-colors ${
+                    'color-text-secondary color-hover'
+                  }`}
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+            <div className="p-4 overflow-auto flex-1">
+              {libraryDebugData === null || libraryDebugData === undefined ? (
+                <p className={`color-text-secondary`}>No data available</p>
+              ) : (
+                <div className="relative">
+                  <pre className={`p-4 rounded-lg border text-xs overflow-auto max-h-96 card`}>
+                    {JSON.stringify(libraryDebugData, null, 2)}
                   </pre>
                 </div>
               )}
