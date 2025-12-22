@@ -46,6 +46,7 @@ api.interceptors.response.use(
                              error.config?.url?.includes('/clear-stremio-credentials') ||
                              error.config?.url?.includes('/stremio-credentials')
     
+    // Admin auth: 401 errors
     if (error.response?.status === 401 && !isStremioEndpoint) {
       if (typeof window !== 'undefined') {
         try {
@@ -53,6 +54,7 @@ api.interceptors.response.use(
         } catch {}
       }
     }
+    
     return Promise.reject(error)
   }
 )
@@ -65,6 +67,7 @@ export interface User {
   status: 'active' | 'inactive'
   groups: string[]
   isActive: boolean
+  colorIndex?: number
 }
 
 export interface Group {
@@ -239,6 +242,16 @@ export const usersAPI = {
       groupName: userData.groupName,
       colorIndex: userData.colorIndex,
     }
+
+    // If registerIfMissing is true, call the register endpoint directly instead of connect
+    const shouldRegister = (userData as any).registerIfMissing === true
+    if (shouldRegister) {
+      const response: AxiosResponse<any> = await api.post('/stremio/register', payload)
+      return response.data?.user || response.data
+    }
+
+    // Otherwise, call connect endpoint with registerIfMissing: false to prevent auto-registration
+    payload.registerIfMissing = false
     const response: AxiosResponse<any> = await api.post('/stremio/connect', payload)
     return response.data?.user || response.data
   },
@@ -249,7 +262,7 @@ export const usersAPI = {
   },
 
   // Update user
-  update: async (id: string, userData: { username?: string; email?: string; password?: string; groupName?: string; groupId?: string; expiresAt?: string | null }): Promise<User> => {
+  update: async (id: string, userData: { username?: string; email?: string; password?: string; groupName?: string; groupId?: string; expiresAt?: string | null; discordWebhookUrl?: string | null; discordUserId?: string | null }): Promise<User> => {
     const response: AxiosResponse<User> = await api.put(`/users/${id}`, userData)
     // Handle axios response wrapper
     if (response.data && typeof response.data === 'object' && (response.data as any).data) {
@@ -259,7 +272,40 @@ export const usersAPI = {
   },
 
   // Delete user
-  delete: async (id: string): Promise<void> => {
+  delete: async (id: string, options?: { clearAddons?: boolean }): Promise<void> => {
+    // If clearAddons is requested, clear addons first, then delete user
+    // This reuses the same pattern as the opt-out endpoint
+    if (options?.clearAddons) {
+      try {
+        // Get user to check if they need to be enabled
+        const user = await usersAPI.getById(id)
+        let wasDisabled = false
+        
+        // Temporarily enable user if they're disabled (required for addon clearing)
+        if (user && !user.isActive && user.hasStremioConnection) {
+          wasDisabled = true
+          await usersAPI.enable(id)
+        }
+        
+        try {
+          await usersAPI.clearStremioAddons(id)
+        } finally {
+          // Re-disable user if we enabled them (before deletion)
+          if (wasDisabled) {
+            try {
+              await usersAPI.disable(id)
+            } catch (e) {
+              // Ignore disable errors, we're about to delete anyway
+            }
+          }
+        }
+      } catch (error: any) {
+        const errorMsg = error?.response?.data?.message || error?.message || 'Failed to clear addons'
+        console.error('Error clearing addons before deletion:', error)
+        // Continue with deletion even if addon clearing fails
+        // The user will be deleted regardless
+      }
+    }
     await api.delete(`/users/${id}`)
   },
 
@@ -318,6 +364,163 @@ export const usersAPI = {
   getUserAddons: async (id: string): Promise<any> => {
     const response: AxiosResponse<any> = await api.get(`/users/${id}/user-addons`)
     return response.data
+  },
+
+  // Get user's library/watch history
+  getLibrary: async (id: string): Promise<any> => {
+    const response: AxiosResponse<any> = await api.get(`/users/${id}/library`)
+    return response.data
+  },
+
+  // Get combined library/watch history from all users (for Activity page)
+  getActivityLibrary: async (): Promise<any> => {
+    const response: AxiosResponse<any> = await api.get(`/users/activity/library`)
+    return response.data
+  },
+
+  // Get metrics data
+  getMetrics: async (period: string = '30d'): Promise<any> => {
+    const response: AxiosResponse<any> = await api.get(`/users/metrics?period=${period}`)
+    return response.data
+  },
+
+  // Get watch time for a user
+  getWatchTime: async (userId: string, params?: { startDate?: string; endDate?: string; itemId?: string; itemType?: string; groupBy?: string }): Promise<any> => {
+    const queryParams = new URLSearchParams()
+    if (params?.startDate) queryParams.append('startDate', params.startDate)
+    if (params?.endDate) queryParams.append('endDate', params.endDate)
+    if (params?.itemId) queryParams.append('itemId', params.itemId)
+    if (params?.itemType) queryParams.append('itemType', params.itemType)
+    if (params?.groupBy) queryParams.append('groupBy', params.groupBy)
+    const response: AxiosResponse<any> = await api.get(`/users/${userId}/watch-time?${queryParams.toString()}`)
+    return response.data
+  },
+
+  // Get top items for a user
+  getTopItems: async (userId: string, params?: { period?: string; itemType?: string; limit?: number }): Promise<any> => {
+    const queryParams = new URLSearchParams()
+    if (params?.period) queryParams.append('period', params.period)
+    if (params?.itemType) queryParams.append('itemType', params.itemType)
+    if (params?.limit) queryParams.append('limit', params.limit.toString())
+    const response: AxiosResponse<any> = await api.get(`/users/${userId}/top-items?${queryParams.toString()}`)
+    return response.data
+  },
+
+  // Get watch streaks for a user
+  getStreaks: async (userId: string): Promise<any> => {
+    const response: AxiosResponse<any> = await api.get(`/users/${userId}/streaks`)
+    return response.data
+  },
+
+  // Get watch velocity for a user
+  getVelocity: async (userId: string, params?: { itemId?: string; period?: string }): Promise<any> => {
+    const queryParams = new URLSearchParams()
+    if (params?.itemId) queryParams.append('itemId', params.itemId)
+    if (params?.period) queryParams.append('period', params.period)
+    const response: AxiosResponse<any> = await api.get(`/users/${userId}/velocity?${queryParams.toString()}`)
+    return response.data
+  },
+
+  // Delete a library item from a user's Stremio library
+  deleteLibraryItem: async (userId: string, itemId: string): Promise<any> => {
+    const response: AxiosResponse<any> = await api.delete(`/users/${userId}/library/${encodeURIComponent(itemId)}`)
+    return response.data
+  },
+
+  // Get like/love status for a media item in Stremio
+  getLikeStatus: async (userId: string, mediaId: string, mediaType: 'series' | 'movie'): Promise<{ status: 'liked' | 'loved' | null }> => {
+    const response: AxiosResponse<any> = await api.get(`/users/${userId}/status`, {
+      params: { mediaId, mediaType }
+    })
+    return response.data
+  },
+
+  // Update like/love status for a media item in Stremio
+  // status: 'liked', 'loved', or null to unlike/unlove
+  updateLikeStatus: async (userId: string, mediaId: string, mediaType: 'series' | 'movie', status: 'liked' | 'loved' | null): Promise<any> => {
+    const response: AxiosResponse<any> = await api.post(`/users/${userId}/statusUpdate`, {
+      mediaId,
+      mediaType,
+      status
+    })
+    return response.data
+  },
+
+  // Toggle library status (add/remove) for selected items
+  toggleLibraryItems: async (userId: string, items: Array<{ itemId: string; itemType: 'series' | 'movie'; itemName: string; poster?: string; addToLibrary: boolean }>): Promise<any> => {
+    const response: AxiosResponse<any> = await api.post(`/users/${userId}/library/toggle`, {
+      items
+    })
+    return response.data
+  },
+
+  // Shares API
+  getShares: async (userId: string): Promise<{ sent: any[]; received: any[] }> => {
+    const response: AxiosResponse<{ sent: any[]; received: any[] }> = await api.get(`/users/${userId}/shares`)
+    return response.data
+  },
+
+  getReceivedShares: async (userId: string): Promise<{ received: any[] }> => {
+    const response: AxiosResponse<{ received: any[] }> = await api.get(`/users/${userId}/shares/received`)
+    return response.data
+  },
+
+  getGroupMembers: async (userId: string): Promise<{ members: any[] }> => {
+    const response: AxiosResponse<{ members: any[] }> = await api.get(`/users/${userId}/shares/group-members`)
+    return response.data
+  },
+
+  shareItems: async (userId: string, items: Array<{ itemId: string; itemName?: string; itemType?: string; poster?: string }>, targetUserIds: string[]): Promise<any> => {
+    const response: AxiosResponse<any> = await api.post(`/users/${userId}/shares`, {
+      items,
+      targetUserIds
+    })
+    return response.data
+  },
+
+  removeShare: async (userId: string, shareId: string): Promise<any> => {
+    const response: AxiosResponse<any> = await api.delete(`/users/${userId}/shares/${shareId}`)
+    return response.data
+  },
+
+  markShareAsViewed: async (userId: string, shareId: string): Promise<any> => {
+    const response: AxiosResponse<any> = await api.put(`/users/${userId}/shares/${shareId}/viewed`)
+    return response.data
+  },
+
+  // Update user's activity visibility
+  updateActivityVisibility: async (userId: string, visibility: 'public' | 'private'): Promise<any> => {
+    const response: AxiosResponse<any> = await api.patch(`/users/${userId}/activity-visibility`, {
+      activityVisibility: visibility
+    })
+    return response.data
+  },
+
+  // Backup user's library (download as JSON file)
+  backupLibrary: async (userId: string): Promise<void> => {
+    const response: AxiosResponse<Blob> = await api.get(`/users/${userId}/library/backup`, {
+      responseType: 'blob'
+    })
+    
+    // Extract filename from Content-Disposition header
+    const contentDisposition = response.headers['content-disposition']
+    let filename = `Stremio-Library-${userId}.json`
+    if (contentDisposition) {
+      const filenameMatch = contentDisposition.match(/filename="?(.+?)"?$/i)
+      if (filenameMatch) {
+        filename = filenameMatch[1]
+      }
+    }
+    
+    // Create download link and trigger download
+    const url = window.URL.createObjectURL(new Blob([response.data]))
+    const link = document.createElement('a')
+    link.href = url
+    link.setAttribute('download', filename)
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    window.URL.revokeObjectURL(url)
   },
 
   // Remove a Stremio addon from user's account
@@ -500,6 +703,12 @@ export const groupsAPI = {
   clone: async (id: string): Promise<Group> => {
     const response: AxiosResponse<{ group: Group }> = await api.post('/groups/clone', { originalGroupId: id })
     return response.data.group
+  },
+
+  // Update activity visibility
+  updateActivityVisibility: async (id: string, activityVisibility: 'public' | 'private'): Promise<any> => {
+    const response: AxiosResponse<any> = await api.patch(`/groups/${id}/activity-visibility`, { activityVisibility })
+    return response.data
   },
 
 }
@@ -880,6 +1089,107 @@ export const invitationsAPI = {
       const text = await response.text()
       throw new Error(`Failed to parse JSON response: ${text.substring(0, 100)}`)
     }
+  },
+}
+
+// Public Library API (no auth required)
+export const publicLibraryAPI = {
+  // Generate OAuth link
+  generateOAuth: async (): Promise<any> => {
+    const response: AxiosResponse<any> = await api.post(`/public-library/generate-oauth`)
+    return response.data
+  },
+  
+  // Poll for OAuth completion
+  pollOAuth: async (code: string): Promise<any> => {
+    const response: AxiosResponse<any> = await api.post(`/public-library/poll-oauth`, { code })
+    return response.data
+  },
+  
+  // Authenticate with OAuth and get/create user
+  authenticate: async (authKey: string): Promise<any> => {
+    const response: AxiosResponse<any> = await api.post(`/public-library/authenticate`, { authKey })
+    return response.data
+  },
+
+  // Validate user session (check if user exists, is active, and is in a group)
+  validate: async (authKey?: string, userId?: string): Promise<any> => {
+    const response: AxiosResponse<any> = await api.post(`/public-library/validate`, { authKey, userId })
+    return response.data
+  },
+
+  // Get current user's info (including activityVisibility)
+  getUserInfo: async (userId?: string, authKey?: string): Promise<any> => {
+    const params = new URLSearchParams()
+    if (userId) params.append('userId', userId)
+    if (authKey) params.append('authKey', authKey)
+    const response: AxiosResponse<any> = await api.get(`/public-library/user-info?${params.toString()}`)
+    return response.data
+  },
+
+  // Update current user's activity visibility
+  updateActivityVisibility: async (userId: string, authKey: string, activityVisibility: 'public' | 'private'): Promise<any> => {
+    const response: AxiosResponse<any> = await api.patch(`/public-library/activity-visibility`, {
+      userId,
+      authKey,
+      activityVisibility
+    })
+    return response.data
+  },
+  
+  // Get user's library
+  getLibrary: async (userId: string, requestingUserId?: string): Promise<any> => {
+    const params = new URLSearchParams({ userId })
+    if (requestingUserId) {
+      params.append('requestingUserId', requestingUserId)
+    }
+    const response: AxiosResponse<any> = await api.get(`/public-library/library?${params.toString()}`)
+    return response.data
+  },
+  
+  // Add addon and mark as protected
+  addAddon: async (userId: string, addonUrl: string, manifestData?: any): Promise<any> => {
+    const response: AxiosResponse<any> = await api.post(`/public-library/add-addon`, { userId, addonUrl, manifestData })
+    return response.data
+  },
+
+  // Get user's addons (group addons and current Stremio addons)
+  getAddons: async (userId: string, authKey?: string): Promise<any> => {
+    const params = new URLSearchParams()
+    params.append('userId', userId)
+    if (authKey) params.append('authKey', authKey)
+    const response: AxiosResponse<any> = await api.get(`/public-library/addons?${params.toString()}`)
+    return response.data
+  },
+
+  // Exclude addon from group
+  excludeAddon: async (userId: string, addonId: string): Promise<any> => {
+    const response: AxiosResponse<any> = await api.post('/public-library/exclude-addon', { userId, addonId })
+    return response.data
+  },
+
+  // Include addon back in group (remove exclusion)
+  includeAddon: async (userId: string, addonId: string): Promise<any> => {
+    const response: AxiosResponse<any> = await api.post('/public-library/include-addon', { userId, addonId })
+    return response.data
+  },
+
+  // Delete library item
+  deleteLibraryItem: async (userId: string, itemId: string): Promise<any> => {
+    const response: AxiosResponse<any> = await api.delete(`/public-library/library/${encodeURIComponent(itemId)}?userId=${userId}`)
+    return response.data
+  },
+
+  // Toggle protect status for a single addon (by name)
+  toggleProtectAddon: async (userId: string, name: string, unsafe: boolean = false): Promise<any> => {
+    const response: AxiosResponse<any> = await api.post(`/public-library/protect-addon${unsafe ? '?unsafe=true' : ''}`, { userId, name })
+    return response.data
+  },
+
+  // Remove addon from Stremio
+  removeStremioAddon: async (userId: string, addonName: string, unsafe: boolean = false): Promise<any> => {
+    const response: AxiosResponse<any> = await api.delete(`/public-library/stremio-addons/${encodeURIComponent(addonName)}?userId=${userId}${unsafe ? '&unsafe=true' : ''}`)
+    return response.data
   },
 }
 
