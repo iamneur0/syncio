@@ -7,7 +7,9 @@ import toast from 'react-hot-toast'
 import { Upload, Download, RotateCcw, AlertTriangle, Trash2, User, Users, RefreshCcw, RefreshCw } from 'lucide-react'
 import AccountMenuButton from '@/components/auth/AccountMenuButton'
 import { ConfirmDialog } from '@/components/modals'
-import api from '@/services/api'
+import api, { usersAPI } from '@/services/api'
+import { useQuery } from '@tanstack/react-query'
+import UserAvatar from '@/components/ui/UserAvatar'
 
 export default function TasksPage() {
   // Theme not needed here anymore, keep placeholders for text classes
@@ -25,9 +27,17 @@ export default function TasksPage() {
   const [syncFrequency, setSyncFrequency] = React.useState<string>('0')
   const [backupDays, setBackupDays] = React.useState<number>(0)
   const [isBackupRunning, setIsBackupRunning] = React.useState<boolean>(false)
+  const [selectedUserId, setSelectedUserId] = React.useState<string>('')
+  const [isBackingUpLibrary, setIsBackingUpLibrary] = React.useState<boolean>(false)
   
   const addonsDragDepth = React.useRef<number>(0)
   const configDragDepth = React.useRef<number>(0)
+
+  // Fetch users for library backup dropdown
+  const { data: users } = useQuery({
+    queryKey: ['users'],
+    queryFn: () => usersAPI.getAll()
+  })
 
   React.useEffect(() => {
     api.get('/settings/account-sync')
@@ -648,6 +658,84 @@ export default function TasksPage() {
           onChange={handleFileChange}
           className="hidden"
         />
+      </div>
+
+      {/* Library Export */}
+      <div className={`p-4 rounded-lg border mt-6 card`}>
+        <h2 className={`text-lg font-semibold ${textColor}`}>Library Export</h2>
+        <p className={`text-sm mt-1 ${mutedTextColor}`}>
+          Export a user's Stremio library to a JSON file.
+        </p>
+        <div className="mt-4 flex gap-4 flex-wrap items-center">
+          <div className="relative flex-1 min-w-[200px]">
+            <select
+              value={selectedUserId}
+              onChange={(e) => setSelectedUserId(e.target.value)}
+              className={`input px-3 py-2 w-full appearance-none pr-10`}
+            >
+              <option value="">Select a user...</option>
+              {users && Array.isArray(users) && users
+                .filter((user: any) => user.stremioAuthKey) // Only show users with Stremio connection
+                .map((user: any) => (
+                  <option key={user.id} value={user.id}>
+                    {user.username || user.email || user.id}
+                  </option>
+                ))}
+            </select>
+            <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
+              <User className="w-4 h-4 color-text-secondary" />
+            </div>
+          </div>
+          <button
+            onClick={async () => {
+              if (!selectedUserId) {
+                toast.error('Please select a user')
+                return
+              }
+              try {
+                setIsBackingUpLibrary(true)
+                await usersAPI.backupLibrary(selectedUserId)
+                toast.success('Library exported successfully')
+              } catch (error: any) {
+                console.error('Failed to export library:', error)
+                const errorMsg = error?.response?.data?.message || error?.message || 'Failed to export library'
+                toast.error(errorMsg)
+              } finally {
+                setIsBackingUpLibrary(false)
+              }
+            }}
+            disabled={!selectedUserId || isBackingUpLibrary}
+            className="surface-interactive disabled:opacity-50 flex items-center px-4 py-2 rounded-lg"
+          >
+            <Download className={`w-5 h-5 mr-2 ${isBackingUpLibrary ? 'animate-pulse' : ''}`} />
+            {isBackingUpLibrary ? 'Exporting...' : 'Export Library'}
+          </button>
+        </div>
+        {/* Show selected user with avatar */}
+        {selectedUserId && users && Array.isArray(users) && (() => {
+          const selectedUser = users.find((u: any) => u.id === selectedUserId)
+          if (!selectedUser) return null
+          return (
+            <div className="mt-3 flex items-center gap-2 px-3 py-2 rounded border color-border">
+              <UserAvatar
+                email={selectedUser.email}
+                username={selectedUser.username}
+                colorIndex={selectedUser.colorIndex || 0}
+                size="sm"
+              />
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-medium color-text truncate">
+                  {selectedUser.username || selectedUser.email || selectedUser.id}
+                </div>
+                {selectedUser.email && selectedUser.username && (
+                  <div className="text-xs color-text-secondary truncate">
+                    {selectedUser.email}
+                  </div>
+                )}
+              </div>
+            </div>
+          )
+        })()}
       </div>
 
       {/* Configuration */}
