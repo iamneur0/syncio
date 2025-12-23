@@ -1,5 +1,5 @@
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
   binaryTargets = ["native", "linux-musl-openssl-3.0.x", "linux-musl-arm64-openssl-3.0.x"]
 }
 
@@ -9,38 +9,44 @@ datasource db {
 }
 
 model User {
-  id              String    @id @default(cuid())
-  username        String
-  email           String
-  isActive        Boolean   @default(true)
-  stremioAuthKey  String?   // Encrypted Stremio auth key
-  excludedAddons  String?   // JSON array of addon IDs that user has excluded
-  protectedAddons String?   // JSON array of addon IDs that user has protected
-  colorIndex      Int?      // UI color theme index
-  accountId       String?   // For multi-tenant support
-  expiresAt       DateTime? // When user membership expires (null = never expires)
-  inviteCode      String?   // Invite code used to create this user (null if created manually)
-  createdAt       DateTime  @default(now())
+  id                 String    @id @default(cuid())
+  username           String
+  email              String
+  isActive           Boolean   @default(true)
+  stremioAuthKey     String? // Encrypted Stremio auth key
+  excludedAddons     String? // JSON array of addon IDs that user has excluded
+  protectedAddons    String? // JSON array of addon IDs that user has protected
+  colorIndex         Int? // UI color theme index
+  useGravatar        Boolean   @default(false) // Use Gravatar for avatar instead of generated avatar
+  accountId          String? // For multi-tenant support
+  expiresAt          DateTime? // When user membership expires (null = never expires)
+  inviteCode         String? // Invite code used to create this user (null if created manually)
+  discordWebhookUrl  String? // Discord webhook URL for notifications
+  discordUserId      String? // Discord user ID for personalized notifications
+  apiKey             String? // User-specific API key for accessing own metrics
+  activityVisibility String    @default("private") // "public" or "private" - when public, group members can see this user's library/history
+  createdAt          DateTime  @default(now())
 
   // Relationships
 
-  @@map("users")
   @@unique([accountId, email])
   @@unique([accountId, username])
   @@index([expiresAt])
+  @@map("users")
 }
 
 model Group {
-  id          String   @id @default(cuid())
-  name        String
-  description String?
-  isActive    Boolean  @default(true)
-  colorIndex  Int?
-  accountId   String?
-  userIds     String?
+  id                 String  @id @default(cuid())
+  name               String
+  description        String?
+  isActive           Boolean @default(true)
+  colorIndex         Int?
+  accountId          String?
+  userIds            String?
+  activityVisibility String  @default("private") // DEPRECATED: Use User.activityVisibility instead. Kept for backward compatibility.
 
   // Relationships
-  addons       GroupAddon[]
+  addons GroupAddon[]
 
   @@map("groups")
 }
@@ -48,28 +54,29 @@ model Group {
 // GroupMember and GroupInvite removed – using JSON arrays on Group
 
 model Addon {
-  id             String   @id @default(cuid())
-  name           String
-  description    String?
-  manifestUrl    String
-  manifest       String?  // Encrypted JSON string (AES-GCM)
+  id               String  @id @default(cuid())
+  name             String
+  description      String?
+  manifestUrl      String
+  manifest         String? // Encrypted JSON string (AES-GCM)
   originalManifest String? // Encrypted original manifest JSON
-  stremioAddonId String?
-  version        String?
-  isActive       Boolean  @default(true)
-  accountId      String?
-  iconUrl        String?
+  stremioAddonId   String?
+  version          String?
+  isActive         Boolean @default(true)
+  accountId        String?
+  iconUrl          String?
+  customLogo       String? // Custom logo URL to replace manifest icon
   // Deterministic hash of normalized manifestUrl for search/uniqueness (public mode)
-  manifestUrlHash String? @db.VarChar(64)
+  manifestUrlHash  String? @db.VarChar(64)
   // Normalized HMAC/SHA-256 of processed manifest (content equality check)
-  manifestHash    String? @db.VarChar(64)
+  manifestHash     String? @db.VarChar(64)
   // Non-sensitive cached manifest resources for fast UI (JSON string array)
-  resources      String?
+  resources        String?
   // Non-sensitive cached manifest catalogs for fast UI (JSON array of catalog objects with id and type)
-  catalogs       String?
+  catalogs         String?
 
   // Relationships
-  groupAddons    GroupAddon[]
+  groupAddons GroupAddon[]
 
   @@unique([name, accountId])
   @@index([manifestUrlHash])
@@ -78,49 +85,48 @@ model Addon {
 }
 
 model GroupAddon {
-  id        String   @id @default(cuid())
-  isEnabled Boolean  @default(true)
+  id        String  @id @default(cuid())
+  isEnabled Boolean @default(true)
   position  Int?
   groupId   String
-  group     Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  group     Group   @relation(fields: [groupId], references: [id], onDelete: Cascade)
   addonId   String
-  addon     Addon    @relation(fields: [addonId], references: [id], onDelete: Cascade)
+  addon     Addon   @relation(fields: [addonId], references: [id], onDelete: Cascade)
 
   @@unique([groupId, addonId])
   @@map("group_addons")
 }
 
-
 model AppAccount {
-  id           String   @id @default(cuid())
-  uuid         String   @unique
-  email        String?  @unique
+  id           String  @id @default(cuid())
+  uuid         String  @unique
+  email        String? @unique
   passwordHash String
   sync         Json?
-  apiKeyHash     String?  // Encrypted API key
+  apiKeyHash   String? // Encrypted API key
 
   // Relationships
-  invitations  Invitation[]
+  invitations Invitation[]
 
   @@map("app_accounts")
 }
 
 model Invitation {
-  id                  String    @id @default(cuid())
-  accountId           String
-  inviteCode          String     @unique // Short code for URL (e.g., "abc123")
-  groupName           String?    // Group name to assign users to when they join
-  maxUses             Int        @default(1) // Maximum number of uses
-  currentUses         Int        @default(0) // Current number of uses
-  expiresAt           DateTime?  // Optional expiry date for the invitation
-  membershipDurationDays Int?    // Membership duration in days, applied from user join time
-  isActive            Boolean    @default(true)
-  syncOnJoin          Boolean    @default(false) // Automatically sync user addons when they join
-  createdAt           DateTime   @default(now())
-  
+  id                     String    @id @default(cuid())
+  accountId              String
+  inviteCode             String    @unique // Short code for URL (e.g., "abc123")
+  groupName              String? // Group name to assign users to when they join
+  maxUses                Int       @default(1) // Maximum number of uses
+  currentUses            Int       @default(0) // Current number of uses
+  expiresAt              DateTime? // Optional expiry date for the invitation
+  membershipDurationDays Int? // Membership duration in days, applied from user join time
+  isActive               Boolean   @default(true)
+  syncOnJoin             Boolean   @default(false) // Automatically sync user addons when they join
+  createdAt              DateTime  @default(now())
+
   // Relationships
-  account     AppAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
-  requests    InviteRequest[]
+  account  AppAccount      @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  requests InviteRequest[]
 
   @@index([accountId])
   @@index([inviteCode])
@@ -128,22 +134,22 @@ model Invitation {
 }
 
 model InviteRequest {
-  id              String    @id @default(cuid())
-  invitationId    String
-  accountId       String
-  email           String
-  username        String
-  status          String    @default("pending") // pending, accepted, rejected
-  groupName       String?   // Group name to assign user to when accepted
-  oauthCode       String?   // Stremio OAuth code when accepted
-  oauthLink       String?   // Stremio OAuth link when accepted
-  oauthExpiresAt  DateTime? // When OAuth link expires
-  createdAt       DateTime  @default(now())
-  respondedAt     DateTime?
-  respondedBy     String?   // accountId who responded
-  
+  id             String    @id @default(cuid())
+  invitationId   String
+  accountId      String
+  email          String
+  username       String
+  status         String    @default("pending") // pending, accepted, rejected
+  groupName      String? // Group name to assign user to when accepted
+  oauthCode      String? // Stremio OAuth code when accepted
+  oauthLink      String? // Stremio OAuth link when accepted
+  oauthExpiresAt DateTime? // When OAuth link expires
+  createdAt      DateTime  @default(now())
+  respondedAt    DateTime?
+  respondedBy    String? // accountId who responded
+
   // Relationships
-  invitation      Invitation @relation(fields: [invitationId], references: [id], onDelete: Cascade)
+  invitation Invitation @relation(fields: [invitationId], references: [id], onDelete: Cascade)
 
   @@index([invitationId])
   @@index([accountId])
@@ -152,3 +158,38 @@ model InviteRequest {
   @@map("invite_requests")
 }
 
+// Metrics: Watch snapshots - daily snapshots of library items for delta computation
+model WatchSnapshot {
+  id                 String    @id @default(cuid())
+  accountId          String    @default("default")
+  userId             String
+  itemId             String // Library item ID (e.g., "tt123456" or "tt123456:1:5" for episodes)
+  date               DateTime  @db.Date // Date of snapshot (YYYY-MM-DD)
+  overallTimeWatched BigInt? // Total watch time in milliseconds
+  timeOffset         BigInt? // Current time offset in milliseconds
+  lastWatched        DateTime? // Last watched timestamp
+  mtime              DateTime? // Library item modification time
+  createdAt          DateTime  @default(now())
+
+  @@unique([accountId, userId, itemId, date])
+  @@index([accountId, userId, date])
+  @@index([accountId, userId, itemId])
+  @@map("watch_snapshots")
+}
+
+// Metrics: Watch activity - deltas (watch time changes) for accurate daily/weekly stats
+model WatchActivity {
+  id               String   @id @default(cuid())
+  accountId        String   @default("default")
+  userId           String
+  itemId           String // Library item ID
+  date             DateTime @db.Date // Date of watch activity
+  watchTimeSeconds Int // Delta: watch time in seconds (only positive changes)
+  itemType         String // "movie" or "series"
+  createdAt        DateTime @default(now())
+
+  @@index([accountId, userId, date, itemType])
+  @@index([accountId, userId, itemId])
+  @@index([accountId, date])
+  @@map("watch_activity")
+}

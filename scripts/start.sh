@@ -70,11 +70,19 @@ npx prisma db push --schema "$PRISMA_SCHEMA_PATH" --accept-data-loss || true
 export NODE_OPTIONS="--dns-result-order=ipv4first"
 
 echo "🌐 Starting frontend server on port ${FRONTEND_PORT:-3000}..."
-# Use Next.js standalone output if available
-if [ -f "/app/client/.next/standalone/server.js" ]; then
-  cd /app/client && HOSTNAME=0.0.0.0 node .next/standalone/server.js -p ${FRONTEND_PORT:-3000} &
+
+# Check if we should run in development mode (non-minified React errors)
+if [ "${NEXT_DEV:-false}" = "true" ] || [ "${NODE_ENV:-production}" = "development" ]; then
+  echo "🔧 Running Next.js in DEVELOPMENT mode (non-minified errors enabled)"
+  cd /app/client && npx next dev -H 0.0.0.0 -p ${FRONTEND_PORT:-3000} &
 else
-  cd /app/client && HOSTNAME=0.0.0.0 PORT=${FRONTEND_PORT:-3000} npm start &
+  echo "🚀 Running Next.js in PRODUCTION mode"
+  # Use Next.js standalone output if available
+  if [ -f "/app/client/.next/standalone/server.js" ]; then
+    cd /app/client && HOSTNAME=0.0.0.0 node .next/standalone/server.js -p ${FRONTEND_PORT:-3000} &
+  else
+    cd /app/client && HOSTNAME=0.0.0.0 PORT=${FRONTEND_PORT:-3000} npm start &
+  fi
 fi
 FRONTEND_PID=$!
 

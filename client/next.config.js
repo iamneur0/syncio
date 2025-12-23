@@ -35,7 +35,6 @@ try {
 
 const nextConfig = {
   reactStrictMode: true,
-  swcMinify: true,
   
   // Environment variables
   env: {
@@ -45,7 +44,15 @@ const nextConfig = {
 
   // Image optimization
   images: {
-    domains: ['localhost'],
+    // Note: images.domains is deprecated, use remotePatterns instead
+    remotePatterns: [
+      {
+        protocol: 'http',
+        hostname: 'localhost',
+        port: '3000',
+        pathname: '/**',
+      },
+    ],
     formats: ['image/webp', 'image/avif'],
   },
 
