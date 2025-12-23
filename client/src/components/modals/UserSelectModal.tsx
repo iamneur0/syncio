@@ -7,6 +7,7 @@ import { usersAPI } from '@/services/api'
 import { getEntityColorStyles } from '@/utils/colorMapping'
 import { useBodyScrollLock } from '@/hooks/useBodyScrollLock'
 import { EntityList } from '@/components/entities'
+import UserAvatar from '@/components/ui/UserAvatar'
 
 interface UserSelectModalProps {
   isOpen: boolean
@@ -98,7 +99,6 @@ export default function UserSelectModal({
   }
 
   const renderUserItem = (user: any) => {
-    const colorStyles = getEntityColorStyles(theme, user.colorIndex || 0)
     const isSelected = selectedUserIds.includes(user.id)
     return (
     <div 
@@ -108,17 +108,12 @@ export default function UserSelectModal({
       onClick={() => handleItemClick(user.id)}
     >
       <div className="flex items-center gap-3">
-        <div 
-            className="w-8 h-8 rounded-full flex items-center justify-center"
-            style={{ 
-              background: colorStyles.background,
-              color: colorStyles.textColor,
-            }}
-        >
-            <span className="font-semibold text-sm" style={{ color: colorStyles.textColor }}>
-            {(user.username || user.email || 'U').charAt(0).toUpperCase()}
-          </span>
-        </div>
+        <UserAvatar
+          email={user.email}
+          username={user.username}
+          colorIndex={user.colorIndex || 0}
+          size="sm"
+        />
         <div className="flex-1 min-w-0">
           <h4 className={`font-medium truncate`}>
             {user.username || 'No username'}

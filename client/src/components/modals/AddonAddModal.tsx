@@ -15,6 +15,7 @@ interface AddonAddModalProps {
     name: string
     url: string
     description: string
+    customLogo?: string | null
     groupIds: string[]
     manifestData: any
   }) => void
@@ -37,6 +38,7 @@ export default function AddonAddModal({
   const [addonName, setAddonName] = useState('')
   const [addonUrl, setAddonUrl] = useState('')
   const [addonDescription, setAddonDescription] = useState('')
+  const [customLogo, setCustomLogo] = useState('')
   const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>([])
   const [urlError, setUrlError] = useState<string>('')
   const [nameError, setNameError] = useState<string>('')
@@ -90,9 +92,12 @@ export default function AddonAddModal({
           fetchUrl = fetchUrl.replace(/^stremio:\/\//, 'https://')
         }
         
-        const response = await fetch(fetchUrl)
+        const response = await fetch(fetchUrl, {
+          mode: 'cors',
+          cache: 'no-cache'
+        })
         if (!response.ok) {
-          throw new Error('Failed to fetch manifest')
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`)
         }
         const data = await response.json()
         setManifestData(data)
@@ -101,8 +106,20 @@ export default function AddonAddModal({
         }
         // Always set description, even if empty, to populate the field
         setAddonDescription(data.description || '')
-      } catch (error) {
-        setUrlError('Failed to load manifest. Please check the URL.')
+        setUrlError('') // Clear any previous errors
+      } catch (error: any) {
+        // Check if it's a CORS error
+        const isCorsError = error?.message?.includes('CORS') || 
+                           error?.name === 'TypeError' && 
+                           (error?.message?.includes('Failed to fetch') || 
+                            error?.message?.includes('network') ||
+                            error?.message?.includes('NetworkError'))
+        
+        if (isCorsError) {
+          setUrlError('CORS error: The addon server does not allow cross-origin requests. The URL may still be valid - you can try adding the addon anyway.')
+        } else {
+          setUrlError(error?.message || 'Failed to load manifest. Please check the URL.')
+        }
         setManifestData(null)
       } finally {
         setIsLoadingManifest(false)
@@ -176,20 +193,24 @@ export default function AddonAddModal({
       return
     }
 
-    if (urlError || nameError) {
+    if (nameError) {
       return
     }
 
-    if (!manifestData) {
+    // Allow submission even if manifest fetch failed due to CORS - backend will fetch it
+    // Only block if there's a non-CORS error
+    const isCorsError = urlError?.includes('CORS error')
+    if (urlError && !isCorsError) {
       return
     }
 
     onAddAddon({
       name: addonName.trim(),
       url: addonUrl.trim(),
-      description: addonDescription.trim() || manifestData.description || '',
+      description: addonDescription.trim() || manifestData?.description || '',
+      customLogo: customLogo.trim() || null,
       groupIds: selectedGroupIds,
-      manifestData: manifestData
+      manifestData: manifestData || null // Allow null if CORS blocked the fetch
     })
   }
 
@@ -197,6 +218,7 @@ export default function AddonAddModal({
     setAddonName('')
     setAddonUrl('')
     setAddonDescription('')
+    setCustomLogo('')
     setSelectedGroupIds([])
     setIsLoadingManifest(false)
     setIsCheckingName(false)
@@ -289,6 +311,21 @@ export default function AddonAddModal({
               rows={3}
               className={`w-full px-3 py-2 border rounded-lg focus:outline-none input resize-none`}
             />
+          </div>
+          <div>
+            <label className={`block text-sm font-medium mb-1`}>
+              Custom Logo URL (optional)
+            </label>
+            <input
+              type="url"
+              value={customLogo}
+              onChange={(e) => setCustomLogo(e.target.value)}
+              placeholder="https://example.com/logo.png"
+              className={`w-full px-3 py-2 border rounded-lg focus:outline-none input`}
+            />
+            <p className={`text-xs mt-1 color-text-secondary`}>
+              Custom logo URL to replace the addon icon in the manifest
+            </p>
           </div>
           {/* Groups selection - match AddonDetailModal style */}
           <div>

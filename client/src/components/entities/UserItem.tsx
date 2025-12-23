@@ -1,7 +1,7 @@
 import React from 'react'
 import { useTheme } from '@/contexts/ThemeContext'
 import { SyncBadge } from '@/components/ui'
-import { getEntityColorStyles } from '@/utils/colorMapping'
+import UserAvatar from '@/components/ui/UserAvatar'
 import { X } from 'lucide-react'
 
 interface UserItemProps {
@@ -17,8 +17,7 @@ interface UserItemProps {
 }
 
 export default function UserItem({ user, groupId, onRemove, onSync }: UserItemProps) {
-  const { hideSensitive, theme } = useTheme()
-  const colorStyles = getEntityColorStyles(theme, user.colorIndex || 0)
+  const { hideSensitive } = useTheme()
 
   return (
     <div
@@ -26,20 +25,13 @@ export default function UserItem({ user, groupId, onRemove, onSync }: UserItemPr
     >
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center flex-1 min-w-0">
-          <div 
-            className="w-10 h-10 rounded-full flex items-center justify-center mr-3 flex-shrink-0"
-            style={{ 
-              background: colorStyles.background, 
-              color: colorStyles.textColor,
-            }}
-          >
-            <span 
-              className="font-semibold text-sm"
-              style={{ color: colorStyles.textColor }}
-            >
-              {user.username ? user.username.charAt(0).toUpperCase() : 
-               user.email ? user.email.charAt(0).toUpperCase() : 'U'}
-            </span>
+          <div className="mr-3 flex-shrink-0">
+            <UserAvatar
+              email={user.email}
+              username={user.username}
+              colorIndex={user.colorIndex}
+              size="sm"
+            />
           </div>
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 mb-1">

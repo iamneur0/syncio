@@ -786,7 +786,7 @@ export default function GenericEntityPage({ config }: GenericEntityPageProps) {
             
             {finalConfig.customContent && typeof finalConfig.customContent === 'function' 
               ? finalConfig.customContent(viewMode)
-              : finalConfig.customContent && React.cloneElement(finalConfig.customContent as React.ReactElement, { viewMode })
+              : finalConfig.customContent && React.cloneElement(finalConfig.customContent as React.ReactElement<any>, { viewMode } as any)
             }
           </div>
         ) : (
@@ -831,7 +831,7 @@ export default function GenericEntityPage({ config }: GenericEntityPageProps) {
             
             {finalConfig.customContent && typeof finalConfig.customContent === 'function' 
               ? finalConfig.customContent(viewMode)
-              : finalConfig.customContent && React.cloneElement(finalConfig.customContent as React.ReactElement, { viewMode })
+              : finalConfig.customContent && React.cloneElement(finalConfig.customContent as React.ReactElement<any>, { viewMode } as any)
             }
           </div>
         )}

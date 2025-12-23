@@ -2,6 +2,7 @@ import React from 'react'
 import { VersionChip } from '@/components/ui'
 import AddonIcon from './AddonIcon'
 import { Puzzle, X } from 'lucide-react'
+import { getAddonIconUrl } from '@/utils/addonIcon'
 
 interface AddonItemProps {
   addon: {
@@ -10,6 +11,7 @@ interface AddonItemProps {
     description?: string
     version?: string
     iconUrl?: string
+    customLogo?: string
   }
   onRemove: (id: string) => void
   isDraggable?: boolean
@@ -38,7 +40,7 @@ export default function AddonItem({
     <div {...containerProps}>
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center flex-1 min-w-0">
-          <AddonIcon name={addon.name || 'Addon'} iconUrl={addon.iconUrl} size="10" className="mr-3 flex-shrink-0" />
+          <AddonIcon name={addon.name || 'Addon'} iconUrl={getAddonIconUrl({ customLogo: addon.customLogo, iconUrl: addon.iconUrl })} size="10" className="mr-3 flex-shrink-0" />
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 mb-1 flex-wrap">
               <h4 className={`font-medium truncate`}>

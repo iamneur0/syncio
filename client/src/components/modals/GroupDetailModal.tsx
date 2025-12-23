@@ -14,7 +14,7 @@ import { VersionChip, SyncBadge } from '@/components/ui'
 import { EntityList, UserItem, AddonItem, InlineEdit, AddonIcon, SortableAddonItem } from '@/components/entities'
 import { ColorPicker } from '@/components/layout'
 import { UserSelectModal, AddonSelectModal, ConfirmDialog } from '@/components/modals'
-import { Users, Puzzle, Plus, X } from 'lucide-react'
+import { Users, Puzzle, Plus, X, Eye, EyeOff } from 'lucide-react'
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors } from '@dnd-kit/core'
 import { restrictToParentElement } from '@dnd-kit/modifiers'
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy } from '@dnd-kit/sortable'
@@ -157,6 +157,16 @@ export default function GroupDetailModal({
       await updateGroupMutation.mutateAsync({
         groupId: currentGroup.id,
         groupData: { name: newName }
+      })
+    }
+  }
+
+  // Handle group description update
+  const handleGroupDescriptionUpdate = async (newDescription: string) => {
+    if (currentGroup) {
+      await updateGroupMutation.mutateAsync({
+        groupId: currentGroup.id,
+        groupData: { description: newDescription || null }
       })
     }
   }
@@ -332,6 +342,7 @@ export default function GroupDetailModal({
     }
   })
 
+
   // Helper function to trigger sync status refresh
   const triggerSyncStatusRefresh = () => {
     if (group?.id) {
@@ -420,7 +431,7 @@ export default function GroupDetailModal({
             onColorChange={handleColorChange}
             isOpen={showColorPicker}
             onClose={() => setShowColorPicker(false)}
-            triggerRef={logoRef}
+            triggerRef={logoRef as React.RefObject<HTMLElement>}
           />
                   
                   <div className="flex flex-col min-w-0">
@@ -454,11 +465,13 @@ export default function GroupDetailModal({
                         isSyncing={false}
                       />
                     </div>
-                    {currentGroup.description && (
-                      <p className={`text-sm mt-1 truncate color-text-secondary`}>
-                        {currentGroup.description}
-                      </p>
-                    )}
+                    <InlineEdit
+                      value={currentGroup.description || ''}
+                      onSave={handleGroupDescriptionUpdate}
+                      placeholder="Enter group description..."
+                      maxLength={200}
+                      className="text-xs mt-1 color-text-secondary"
+                    />
                   </div>
                 </div>
               </div>
@@ -472,6 +485,7 @@ export default function GroupDetailModal({
               <X className="w-4 h-4" />
             </button>
           </div>
+
 
           {/* Group Users */}
           <EntityList

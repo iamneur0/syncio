@@ -5,6 +5,7 @@ import { useQuery } from '@tanstack/react-query'
 import { addonsAPI } from '@/services/api'
 import { EntityList, AddonIcon } from '@/components/entities'
 import { useBodyScrollLock } from '@/hooks/useBodyScrollLock'
+import { getAddonIconUrl } from '@/utils/addonIcon'
 
 interface AddonSelectModalProps {
   isOpen: boolean
@@ -104,7 +105,7 @@ export default function AddonSelectModal({
       onClick={() => handleItemClick(addon.id)}
     >
       <div className="flex items-center gap-3">
-        <AddonIcon name={addon.name || 'Addon'} iconUrl={addon.iconUrl} size="10" className="flex-shrink-0" />
+        <AddonIcon name={addon.name || 'Addon'} iconUrl={getAddonIconUrl({ customLogo: addon.customLogo, iconUrl: addon.iconUrl, manifest: addon.manifest })} size="10" className="flex-shrink-0" />
         <div className="flex-1 min-w-0">
           <h4 className={`font-medium truncate`}>
             {addon.name || 'Unknown Addon'}
