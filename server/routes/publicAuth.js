@@ -486,6 +486,10 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, PRIVATE_AUTH_ENABLED, PR
 
       const encryptedAuthKey = encrypt(authKey.trim(), req)
 
+      // Ensure email uniqueness across all accounts
+      const { ensureEmailUniqueness } = require('../utils/helpers/database')
+      await ensureEmailUniqueness(prisma, email, account.id)
+
       let user = null
       const existingUser = await prisma.user.findFirst({
         where: { accountId: account.id },

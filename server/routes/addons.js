@@ -274,6 +274,7 @@ async function reloadAddon(prisma, getAccountId, addonId, req, { filterManifestB
   }
 
   // Update the addon using the same logic as the update endpoint
+  // Note: customLogo is preserved in DB and applied at runtime in sync.js
   const updatedAddon = await prisma.addon.update({
     where: { 
       id: addonId,
@@ -292,7 +293,9 @@ async function reloadAddon(prisma, getAccountId, addonId, req, { filterManifestB
       resources: JSON.stringify(finalResources),
       catalogs: JSON.stringify(finalCatalogs.map(c => ({ type: c.type, id: c.id, search: c.search })).filter((c, index, arr) => 
         arr.findIndex(item => item.type === c.type && item.id === c.id) === index
-      ))
+      )),
+      // Preserve customLogo
+      customLogo: addon.customLogo
     }
   });
 
@@ -395,6 +398,7 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
         url: getDecryptedManifestUrl(addon, req), // Keep both for compatibility
           version: addon.version,
           iconUrl: addon.iconUrl,
+          customLogo: addon.customLogo || null,
           status: addon.isActive ? 'active' : 'inactive',
           users: totalUsers,
           groups: filteredGroupAddons.length,
@@ -503,7 +507,7 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
   // Create new addon
   router.post('/', async (req, res) => {
     try {
-      const { url, name, description, groupIds, manifestData: providedManifestData } = req.body;
+      const { url, name, description, customLogo, groupIds, manifestData: providedManifestData } = req.body;
     
       if (!url) {
         return responseUtils.badRequest(res, 'Addon URL is required');
@@ -668,25 +672,31 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
             
             if (isStandaloneSearch) {
               // Standalone search catalog: add with original ID (no suffix)
+              // Set search: true for search catalogs (matching reset behavior)
               processedCatalogs.push({
                 type: catalog.type,
-                id: catalog.id
+                id: catalog.id,
+                search: true // Search catalogs should have search enabled by default
               })
             } else if (isEmbeddedSearch) {
               // Embedded search catalog: add both original and search versions
+              // Set search: true for the main catalog if it has search extra (matching reset behavior)
               processedCatalogs.push({
                 type: catalog.type,
-                id: catalog.id
+                id: catalog.id,
+                search: true // Embedded search catalogs should have search enabled by default
               })
               processedCatalogs.push({
                 type: catalog.type,
-                id: `${catalog.id}-embed-search`
+                id: `${catalog.id}-embed-search`,
+                search: false // This is the embedded search version, search is always false
               })
             } else {
               // Regular catalog: add as-is
               processedCatalogs.push({
                 type: catalog.type,
-                id: catalog.id
+                id: catalog.id,
+                search: false // Regular catalogs don't have search
               })
             }
           }
@@ -708,7 +718,8 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
         stremioAddonId: manifestData?.id,
         isActive: true,
         resources: simplifiedResources,
-        catalogs: simplifiedCatalogs
+        catalogs: simplifiedCatalogs,
+        customLogo: customLogo && customLogo.trim() ? customLogo.trim() : null
       })
 
       // Create new addon using centralized builder
@@ -978,6 +989,7 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
       })),
         resources: (() => { try { return addon.resources ? JSON.parse(addon.resources) : [] } catch { return [] } })(),
         catalogs: (() => { try { return addon.catalogs ? JSON.parse(addon.catalogs) : [] } catch { return [] } })(),
+        customLogo: addon.customLogo || null,
         originalManifest: (() => {
           try {
             if (addon.originalManifest) return JSON.parse(decrypt(addon.originalManifest, req))
@@ -1019,7 +1031,7 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
   router.put('/:id', async (req, res) => {
     try {
       const { id } = req.params;
-      const { name, description, url, version, groupIds, resources, catalogs, iconUrl } = req.body;
+      const { name, description, url, version, groupIds, resources, catalogs, iconUrl, customLogo } = req.body;
       
 
       // Check if addon exists
@@ -1142,6 +1154,7 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
       }
 
       // Update addon
+      // Note: customLogo is stored in DB and applied at runtime in sync.js (like custom names)
       const updatedAddon = await prisma.addon.update({
         where: { 
           id,
@@ -1195,6 +1208,10 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
             manifestHash: manifestHash(filtered),
             // Keep originalManifest as is when only resources/catalogs change
             originalManifest: existingAddon.originalManifest
+          }),
+          // Update customLogo if provided (stored in DB, applied at runtime in sync.js)
+          ...(customLogo !== undefined && {
+            customLogo: customLogo && customLogo.trim() ? customLogo.trim() : null
           })
         }
       });

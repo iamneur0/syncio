@@ -19,6 +19,7 @@ function pathIsAllowlisted(path) {
     '/api/public-auth/suggest-uuid',
     '/api/ext', // External API uses API key auth (handled by externalApi router)
     '/invite', // Public invitation endpoints (request submission, status check, OAuth completion)
+    '/api/public-library', // Public library endpoints (OAuth-based access)
     // Stremio helpers are NOT allowlisted; require auth
     // Note: addons endpoints are NOT allowlisted; they require auth/CSRF
   ];

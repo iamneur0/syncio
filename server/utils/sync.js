@@ -13,20 +13,58 @@ async function getUserAddons(user, req, { decrypt, StremioAPIClient }) {
     const apiClient = new StremioAPIClient({ endpoint: 'https://api.strem.io', authKey: authKeyPlain })
     const collection = await apiClient.request('addonCollectionGet', {})
 
-    // Return the API response but strip manifest.manifestUrl from each addon and set transportName to empty string
-    const sanitized = collection && Array.isArray(collection.addons)
-      ? {
-          ...collection,
-          addons: collection.addons.map((addon) => {
-            const manifest = addon?.manifest
-            if (manifest && typeof manifest === 'object') {
-              const { manifestUrl, ...restManifest } = manifest
-              return { ...addon, manifest: restManifest, transportName: "" }
-            }
-            return { ...addon, transportName: "" }
-          })
+    // CRITICAL FIX: If collection.addons is null (corrupted account), repair it immediately
+    // Stremio expects addons to always be an array, never null
+    if (collection && collection.addons === null) {
+      console.warn('⚠️ Detected corrupted addon collection (addons: null), repairing...')
+      try {
+        // Repair by clearing addons
+        const { clearAddons } = require('./addonHelpers')
+        await clearAddons(apiClient)
+        // Re-fetch to get the repaired collection
+        const repairedCollection = await apiClient.request('addonCollectionGet', {})
+        if (repairedCollection && repairedCollection.addons !== null) {
+          console.log('✅ Successfully repaired corrupted addon collection')
+          // Use the repaired collection
+          Object.assign(collection, repairedCollection)
         }
-      : collection
+      } catch (repairError) {
+        console.error('❌ Failed to repair corrupted addon collection:', repairError)
+        // Continue with null handling below
+      }
+    }
+
+    // Handle the case where collection.addons might be null (empty account) or not an array
+    // Use the same logic as /stremio-addons endpoint: try collection.addons first, then fall back to collection itself
+    const rawAddons = collection?.addons !== undefined ? collection.addons : collection
+    let addonsArray = []
+    
+    if (rawAddons !== null && rawAddons !== undefined) {
+      if (Array.isArray(rawAddons)) {
+        addonsArray = rawAddons
+      } else if (typeof rawAddons === 'object') {
+        // If it's an object (not an array), try to convert it to an array
+        addonsArray = Object.values(rawAddons)
+      }
+    }
+
+    // Ensure addons is always an array in the response (never null)
+    const sanitized = {
+      ...collection,
+      addons: addonsArray.map((addon) => {
+        const manifest = addon?.manifest
+        if (manifest && typeof manifest === 'object') {
+          const { manifestUrl, ...restManifest } = manifest
+          return { ...addon, manifest: restManifest, transportName: "" }
+        }
+        return { ...addon, transportName: "" }
+      })
+    }
+
+    // Final safety check: ensure addons is always an array
+    if (sanitized.addons === null || sanitized.addons === undefined) {
+      sanitized.addons = []
+    }
 
     return { success: true, addons: sanitized, error: null }
   } catch (error) {
@@ -67,7 +105,16 @@ async function getDesiredAddons(user, req, { prisma, getAccountId, decrypt, pars
     }
     
     // Extract the addons array from the complete response (collection shape)
-    const userAddons = userAddonsResponse?.addons || userAddonsResponse || []
+    // Ensure we always get an array, even if the response structure is unexpected
+    let userAddons = []
+    if (Array.isArray(userAddonsResponse)) {
+      userAddons = userAddonsResponse
+    } else if (userAddonsResponse && typeof userAddonsResponse === 'object') {
+      // Handle collection shape: { addons: [...] }
+      if (Array.isArray(userAddonsResponse.addons)) {
+        userAddons = userAddonsResponse.addons
+      }
+    }
 
     // Parse excluded addons (DB addon IDs)
     const excludedAddons = parseAddonIds(user.excludedAddons)
@@ -122,6 +169,10 @@ async function getDesiredAddons(user, req, { prisma, getAccountId, decrypt, pars
         if (useCustomFields && addon.description !== undefined && addon.description !== null) {
           manifestObj.description = addon.description
         }
+        // Apply custom logo if it exists (only set logo field, like the original manifest)
+        if (addon.customLogo && addon.customLogo.trim()) {
+          manifestObj.logo = addon.customLogo.trim()
+        }
       }
       
       return {
@@ -132,7 +183,9 @@ async function getDesiredAddons(user, req, { prisma, getAccountId, decrypt, pars
     })
 
     // 2) Keep only protected addons from userAddons
-    const protectedUserAddons = (userAddons || []).filter(addon => isProtected(addon))
+    // Ensure userAddons is an array before filtering
+    const userAddonsArray = Array.isArray(userAddons) ? userAddons : []
+    const protectedUserAddons = userAddonsArray.filter(addon => isProtected(addon))
 
     // Build a protected NAME set from userAddons (normalized)
     const protectedUserNameSet = new Set(
@@ -255,7 +308,16 @@ function createGetUserSyncStatus({ prisma, getAccountId, decrypt, parseAddonIds,
     }
     
     // Extract the addons array from the complete response
-    const userAddons = userAddonsResponse?.addons || userAddonsResponse || []
+    // Ensure we always get an array, even if the response structure is unexpected
+    let userAddons = []
+    if (Array.isArray(userAddonsResponse)) {
+      userAddons = userAddonsResponse
+    } else if (userAddonsResponse && typeof userAddonsResponse === 'object') {
+      // Handle collection shape: { addons: [...] }
+      if (Array.isArray(userAddonsResponse.addons)) {
+        userAddons = userAddonsResponse.addons
+      }
+    }
 
     // Get desired addons (group addons + protected addons)
     const { success: desiredAddonsSuccess, addons: desiredAddons, error: desiredAddonsError } = await getDesiredAddons(user, req, {
@@ -320,7 +382,7 @@ async function computeUserSyncPlan(user, req, { prisma, getAccountId, decrypt, p
   // Backward compatibility: support both useCustomFields (new) and useCustomNames (old)
   const useCustomFieldsValue = useCustomFields !== undefined ? useCustomFields : (useCustomNames !== undefined ? useCustomNames : true)
   
-  // 1) Current
+  // 1) Current - getUserAddons already has repair logic built in
   const currentRes = await getUserAddons(user, req, { decrypt, StremioAPIClient })
   if (!currentRes.success) return { success: false, error: currentRes.error, alreadySynced: false, current: [], desired: [] }
   const current = currentRes.addons?.addons || currentRes.addons || []
@@ -328,6 +390,9 @@ async function computeUserSyncPlan(user, req, { prisma, getAccountId, decrypt, p
   const desiredRes = await getDesiredAddons(user, req, { prisma, getAccountId, decrypt, parseAddonIds, parseProtectedAddons, canonicalizeManifestUrl, StremioAPIClient, unsafeMode, useCustomFields: useCustomFieldsValue })
   if (!desiredRes.success) return { success: false, error: desiredRes.error, alreadySynced: false, current, desired: [] }
   const desired = desiredRes.addons || []
+  
+  // Ensure desired is always an array, never null
+  const safeDesired = Array.isArray(desired) ? desired : []
   // 3) Compare (set + order) using manifest fingerprint
   const fingerprint = createManifestFingerprint(canonicalizeManifestUrl)
   const aKeys = current.map(fingerprint)
