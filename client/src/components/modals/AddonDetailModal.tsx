@@ -114,6 +114,7 @@ export default function AddonDetailModal({
   // Form state
   const [editName, setEditName] = useState('')
   const [editDescription, setEditDescription] = useState('')
+  const [editCustomLogo, setEditCustomLogo] = useState('')
   const [editGroupIds, setEditGroupIds] = useState<string[]>([])
   const [editResources, setEditResources] = useState<any[]>([])
   const [editCatalogs, setEditCatalogs] = useState<any[]>([])
@@ -138,6 +139,7 @@ const [previewError, setPreviewError] = useState<string | null>(null)
     if (!sourceAddon) {
       setEditName('')
       setEditDescription('')
+      setEditCustomLogo('')
       setEditUrl('')
       setEditGroupIds([])
       setEditResources([])
@@ -151,6 +153,7 @@ const [previewError, setPreviewError] = useState<string | null>(null)
     const manifest = sourceAddon?.manifest || sourceAddon?.originalManifest
     const description = sourceAddon.description || manifest?.description || ''
     setEditDescription(description)
+    setEditCustomLogo(sourceAddon.customLogo || '')
     setEditUrl((prev) => {
       const next = sourceAddon.url || ''
       return prev === next ? prev : next
@@ -251,11 +254,15 @@ const [previewError, setPreviewError] = useState<string | null>(null)
         setCatalogSearchState(searchStateMap)
         setEditCatalogs(mergedCatalogs as any[])
       } else {
+        // No stored catalogs - fall back to manifest catalogs
+        // For search catalogs, set search: true by default (matching reset behavior)
         const manifestCatalogs = Array.isArray(detailManifest?.catalogs) ? detailManifest.catalogs : []
         const searchStateMap = new Map<string, boolean>()
         manifestCatalogs.forEach((catalog: any) => {
           const key = `${catalog.id}:${catalog.type}`
-          searchStateMap.set(key, false)
+          // Set search: true for catalogs that have search in their extra field (matching reset behavior)
+          const hasSearch = catalog.extra?.some((extra: any) => extra.name === 'search') || false
+          searchStateMap.set(key, hasSearch)
         })
 
         setCatalogSearchState(searchStateMap)
@@ -318,6 +325,8 @@ const [previewError, setPreviewError] = useState<string | null>(null)
           version: manifestData?.version || manifestData?.addonVersion || currentAddon.version || null,
           description: manifestData?.description ?? manifestData?.desc ?? currentAddon?.description ?? '',
           iconUrl: manifestData?.logo || currentAddon?.iconUrl || null,
+          // Preserve customLogo from currentAddon
+          customLogo: currentAddon?.customLogo || null,
           manifest: manifestData,
           originalManifest: manifestData,
           resources: Array.isArray(manifestData?.resources) ? manifestData.resources : [],
@@ -366,6 +375,11 @@ const [previewError, setPreviewError] = useState<string | null>(null)
       updateData.description = trimmedDescription
     }
 
+    const trimmedCustomLogo = editCustomLogo.trim()
+    if (trimmedCustomLogo !== (currentAddon?.customLogo || '').trim()) {
+      updateData.customLogo = trimmedCustomLogo || null
+    }
+
     const trimmedUrl = editUrl.trim()
     if (trimmedUrl) {
       const normalizedUrl = normalizeManifestUrl(trimmedUrl)
@@ -378,7 +392,9 @@ const [previewError, setPreviewError] = useState<string | null>(null)
     if (Array.isArray(editResources)) updateData.resources = editResources
     
     // Convert catalogs to tuple format: [type, id, search]
-    if (Array.isArray(editCatalogs)) {
+    // Only send catalogs if the array has items - this prevents accidentally clearing catalogs
+    // when editCatalogs is empty due to initialization issues or state problems
+    if (Array.isArray(editCatalogs) && editCatalogs.length > 0) {
       updateData.catalogs = editCatalogs.map(catalog => {
         if (typeof catalog === 'string') {
           return [catalog, catalog, false] // [type, id, search] - legacy string format
@@ -386,12 +402,12 @@ const [previewError, setPreviewError] = useState<string | null>(null)
           // Use the search state map to determine if search is enabled
           const key = `${catalog.id}:${catalog.type}`
           const hasSearch = catalogSearchState.get(key) || false
-          console.log(`🔍 Converting catalog ${catalog.id}:${catalog.type} - hasSearch:`, hasSearch)
           return [catalog.type || 'unknown', catalog.id, hasSearch]
         }
         return catalog // fallback
-      })
+      }).filter(Boolean) // Remove any null/undefined entries
     }
+    // If editCatalogs is empty, don't send it - backend will preserve existing catalogs
 
     try {
       // Determine current associated groups from addonData (supports both shapes)
@@ -661,7 +677,10 @@ const [previewError, setPreviewError] = useState<string | null>(null)
     return null
   }, [previewAddon, currentAddon])
   const addonManifest = originalManifest || filteredManifest || {}
+  // Prioritize editCustomLogo (current edited value), then effectiveAddon.customLogo, then fallback to manifest logos
   const addonLogoUrl =
+    (editCustomLogo?.trim() || null) ||
+    effectiveAddon?.customLogo ||
     effectiveAddon?.iconUrl ||
     addonManifest?.logo ||
     addonManifest?.icon ||
@@ -811,6 +830,21 @@ const [previewError, setPreviewError] = useState<string | null>(null)
                 placeholder="No description available"
                 className={`w-full px-3 py-2 rounded-lg input min-h-[80px] resize-y`}
               />
+            </div>
+            <div>
+              <h4 className={`text-sm font-semibold mb-2`}>
+              Custom Logo URL
+              </h4>
+              <input
+                type="url"
+                value={editCustomLogo}
+                onChange={(e) => setEditCustomLogo(e.target.value)}
+                placeholder="https://example.com/logo.png"
+                className={`w-full px-3 py-2 rounded-lg input`}
+              />
+              <p className={`text-xs mt-1 color-text-secondary`}>
+                Custom logo URL to replace the addon icon in the manifest
+              </p>
             </div>
           </div>
 
