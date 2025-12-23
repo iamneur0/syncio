@@ -179,7 +179,8 @@ export function ToggleButton({
   inactiveIcon,
   children,
   className = '',
-  title
+  title,
+  disabled = false
 }: {
   isActive: boolean
   onClick: () => void
@@ -188,6 +189,7 @@ export function ToggleButton({
   children?: React.ReactNode
   className?: string
   title?: string
+  disabled?: boolean
 }) {
   const baseClasses = 'flex items-center justify-center px-3 py-2 text-sm font-medium transition-colors'
   const activeClasses = 'surface-interactive is-active shadow-sm'
@@ -202,11 +204,12 @@ export function ToggleButton({
   return (
     <button
       type="button"
-      className={`${baseClasses} ${className} ${isActive ? activeClasses : inactiveClasses}`}
-      onClick={onClick}
+      className={`${baseClasses} ${className} ${isActive ? activeClasses : inactiveClasses} ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+      onClick={disabled ? undefined : onClick}
       aria-pressed={isActive}
       title={title}
       style={dynamicStyle}
+      disabled={disabled}
     >
       {isActive ? activeIcon : inactiveIcon}
       {children}
