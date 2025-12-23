@@ -208,6 +208,7 @@ async function getGroupAddons(prisma, groupId, req) {
       id: ga.addon.id,
       name: ga.addon.name,
       description: ga.addon.description || null,
+      customLogo: ga.addon.customLogo || null,
       transportUrl,
       transportName,
       manifest: cleanManifest
@@ -266,6 +267,75 @@ async function assignUserToGroup(userId, groupId, req) {
   }
 }
 
+/**
+ * Ensure email uniqueness across all accounts
+ * If a user with the same email exists in another account, delete it first
+ * This ensures one email can only exist in one account at a time
+ */
+async function ensureEmailUniqueness(prisma, email, targetAccountId) {
+  const normalizedEmail = email.trim().toLowerCase()
+  
+  // Find all users with this email (across all accounts)
+  const existingUsers = await prisma.user.findMany({
+    where: {
+      email: normalizedEmail
+    },
+    select: {
+      id: true,
+      accountId: true
+    }
+  })
+  
+  // Filter out users that are already in the target account (they're fine)
+  const usersToDelete = existingUsers.filter(user => user.accountId !== targetAccountId)
+  
+  if (usersToDelete.length === 0) {
+    return // No duplicates, nothing to do
+  }
+  
+  console.log(`[ensureEmailUniqueness] Found ${usersToDelete.length} duplicate user(s) with email ${normalizedEmail}, removing from other accounts...`)
+  
+  // For each duplicate user, remove them from all groups and then delete them
+  for (const userToDelete of usersToDelete) {
+    // Find all groups in the user's account
+    const groups = await prisma.group.findMany({
+      where: {
+        accountId: userToDelete.accountId,
+        isActive: true
+      },
+      select: {
+        id: true,
+        userIds: true
+      }
+    })
+    
+    // Remove user from all groups
+    for (const group of groups) {
+      if (group.userIds) {
+        try {
+          const userIds = JSON.parse(group.userIds)
+          if (Array.isArray(userIds) && userIds.includes(userToDelete.id)) {
+            const updatedUserIds = userIds.filter(id => id !== userToDelete.id)
+            await prisma.group.update({
+              where: { id: group.id },
+              data: { userIds: JSON.stringify(updatedUserIds) }
+            })
+            console.log(`[ensureEmailUniqueness] Removed user ${userToDelete.id} from group ${group.id}`)
+          }
+        } catch (e) {
+          console.error(`[ensureEmailUniqueness] Error parsing userIds for group ${group.id}:`, e)
+        }
+      }
+    }
+    
+    // Delete the duplicate user
+    await prisma.user.delete({
+      where: { id: userToDelete.id }
+    })
+    console.log(`[ensureEmailUniqueness] Deleted duplicate user ${userToDelete.id} from account ${userToDelete.accountId}`)
+  }
+}
+
 module.exports = {
   findUserById,
   findGroupById,
@@ -280,5 +350,6 @@ module.exports = {
   getAccountId,
   scopedWhere,
   getGroupAddons,
-  assignUserToGroup
+  assignUserToGroup,
+  ensureEmailUniqueness
 };

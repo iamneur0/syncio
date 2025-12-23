@@ -29,6 +29,7 @@ const externalApiRouter = require('./routes/externalApi');
 const debugRouter = require('./routes/debug');
 const publicAuthRouter = require('./routes/publicAuth');
 const invitationsRouter = require('./routes/invitations');
+const publicLibraryRouter = require('./routes/publicLibrary');
 
 // Import configuration constants
 const { AUTH_ENABLED, PRIVATE_AUTH_ENABLED, PRIVATE_AUTH_USERNAME, PRIVATE_AUTH_PASSWORD, JWT_SECRET, DEFAULT_ACCOUNT_ID, DEFAULT_ACCOUNT_UUID, defaultAddons, AUTH_ALLOWLIST, BACKUP_DIR, BACKUP_CFG, PEPPER, ENCRYPTION_KEY, allowedOrigins, QUIET, DEBUG_ENABLED, PORT } = require('./utils/config');
@@ -40,6 +41,7 @@ const { validateStremioAuthKey, filterDefaultAddons, buildAddonDbData } = requir
 const { ensureBackupDir, readBackupFrequencyDays, scheduleBackups } = require('./utils/backup');
 const { scheduleSyncs, readSyncFrequencyMinutes } = require('./utils/syncScheduler');
 const { scheduleUserExpiration } = require('./utils/userExpiration');
+const { scheduleActivityMonitor } = require('./utils/activityMonitor');
 const { pathIsAllowlisted, extractBearerToken, parseCookies, cookieName, issueAccessToken, issueRefreshToken, issuePublicToken, randomCsrfToken } = require('./utils/auth');
 const { getAccountId: getAccountIdHelper, scopedWhere, assignUserToGroup } = require('./utils/helpers');
 const { selectKeyForRequest, encrypt, decrypt, getAccountHmacKey: getAccountHmacKeyEnc, encryptIf, decryptIf, getDecryptedManifestUrl, decryptWithFallback } = require('./utils/encryption');
@@ -192,6 +194,9 @@ if (!AUTH_ENABLED) {
 app.use('/api/public-auth', publicAuthRouter({ prisma, getAccountId, AUTH_ENABLED, PRIVATE_AUTH_ENABLED, PRIVATE_AUTH_USERNAME, PRIVATE_AUTH_PASSWORD, DEFAULT_ACCOUNT_ID, issueAccessToken, issueRefreshToken, cookieName, isProdEnv, encrypt, decrypt, getDecryptedManifestUrl, scopedWhere, getAccountDek, decryptWithFallback, manifestUrlHmac, manifestHash, filterManifestByResources, filterManifestByCatalogs, parseCookies, JWT_SECRET }));
 app.use('/api/invitations', invitationsRouter({ prisma, getAccountId, AUTH_ENABLED, encrypt, decrypt, assignUserToGroup }));
 app.use('/invite', invitationsRouter.createPublicRouter({ prisma, encrypt, assignUserToGroup, decrypt }));
+// Public library router (no auth required)
+const { getCachedLibrary, setCachedLibrary } = require('./utils/libraryCache');
+app.use('/api/public-library', publicLibraryRouter({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibrary, setCachedLibrary }));
 
 // Error handling
 app.use((error, req, res, next) => {
@@ -238,6 +243,13 @@ scheduleSyncs(
     scheduleUserExpiration(prisma, decrypt, StremioAPIClient)
   } catch (err) {
     console.error('⚠️ Failed to initialize user expiration scheduler:', err)
+  }
+
+  // Schedule activity monitor (checks for new watch activity every 5 minutes)
+  try {
+    scheduleActivityMonitor(prisma, decrypt, getAccountId, AUTH_ENABLED)
+  } catch (err) {
+    console.error('⚠️ Failed to initialize activity monitor:', err)
   }
 
   const storageLabel = process.env.PRISMA_PROVIDER === 'sqlite' ? 'SQLite with Prisma' : 'PostgreSQL with Prisma'

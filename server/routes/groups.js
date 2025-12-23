@@ -186,7 +186,9 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
         // Expose color index for UI
           colorIndex: group.colorIndex || 1,
           // Include userIds for SQLite compatibility
-          userIds: group.userIds
+          userIds: group.userIds,
+          // Activity visibility - 'public' or 'private'
+          activityVisibility: group.activityVisibility || 'private'
         }
       }));
       
@@ -439,7 +441,8 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
         restrictions: 'none',
         isActive: group.isActive,
         colorIndex: group.colorIndex || 1,
-        userIds: group.userIds
+        userIds: group.userIds,
+        activityVisibility: group.activityVisibility || 'private'
       });
     } catch (error) {
       console.error('Error fetching group detail:', error);
@@ -450,7 +453,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
   // Update group fields and usership/addons
   router.put('/:id', async (req, res) => {
     const { id } = req.params
-    const { name, description, userIds, addonIds, colorIndex } = req.body
+    const { name, description, userIds, addonIds, colorIndex, activityVisibility } = req.body
     try {
       const group = await prisma.group.findUnique({ 
         where: { 
@@ -477,6 +480,11 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
       
       if (colorIndex !== undefined) {
         updateData.colorIndex = colorIndex
+      }
+      
+      // Update activity visibility if provided
+      if (activityVisibility !== undefined && ['public', 'private'].includes(activityVisibility)) {
+        updateData.activityVisibility = activityVisibility
       }
       
       await prisma.group.update({ 
@@ -1094,6 +1102,45 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
     } catch (error) {
       console.error('Error toggling group status:', error)
       res.status(500).json({ error: 'Failed to toggle group status', details: error?.message })
+    }
+  });
+
+  // Update activity visibility for a group
+  router.patch('/:id/activity-visibility', async (req, res) => {
+    try {
+      const { id } = req.params
+      const { activityVisibility } = req.body
+
+      if (!activityVisibility || !['public', 'private'].includes(activityVisibility)) {
+        return res.status(400).json({ error: 'Invalid activityVisibility value. Must be "public" or "private".' })
+      }
+
+      const group = await prisma.group.findUnique({
+        where: { 
+          id,
+          accountId: getAccountId(req)
+        }
+      })
+
+      if (!group) {
+        return responseUtils.notFound(res, 'Group')
+      }
+
+      const updatedGroup = await prisma.group.update({
+        where: { 
+          id,
+          accountId: getAccountId(req)
+        },
+        data: { activityVisibility }
+      })
+
+      res.json({ 
+        message: `Activity visibility set to ${activityVisibility}`,
+        activityVisibility: updatedGroup.activityVisibility 
+      })
+    } catch (error) {
+      console.error('Error updating activity visibility:', error)
+      res.status(500).json({ error: 'Failed to update activity visibility', details: error?.message })
     }
   });
 

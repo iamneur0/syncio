@@ -3,6 +3,7 @@ const crypto = require('crypto')
 const { postDiscord } = require('../utils/notify')
 const { validateStremioAuthKey } = require('../utils/stremio')
 const { formatCodeBlock, formatRelativeTime, parseSyncConfig, getAppVersion } = require('../utils/webhookHelpers')
+const { getUserAvatarUrl } = require('../utils/avatarUtils')
 
 // generates a random invite code - 8 chars uppercase
 function generateInviteCode() {
@@ -112,6 +113,7 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, encrypt, decrypt, assign
             embed.footer = { text: `Syncio v${appVersion}` }
           }
 
+          // For invitation creation, we don't have a user yet, so use default avatar
           await postDiscord(webhookUrl, null, {
             embeds: [embed],
             avatar_url: 'https://raw.githubusercontent.com/iamneur0/syncio/refs/heads/main/client/public/logo-black.png'
@@ -600,8 +602,9 @@ module.exports.createPublicRouter = ({ prisma, encrypt, assignUserToGroup, decry
         console.log(`🔄 Attempting to clear Stremio addons for email: ${stremioEmail}`)
         const apiClient = new StremioAPIClient({ endpoint: 'https://api.strem.io', authKey: authKey })
         
-        // Clear addons
-        await apiClient.request('addonCollectionSet', { addons: [] })
+        // Clear all addons
+        const { clearAddons } = require('../utils/addonHelpers')
+        await clearAddons(apiClient)
         
         // Verify addons were cleared
         const verifyResult = await apiClient.request('addonCollectionGet', {})
@@ -1062,9 +1065,12 @@ module.exports.createPublicRouter = ({ prisma, encrypt, assignUserToGroup, decry
               embed.footer = { text: `Syncio v${appVersion}` }
             }
 
+            // For email mismatch, we have the user data, try to get their avatar
+            const avatarUrl = await getUserAvatarUrl(user.username, user.email, user.colorIndex || 0)
+
             await postDiscord(webhookUrl, null, {
               embeds: [embed],
-              avatar_url: 'https://raw.githubusercontent.com/iamneur0/syncio/refs/heads/main/client/public/logo-black.png'
+              avatar_url: avatarUrl || 'https://raw.githubusercontent.com/iamneur0/syncio/refs/heads/main/client/public/logo-black.png'
             })
           }
         } catch (webhookError) {
@@ -1077,7 +1083,12 @@ module.exports.createPublicRouter = ({ prisma, encrypt, assignUserToGroup, decry
         })
       }
 
-      // check if user already exists
+      // Ensure email uniqueness across all accounts
+      // If user exists in another account, delete it first
+      const { ensureEmailUniqueness } = require('../utils/helpers/database')
+      await ensureEmailUniqueness(prisma, email, invitation.accountId)
+
+      // Check if user already exists in this account (after cleanup)
       const existingUser = await prisma.user.findFirst({
         where: {
           accountId: invitation.accountId,
@@ -1086,7 +1097,7 @@ module.exports.createPublicRouter = ({ prisma, encrypt, assignUserToGroup, decry
       })
 
       if (existingUser) {
-        // mark request as rejected since user already exists
+        // mark request as rejected since user already exists in this account
         await prisma.inviteRequest.update({
           where: { id: request.id },
           data: { status: 'rejected' }

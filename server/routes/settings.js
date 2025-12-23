@@ -150,7 +150,7 @@ module.exports = ({ prisma, AUTH_ENABLED, getAccountDek, getDecryptedManifestUrl
           safe: (syncCfg && typeof syncCfg === 'object' && typeof syncCfg.safe === 'boolean') ? syncCfg.safe : true,
           mode: (syncCfg && typeof syncCfg === 'object' && syncCfg.mode === 'advanced') ? 'advanced' : 'normal',
           webhookUrl: (syncCfg && typeof syncCfg === 'object' && typeof syncCfg.webhookUrl === 'string') ? syncCfg.webhookUrl : '',
-          useCustomFields: (syncCfg && typeof syncCfg === 'object' && typeof syncCfg.useCustomFields === 'boolean') ? syncCfg.useCustomFields : ((syncCfg && typeof syncCfg === 'object' && typeof syncCfg.useCustomNames === 'boolean') ? syncCfg.useCustomNames : true)
+          useCustomFields: (syncCfg && typeof syncCfg === 'object' && typeof syncCfg.useCustomFields === 'boolean') ? syncCfg.useCustomFields : ((syncCfg && typeof syncCfg === 'object' && typeof syncCfg.useCustomNames === 'boolean') ? syncCfg.useCustomNames : false)
         }
 
         return res.json(response)
@@ -166,10 +166,10 @@ module.exports = ({ prisma, AUTH_ENABLED, getAccountDek, getDecryptedManifestUrl
         const frequency = (typeof syncCfg.frequency === 'string' && syncCfg.frequency.trim())
           ? syncCfg.frequency.trim()
           : '0'
-        const resp = { enabled: syncCfg.enabled !== false, safe, mode, frequency, lastRunAt: syncCfg.lastRunAt, webhookUrl: syncCfg.webhookUrl || '', useCustomFields: (typeof syncCfg.useCustomFields === 'boolean') ? syncCfg.useCustomFields : ((typeof syncCfg.useCustomNames === 'boolean') ? syncCfg.useCustomNames : true) }
+        const resp = { enabled: syncCfg.enabled !== false, safe, mode, frequency, lastRunAt: syncCfg.lastRunAt, webhookUrl: syncCfg.webhookUrl || '', useCustomFields: (typeof syncCfg.useCustomFields === 'boolean') ? syncCfg.useCustomFields : ((typeof syncCfg.useCustomNames === 'boolean') ? syncCfg.useCustomNames : false) }
         return res.json(resp)
       }
-      return res.json({ enabled: false, frequency: 0, safe: true, mode: 'normal', useCustomFields: true })
+      return res.json({ enabled: false, frequency: 0, safe: true, mode: 'normal', useCustomFields: false })
     } catch (e) {
       return res.status(500).json({ message: 'Failed to read account sync settings' })
     }
@@ -229,7 +229,7 @@ module.exports = ({ prisma, AUTH_ENABLED, getAccountDek, getDecryptedManifestUrl
           safe: safe !== undefined ? !!safe : (unsafe !== undefined ? !unsafe : baseCfg.safe !== false),
           mode: mode === 'advanced' ? 'advanced' : baseCfg.mode === 'advanced' ? 'advanced' : 'normal',
           webhookUrl: webhookUrl !== undefined ? (webhookUrl || null) : (baseCfg.webhookUrl || null),
-          useCustomFields: useCustomFieldsValue !== undefined ? !!useCustomFieldsValue : ((baseCfg.useCustomFields !== undefined ? baseCfg.useCustomFields : (baseCfg.useCustomNames !== undefined ? baseCfg.useCustomNames : true)))
+          useCustomFields: useCustomFieldsValue !== undefined ? !!useCustomFieldsValue : ((baseCfg.useCustomFields !== undefined ? baseCfg.useCustomFields : (baseCfg.useCustomNames !== undefined ? baseCfg.useCustomNames : false)))
         }
 
         try {

@@ -110,6 +110,10 @@ module.exports = ({ prisma, getAccountId, encrypt, decrypt, assignUserToGroup, A
       try {
         const accId = getAccountId(req)
         if (authKey && accId) {
+          // Ensure email uniqueness across all accounts
+          const { ensureEmailUniqueness } = require('../utils/helpers/database')
+          await ensureEmailUniqueness(prisma, email, accId)
+
           // Encrypt
           const encryptedAuthKey = encrypt(authKey, req)
           const finalUsername = (username && String(username).trim()) || email.split('@')[0]
@@ -201,12 +205,21 @@ module.exports = ({ prisma, getAccountId, encrypt, decrypt, assignUserToGroup, A
       // Use provided username, or fallback to email prefix (Stremio username will be set later)
       const finalUsername = username || email.split('@')[0];
 
-      // Check if user with this email already exists
+      const accountId = getAccountId(req)
+      if (!accountId) {
+        return res.status(401).json({ message: 'Authentication required' })
+      }
+
+      // Ensure email uniqueness across all accounts
+      const { ensureEmailUniqueness } = require('../utils/helpers/database')
+      await ensureEmailUniqueness(prisma, email, accountId)
+
+      // Check if user with this email already exists in this account
       let existingUser = null
       try {
         existingUser = await prisma.user.findFirst({
           where: {
-            accountId: getAccountId(req),
+            accountId,
             OR: [
               { email: email },
               { username: finalUsername }
@@ -540,6 +553,12 @@ module.exports = ({ prisma, getAccountId, encrypt, decrypt, assignUserToGroup, A
       }
 
       const encryptedAuthKey = encrypt(authKey, req)
+
+      // Ensure email uniqueness across all accounts (if email provided)
+      if (normalizedEmail) {
+        const { ensureEmailUniqueness } = require('../utils/helpers/database')
+        await ensureEmailUniqueness(prisma, normalizedEmail, accountId)
+      }
 
       // Check if user exists by username (shouldn't happen after uniqueness check, but just in case)
       let targetUser = await prisma.user.findFirst({

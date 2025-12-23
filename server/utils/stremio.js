@@ -112,8 +112,10 @@ function buildAddonDbData(req, params) {
     stremioAddonId,
     isActive = true,
     resources: resourcesInput,   // optional explicit resources array (names)
-    catalogs: catalogsInput      // optional explicit catalogs array ({type,id})
+    catalogs: catalogsInput,      // optional explicit catalogs array ({type,id})
+    customLogo                   // optional custom logo URL (stored but applied at runtime)
   } = params
+  
   const urlPlain = String(sanitizedUrl || '').trim()
   const encUrl = encrypt(urlPlain, req)
   const encOriginal = manifestObj ? encrypt(JSON.stringify(manifestObj), req) : null
@@ -139,11 +141,26 @@ function buildAddonDbData(req, params) {
   const catalogs = (() => {
     try {
       if (Array.isArray(catalogsInput)) {
-        const compact = catalogsInput.map(c => ({ type: c.type, id: c.id })).filter(c => c.type && c.id)
+        // Preserve search field if present (for UI state tracking)
+        const compact = catalogsInput.map(c => {
+          if (typeof c === 'string') {
+            // Legacy string format
+            return { type: c, id: c, search: false }
+          }
+          if (Array.isArray(c) && c.length >= 2) {
+            // Tuple format: [type, id, search]
+            return { type: c[0], id: c[1], search: c[2] || false }
+          }
+          if (c && typeof c === 'object' && c.type && c.id) {
+            // Object format: { type, id, search? }
+            return { type: c.type, id: c.id, search: c.search || false }
+          }
+          return null
+        }).filter(c => c && c.type && c.id)
         return compact.length ? JSON.stringify(compact) : null
       }
       const src = Array.isArray(manifestToPersist?.catalogs) ? manifestToPersist.catalogs : Array.isArray(manifestObj?.catalogs) ? manifestObj.catalogs : []
-      const compact = src.map(c => ({ type: c.type, id: c.id })).filter(c => c.type && c.id)
+      const compact = src.map(c => ({ type: c.type, id: c.id, search: false })).filter(c => c.type && c.id)
       return compact.length ? JSON.stringify(compact) : null
     } catch { return null }
   })()
@@ -156,6 +173,7 @@ function buildAddonDbData(req, params) {
     manifestHash: mHash,      // content hash of filtered/original
     version: version || manifestObj?.version || null,
     iconUrl: iconUrl || manifestObj?.logo || null,
+    customLogo: customLogo && customLogo.trim() ? customLogo.trim() : null,
     stremioAddonId: stremioAddonId || manifestObj?.id || null,
     isActive,
     originalManifest: encOriginal,

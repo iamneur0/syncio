@@ -52,6 +52,42 @@ module.exports = ({ prisma, getAccountId, scopedWhere, reloadDeps, syncGroupUser
     }
   })
 
+  // GET /ext/metrics.json - full metrics JSON for this account (API key scoped)
+  router.get('/metrics.json', async (req, res) => {
+    try {
+      const accountId = req.appAccountId
+      if (!accountId) {
+        return res.status(401).json({ error: 'Unauthorized' })
+      }
+
+      const { period = '30d' } = req.query // same semantics as /users/metrics
+
+      const { getCachedMetrics, setCachedMetrics } = require('../utils/metricsCache')
+      const { buildMetricsForAccount } = require('../utils/metricsBuilder')
+
+      // Try in-memory metrics cache first (populated by activityMonitor every 5 minutes)
+      const cached = getCachedMetrics(accountId, period)
+      if (cached) {
+        return res.json(cached)
+      }
+
+      // Build on demand (also used on first boot or if scheduler hasn't run yet)
+      // Use reloadDeps.decrypt which matches the decrypt function signature expected by buildMetricsForAccount
+      const metrics = await buildMetricsForAccount({
+        prisma,
+        accountId,
+        period,
+        decrypt: reloadDeps.decrypt
+      })
+
+      setCachedMetrics(accountId, period, metrics)
+      return res.json(metrics)
+    } catch (e) {
+      console.error('[ext/metrics] Failed to build metrics:', e)
+      return res.status(500).json({ error: 'Failed to fetch metrics' })
+    }
+  })
+
   // POST /ext/addons/reload
   router.post('/addons/reload', async (req, res) => {
     try {
