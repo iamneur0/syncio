@@ -32,8 +32,9 @@ async function resetUserAddons(user, decrypt, StremioAPIClient) {
     const authKeyPlain = decrypt(user.stremioAuthKey, mockReq)
     const apiClient = new StremioAPIClient({ endpoint: 'https://api.strem.io', authKey: authKeyPlain })
 
-    // Clear the entire addon collection
-    await apiClient.request('addonCollectionSet', { addons: [] })
+    // Clear all addons
+    const { clearAddons } = require('./addonHelpers')
+    await clearAddons(apiClient)
     return { success: true }
   } catch (error) {
     console.error(`⚠️  Error resetting addons for user ${user.id}:`, error?.message || error)
