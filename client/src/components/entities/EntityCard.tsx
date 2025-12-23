@@ -6,6 +6,8 @@ import { ConfirmDialog } from '@/components/modals'
 import { groupsAPI } from '@/services/api'
 import { useTheme } from '@/contexts/ThemeContext'
 import { getEntityColorStyles } from '@/utils/colorMapping'
+import UserAvatar from '@/components/ui/UserAvatar'
+import { getAddonIconUrl } from '@/utils/addonIcon'
 // ToggleSwitch and VersionChip are imported from '@/components/ui' above
 
 const MANIFEST_SUFFIX_REGEX = /\/manifest(\.[^/?#]+)?$/i
@@ -334,15 +336,33 @@ export default function EntityCard({
 
   const renderAvatar = () => {
     if (variant === 'addon') {
+      const logoUrl = getAddonIconUrl({ 
+        customLogo: (entity as any).customLogo, 
+        iconUrl: (entity as any).iconUrl,
+        manifest: (entity as any).manifest
+      })
       return (
         <AddonIcon
           name={entity.name}
-          iconUrl={(entity as any).iconUrl}
+          iconUrl={logoUrl}
           size="12"
         />
       )
     }
 
+    // Use UserAvatar for users
+    if (variant === 'user') {
+      return (
+        <UserAvatar
+          email={(entity as any).email}
+          username={entity.username}
+          colorIndex={entity.colorIndex}
+          size="md"
+        />
+      )
+    }
+
+    // For groups and other variants, use the colored circle
     return (
       <div
         className="logo-circle-12 flex items-center justify-center"

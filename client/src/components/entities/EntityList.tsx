@@ -52,6 +52,8 @@ interface EntityListProps {
   getIsSelected?: (item: any) => boolean
   // Optional: callback to clear all selections when clicking on empty space
   onClearSelection?: () => void
+  // Optional: callback when title is clicked
+  onTitleClick?: () => void
 }
 
 export default function EntityList({
@@ -75,7 +77,8 @@ export default function EntityList({
   layout = 'vertical',
   confirmReset,
   getIsSelected,
-  onClearSelection
+  onClearSelection,
+  onTitleClick
 }: EntityListProps) {
   const [confirmOpen, setConfirmOpen] = React.useState(false)
 
@@ -118,7 +121,7 @@ export default function EntityList({
     }
   }
 
-  const hasHeaderContent = title || headerRight || actionButton || (items.length > 0 && onClear)
+  const hasHeaderContent = title || headerRight || actionButton || onClear
 
   return (
     <div 
@@ -128,7 +131,11 @@ export default function EntityList({
       {hasHeaderContent && (
         <div className="flex items-center justify-between mb-3">
           {title && (
-            <h3 className={`text-lg font-semibold`}>
+            <h3 
+              className={`text-lg font-semibold ${onTitleClick ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''}`}
+              onClick={onTitleClick}
+              title={onTitleClick ? 'Click to view JSON' : undefined}
+            >
               {count > 0 && `${count} `}{title}
             </h3>
           )}
@@ -143,13 +150,13 @@ export default function EntityList({
                 {actionButton.icon}
               </button>
             )}
-            {items.length > 0 && onClear && (
+            {onClear && (
               <button
                 onClick={() => setConfirmOpen(true)}
                 className={`px-3 py-1 text-sm rounded transition-colors color-hover`}
-                title={`Reset ${title.toLowerCase()} to default`}
+                title={`Clear all ${title.toLowerCase()}`}
               >
-                Reset
+                Clear
               </button>
             )}
           </div>

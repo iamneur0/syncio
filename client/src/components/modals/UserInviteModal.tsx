@@ -5,6 +5,7 @@ import toast from 'react-hot-toast'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { usersAPI, groupsAPI } from '@/services/api'
 import { useBodyScrollLock } from '@/hooks/useBodyScrollLock'
+import { ConfirmDialog } from '@/components/modals'
 
 interface UserInviteModalProps {
   isOpen: boolean
@@ -57,6 +58,14 @@ export default function UserInviteModal({
   const inviteStartTimeRef = useRef<number | null>(null)
   const webhookSentRef = useRef(false)
   const queryClient = useQueryClient()
+  const [deleteConfirm, setDeleteConfirm] = useState<{
+    open: boolean
+    inviteIndex: number | null
+    username: string | null
+    inviteCode: string | null
+  }>({ open: false, inviteIndex: null, username: null, inviteCode: null })
+  const [deleteAddons, setDeleteAddons] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
 
   // Fetch groups
   const { data: groups = [] } = useQuery({
@@ -677,6 +686,70 @@ export default function UserInviteModal({
     }
   }, [visibleInvites])
 
+  const handleDeleteUser = useCallback(async (inviteIndex: number) => {
+    const invite = invites[inviteIndex]
+    if (!invite || !invite.user?.username || !invite.code) {
+      toast.error('Invalid invite data')
+      return
+    }
+    setDeleteConfirm({
+      open: true,
+      inviteIndex,
+      username: invite.user.username,
+      inviteCode: invite.code,
+    })
+    setDeleteAddons(false)
+  }, [invites])
+
+  const confirmDeleteUser = useCallback(async () => {
+    if (deleteConfirm.inviteIndex === null || !deleteConfirm.username || !deleteConfirm.inviteCode) {
+      return
+    }
+
+    setIsDeleting(true)
+    try {
+      // First, find the user by username and inviteCode
+      const allUsers = await usersAPI.getAll()
+      const userToDelete = allUsers.find(
+        (user: any) => 
+          user.username === deleteConfirm.username && 
+          user.inviteCode === deleteConfirm.inviteCode
+      )
+
+      if (!userToDelete) {
+        toast.error('User not found')
+        setDeleteConfirm({ open: false, inviteIndex: null, username: null, inviteCode: null })
+        setIsDeleting(false)
+        return
+      }
+
+      // Delete user (with optional addon clearing)
+      await usersAPI.delete(userToDelete.id, { clearAddons: deleteAddons })
+
+      // Update the invite status
+      setInvites((prev) =>
+        prev.map((invite, index) =>
+          index === deleteConfirm.inviteIndex
+            ? { ...invite, status: 'pending' as const, user: undefined }
+            : invite
+        )
+      )
+
+      // Invalidate queries to refresh the UI
+      queryClient.invalidateQueries({ queryKey: ['users'] })
+      queryClient.invalidateQueries({ queryKey: ['groups'] })
+
+      toast.success('User deleted successfully')
+      setDeleteConfirm({ open: false, inviteIndex: null, username: null, inviteCode: null })
+      setDeleteAddons(false)
+    } catch (error: any) {
+      const message = error?.response?.data?.message || error?.message || 'Failed to delete user'
+      toast.error(message)
+    } finally {
+      setIsDeleting(false)
+    }
+  }, [deleteConfirm, deleteAddons, queryClient])
+
   const handleCloseSummary = useCallback(() => {
     setShowSummary(false)
     clearAllPollers()
@@ -942,6 +1015,7 @@ export default function UserInviteModal({
                               <span className="text-xs uppercase tracking-wide color-text-secondary">
                                 User
                               </span>
+                              <div className="flex items-center gap-2">
                               <button
                                 type="button"
                                 onClick={() => handleCopy(invite.user?.username || '', 'Username')}
@@ -950,6 +1024,17 @@ export default function UserInviteModal({
                                 <Copy className="w-4 h-4" />
                                 {invite.user?.username || 'Stremio user'}
                               </button>
+                                {invite.user?.username && invite.code && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteUser(index)}
+                                    className="inline-flex items-center justify-center w-8 h-8 rounded-lg color-surface hover:bg-red-500/20 transition-colors border border-red-500/30"
+                                    title="Delete user"
+                                  >
+                                    <X className="w-4 h-4 text-red-400" />
+                                  </button>
+                                )}
+                              </div>
                             </div>
 
                             {invite.user?.email && (
@@ -1110,7 +1195,9 @@ export default function UserInviteModal({
                       {title}
                     </h3>
                   <div className="space-y-2">
-                    {groupUsers.map((invite) => (
+                    {groupUsers.map((invite) => {
+                      const inviteIndex = invites.findIndex((i) => i.id === invite.id)
+                      return (
                       <div
                         key={invite.id}
                         className="p-3 rounded-lg border border-emerald-400/60 bg-emerald-500/5"
@@ -1119,6 +1206,7 @@ export default function UserInviteModal({
                           <span className="text-xs uppercase tracking-wide color-text-secondary">
                             User
                           </span>
+                          <div className="flex items-center gap-2">
                           <button
                             type="button"
                             onClick={() => handleCopy(invite.user?.username || '', 'Username')}
@@ -1127,6 +1215,17 @@ export default function UserInviteModal({
                             <Copy className="w-4 h-4" />
                             {invite.user?.username || 'Stremio user'}
                           </button>
+                            {invite.user?.username && invite.code && inviteIndex >= 0 && (
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteUser(inviteIndex)}
+                                className="inline-flex items-center justify-center w-8 h-8 rounded-lg color-surface hover:bg-red-500/20 transition-colors border border-red-500/30"
+                                title="Delete user"
+                              >
+                                <X className="w-4 h-4 text-red-400" />
+                              </button>
+                            )}
+                          </div>
                         </div>
                         {invite.user?.email && (
                           <div className="flex items-center justify-between gap-2 mt-2">
@@ -1144,7 +1243,8 @@ export default function UserInviteModal({
                           </div>
                         )}
                       </div>
-                    ))}
+                      )
+                    })}
                   </div>
                 </div>
                 )
@@ -1208,6 +1308,46 @@ export default function UserInviteModal({
             </div>
           </div>
         </div>,
+        document.body
+      )}
+      {typeof window !== 'undefined' && document.body && createPortal(
+        <ConfirmDialog
+          open={deleteConfirm.open}
+          title="Delete User"
+          body={
+            <div className="space-y-4">
+              <p className="text-sm color-text">
+                Are you sure you want to delete user <strong>{deleteConfirm.username}</strong>?
+                This action cannot be undone.
+              </p>
+              <div className="flex items-center gap-2">
+                <input
+                  id="delete-addons-checkbox"
+                  type="checkbox"
+                  checked={deleteAddons}
+                  onChange={(e) => setDeleteAddons(e.target.checked)}
+                  className="control-radio"
+                  disabled={isDeleting}
+                />
+                <label 
+                  htmlFor="delete-addons-checkbox" 
+                  className="text-sm cursor-pointer"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  Also delete user's Stremio addons
+                </label>
+              </div>
+            </div>
+          }
+          confirmText={isDeleting ? 'Deleting...' : 'Delete'}
+          cancelText="Cancel"
+          isDanger={true}
+          onConfirm={confirmDeleteUser}
+          onCancel={() => {
+            setDeleteConfirm({ open: false, inviteIndex: null, username: null, inviteCode: null })
+            setDeleteAddons(false)
+          }}
+        />,
         document.body
       )}
     </>

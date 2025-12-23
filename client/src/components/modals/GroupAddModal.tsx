@@ -257,7 +257,7 @@ export default function GroupAddModal({
                     }}
                     isOpen={showColorPicker}
                     onClose={() => setShowColorPicker(false)}
-                    triggerRef={logoRef}
+                    triggerRef={logoRef as React.RefObject<HTMLElement>}
                   />
                   
                   <div className="flex flex-col min-w-0">

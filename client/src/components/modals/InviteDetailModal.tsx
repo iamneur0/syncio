@@ -14,6 +14,8 @@ import { formatDate } from '@/utils/dateUtils'
 import { SyncBadge } from '@/components/ui'
 import DateTimePicker from '@/components/ui/DateTimePicker'
 import { format } from 'date-fns'
+import { usersAPI } from '@/services/api'
+import UserAvatar from '@/components/ui/UserAvatar'
 
 interface Invitation {
   id: string
@@ -57,11 +59,15 @@ function RequestItem({
   onUndoRejection,
   onRefreshOAuth,
   onDelete,
+  onDeleteUser,
   isRefreshingOAuth,
   isUndoingRejection,
   isDeleting,
+  isDeletingUser,
   getRequestStatusBadge,
-  isOAuthUsed 
+  isOAuthUsed,
+  allUsers,
+  inviteCode
 }: { 
   request: InviteRequest
   themeName: string
@@ -70,17 +76,24 @@ function RequestItem({
   onUndoRejection: (id: string) => void
   onRefreshOAuth: (requestId: string) => void
   onDelete: (id: string) => void
+  onDeleteUser: (request: InviteRequest) => void
   isRefreshingOAuth: boolean
   isUndoingRejection: boolean
   isDeleting: boolean
-  getRequestStatusBadge: (status: string, request: InviteRequest) => React.ReactNode
+  isDeletingUser: boolean
+  getRequestStatusBadge: (status: string, request: InviteRequest, userExists?: boolean) => React.ReactNode
   isOAuthUsed: boolean
+  allUsers: any[]
+  inviteCode: string | undefined
 }) {
-  // get first letter for avatar
-  const firstLetter = request.username ? request.username.charAt(0).toUpperCase() : 'U'
-  // color based on username char
-  const colorIndex = request.username ? request.username.charCodeAt(0) % 10 : 0
-  const userColorStyles = getEntityColorStyles(themeName, colorIndex)
+  // Find user in allUsers to get their actual colorIndex if they exist
+  const existingUser = allUsers.find(
+    (user: any) => 
+      user.username === request.username && 
+      inviteCode && user.inviteCode === inviteCode
+  )
+  // Use actual colorIndex if user exists, otherwise compute from username
+  const colorIndex = existingUser?.colorIndex ?? (request.username ? request.username.charCodeAt(0) % 10 : 0)
   
   const [tick, setTick] = useState(0)
   const oauthExpiresAtTimestamp = request.oauthExpiresAt ? new Date(request.oauthExpiresAt).getTime() : null
@@ -109,25 +122,28 @@ function RequestItem({
     <div className="flex items-center justify-between p-4 rounded-lg border color-border card hover:shadow-lg transition-all">
       <div className="flex items-center gap-3 flex-1 min-w-0">
         <div className="flex-shrink-0">
-          <div
-            className="logo-circle-12 flex items-center justify-center"
-            style={{
-              background: userColorStyles.background,
-              color: userColorStyles.textColor,
-            }}
-          >
-            <span
-              className="font-semibold text-lg"
-              style={{ color: userColorStyles.textColor }}
-            >
-              {firstLetter}
-            </span>
-          </div>
+          <UserAvatar
+            email={request.email}
+            username={request.username}
+            colorIndex={colorIndex}
+            size="md"
+          />
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1 flex-wrap">
             <span className="font-medium truncate">{request.username}</span>
-            {getRequestStatusBadge(request.status, request)}
+            {(() => {
+              // Check if user exists in userbase (only for completed status)
+              let userExists: boolean | undefined = undefined
+              if (request.status === 'completed' && inviteCode) {
+                userExists = allUsers.some(
+                  (user: any) => 
+                    user.username === request.username && 
+                    user.inviteCode === inviteCode
+                )
+              }
+              return getRequestStatusBadge(request.status, request, userExists)
+            })()}
           </div>
           <p className="text-sm color-text-secondary truncate mb-1">
             {request.email}
@@ -225,6 +241,26 @@ function RequestItem({
             </button>
           </>
         )}
+        {request.status === 'completed' && inviteCode && (() => {
+          // Check if user still exists in userbase
+          const userExists = allUsers.some(
+            (user: any) => 
+              user.username === request.username && 
+              user.inviteCode === inviteCode
+          )
+          // Only show delete button if user exists
+          return userExists ? (
+            <button
+              type="button"
+              onClick={() => onDeleteUser(request)}
+              disabled={isDeletingUser}
+              className="p-2 rounded-lg transition-colors color-text color-hover"
+              title="Delete user"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          ) : null
+        })()}
         </div>
       </div>
     </div>
@@ -244,6 +280,12 @@ export default function InviteDetailModal({
   const [oauthUsedRequests, setOauthUsedRequests] = useState<Set<string>>(new Set())
   const [renewedRequests, setRenewedRequests] = useState<Set<string>>(new Set())
   const justClearedOAuthRef = React.useRef<Set<string>>(new Set())
+  const [deleteUserConfirm, setDeleteUserConfirm] = useState<{
+    open: boolean
+    request: InviteRequest | null
+  }>({ open: false, request: null })
+  const [deleteAddons, setDeleteAddons] = useState(false)
+  const [isDeletingUser, setIsDeletingUser] = useState(false)
   
   // Form state for editing
   const [editGroupName, setEditGroupName] = useState<string>('')
@@ -258,6 +300,13 @@ export default function InviteDetailModal({
   const { data: groups = [] } = useQuery({
     queryKey: ['groups'],
     queryFn: groupsAPI.getAll,
+    enabled: isOpen
+  })
+
+  // Fetch users to check if they exist (for "Removed" status)
+  const { data: allUsers = [] } = useQuery({
+    queryKey: ['users'],
+    queryFn: usersAPI.getAll,
     enabled: isOpen
   })
 
@@ -612,6 +661,54 @@ export default function InviteDetailModal({
     deleteRequestMutation.mutate(requestId)
   }
 
+  const handleDeleteUser = (request: InviteRequest) => {
+    setDeleteUserConfirm({ open: true, request })
+    setDeleteAddons(false)
+  }
+
+  const confirmDeleteUser = async () => {
+    if (!deleteUserConfirm.request || !currentInvitation) {
+      return
+    }
+
+    setIsDeletingUser(true)
+    try {
+      // Find the user by username and inviteCode
+      const allUsers = await usersAPI.getAll()
+      const userToDelete = allUsers.find(
+        (user: any) => 
+          user.username === deleteUserConfirm.request!.username && 
+          user.inviteCode === currentInvitation.inviteCode
+      )
+
+      if (!userToDelete) {
+        toast.error('User not found')
+        setDeleteUserConfirm({ open: false, request: null })
+        setIsDeletingUser(false)
+        return
+      }
+
+      // Delete user (with optional addon clearing)
+      await usersAPI.delete(userToDelete.id, { clearAddons: deleteAddons })
+
+      // Invalidate queries to refresh the UI
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['users'] }),
+        queryClient.invalidateQueries({ queryKey: ['invitations'] }),
+        queryClient.invalidateQueries({ queryKey: ['invitation', currentInvitation.id, 'details'] })
+      ])
+
+      toast.success(deleteAddons ? 'User and addons deleted successfully' : 'User deleted successfully')
+      setDeleteUserConfirm({ open: false, request: null })
+      setDeleteAddons(false)
+    } catch (error: any) {
+      const message = error?.response?.data?.message || error?.message || 'Failed to delete user'
+      toast.error(message)
+    } finally {
+      setIsDeletingUser(false)
+    }
+  }
+
   const handleDelete = () => {
     if (!currentInvitation) return
     setShowDeleteConfirm(true)
@@ -630,21 +727,27 @@ export default function InviteDetailModal({
     toast.success('Invite link copied to clipboard')
   }
 
-  const getRequestStatusBadge = React.useCallback((status: string, request: InviteRequest) => {
+  const getRequestStatusBadge = React.useCallback((status: string, request: InviteRequest, userExists?: boolean) => {
     const isOAuthExpired = request.oauthExpiresAt && new Date(request.oauthExpiresAt) < new Date()
     const isRenewed = status === 'accepted' && renewedRequests.has(request.id)
     // Only mark as used/expired if NOT renewed (renewed requests get a fresh OAuth link)
     const isOAuthUsedButNotCompleted = oauthUsedRequests.has(request.id) && status === 'accepted' && !isRenewed
     
-    let badgeStatus: 'pending' | 'accepted' | 'joined' | 'rejected' | 'renewed'
+    let badgeStatus: 'pending' | 'accepted' | 'joined' | 'rejected' | 'renewed' | 'removed'
     let dotColor: string
     let text: string
     
-    // Always prioritize completed status first - prevents showing "Expired" for completed requests
+    // Check if user was deleted (completed status but user doesn't exist)
     if (status === 'completed') {
+      if (userExists === false) {
+        badgeStatus = 'removed'
+        dotColor = '#ef4444'
+        text = 'Removed'
+      } else {
       badgeStatus = 'joined'
       dotColor = '#22c55e'
       text = 'Joined'
+      }
     } else if (status === 'rejected') {
       badgeStatus = 'rejected'
       dotColor = '#ef4444'
@@ -894,11 +997,15 @@ export default function InviteDetailModal({
                     onUndoRejection={handleUndoRejection}
                     onRefreshOAuth={handleRefreshOAuth}
                     onDelete={handleDeleteRequest}
+                    onDeleteUser={handleDeleteUser}
                     isRefreshingOAuth={refreshOAuthMutation.isPending}
                     isUndoingRejection={undoRejectionMutation.isPending}
                     isDeleting={deleteRequestMutation.isPending}
+                    isDeletingUser={isDeletingUser}
                     getRequestStatusBadge={getRequestStatusBadge}
                     isOAuthUsed={oauthUsedRequests.has(request.id)}
+                    allUsers={allUsers}
+                    inviteCode={currentInvitation?.inviteCode}
                   />
                 )}
               />
@@ -962,6 +1069,44 @@ export default function InviteDetailModal({
         isDanger={true}
         onConfirm={handleConfirmReject}
         onCancel={() => setRequestToReject(null)}
+      />
+
+      <ConfirmDialog
+        open={deleteUserConfirm.open}
+        title="Delete User"
+        body={
+          <div className="space-y-4">
+            <p className="text-sm color-text">
+              Are you sure you want to delete user <strong>{deleteUserConfirm.request?.username}</strong>?
+              This action cannot be undone.
+            </p>
+            <div className="flex items-center gap-2">
+              <input
+                id="delete-addons-checkbox"
+                type="checkbox"
+                checked={deleteAddons}
+                onChange={(e) => setDeleteAddons(e.target.checked)}
+                className="control-radio"
+                disabled={isDeletingUser}
+              />
+              <label 
+                htmlFor="delete-addons-checkbox" 
+                className="text-sm cursor-pointer"
+                onClick={(e) => e.stopPropagation()}
+              >
+                Also delete user's Stremio addons
+              </label>
+            </div>
+          </div>
+        }
+        confirmText={isDeletingUser ? 'Deleting...' : 'Delete'}
+        cancelText="Cancel"
+        isDanger={true}
+        onConfirm={confirmDeleteUser}
+        onCancel={() => {
+          setDeleteUserConfirm({ open: false, request: null })
+          setDeleteAddons(false)
+        }}
       />
     </div>
   )

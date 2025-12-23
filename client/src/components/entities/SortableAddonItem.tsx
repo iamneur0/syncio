@@ -4,6 +4,7 @@ import { CSS } from '@dnd-kit/utilities'
 import { VersionChip } from '@/components/ui'
 import AddonIcon from './AddonIcon'
 import { X, LockKeyhole, Unlock } from 'lucide-react'
+import { getAddonIconUrl } from '@/utils/addonIcon'
 
 interface SortableAddonItemProps {
   addon: any
@@ -38,7 +39,7 @@ export default function SortableAddonItem({
   const name = addon?.name || manifest?.name || addon?.transportName || 'Unknown'
   const version = addon?.version || manifest?.version
   const description = addon?.description || manifest?.description || 'No description'
-  const iconUrl = addon?.iconUrl || manifest?.logo || manifest?.icon || null
+  const iconUrl = getAddonIconUrl({ customLogo: addon?.customLogo, iconUrl: addon?.iconUrl, manifest })
 
   const {
     attributes,

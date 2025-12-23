@@ -291,7 +291,7 @@ export default function UserAddModal({
               }}
               isOpen={showColorPicker}
               onClose={() => setShowColorPicker(false)}
-              triggerRef={logoRef}
+              triggerRef={logoRef as React.RefObject<HTMLElement>}
             />
             <div className="flex flex-col">
               <label className="sr-only" htmlFor="stremio-username-input">
@@ -370,7 +370,19 @@ export default function UserAddModal({
             <input
               type="email"
               value={stremioEmail}
-              onChange={(e) => setStremioEmail(e.target.value)}
+              onChange={(e) => {
+                const newEmail = e.target.value
+                setStremioEmail(newEmail)
+                // Auto-fill username from email (part before @) if username hasn't been manually edited
+                if (!editingUser && !usernameManuallyEdited && newEmail.includes('@')) {
+                  const emailPrefix = newEmail.split('@')[0].trim()
+                  if (emailPrefix) {
+                    // Capitalize first letter like OAuth does
+                    const capitalizedUsername = emailPrefix.charAt(0).toUpperCase() + emailPrefix.slice(1)
+                    setStremioUsername(capitalizedUsername)
+                  }
+                }
+              }}
               placeholder="Email"
               readOnly={!!editingUser}
               className={`w-full px-3 py-2 border rounded-lg focus:outline-none ${editingUser ? 'input cursor-not-allowed opacity-80' : 'input'}`}

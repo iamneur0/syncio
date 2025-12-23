@@ -9,4 +9,5 @@ export { default as AddonAddModal } from './AddonAddModal'
 export { default as UserDetailModal } from './UserDetailModal'
 export { default as GroupDetailModal } from './GroupDetailModal'
 export { default as AddonDetailModal } from './AddonDetailModal'
+export { default as ShareModal } from './ShareModal'
 
