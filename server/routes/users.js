@@ -5,10 +5,17 @@ const crypto = require('crypto');
 const { handleStremioError } = require('../utils/handlers');
 const { findUserById } = require('../utils/helpers');
 const { responseUtils, dbUtils } = require('../utils/routeUtils');
+const { sendShareNotification } = require('../utils/activityMonitor');
+const { postDiscord } = require('../utils/notify');
 
 // Export a function that returns the router, allowing dependency injection
 module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, encrypt, parseAddonIds, parseProtectedAddons, getDecryptedManifestUrl, StremioAPIClient, StremioAPIStore, assignUserToGroup, debug, defaultAddons, canonicalizeManifestUrl, getAccountDek, getServerKey, aesGcmDecrypt, validateStremioAuthKey, manifestUrlHmac, manifestHash }) => {
+  const { findLatestEpisode, enrichPostersFromCinemeta } = require('../utils/libraryHelpers')
   const router = express.Router();
+
+  // User API key middleware - allows users to access their own data via API key
+  const { createUserApiKeyMiddleware } = require('../middleware/userApiKey')
+  router.use(createUserApiKeyMiddleware(prisma))
 
   // Check if user exists by email or username (for validation)
   router.get('/check', async (req, res) => {
@@ -138,7 +145,8 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
           isActive: user.isActive,
           excludedAddons: excludedAddons,
           protectedAddons: protectedAddons,
-          colorIndex: user.colorIndex
+          colorIndex: user.colorIndex,
+          inviteCode: user.inviteCode
         };
       }));
 
@@ -148,6 +156,703 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
       res.status(500).json({ message: 'Failed to fetch users' });
     }
   });
+
+  // GET /users/metrics - Get metrics data for dashboard (must be before /:id route)
+  router.get('/metrics', async (req, res) => {
+    try {
+      const accountId = getAccountId(req)
+      if (!accountId) {
+        return res.status(401).json({ error: 'Unauthorized' })
+      }
+
+      const { period = '30d' } = req.query // '7d', '30d', '90d', '1y', 'all'
+
+      const { getCachedMetrics, setCachedMetrics } = require('../utils/metricsCache')
+      const { buildMetricsForAccount } = require('../utils/metricsBuilder')
+
+      // Try in-memory metrics cache first (populated by activityMonitor every 5 minutes)
+      const cached = getCachedMetrics(accountId, period)
+      if (cached) {
+        return res.json(cached)
+      }
+
+      // Build on demand (also used on first boot or if scheduler hasn't run yet)
+      const metrics = await buildMetricsForAccount({
+        prisma,
+        accountId,
+        period,
+        decrypt
+      })
+
+      setCachedMetrics(accountId, period, metrics)
+      return res.json(metrics)
+    } catch (error) {
+      console.error('Error fetching metrics:', error)
+      res.status(500).json({ error: 'Failed to fetch metrics' })
+    }
+  })
+
+  // GET /users/:id/watch-time - Get watch time for a specific user
+  router.get('/:id/watch-time', async (req, res) => {
+    try {
+      const accountId = getAccountId(req)
+      if (!accountId) {
+        return res.status(401).json({ error: 'Unauthorized' })
+      }
+
+      const { id: userId } = req.params
+      const { 
+        startDate, 
+        endDate, 
+        itemId,  // Optional: filter by specific item
+        itemType, // Optional: 'movie' or 'series'
+        groupBy = 'day' // 'day' or 'week'
+      } = req.query
+
+      const accountIdValue = accountId || 'default'
+
+      // If user API key is used, restrict to own data only
+      if (req.appUserId && req.appUserId !== userId) {
+        return res.status(403).json({ error: 'Forbidden: You can only access your own data' })
+      }
+
+      // Verify user belongs to account
+      const user = await prisma.user.findFirst({
+        where: {
+          id: userId,
+          accountId: accountIdValue
+        },
+        select: { id: true, username: true, email: true }
+      })
+
+      if (!user) {
+        return res.status(404).json({ error: 'User not found' })
+      }
+
+      // Build date range
+      let start = startDate ? new Date(startDate) : new Date()
+      start.setDate(start.getDate() - 7) // Default: last 7 days
+      let end = endDate ? new Date(endDate) : new Date()
+
+      // Build query
+      const where = {
+        accountId: accountIdValue,
+        userId: userId,
+        date: {
+          gte: start,
+          lte: end
+        }
+      }
+
+      if (itemId) {
+        where.itemId = itemId
+      }
+
+      if (itemType) {
+        where.itemType = itemType
+      }
+
+      const activities = await prisma.watchActivity.findMany({
+        where,
+        select: {
+          date: true,
+          watchTimeSeconds: true,
+          itemId: true,
+          itemType: true
+        },
+        orderBy: {
+          date: 'asc'
+        }
+      })
+
+      // Group by day or week
+      const grouped = {}
+      let totalSeconds = 0
+
+      for (const activity of activities) {
+        const date = new Date(activity.date)
+        let key
+
+        if (groupBy === 'week') {
+          // Get week start (Monday)
+          const weekStart = new Date(date)
+          const day = date.getDay()
+          const diff = date.getDate() - day + (day === 0 ? -6 : 1) // Adjust to Monday
+          weekStart.setDate(diff)
+          key = weekStart.toISOString().split('T')[0]
+        } else {
+          key = date.toISOString().split('T')[0]
+        }
+
+        if (!grouped[key]) {
+          grouped[key] = {
+            date: key,
+            watchTimeSeconds: 0,
+            watchTimeHours: 0,
+            items: new Set(),
+            movies: 0,
+            shows: 0
+          }
+        }
+
+        grouped[key].watchTimeSeconds += activity.watchTimeSeconds || 0
+        grouped[key].items.add(activity.itemId)
+        totalSeconds += activity.watchTimeSeconds || 0
+
+        if (activity.itemType === 'movie') {
+          grouped[key].movies++
+        } else if (activity.itemType === 'series') {
+          grouped[key].shows++
+        }
+      }
+
+      // Convert to array and format
+      const result = Object.values(grouped).map(entry => ({
+        date: entry.date,
+        watchTimeSeconds: entry.watchTimeSeconds,
+        watchTimeHours: Math.round((entry.watchTimeSeconds / 3600) * 100) / 100,
+        itemsCount: entry.items.size,
+        movies: entry.movies,
+        shows: entry.shows
+      }))
+
+      // If itemId specified, also return per-item breakdown
+      let itemBreakdown = null
+      if (itemId) {
+        itemBreakdown = {
+          itemId,
+          totalWatchTimeSeconds: totalSeconds,
+          totalWatchTimeHours: Math.round((totalSeconds / 3600) * 100) / 100,
+          days: result.length
+        }
+      }
+
+      res.json({
+        userId: user.id,
+        username: user.username || user.email,
+        startDate: start.toISOString().split('T')[0],
+        endDate: end.toISOString().split('T')[0],
+        totalWatchTimeSeconds: totalSeconds,
+        totalWatchTimeHours: Math.round((totalSeconds / 3600) * 100) / 100,
+        byDate: result,
+        itemBreakdown
+      })
+    } catch (error) {
+      console.error('Error fetching watch time:', error)
+      res.status(500).json({ error: 'Failed to fetch watch time', message: error.message })
+    }
+  })
+
+  // GET /users/:id/top-items - Get top shows/movies by watch time
+  router.get('/:id/top-items', async (req, res) => {
+    try {
+      const accountId = getAccountId(req)
+      if (!accountId) {
+        return res.status(401).json({ error: 'Unauthorized' })
+      }
+
+      const { id: userId } = req.params
+      const { 
+        period = '30d',  // '1h', '12h', '1d', '3d', '7d', '30d', '90d', '1y', 'all'
+        itemType,        // 'movie' or 'series' (optional)
+        limit = 10       // Number of items to return
+      } = req.query
+
+      const accountIdValue = accountId || 'default'
+
+      // If user API key is used, restrict to own data only
+      if (req.appUserId && req.appUserId !== userId) {
+        return res.status(403).json({ error: 'Forbidden: You can only access your own data' })
+      }
+
+      // Verify user belongs to account
+      const user = await prisma.user.findFirst({
+        where: {
+          id: userId,
+          accountId: accountIdValue
+        },
+        select: { id: true, username: true, email: true }
+      })
+
+      if (!user) {
+        return res.status(404).json({ error: 'User not found' })
+      }
+
+      // Calculate date range
+      let startDate = new Date()
+      switch (period) {
+        case '1h':
+          startDate.setHours(startDate.getHours() - 1)
+          break
+        case '12h':
+          startDate.setHours(startDate.getHours() - 12)
+          break
+        case '1d':
+          startDate.setDate(startDate.getDate() - 1)
+          break
+        case '3d':
+          startDate.setDate(startDate.getDate() - 3)
+          break
+        case '7d':
+          startDate.setDate(startDate.getDate() - 7)
+          break
+        case '30d':
+          startDate.setDate(startDate.getDate() - 30)
+          break
+        case '90d':
+          startDate.setDate(startDate.getDate() - 90)
+          break
+        case '1y':
+          startDate.setFullYear(startDate.getFullYear() - 1)
+          break
+        case 'all':
+          startDate = new Date(0)
+          break
+        default:
+          startDate.setDate(startDate.getDate() - 30)
+      }
+
+      // Build query
+      // For short periods (1h, 12h, 1d, 3d), filter by createdAt timestamp for accurate filtering
+      // For longer periods, date filtering is sufficient
+      const useTimestampFilter = period === '1h' || period === '12h' || period === '1d' || period === '3d'
+      
+      const where = {
+        accountId: accountIdValue,
+        userId: userId,
+        ...(useTimestampFilter ? {
+          createdAt: {
+            gte: startDate
+          }
+        } : {
+          date: {
+            gte: startDate
+          }
+        })
+      }
+
+      if (itemType) {
+        where.itemType = itemType
+      }
+
+      // Aggregate watch time by item
+      const activities = await prisma.watchActivity.findMany({
+        where,
+        select: {
+          itemId: true,
+          itemType: true,
+          watchTimeSeconds: true,
+          date: true
+        }
+      })
+
+      // Group by itemId
+      const itemStats = {}
+      for (const activity of activities) {
+        if (!itemStats[activity.itemId]) {
+          itemStats[activity.itemId] = {
+            itemId: activity.itemId,
+            itemType: activity.itemType,
+            totalWatchTimeSeconds: 0,
+            daysWatched: new Set(),
+            firstWatched: activity.date,
+            lastWatched: activity.date
+          }
+        }
+
+        itemStats[activity.itemId].totalWatchTimeSeconds += activity.watchTimeSeconds || 0
+        itemStats[activity.itemId].daysWatched.add(activity.date.toISOString().split('T')[0])
+        
+        if (activity.date < itemStats[activity.itemId].firstWatched) {
+          itemStats[activity.itemId].firstWatched = activity.date
+        }
+        if (activity.date > itemStats[activity.itemId].lastWatched) {
+          itemStats[activity.itemId].lastWatched = activity.date
+        }
+      }
+
+      // Convert to array and sort
+      const topItems = Object.values(itemStats)
+        .map(item => ({
+          itemId: item.itemId,
+          itemType: item.itemType,
+          totalWatchTimeSeconds: item.totalWatchTimeSeconds,
+          totalWatchTimeHours: Math.round((item.totalWatchTimeSeconds / 3600) * 100) / 100,
+          daysWatched: item.daysWatched.size,
+          firstWatched: item.firstWatched.toISOString().split('T')[0],
+          lastWatched: item.lastWatched.toISOString().split('T')[0]
+        }))
+        .sort((a, b) => b.totalWatchTimeSeconds - a.totalWatchTimeSeconds)
+        .slice(0, parseInt(limit) || 10)
+
+      res.json({
+        userId: user.id,
+        username: user.username || user.email,
+        period,
+        itemType: itemType || 'all',
+        totalItems: Object.keys(itemStats).length,
+        topItems
+      })
+    } catch (error) {
+      console.error('Error fetching top items:', error)
+      res.status(500).json({ error: 'Failed to fetch top items', message: error.message })
+    }
+  })
+
+  // GET /users/:id/streaks - Get watch streaks
+  router.get('/:id/streaks', async (req, res) => {
+    try {
+      const accountId = getAccountId(req)
+      if (!accountId) {
+        return res.status(401).json({ error: 'Unauthorized' })
+      }
+
+      const { id: userId } = req.params
+      const accountIdValue = accountId || 'default'
+
+      // If user API key is used, restrict to own data only
+      if (req.appUserId && req.appUserId !== userId) {
+        return res.status(403).json({ error: 'Forbidden: You can only access your own data' })
+      }
+
+      // Verify user belongs to account
+      const user = await prisma.user.findFirst({
+        where: {
+          id: userId,
+          accountId: accountIdValue
+        },
+        select: { id: true, username: true, email: true }
+      })
+
+      if (!user) {
+        return res.status(404).json({ error: 'User not found' })
+      }
+
+      // Get all watch activity dates
+      const activities = await prisma.watchActivity.findMany({
+        where: {
+          accountId: accountIdValue,
+          userId: userId
+        },
+        select: {
+          date: true
+        },
+        distinct: ['date'],
+        orderBy: {
+          date: 'desc'
+        }
+      })
+
+      if (activities.length === 0) {
+        return res.json({
+          userId: user.id,
+          username: user.username || user.email,
+          currentStreak: 0,
+          longestStreak: 0,
+          streakStartDate: null,
+          longestStreakStartDate: null,
+          longestStreakEndDate: null,
+          totalDaysWatched: 0
+        })
+      }
+
+      // Get unique date strings (YYYY-MM-DD) and sort
+      const dateStrings = [...new Set(activities.map(a => {
+        const d = new Date(a.date)
+        // Normalize to UTC date string to avoid timezone issues
+        const year = d.getUTCFullYear()
+        const month = String(d.getUTCMonth() + 1).padStart(2, '0')
+        const day = String(d.getUTCDate()).padStart(2, '0')
+        return `${year}-${month}-${day}`
+      }))].sort((a, b) => b.localeCompare(a)) // Most recent first
+
+      // Calculate current streak
+      let currentStreak = 0
+      let streakStartDate = null
+      const today = new Date()
+      // Normalize today to UTC date string
+      const todayYear = today.getUTCFullYear()
+      const todayMonth = String(today.getUTCMonth() + 1).padStart(2, '0')
+      const todayDay = String(today.getUTCDate()).padStart(2, '0')
+      const todayStr = `${todayYear}-${todayMonth}-${todayDay}`
+      
+      let checkDate = new Date(today)
+      checkDate.setUTCHours(0, 0, 0, 0)
+      let isFirstCheck = true
+      
+      // Keep checking consecutive days until we find a gap
+      while (true) {
+        const year = checkDate.getUTCFullYear()
+        const month = String(checkDate.getUTCMonth() + 1).padStart(2, '0')
+        const day = String(checkDate.getUTCDate()).padStart(2, '0')
+        const dateStr = `${year}-${month}-${day}`
+        const hasActivity = dateStrings.includes(dateStr)
+        
+        if (hasActivity) {
+          if (currentStreak === 0) {
+            streakStartDate = new Date(checkDate)
+          }
+          currentStreak++
+          checkDate.setUTCDate(checkDate.getUTCDate() - 1)
+          isFirstCheck = false
+        } else {
+          // Allow 1 day gap (yesterday) for current streak only on first check (if today has no activity)
+          if (isFirstCheck && dateStr === todayStr) {
+            checkDate.setUTCDate(checkDate.getUTCDate() - 1)
+            isFirstCheck = false
+            continue
+          }
+          break
+        }
+      }
+
+      // Calculate longest streak
+      let longestStreak = 0
+      let longestStreakStartDate = null
+      let longestStreakEndDate = null
+      let currentStreakLength = 1
+      let currentStreakStart = dateStrings[0]
+
+      for (let i = 1; i < dateStrings.length; i++) {
+        const prevDateStr = dateStrings[i - 1]
+        const currDateStr = dateStrings[i]
+        const prevDate = new Date(prevDateStr + 'T00:00:00Z')
+        const currDate = new Date(currDateStr + 'T00:00:00Z')
+        const daysDiff = Math.floor((prevDate - currDate) / (1000 * 60 * 60 * 24))
+
+        if (daysDiff === 1) {
+          // Consecutive day
+          currentStreakLength++
+        } else {
+          // Streak broken
+          if (currentStreakLength > longestStreak) {
+            longestStreak = currentStreakLength
+            longestStreakStartDate = new Date(currDateStr + 'T00:00:00Z')
+            longestStreakEndDate = new Date(prevDateStr + 'T00:00:00Z')
+          }
+          currentStreakLength = 1
+          currentStreakStart = dateStrings[i]
+        }
+      }
+
+      // Check if last streak is longest
+      if (currentStreakLength > longestStreak) {
+        longestStreak = currentStreakLength
+        longestStreakStartDate = new Date(currentStreakStart + 'T00:00:00Z')
+        longestStreakEndDate = new Date(dateStrings[0] + 'T00:00:00Z')
+      }
+
+      res.json({
+        userId: user.id,
+        username: user.username || user.email,
+        currentStreak,
+        longestStreak,
+        streakStartDate: streakStartDate ? streakStartDate.toISOString().split('T')[0] : null,
+        longestStreakStartDate: longestStreakStartDate ? longestStreakStartDate.toISOString().split('T')[0] : null,
+        longestStreakEndDate: longestStreakEndDate ? longestStreakEndDate.toISOString().split('T')[0] : null,
+        totalDaysWatched: dateStrings.length
+      })
+    } catch (error) {
+      console.error('Error fetching streaks:', error)
+      res.status(500).json({ error: 'Failed to fetch streaks', message: error.message })
+    }
+  })
+
+  // GET /users/:id/velocity - Get watch velocity (episodes per day for shows)
+  router.get('/:id/velocity', async (req, res) => {
+    try {
+      const accountId = getAccountId(req)
+      if (!accountId) {
+        return res.status(401).json({ error: 'Unauthorized' })
+      }
+
+      const { id: userId } = req.params
+      const { 
+        itemId,  // Optional: specific show
+        period = '30d'  // '1h', '12h', '1d', '3d', '7d', '30d', '90d', '1y', 'all'
+      } = req.query
+
+      const accountIdValue = accountId || 'default'
+
+      // If user API key is used, restrict to own data only
+      if (req.appUserId && req.appUserId !== userId) {
+        return res.status(403).json({ error: 'Forbidden: You can only access your own data' })
+      }
+
+      // Verify user belongs to account
+      const user = await prisma.user.findFirst({
+        where: {
+          id: userId,
+          accountId: accountIdValue
+        },
+        select: { id: true, username: true, email: true }
+      })
+
+      if (!user) {
+        return res.status(404).json({ error: 'User not found' })
+      }
+
+      // Calculate date range
+      let startDate = new Date()
+      switch (period) {
+        case '1h':
+          startDate.setHours(startDate.getHours() - 1)
+          break
+        case '12h':
+          startDate.setHours(startDate.getHours() - 12)
+          break
+        case '1d':
+          startDate.setDate(startDate.getDate() - 1)
+          break
+        case '3d':
+          startDate.setDate(startDate.getDate() - 3)
+          break
+        case '7d':
+          startDate.setDate(startDate.getDate() - 7)
+          break
+        case '30d':
+          startDate.setDate(startDate.getDate() - 30)
+          break
+        case '90d':
+          startDate.setDate(startDate.getDate() - 90)
+          break
+        case '1y':
+          startDate.setFullYear(startDate.getFullYear() - 1)
+          break
+        case 'all':
+          startDate = new Date(0)
+          break
+        default:
+          startDate.setDate(startDate.getDate() - 30)
+      }
+
+      // Get watch snapshots to track episode progress
+      const snapshotWhere = {
+        accountId: accountIdValue,
+        userId: userId,
+        date: {
+          gte: startDate
+        }
+      }
+
+      if (itemId) {
+        snapshotWhere.itemId = itemId
+      }
+
+      // Get snapshots for series only
+      const snapshots = await prisma.watchSnapshot.findMany({
+        where: snapshotWhere,
+        select: {
+          itemId: true,
+          date: true,
+          overallTimeWatched: true
+        },
+        orderBy: {
+          date: 'asc'
+        }
+      })
+
+      // Get watch activities to see daily changes
+      const activities = await prisma.watchActivity.findMany({
+        where: {
+          accountId: accountIdValue,
+          userId: userId,
+          itemType: 'series',
+          date: {
+            gte: startDate
+          },
+          ...(itemId ? { itemId } : {})
+        },
+        select: {
+          itemId: true,
+          date: true,
+          watchTimeSeconds: true
+        },
+        orderBy: {
+          date: 'asc'
+        }
+      })
+
+      // Group by itemId and calculate velocity
+      const velocityByItem = {}
+      
+      // Process activities to estimate episodes watched
+      // Assume average episode is ~45 minutes (2700 seconds)
+      const avgEpisodeSeconds = 45 * 60
+
+      for (const activity of activities) {
+        if (!velocityByItem[activity.itemId]) {
+          velocityByItem[activity.itemId] = {
+            itemId: activity.itemId,
+            totalWatchTimeSeconds: 0,
+            estimatedEpisodes: 0,
+            daysActive: new Set(),
+            firstWatched: activity.date,
+            lastWatched: activity.date,
+            watchDays: []
+          }
+        }
+
+        const item = velocityByItem[activity.itemId]
+        item.totalWatchTimeSeconds += activity.watchTimeSeconds || 0
+        item.daysActive.add(activity.date.toISOString().split('T')[0])
+        item.watchDays.push({
+          date: activity.date.toISOString().split('T')[0],
+          watchTimeSeconds: activity.watchTimeSeconds
+        })
+
+        if (activity.date < item.firstWatched) {
+          item.firstWatched = activity.date
+        }
+        if (activity.date > item.lastWatched) {
+          item.lastWatched = activity.date
+        }
+      }
+
+      // Calculate velocity metrics
+      const velocityResults = Object.values(velocityByItem).map(item => {
+        const daysActive = item.daysActive.size
+        const totalDays = Math.max(1, Math.ceil((item.lastWatched - item.firstWatched) / (1000 * 60 * 60 * 24)) + 1)
+        const estimatedEpisodes = Math.round(item.totalWatchTimeSeconds / avgEpisodeSeconds)
+        const episodesPerDay = daysActive > 0 ? (estimatedEpisodes / daysActive) : 0
+        const episodesPerWeek = episodesPerDay * 7
+
+        // Estimate completion date (if we have current progress)
+        let estimatedCompletion = null
+        if (itemId && snapshots.length > 0) {
+          const latestSnapshot = snapshots[snapshots.length - 1]
+          // This is a rough estimate - would need total episodes from metadata
+          // For now, just show velocity
+        }
+
+        return {
+          itemId: item.itemId,
+          totalWatchTimeSeconds: item.totalWatchTimeSeconds,
+          totalWatchTimeHours: Math.round((item.totalWatchTimeSeconds / 3600) * 100) / 100,
+          estimatedEpisodes,
+          daysActive,
+          totalDays,
+          episodesPerDay: Math.round(episodesPerDay * 100) / 100,
+          episodesPerWeek: Math.round(episodesPerWeek * 100) / 100,
+          firstWatched: item.firstWatched.toISOString().split('T')[0],
+          lastWatched: item.lastWatched.toISOString().split('T')[0],
+          watchDays: item.watchDays.slice(-7) // Last 7 days of activity
+        }
+      }).sort((a, b) => b.episodesPerDay - a.episodesPerDay)
+
+      res.json({
+        userId: user.id,
+        username: user.username || user.email,
+        period,
+        itemId: itemId || null,
+        averageEpisodeLength: avgEpisodeSeconds,
+        items: velocityResults
+      })
+    } catch (error) {
+      console.error('Error fetching velocity:', error)
+      res.status(500).json({ error: 'Failed to fetch velocity', message: error.message })
+    }
+  })
 
   // Get single user with detailed information
   router.get('/:id', async (req, res) => {
@@ -224,7 +929,8 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
         colorIndex: user.colorIndex,
         expiresAt: user.expiresAt,
         inviteCode: user.inviteCode,
-        createdAt: user.createdAt
+        createdAt: user.createdAt,
+        discordWebhookUrl: user.discordWebhookUrl || null
       }
 
       res.json(transformedUser)
@@ -234,7 +940,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
     }
   });
 
-  // Update user
+  // Update user (including Discord settings for public users)
   router.put('/:id', async (req, res) => {
     try {
       const { id } = req.params
@@ -289,6 +995,14 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
 
       if (expiresAt !== undefined) {
         updateData.expiresAt = expiresAt ? new Date(expiresAt) : null
+      }
+
+      // Handle Discord settings (for public users)
+      if (req.body.discordWebhookUrl !== undefined) {
+        updateData.discordWebhookUrl = req.body.discordWebhookUrl || null
+      }
+      if (req.body.discordUserId !== undefined) {
+        updateData.discordUserId = req.body.discordUserId || null
       }
 
       // Update user
@@ -390,6 +1104,42 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
     } catch (error) {
       console.error('Error updating user:', error)
       res.status(500).json({ error: 'Failed to update user', details: error?.message })
+    }
+  });
+
+  // Test user's Discord webhook
+  router.post('/:id/test-webhook', async (req, res) => {
+    try {
+      const { id } = req.params
+      const accountId = getAccountId(req)
+      
+      if (!accountId) {
+        return res.status(401).json({ error: 'Unauthorized' })
+      }
+
+      // Get user's webhook URL
+      const user = await prisma.user.findUnique({
+        where: { id, accountId },
+        select: { id: true, username: true, discordWebhookUrl: true }
+      })
+
+      if (!user) {
+        return res.status(404).json({ error: 'User not found' })
+      }
+
+      // Use provided URL or user's stored URL
+      const providedUrl = typeof req.body?.webhookUrl === 'string' ? req.body.webhookUrl.trim() : ''
+      const targetUrl = providedUrl || user.discordWebhookUrl
+
+      if (!targetUrl) {
+        return res.status(400).json({ message: 'No webhook URL configured' })
+      }
+
+      await postDiscord(targetUrl, `🔬 Syncio test webhook message for ${user.username}`)
+      return res.json({ message: 'Test message sent' })
+    } catch (error) {
+      console.error('Failed to send user webhook test:', error)
+      return res.status(500).json({ message: 'Failed to send test message', error: error?.message })
     }
   });
 
@@ -1236,6 +1986,690 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
     }
   })
 
+  // Get combined library/watch history from all users (for Activity page)
+  // Loads all cached library files for active users
+  router.get('/activity/library', async (req, res) => {
+    try {
+      const accountId = getAccountId(req)
+      if (!accountId) {
+        return res.status(401).json({ message: 'Unauthorized' })
+      }
+
+      // Get all active users with Stremio connections
+      // For admin view, show all users regardless of visibility
+      // For user-facing views, filter by activityVisibility (handled in frontend/user endpoints)
+      const users = await prisma.user.findMany({
+        where: {
+          accountId: accountId,
+          isActive: true,
+          stremioAuthKey: { not: null }
+        },
+        select: {
+          id: true,
+          username: true,
+          email: true,
+          stremioAuthKey: true,
+          colorIndex: true,
+          activityVisibility: true
+        }
+      })
+
+      if (users.length === 0) {
+        return res.json({
+          library: [],
+          count: 0
+        })
+      }
+
+      // Load all cached library files at once (only from this account's folder)
+      const { getAllCachedLibraries, setCachedLibrary } = require('../utils/libraryCache')
+      const userIds = users.map(u => u.id)
+      const cachedLibraries = getAllCachedLibraries(accountId, userIds)
+      
+      const allLibraryItems = []
+      const userMap = new Map() // Map user ID to user info for adding to items
+
+      // Process each user's cached library
+      // Note: This is an admin endpoint, so we include all users
+      // Frontend will filter by visibility for user-facing views
+      for (const user of users) {
+        try {
+          let library = cachedLibraries.get(user.id)
+          
+          // Check if cache only has removed items (stale cache) - if so, refresh from Stremio
+          // Active items: removed === false (or missing/undefined, treated as in library)
+          const hasActiveItems = library && Array.isArray(library) && library.some(item => {
+            return item.removed === false || item.removed === undefined || item.removed === null;
+          })
+          
+          // If no cache file exists or cache only has removed items, fetch from Stremio and cache it
+          if (!library || !Array.isArray(library) || library.length === 0 || !hasActiveItems) {
+            const authKeyPlain = decrypt(user.stremioAuthKey, req)
+            const apiClient = new StremioAPIClient({ endpoint: 'https://api.strem.io', authKey: authKeyPlain })
+
+            const libraryItems = await apiClient.request('datastoreGet', {
+              collection: 'libraryItem',
+              ids: [],
+              all: true
+            })
+
+            library = Array.isArray(libraryItems) ? libraryItems : (libraryItems?.result || libraryItems?.library || [])
+            
+            // Cache the library data for future requests
+            if (Array.isArray(library) && library.length > 0) {
+              setCachedLibrary(accountId, user.id, library)
+            }
+          }
+
+          // Add user info to each item
+          library = library.map(item => ({
+            ...item,
+            _userId: user.id,
+            _username: user.username || user.email,
+            _userColorIndex: user.colorIndex || 0
+          }))
+
+          allLibraryItems.push(...library)
+          userMap.set(user.id, { username: user.username, email: user.email })
+        } catch (error) {
+          console.error(`Error loading library for user ${user.id}:`, error)
+          // Continue with other users
+        }
+      }
+
+      // Process and expand items (same logic as single user endpoint)
+      // Group by show ID + user ID to handle multiple users watching the same show
+      const expandedLibrary = []
+      const episodeItemsByShowAndUser = new Map() // Key: `${showId}:${userId}`
+      
+      for (const item of allLibraryItems) {
+        if (item.type === 'movie') {
+          expandedLibrary.push(item)
+          continue
+        }
+        
+        const isEpisodeItem = item._id && item._id.includes(':') && item._id.split(':').length >= 3
+        
+        if (isEpisodeItem) {
+          const showId = item._id.split(':')[0]
+          const userId = item._userId
+          const key = `${showId}:${userId}`
+          if (!episodeItemsByShowAndUser.has(key)) {
+            episodeItemsByShowAndUser.set(key, [])
+          }
+          episodeItemsByShowAndUser.get(key).push(item)
+          continue
+        }
+        
+        // Just add the item as-is (no cinemeta expansion)
+        expandedLibrary.push(item)
+      }
+
+      // Process episode items: only keep the latest episode per show per user
+      episodeItemsByShowAndUser.forEach((episodes, key) => {
+        const latestEpisode = findLatestEpisode(episodes)
+        if (latestEpisode) {
+          expandedLibrary.push(latestEpisode)
+        }
+      })
+
+      // Sort by watch date in descending order (most recent first), using lastWatched only
+      expandedLibrary.sort((a, b) => {
+        const getWatchDate = (item) => {
+          if (item.state?.lastWatched) {
+            const date = new Date(item.state.lastWatched)
+            if (!isNaN(date.getTime())) return date.getTime()
+          }
+          return 0
+        }
+
+        const dateA = getWatchDate(a)
+        const dateB = getWatchDate(b)
+
+        if (dateB === dateA) return 0
+        return dateB - dateA
+      })
+
+        // Return all items (both removed and non-removed)
+        // Frontend will filter based on viewType:
+        // - Library mode: shows only non-removed items (removed: false)
+        // - History mode: shows all watched items (based on _ctime) regardless of removed status
+
+      res.json({
+        library: expandedLibrary,
+        count: expandedLibrary.length
+      })
+    } catch (error) {
+      console.error('Error fetching combined library:', error)
+      res.status(500).json({ message: 'Failed to fetch combined library', error: error?.message })
+    }
+  })
+
+  // Get like/love status for a media item in Stremio
+  router.get('/:userId/status', async (req, res) => {
+    try {
+      const { userId } = req.params
+      const { mediaId, mediaType } = req.query
+      const accountId = getAccountId(req)
+
+      if (!mediaId || !mediaType) {
+        return res.status(400).json({ message: 'mediaId and mediaType are required' })
+      }
+
+      // Get user
+      const user = await prisma.user.findUnique({
+        where: { 
+          id: userId,
+          accountId: accountId
+        },
+        select: { 
+          stremioAuthKey: true,
+          isActive: true
+        }
+      })
+
+      if (!user || !user.isActive) {
+        return res.status(404).json({ message: 'User not found or inactive' })
+      }
+
+      if (!user.stremioAuthKey) {
+        return res.status(400).json({ message: 'User not connected to Stremio' })
+      }
+
+      // Decrypt auth key
+      const authKeyPlain = decrypt(user.stremioAuthKey, req)
+
+      // Call Stremio likes API to get status
+      const response = await fetch(`https://likes.stremio.com/api/get_status?authToken=${encodeURIComponent(authKeyPlain)}&mediaId=${encodeURIComponent(mediaId)}&mediaType=${encodeURIComponent(mediaType)}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      })
+
+      if (!response.ok) {
+        const errorText = await response.text()
+        console.error(`[Get Status] Stremio API error: ${response.status} - ${errorText}`)
+        return res.status(response.status).json({ 
+          message: 'Failed to get like/love status',
+          error: errorText 
+        })
+      }
+
+      const data = await response.json().catch(() => ({}))
+      // Stremio returns { status: 'liked' | 'loved' | null }
+      res.json({ status: data.status || null })
+    } catch (error) {
+      console.error('Error getting like/love status:', error)
+      res.status(500).json({ message: 'Failed to get like/love status', error: error?.message })
+    }
+  })
+
+  // Update like/love status for a media item in Stremio
+  router.post('/:userId/statusUpdate', async (req, res) => {
+    try {
+      const { userId } = req.params
+      const { mediaId, mediaType, status } = req.body // status: 'liked', 'loved', or null
+      const accountId = getAccountId(req)
+
+      if (!mediaId || !mediaType) {
+        return res.status(400).json({ message: 'mediaId and mediaType are required' })
+      }
+
+      if (status !== null && status !== undefined && !['liked', 'loved'].includes(status)) {
+        return res.status(400).json({ message: 'status must be "liked", "loved", or null' })
+      }
+
+      // Get user
+      const user = await prisma.user.findUnique({
+        where: { 
+          id: userId,
+          accountId: accountId
+        },
+        select: { 
+          stremioAuthKey: true,
+          isActive: true
+        }
+      })
+
+      if (!user || !user.isActive) {
+        return res.status(404).json({ message: 'User not found or inactive' })
+      }
+
+      if (!user.stremioAuthKey) {
+        return res.status(400).json({ message: 'User not connected to Stremio' })
+      }
+
+      // Decrypt auth key
+      const authKeyPlain = decrypt(user.stremioAuthKey, req)
+
+      // Call Stremio likes API
+      const response = await fetch('https://likes.stremio.com/api/send', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          authToken: authKeyPlain,
+          mediaId: mediaId,
+          mediaType: mediaType, // 'series' or 'movie'
+          status: status // 'liked', 'loved', or null to unlike/unlove
+        })
+      })
+
+      if (!response.ok) {
+        const errorText = await response.text()
+        console.error(`[Like/Love] Stremio API error: ${response.status} - ${errorText}`)
+        return res.status(response.status).json({ 
+          message: 'Failed to update like/love status',
+          error: errorText 
+        })
+      }
+
+      const data = await response.json().catch(() => ({}))
+      res.json({ success: true, data })
+    } catch (error) {
+      console.error('Error updating like/love status:', error)
+      res.status(500).json({ message: 'Failed to update like/love status', error: error?.message })
+    }
+  })
+
+  // Toggle library status (add/remove) for selected items
+  router.post('/:userId/library/toggle', async (req, res) => {
+    try {
+      const { userId } = req.params
+      const { items } = req.body // Array of { itemId, itemType, itemName, poster, addToLibrary }
+      const accountId = getAccountId(req)
+
+      if (!items || !Array.isArray(items) || items.length === 0) {
+        return res.status(400).json({ message: 'items array is required' })
+      }
+
+      // Get user
+      const user = await prisma.user.findUnique({
+        where: { 
+          id: userId,
+          accountId: accountId
+        },
+        select: { 
+          stremioAuthKey: true,
+          isActive: true
+        }
+      })
+
+      if (!user || !user.isActive) {
+        return res.status(404).json({ message: 'User not found or inactive' })
+      }
+
+      if (!user.stremioAuthKey) {
+        return res.status(400).json({ message: 'User not connected to Stremio' })
+      }
+
+      // Decrypt auth key
+      const authKeyPlain = decrypt(user.stremioAuthKey, req)
+
+      const { toggleLibraryItemsBatch } = require('../utils/libraryToggle')
+      const { clearCache, setCachedLibrary } = require('../utils/libraryCache')
+
+      // Process all items in a single batch call (1 API call per user)
+      let batchResult
+      try {
+        batchResult = await toggleLibraryItemsBatch({
+          authKey: authKeyPlain,
+          items: items,
+          logPrefix: `[LibraryToggle] User ${userId}`
+        })
+      } catch (error) {
+        console.error(`[LibraryToggle] Failed to toggle library items for user ${userId}:`, error)
+        console.error(`[LibraryToggle] Error stack:`, error?.stack)
+        clearCache(accountId, userId)
+        return res.status(500).json({ 
+          error: 'Failed to toggle library items', 
+          message: error?.message || String(error),
+          success: false,
+          successCount: 0,
+          errorCount: items.length,
+          results: items.map(item => ({ itemId: item.itemId, success: false, error: error?.message }))
+        })
+      }
+
+      // Wait a moment for Stremio to process the changes before refreshing cache
+      await new Promise(resolve => setTimeout(resolve, 1000))
+
+      // Fetch updated library from Stremio and update cache
+      try {
+        const apiClient = new StremioAPIClient({ endpoint: 'https://api.strem.io', authKey: authKeyPlain })
+        const libraryItems = await apiClient.request('datastoreGet', {
+          collection: 'libraryItem',
+          ids: [],
+          all: true
+        })
+        
+        let library = []
+        if (Array.isArray(libraryItems)) {
+          library = libraryItems
+        } else if (libraryItems?.result) {
+          library = Array.isArray(libraryItems.result) ? libraryItems.result : [libraryItems.result]
+        } else if (libraryItems?.library) {
+          library = Array.isArray(libraryItems.library) ? libraryItems.library : [libraryItems.library]
+        }
+        
+        if (Array.isArray(library) && library.length > 0) {
+          setCachedLibrary(accountId, userId, library)
+          console.log(`[LibraryToggle] Updated cache for user ${userId} with ${library.length} items`)
+        }
+      } catch (cacheError) {
+        console.error(`[LibraryToggle] Failed to refresh cache for user ${userId}:`, cacheError)
+        // Clear cache as fallback so it will be refreshed on next request
+        clearCache(accountId, userId)
+      }
+
+      const successCount = batchResult?.processedCount || 0
+      const errorCount = items.length - successCount
+
+      // Build results array for response
+      const results = items.map((item, index) => ({
+        itemId: item.itemId,
+        success: index < successCount,
+        error: index < successCount ? undefined : 'Item was skipped or failed'
+      }))
+
+      res.json({ 
+        success: errorCount === 0,
+        results,
+        successCount,
+        errorCount
+      })
+    } catch (error) {
+      console.error('Error toggling library items:', error)
+      res.status(500).json({ error: 'Failed to toggle library items', message: error?.message })
+    }
+  })
+
+  // Delete a library item from a user's Stremio library
+  router.delete('/:userId/library/:itemId', async (req, res) => {
+    try {
+      const { userId, itemId } = req.params
+      const accountId = getAccountId(req)
+
+      // Get user
+      const user = await prisma.user.findUnique({
+        where: { 
+          id: userId,
+          accountId: accountId
+        },
+        select: { 
+          stremioAuthKey: true,
+          isActive: true
+        }
+      })
+
+      if (!user) {
+        return res.status(404).json({ error: 'User not found' })
+      }
+
+      if (!user.isActive) {
+        return res.status(400).json({ error: 'User is disabled' })
+      }
+
+      if (!user.stremioAuthKey) {
+        return res.status(400).json({ error: 'User not connected to Stremio' })
+      }
+
+      // Decrypt auth key
+      const authKeyPlain = decrypt(user.stremioAuthKey, req)
+
+      const { markLibraryItemRemoved } = require('../utils/libraryDelete')
+
+      try {
+        await markLibraryItemRemoved({
+          authKey: authKeyPlain,
+          itemId,
+          logPrefix: '[users/delete-library-item]'
+        })
+      } catch (deleteError) {
+        if (deleteError.code === 'NOT_FOUND') {
+          return res.status(404).json({ error: 'Library item not found', itemId: deleteError.meta?.itemId })
+        }
+        console.error('[users] Error deleting library item via helper:', deleteError)
+        return res.status(500).json({ error: 'Failed to delete library item', message: deleteError?.message })
+      }
+
+      // Clear the cache for this user so it refreshes on next request
+      const { clearCache } = require('../utils/libraryCache')
+      clearCache(accountId, userId)
+
+      res.json({ 
+        success: true,
+        message: 'Library item deleted successfully'
+      })
+    } catch (error) {
+      console.error('Error deleting library item:', error)
+      res.status(500).json({ error: 'Failed to delete library item', message: error?.message })
+    }
+  })
+
+  // Backup user's library (download as JSON)
+  router.get('/:id/library/backup', async (req, res) => {
+    try {
+      const { id } = req.params
+      const accountId = getAccountId(req)
+
+      // Get user
+      const user = await prisma.user.findUnique({
+        where: { 
+          id,
+          accountId: accountId
+        },
+        select: { 
+          stremioAuthKey: true,
+          isActive: true,
+          username: true,
+          email: true
+        }
+      })
+
+      if (!user) {
+        return res.status(404).json({ error: 'User not found' })
+      }
+
+      if (!user.isActive) {
+        return res.status(400).json({ error: 'User is disabled' })
+      }
+
+      if (!user.stremioAuthKey) {
+        return res.status(400).json({ error: 'User not connected to Stremio' })
+      }
+
+      // Decrypt auth key
+      const authKeyPlain = decrypt(user.stremioAuthKey, req)
+      const apiClient = new StremioAPIClient({ endpoint: 'https://api.strem.io', authKey: authKeyPlain })
+
+      // Get all library items
+      const libraryItems = await apiClient.request('datastoreGet', {
+        collection: 'libraryItem',
+        ids: [],
+        all: true
+      })
+
+      let library = Array.isArray(libraryItems) ? libraryItems : (libraryItems?.result || libraryItems?.library || [])
+
+      // Find the latest modification time for filename
+      let lastModified = 0
+      for (const item of library) {
+        const mtime = item._mtime || item.mtime || 0
+        if (mtime > lastModified) {
+          lastModified = mtime
+        }
+      }
+
+      // Generate filename: Stremio-Library-{email/username}-{timestamp}.json
+      const userIdentifier = user.email || user.username || 'user'
+      const timestamp = lastModified || Date.now()
+      const filename = `Stremio-Library-${userIdentifier}-${timestamp}.json`
+
+      // Set headers for file download
+      res.setHeader('Content-Type', 'application/json')
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`)
+
+      // Send JSON response
+      res.json(library)
+    } catch (error) {
+      console.error('Error backing up library:', error)
+      res.status(500).json({ error: 'Failed to backup library', message: error?.message })
+    }
+  })
+
+  // Get user's library/watch history
+  router.get('/:id/library', async (req, res) => {
+    try {
+      const { id } = req.params
+
+      const user = await prisma.user.findUnique({
+        where: { 
+          id,
+          accountId: getAccountId(req)
+        },
+        select: { 
+          stremioAuthKey: true,
+          isActive: true
+        }
+      })
+
+      if (!user) {
+        return responseUtils.notFound(res, 'User')
+      }
+
+      if (!user.stremioAuthKey) {
+        return res.status(400).json({ message: 'User not connected to Stremio' })
+      }
+
+      if (!user.isActive) {
+        return res.status(400).json({ message: 'User is disabled' })
+      }
+
+      try {
+        // Use cached library data (updated every 5 minutes by activity monitor)
+        const accountId = getAccountId(req)
+        const { getCachedLibrary, setCachedLibrary } = require('../utils/libraryCache')
+        let library = getCachedLibrary(accountId, id)
+        
+        // If no cache, fetch from Stremio and cache it
+        if (!library || !Array.isArray(library) || library.length === 0) {
+          const authKeyPlain = decrypt(user.stremioAuthKey, req)
+          const apiClient = new StremioAPIClient({ endpoint: 'https://api.strem.io', authKey: authKeyPlain })
+
+          // Get library items from Stremio API using datastoreGet
+          const libraryItems = await apiClient.request('datastoreGet', {
+            collection: 'libraryItem',
+            ids: [],
+            all: true
+          })
+
+          // The response might be wrapped or direct array
+          library = Array.isArray(libraryItems) ? libraryItems : (libraryItems?.result || libraryItems?.library || [])
+          
+          // Cache the library data
+          if (Array.isArray(library) && library.length > 0) {
+            setCachedLibrary(accountId, id, library)
+          }
+        }
+
+        // Expand series into individual episodes
+        // Stremio stores one library item per show with a watched bitfield
+        // We only want to show the latest episode per show (since we only have show-level watch dates)
+        const expandedLibrary = []
+        const episodeItemsByShow = new Map() // Track episode items by show ID
+        
+        // First pass: collect all items
+        for (const item of library) {
+          // Movies: add as-is
+          if (item.type === 'movie') {
+            expandedLibrary.push(item)
+            continue
+          }
+          
+          // Series: Check if Stremio already returned per-episode items
+          // If the _id contains episode info (format: "tt1234567:season:episode"), it's already an episode item
+          const isEpisodeItem = item._id && item._id.includes(':') && item._id.split(':').length >= 3
+          
+          if (isEpisodeItem) {
+            // Stremio already returned this as a separate episode item
+            // Group by show ID to find the latest episode per show
+            const showId = item._id.split(':')[0] // Get base show ID (e.g., "tt0096697" from "tt0096697:0:1")
+            if (!episodeItemsByShow.has(showId)) {
+              episodeItemsByShow.set(showId, [])
+            }
+            episodeItemsByShow.get(showId).push(item)
+            continue
+          }
+          
+          // Just add the item as-is (no cinemeta expansion)
+          expandedLibrary.push(item)
+        }
+
+        // Process episode items: only keep the latest episode per show
+        episodeItemsByShow.forEach((episodes, showId) => {
+          const latestEpisode = findLatestEpisode(episodes, { inheritPoster: true })
+          if (latestEpisode) {
+            expandedLibrary.push(latestEpisode)
+          }
+        })
+
+        // Enrich items with missing posters from Cinemeta
+        await enrichPostersFromCinemeta(expandedLibrary)
+
+        // Sort by watch date in descending order (most recent first), using the least-recent of _mtime vs lastWatched
+        expandedLibrary.sort((a, b) => {
+          const getWatchDate = (item) => {
+            const dates = []
+            if (item._mtime) {
+              const d = new Date(item._mtime)
+              if (!isNaN(d.getTime())) dates.push(d.getTime())
+            }
+            if (item.state?.lastWatched) {
+              const d = new Date(item.state.lastWatched)
+              if (!isNaN(d.getTime())) dates.push(d.getTime())
+            }
+            if (dates.length === 0) return 0
+            return Math.min(...dates)
+          }
+
+          const dateA = getWatchDate(a)
+          const dateB = getWatchDate(b)
+
+          // Descending order (most recent first) - higher timestamp comes first
+          // If dates are equal, maintain original order
+          if (dateB === dateA) return 0
+          return dateB - dateA
+        })
+
+        // Debug: log first few items to verify sorting
+        if (expandedLibrary.length > 0) {
+          console.log('Library sorted by date (first 5 items, using min(_mtime,lastWatched)):')
+          expandedLibrary.slice(0, 5).forEach((item, idx) => {
+            const dates = []
+            if (item._mtime) dates.push(item._mtime)
+            if (item.state?.lastWatched) dates.push(item.state.lastWatched)
+            const date = dates.length ? Math.min(...dates.map(d => new Date(d).getTime())) : null
+            console.log(`${idx + 1}. ${item.name} - ${date}`)
+          })
+        }
+
+        res.json({
+          library: expandedLibrary,
+          count: expandedLibrary.length
+        })
+      } catch (error) {
+        console.error('Error fetching library items:', error)
+        res.status(500).json({ message: 'Failed to fetch library items', error: error?.message })
+      }
+    } catch (error) {
+      console.error('Error in get library endpoint:', error)
+      res.status(500).json({ message: 'Failed to fetch library items', error: error?.message })
+    }
+  })
+
   // Clear all Stremio addons from user's account
   router.post('/:id/stremio-addons/clear', async (req, res) => {
     try {
@@ -1268,8 +2702,9 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
         const authKeyPlain = decrypt(user.stremioAuthKey, req)
         const apiClient = new StremioAPIClient({ endpoint: 'https://api.strem.io', authKey: authKeyPlain })
 
-        // Clear the entire addon collection in one call (matches old backend)
-        await apiClient.request('addonCollectionSet', { addons: [] })
+        // Clear all addons
+        const { clearAddons } = require('../utils/addonHelpers')
+        await clearAddons(apiClient)
 
         res.json({
           message: 'All addons cleared successfully',
@@ -2549,6 +3984,374 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
     }
   })
 
+  // ==================== USER ACTIVITY VISIBILITY ====================
+  // Update user's activity visibility
+  router.patch('/:id/activity-visibility', async (req, res) => {
+    try {
+      const { id } = req.params
+      const { activityVisibility } = req.body
+      const accountId = getAccountId(req)
+
+      if (!accountId) {
+        return res.status(401).json({ error: 'Unauthorized' })
+      }
+
+      if (!activityVisibility || !['public', 'private'].includes(activityVisibility)) {
+        return res.status(400).json({ error: 'Invalid activityVisibility value. Must be "public" or "private".' })
+      }
+
+      const user = await prisma.user.findUnique({
+        where: { 
+          id,
+          accountId
+        }
+      })
+
+      if (!user) {
+        return res.status(404).json({ error: 'User not found' })
+      }
+
+      const updatedUser = await prisma.user.update({
+        where: { 
+          id,
+          accountId
+        },
+        data: { activityVisibility }
+      })
+
+      res.json({ 
+        message: `Activity visibility set to ${activityVisibility}`,
+        activityVisibility: updatedUser.activityVisibility 
+      })
+    } catch (error) {
+      console.error('Error updating user activity visibility:', error)
+      res.status(500).json({ error: 'Failed to update activity visibility', details: error?.message })
+    }
+  })
+
+  // ==================== SHARES ENDPOINTS ====================
+  const { getShares, addShare, removeShare, markShareAsViewed, getGroupMembers } = require('../utils/sharesManager')
+  const { getCachedLibrary } = require('../utils/libraryCache')
+
+  // Get all shares for a user (sent + received)
+  router.get('/:userId/shares', async (req, res) => {
+    try {
+      const { userId } = req.params
+      const accountId = getAccountId(req)
+      
+      if (!accountId) {
+        return res.status(401).json({ error: 'Unauthorized' })
+      }
+
+      // Verify user exists and belongs to account
+      const user = await prisma.user.findUnique({
+        where: { id: userId, accountId },
+        select: { id: true, username: true }
+      })
+
+      if (!user) {
+        return res.status(404).json({ error: 'User not found' })
+      }
+
+      const shares = getShares(accountId, userId)
+      res.json(shares)
+    } catch (error) {
+      console.error(`Failed to get shares for user ${req.params.userId}:`, error)
+      res.status(500).json({ error: 'Failed to get shares', message: error?.message })
+    }
+  })
+
+  // Get received shares only
+  router.get('/:userId/shares/received', async (req, res) => {
+    try {
+      const { userId } = req.params
+      const accountId = getAccountId(req)
+      
+      if (!accountId) {
+        return res.status(401).json({ error: 'Unauthorized' })
+      }
+
+      const user = await prisma.user.findUnique({
+        where: { id: userId, accountId },
+        select: { id: true }
+      })
+
+      if (!user) {
+        return res.status(404).json({ error: 'User not found' })
+      }
+
+      const shares = getShares(accountId, userId)
+      res.json({ received: shares.received })
+    } catch (error) {
+      console.error(`Failed to get received shares for user ${req.params.userId}:`, error)
+      res.status(500).json({ error: 'Failed to get received shares', message: error?.message })
+    }
+  })
+
+  // Get group members (users in same group)
+  router.get('/:userId/shares/group-members', async (req, res) => {
+    try {
+      const { userId } = req.params
+      const accountId = getAccountId(req)
+      
+      if (!accountId) {
+        return res.status(401).json({ error: 'Unauthorized' })
+      }
+
+      const user = await prisma.user.findUnique({
+        where: { id: userId, accountId },
+        select: { id: true }
+      })
+
+      if (!user) {
+        return res.status(404).json({ error: 'User not found' })
+      }
+
+      const groupMembers = await getGroupMembers(prisma, accountId, userId)
+      res.json({ members: groupMembers })
+    } catch (error) {
+      console.error(`Failed to get group members for user ${req.params.userId}:`, error)
+      res.status(500).json({ error: 'Failed to get group members', message: error?.message })
+    }
+  })
+
+  // Share item(s) with user(s)
+  router.post('/:userId/shares', async (req, res) => {
+    try {
+      const { userId } = req.params
+      const { items, targetUserIds } = req.body
+      const accountId = getAccountId(req)
+      
+      if (!accountId) {
+        return res.status(401).json({ error: 'Unauthorized' })
+      }
+
+      if (!Array.isArray(items) || items.length === 0) {
+        return res.status(400).json({ error: 'Items array is required' })
+      }
+
+      if (!Array.isArray(targetUserIds) || targetUserIds.length === 0) {
+        return res.status(400).json({ error: 'Target user IDs array is required' })
+      }
+
+      // Verify sender exists and get info for notification
+      const sender = await prisma.user.findUnique({
+        where: { id: userId, accountId },
+        select: { id: true, username: true, email: true, colorIndex: true }
+      })
+
+      if (!sender) {
+        return res.status(404).json({ error: 'User not found' })
+      }
+
+      // Get target users with their Discord webhook URLs for notifications
+      const targetUsers = await prisma.user.findMany({
+        where: { id: { in: targetUserIds }, accountId },
+        select: { id: true, username: true, discordWebhookUrl: true }
+      })
+      const targetUserMap = new Map(targetUsers.map(u => [u.id, u]))
+
+      // Verify all target users exist and are in the same group
+      const groupMembers = await getGroupMembers(prisma, accountId, userId)
+      const groupMemberIds = new Set(groupMembers.map(u => u.id))
+      
+      const invalidTargets = targetUserIds.filter(id => !groupMemberIds.has(id))
+      if (invalidTargets.length > 0) {
+        return res.status(400).json({ 
+          error: 'Some target users are not in your group',
+          invalidTargets 
+        })
+      }
+
+      // Get sender's library to verify items exist
+      const senderLibrary = getCachedLibrary(accountId, userId) || []
+      const libraryItemMap = new Map()
+      const baseIdMap = new Map() // Map base IDs (tt...) to any matching library item
+      
+      senderLibrary.forEach(item => {
+        const itemId = item._id || item.id
+        if (itemId) {
+          libraryItemMap.set(itemId, item)
+          // Also index by base ID (everything before the first colon)
+          const baseId = itemId.split(':')[0]
+          if (baseId && !baseIdMap.has(baseId)) {
+            baseIdMap.set(baseId, item)
+          }
+        }
+      })
+
+      // Helper to find item in library (exact match first, then base ID match)
+      const findLibraryItem = (searchId) => {
+        // Try exact match first
+        let found = libraryItemMap.get(searchId)
+        if (found) return found
+        
+        // Try base ID match (for shows where we might have episode IDs)
+        const baseId = searchId.split(':')[0]
+        found = baseIdMap.get(baseId)
+        if (found) return found
+        
+        return null
+      }
+
+      // Build valid items - use library data when available, fall back to frontend data
+      const validItems = []
+      for (const item of items) {
+        const itemId = item.itemId || item._id || item.id
+        const libraryItem = findLibraryItem(itemId)
+        
+        // Accept item if found in library OR if frontend provided enough data
+        if (libraryItem || (item.itemName && item.itemType)) {
+          validItems.push({
+            itemId,
+            itemName: libraryItem?.name || item.itemName || 'Unknown',
+            itemType: libraryItem?.type || item.itemType || 'movie',
+            poster: libraryItem?.poster || item.poster || ''
+          })
+        }
+      }
+
+      if (validItems.length === 0) {
+        return res.status(400).json({ 
+          error: 'No valid items to share'
+        })
+      }
+
+      // Share each item with each target user
+      const results = []
+      const errors = []
+
+      // Track which users received shares for notifications
+      const notificationsToSend = []
+
+      for (const item of validItems) {
+        for (const targetUserId of targetUserIds) {
+          try {
+            const targetUser = groupMembers.find(u => u.id === targetUserId)
+            if (!targetUser) continue
+
+            const share = addShare(
+              accountId,
+              userId,
+              targetUserId,
+              item,
+              sender.username,
+              targetUser.username
+            )
+            results.push(share)
+            
+            // Queue notification if target user has a Discord webhook
+            const targetUserData = targetUserMap.get(targetUserId)
+            if (targetUserData?.discordWebhookUrl) {
+              notificationsToSend.push({
+                webhookUrl: targetUserData.discordWebhookUrl,
+                item
+              })
+            }
+          } catch (error) {
+            if (error.message.includes('already shared')) {
+              // Skip duplicates silently
+              continue
+            }
+            errors.push({ itemId: item.itemId, targetUserId, error: error.message })
+          }
+        }
+      }
+
+      // Send Discord notifications to target users (don't block the response)
+      if (notificationsToSend.length > 0) {
+        // Fire and forget - send notifications in the background
+        setImmediate(async () => {
+          for (const notification of notificationsToSend) {
+            try {
+              await sendShareNotification(
+                notification.webhookUrl,
+                sender.username,
+                sender.email,
+                sender.colorIndex,
+                notification.item
+              )
+            } catch (err) {
+              // Silently fail - notifications are best effort
+            }
+          }
+        })
+      }
+
+      res.json({
+        success: errors.length === 0,
+        shared: results.length,
+        results,
+        errors: errors.length > 0 ? errors : undefined
+      })
+    } catch (error) {
+      console.error(`Failed to share items for user ${req.params.userId}:`, error)
+      res.status(500).json({ error: 'Failed to share items', message: error?.message })
+    }
+  })
+
+  // Remove a share
+  router.delete('/:userId/shares/:shareId', async (req, res) => {
+    try {
+      const { userId, shareId } = req.params
+      const accountId = getAccountId(req)
+      
+      if (!accountId) {
+        return res.status(401).json({ error: 'Unauthorized' })
+      }
+
+      const user = await prisma.user.findUnique({
+        where: { id: userId, accountId },
+        select: { id: true }
+      })
+
+      if (!user) {
+        return res.status(404).json({ error: 'User not found' })
+      }
+
+      const removed = removeShare(accountId, userId, shareId)
+      if (!removed) {
+        return res.status(404).json({ error: 'Share not found' })
+      }
+
+      res.json({ success: true, message: 'Share removed' })
+    } catch (error) {
+      console.error(`Failed to remove share ${req.params.shareId} for user ${req.params.userId}:`, error)
+      res.status(500).json({ error: 'Failed to remove share', message: error?.message })
+    }
+  })
+
+  // Mark share as viewed
+  router.put('/:userId/shares/:shareId/viewed', async (req, res) => {
+    try {
+      const { userId, shareId } = req.params
+      const accountId = getAccountId(req)
+      
+      if (!accountId) {
+        return res.status(401).json({ error: 'Unauthorized' })
+      }
+
+      const user = await prisma.user.findUnique({
+        where: { id: userId, accountId },
+        select: { id: true }
+      })
+
+      if (!user) {
+        return res.status(404).json({ error: 'User not found' })
+      }
+
+      const marked = markShareAsViewed(accountId, userId, shareId)
+      if (!marked) {
+        return res.status(404).json({ error: 'Share not found' })
+      }
+
+      res.json({ success: true, message: 'Share marked as viewed' })
+    } catch (error) {
+      console.error(`Failed to mark share ${req.params.shareId} as viewed for user ${req.params.userId}:`, error)
+      res.status(500).json({ error: 'Failed to mark share as viewed', message: error?.message })
+    }
+  })
+
   return router;
 };
 
@@ -2744,7 +4547,17 @@ async function syncUserAddons(prismaClient, userId, excludedManifestUrls = [], u
         return { success: true, total: (plan.desired || []).length, alreadySynced: true }
       }
 
-      await apiClient.request('addonCollectionSet', { addons: plan.desired || [] })
+      // If desired addons is empty (empty group), clear all addons
+      let finalDesired = plan.desired || []
+      if (finalDesired.length === 0) {
+        // Empty group: clear all addons
+        const { clearAddons } = require('../utils/addonHelpers')
+        await clearAddons(apiClient)
+        console.log('📦 Empty group detected, cleared all addons')
+        return { success: true, total: 0 }
+      }
+
+      await apiClient.request('addonCollectionSet', { addons: finalDesired })
       console.log('✅ User now synced')
       return { success: true, total: (plan.desired || []).length }
       } catch (e) {
