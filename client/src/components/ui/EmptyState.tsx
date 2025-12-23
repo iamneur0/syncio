@@ -23,8 +23,8 @@ export default function EmptyState({
   }
   
   return (
-    <div className={`text-center py-12 px-4 ${className}`}>
-      <div className={`mx-auto w-16 h-16 mb-4 ${getIconColor()}`}>
+    <div className={`flex flex-col items-center justify-center min-h-[200px] py-12 px-4 ${className}`}>
+      <div className={`w-16 h-16 mb-4 flex items-center justify-center ${getIconColor()}`}>
         {icon}
       </div>
       

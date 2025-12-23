@@ -334,7 +334,7 @@ export default function SettingsPage() {
         const whUrl = r.data?.webhookUrl || ''
         setWebhookUrl(whUrl)
         // Extract useCustomFields from sync config (with backward compatibility for useCustomNames)
-        const customFields = r.data?.useCustomFields !== undefined ? !!r.data.useCustomFields : (r.data?.useCustomNames !== undefined ? !!r.data.useCustomNames : true)
+        const customFields = r.data?.useCustomFields !== undefined ? !!r.data.useCustomFields : (r.data?.useCustomNames !== undefined ? !!r.data.useCustomNames : false)
         setUseCustomFields(customFields)
       })
       .catch(() => {})
@@ -875,7 +875,7 @@ export default function SettingsPage() {
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4 gap-4">
           <div>
             <h1 className={`hidden sm:block text-xl sm:text-2xl font-bold`}>Settings</h1>
-            <p className={`text-sm sm:text-base color-text-secondary`}>Configure your Syncio preferences</p>
+            <p className={`hidden lg:block text-sm sm:text-base color-text-secondary`}>Configure your Syncio preferences</p>
           </div>
           <div className="flex items-center gap-2">
             {/* Desktop account button */}

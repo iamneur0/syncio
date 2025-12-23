@@ -284,6 +284,22 @@ export default function SyncBadge({
     ? () => onSync(userId || groupId!)
     : onClick
 
+  // Get error message for tooltip if status is error
+  const errorMessage = React.useMemo(() => {
+    if (finalStatus === 'error' && isSmartMode) {
+      if (userId && userSyncStatus) {
+        return (userSyncStatus as any).message || 'Unknown error'
+      }
+      if (groupId && groupSyncStatus) {
+        return (groupSyncStatus as any).message || 'Unknown error'
+      }
+    }
+    return null
+  }, [finalStatus, isSmartMode, userId, groupId, userSyncStatus, groupSyncStatus])
+
+  // Combine title with error message if available
+  const finalTitle = errorMessage ? `${title || ''}${title ? ' - ' : ''}Error: ${errorMessage}`.trim() : title
+
   const getStatusConfig = () => {
     const baseBackground = accentBackground
     const neutralDot = 'color-mix(in srgb, var(--color-text) 40%, var(--color-surface))'
@@ -380,7 +396,7 @@ export default function SyncBadge({
       <div 
         className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-medium ${finalIsClickable ? 'cursor-pointer hover:opacity-80 transition-opacity' : 'cursor-default'}`}
         style={{ backgroundColor: config.background, color: config.textColor }}
-        title={title}
+        title={finalTitle}
       >
         <div className={`w-2 h-2 rounded-full ${isSpinning ? 'animate-spin' : ''}`} style={{ backgroundColor: config.dot }} />
       </div>
@@ -418,7 +434,7 @@ export default function SyncBadge({
         backgroundColor: config.background,
         color: config.textColor
       }}
-      title={title}
+      title={finalTitle}
     >
       <div className={`w-2 h-2 rounded-full mr-1 ${isSpinning ? 'animate-spin' : ''}`} style={{ backgroundColor: config.dot }} />
       {config.text}
