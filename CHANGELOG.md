@@ -1,5 +1,41 @@
 # Changelog
 
+## [0.3.3](https://github.com/iamneur0/syncio/compare/v0.3.2...v0.3.3) (2025-12-23)
+
+
+### Features
+
+* add activity monitoring system ([ab25d30](https://github.com/iamneur0/syncio/commit/ab25d30ed4a1853b0a0ec59d313a9f51dbaa9af0))
+* add activity page component ([ba95ab4](https://github.com/iamneur0/syncio/commit/ba95ab4c1ee387541192d769e3f33fb4caa651c4))
+* add addon icon utility ([61eb73d](https://github.com/iamneur0/syncio/commit/61eb73d8d47b5041fc014f1f7095c6a31de2bc1c))
+* add library export functionality to TasksPage with user selection ([46e4641](https://github.com/iamneur0/syncio/commit/46e464121b61e9c0fb378e3699bccb46859fe345))
+* add shared app layout component ([31bd759](https://github.com/iamneur0/syncio/commit/31bd75937aaac7466f1cc83b266b68d3e701725f))
+* add user authentication gate component ([1ececf1](https://github.com/iamneur0/syncio/commit/1ececf1160d30f4c88e624e8968a752b6af7662e))
+* add user authentication hook ([ad8dc09](https://github.com/iamneur0/syncio/commit/ad8dc09ba7f8692f2246ee99eefd0ab9eb9dfa77))
+* add user logout button component ([603d315](https://github.com/iamneur0/syncio/commit/603d315e47af5db427860cdd196e742e30ff3448))
+* implement admin page routing structure ([5a1c4b9](https://github.com/iamneur0/syncio/commit/5a1c4b9a3d4da003c55ed1182841c04cec3f7c78))
+* implement library management utilities ([bd6a443](https://github.com/iamneur0/syncio/commit/bd6a44323fd260b8e0dde89e08e7ef81dc7d518f))
+* implement metrics system ([58f6953](https://github.com/iamneur0/syncio/commit/58f695365585efbfaf2b3589833f1c1242cedc5d))
+* implement public library API for user-facing operations ([c1078f9](https://github.com/iamneur0/syncio/commit/c1078f9182d356b351ab914f659dba598c76b074))
+* implement shares system ([f63453f](https://github.com/iamneur0/syncio/commit/f63453fda9a405c5d34da2c1cb3b29b6a9e5b3f5))
+* implement user avatar system ([026a605](https://github.com/iamneur0/syncio/commit/026a6057eb7edeb9aee8da8c8097a8d591ec557e))
+* library export with user selection and avatar preview ([6705166](https://github.com/iamneur0/syncio/commit/67051664ba69803b73d9e3732b9216f18bb300fd))
+* refactor user pages to match admin page structure ([1fe88f6](https://github.com/iamneur0/syncio/commit/1fe88f6fffc9afee1229e3ef16eb2afbdca3f734))
+* restructure account menu with icon-only buttons ([80289c2](https://github.com/iamneur0/syncio/commit/80289c20089aa394f69b9e35f6328a65112814be))
+
+
+### Bug Fixes
+
+* Docker build - add ARG for NEXT_PUBLIC_API_URL and update npm to 10.9.2 ([e1c9d71](https://github.com/iamneur0/syncio/commit/e1c9d71dbca6b30192711a7afb2048c224ae97ec))
+* gate debug features behind DEBUG flag ([e550720](https://github.com/iamneur0/syncio/commit/e5507203d69302324c88e1498739b8b847aa2cfa))
+* gate debug-specific UI elements and logs behind DEBUG flag ([7f818f8](https://github.com/iamneur0/syncio/commit/7f818f8f7c26d7d7ca872a163f3a027ae69d905b))
+* library export user dropdown not populating ([d1b206a](https://github.com/iamneur0/syncio/commit/d1b206a4ff126636826758d506ec8d48fea187b6))
+* prevent layout shift when scrollbar appears ([055fd03](https://github.com/iamneur0/syncio/commit/055fd03c5ec0e31d527ebd6b932c803de164ec69))
+* remove unused imports and code ([e694675](https://github.com/iamneur0/syncio/commit/e6946752d4897fedf40c98cb78625d83554484fc))
+* replace loading skeletons with simple spinners and remove loading text + ui fixes ([d643fd4](https://github.com/iamneur0/syncio/commit/d643fd45a064c39fdc20acf9668456490cc9b104))
+* TypeScript error for colorIndex property ([101cbbd](https://github.com/iamneur0/syncio/commit/101cbbd55d8df550d3c948036dd45459b06ef207))
+* TypeScript formatter type error in MetricsPage ([3c9dcb6](https://github.com/iamneur0/syncio/commit/3c9dcb6389f09eb9e322e76a35057b34a13513e9))
+
 ## [0.3.2](https://github.com/iamneur0/syncio/compare/v0.3.1...v0.3.2) (2025-12-04)
 
 
