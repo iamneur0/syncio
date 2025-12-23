@@ -4,6 +4,9 @@ FROM node:18-alpine AS base
 # Install dependencies only when needed
 FROM base AS deps
 RUN apk add --no-cache libc6-compat openssl3 curl
+# Update npm to latest 10.x version (compatible with Node.js 18)
+# npm 11+ requires Node.js 20.17.0+ or 22.9.0+, so we use npm 10.x
+RUN npm install -g npm@10.9.2
 WORKDIR /app
 
 # Copy package files for both frontend and backend
@@ -38,14 +41,15 @@ RUN if [ "$INSTANCE" = "public" ]; then \
 RUN npx prisma generate --schema=prisma/schema.prisma
 
 # Set environment variables
-ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+ARG NEXT_PUBLIC_API_URL
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-}
 ENV INSTANCE=$INSTANCE
 
 # Build Next.js frontend with derived NEXT_PUBLIC_AUTH_ENABLED
 RUN --mount=type=cache,target=/app/client/.next/cache \
     cd client && \
     NEXT_PUBLIC_AUTH_ENABLED=$( [ "$INSTANCE" = "public" ] && echo true || echo false ) \
-    NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL \
+    NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-} \
     npm run build
 
 # Production stage
