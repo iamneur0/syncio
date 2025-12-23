@@ -1362,7 +1362,8 @@ export default function MetricsPage() {
                 />
                 <ChartTooltip 
                   content={<ChartTooltipContent hideLabel />}
-                  formatter={(value: number, name: string) => {
+                  formatter={(value: number | undefined, name: string | undefined) => {
+                    if (value === undefined || value === null) return null
                     const hours = value as number
                     if (hours <= 0) return null
                     const h = Math.floor(hours)
@@ -2034,7 +2035,3 @@ export default function MetricsPage() {
     </div>
   )
 }
-
-
-
-
