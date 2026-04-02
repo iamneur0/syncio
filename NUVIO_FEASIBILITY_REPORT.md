@@ -825,3 +825,255 @@ No WebSocket connections. No streaming connections. All env vars are generic (no
 **Metadata enrichment (Cinemeta, Kitsu) is provider-agnostic** — uses IMDb IDs which both Stremio and Nuvio share.
 
 **No remaining blockers.** All API surfaces are mapped. Ready for implementation.
+
+---
+
+## Appendix A: Precise Line-by-Line Change List
+
+### A.1 Schema Changes (2 files)
+
+| File | Line | Current | Change |
+|---|---|---|---|
+| `prisma/schema.sqlite.prisma` | 16 | `stremioAuthKey String?` | Add `providerType String @default("stremio")`, keep `stremioAuthKey`, add `nuvioRefreshToken String?`, `nuvioUserId String?` |
+| `prisma/schema.postgres.prisma` | 16 | `stremioAuthKey String?` | Same as above |
+
+### A.2 Server: API Client Creation (~28 sites)
+
+Every `new StremioAPIClient({ endpoint: 'https://api.strem.io', authKey })` needs provider branching.
+
+| File | Lines | Context |
+|---|---|---|
+| `server/utils/sync.js` | 13 | `getUserAddons()` — fetch current addons |
+| `server/utils/stremio.js` | 10 | `validateStremioAuthKey()` — auth validation |
+| `server/utils/addonHelpers.js` | 45, 54 | `clearAddons()` — clear user's addons |
+| `server/utils/libraryToggle.js` | 30 | Library item toggle |
+| `server/utils/libraryDelete.js` | 22 | Library item deletion |
+| `server/utils/activityMonitor.js` | 104, 156 | Activity polling (2 loops) |
+| `server/utils/metricsBuilder.js` | 312 | Metrics computation |
+| `server/utils/userExpiration.js` | 33 | Membership expiry addon clear |
+| `server/utils/helpers/stremio.js` | 10 | `createStremioClient()` factory |
+| `server/routes/users.js` | 114, 1375, 1937, 2048, 2341, 2486, 2560, 2703, 2797, 3136, 4516 | Various addon/library ops (11 sites) |
+| `server/routes/publicLibrary.js` | 565, 843, 1096, 1476 | Public user addon/library ops (4 sites) |
+| `server/routes/invitations.js` | 603 | Invite completion addon fetch |
+| `server/routes/debug.js` | 72 | Debug addon fetch |
+
+### A.3 Server: Auth Key Field Access (~47 sites)
+
+Every `user.stremioAuthKey` read/write/check needs provider branching.
+
+| File | Lines | Pattern |
+|---|---|---|
+| `server/utils/sync.js` | 7, 270, 273 | `if (!user.stremioAuthKey)` + select clause |
+| `server/utils/activityMonitor.js` | 78, 103, 155 | Prisma filter `stremioAuthKey: { not: null }` + decrypt |
+| `server/utils/metricsBuilder.js` | 66, 95, 305 | Select + filter + decrypt |
+| `server/utils/userExpiration.js` | 25, 32, 72 | Check + decrypt + select |
+| `server/routes/users.js` | 108, 144, 918, 1308, 1317, 1353, 1360, 1367, 1438, 1938, 2047, 2180, 2340, 4500 | Check + decrypt across many endpoints (~14 sites) |
+| `server/routes/publicLibrary.js` | 40, 93, 97, 114, 565 | Check + decrypt + update (~5 sites) |
+| `server/routes/invitations.js` | 470, 1135 | Validate + store |
+| `server/routes/stremio.js` | 126, 238, 413, 427, 582 | Auth flow store + validate (~5 sites) |
+| `server/routes/groups.js` | 90 | Select clause |
+| `server/routes/debug.js` | 64 | Check + error message |
+
+### A.4 Server: Stremio API Requests (~30 sites)
+
+Every `.request('addonCollectionGet/Set/Add')` and `.request('datastoreGet/Put')`.
+
+| Method | Call Count | Files |
+|---|---|---|
+| `addonCollectionGet` | ~17 | `sync.js`, `users.js` (7), `publicLibrary.js` (3), `debug.js`, `invitations.js`, `stremio.js` |
+| `addonCollectionSet` | ~9 | `users.js` (4), `publicLibrary.js` (3), `addonHelpers.js` (2) |
+| `addonCollectionAdd` | 1 | `users.js:1952` |
+| `datastoreGet` | ~11 | `users.js` (4), `publicLibrary.js` (1), `libraryToggle.js`, `libraryDelete.js`, `activityMonitor.js` (2), `metricsBuilder.js` |
+| `datastorePut` | ~3 | `libraryToggle.js`, `libraryDelete.js` (NOOP for Nuvio) |
+| `getUser` | ~2 | `stremio.js`, `helpers/stremio.js` |
+
+### A.5 Server: External URL Calls
+
+| URL | File:Line | Change |
+|---|---|---|
+| `https://api.strem.io` | 28+ sites (via StremioAPIClient) | Provider factory |
+| `https://api.strem.io/api/pullUser` | `stremio.js:39` | Stremio-only fallback |
+| `https://link.stremio.com/api/v2/create` | `invitations.js:513,876` | Skip for Nuvio (email/pwd form) |
+| `https://likes.stremio.com/api/get_status` | `users.js:2183` | NOOP for Nuvio |
+| `https://likes.stremio.com/api/send` | `users.js:2247` | NOOP for Nuvio |
+| `https://v3-cinemeta.strem.io/meta/` | `publicLibrary.js:610`, `libraryHelpers.js:78` | KEEP (IMDb IDs, provider-agnostic) |
+| `https://cinemeta-live.strem.io/meta/` | `activityMonitor.js:445-546` | KEEP |
+
+### A.6 Server: Hardcoded Defaults
+
+| File | Lines | What | Change |
+|---|---|---|---|
+| `server/utils/stremio.js` | 72-85 | Default addon filter (Cinemeta, Local Files) | Add Nuvio defaults if any |
+| `server/utils/config.js` | 22-27 | `com.linvo.cinemeta`, `org.stremio.local`, URLs | Provider-specific defaults |
+| `server/utils/addonHelpers.js` | 12-34 | Local Files addon object | Stremio-only, skip for Nuvio |
+| `server/routes/addons.js` | 53 | Skip reload for local addon URL | Keep (harmless) |
+
+### A.7 Server: Route Names Containing "stremio"
+
+| Route | File | Change |
+|---|---|---|
+| `POST /api/stremio/validate` | `stremio.js` | Add parallel `/api/nuvio/validate` |
+| `POST /api/stremio/register` | `stremio.js` | Stremio-only (Nuvio has no register-via-Syncio) |
+| `POST /api/stremio/connect` | `stremio.js` | Add `/api/nuvio/connect` |
+| `POST /api/stremio/connect-authkey` | `stremio.js` | Add `/api/nuvio/connect` |
+| `GET /api/users/:id/stremio-addons` | `users.js` | Rename to `/provider-addons` or keep + add `/nuvio-addons` |
+| `POST /api/users/:id/stremio-addons/add` | `users.js` | Same |
+| `DELETE /api/users/:id/stremio-addons/:name` | `users.js` | Same |
+| `POST /api/users/:id/stremio-addons/clear` | `users.js` | Same |
+| `POST /api/users/:id/stremio-addons/reorder` | `users.js` | Same |
+| `POST /api/public-auth/stremio-login` | `publicAuth.js` | Admin-only, can keep (UUID/pwd for Nuvio admins) |
+| `POST /api/public-auth/unlink-stremio` | `publicAuth.js` | Admin-only, can keep |
+| `DELETE /api/public-library/stremio-addons/:name` | `publicLibrary.js` | Rename or add parallel route |
+
+### A.8 Server: Dependency Injection (server/index.js)
+
+| Line | Current | Change |
+|---|---|---|
+| 18 | `require('stremio-api-client')` | Keep + add Nuvio client |
+| 40 | `require('./utils/stremio')` | Keep + add `require('./utils/nuvio')` |
+| 179 | Passes `StremioAPIClient` to users router | Pass provider factory instead |
+| 243 | Passes `StremioAPIClient` to `scheduleUserExpiration` | Pass provider factory |
+
+---
+
+### A.9 Client: StremioOAuthCard.tsx (core component, ~80 lines to change)
+
+| Lines | What | Change |
+|---|---|---|
+| 5 | `interface StremioOAuthCardProps` | Rename or add `provider` prop |
+| 41 | `startButtonLabel = 'Sign in with Stremio'` | Dynamic: `'Sign in with ${provider}'` |
+| 45 | `instructionLinkHref = 'https://link.stremio.com'` | Dynamic per provider |
+| 74-77 | `stremioLink/stremioCode/stremioExpiresAt/stremioError` state vars | Rename to `providerLink/providerCode/...` |
+| 181 | `fetch('https://link.stremio.com/api/v2/create...')` | Provider-specific endpoint |
+| 308 | `fetch('https://link.stremio.com/api/v2/read...')` | Provider-specific polling |
+| 297-354 | Error messages: "Stremio link expired", "Stremio account email does not match", "Network error while checking Stremio status" | Dynamic provider name in all errors |
+
+**For Nuvio users:** This component is NOT used at all — replaced by `NuvioLoginCard` (email/password form). The `StremioOAuthCard` only renders when `providerType === 'stremio'`.
+
+### A.10 Client: LoginPage.tsx (~20 lines to change)
+
+| Lines | What | Change |
+|---|---|---|
+| 7 | `import StremioOAuthCard` | Keep + add NuvioLoginCard import |
+| 42 | `showStremioLogin` state | Rename to `showProviderLogin` |
+| 91 | `publicAuthAPI.loginWithStremio({ authKey })` | Branch: Stremio → OAuth, Nuvio → email/pwd |
+| 103 | `publicLibraryAPI.authenticate(authKey)` | Branch on provider type |
+| 328 | `'Manage your Stremio library and addons'` | Dynamic provider name |
+| 407-450 | StremioOAuthCard rendering | Conditional: show OAuth for Stremio, login form for Nuvio |
+| 417 | `'Sign in with Stremio'` button | Dynamic |
+| 441-443 | `'Connect with Stremio to get started'` | Dynamic |
+
+### A.11 Client: AccountMenuButton.tsx (~25 lines to change)
+
+| Lines | What | Change |
+|---|---|---|
+| 34-36 | `showStremioLink/isLinkingStremio/isUnlinkingStremio` | Rename to generic |
+| 214-234 | `logoutFromStremio()` — clears `stremio_*` localStorage keys | Clear provider-specific keys |
+| 291-322 | `handleStremioAuthKey()` — admin Stremio linking | Admin-only, can keep Stremio-specific |
+| 295 | `'Stremio account linked successfully!'` toast | Dynamic |
+| 304-311 | 6 error messages mentioning "Stremio" | Dynamic |
+| 475, 518 | `'Unlink Stremio account'`, `'Link Stremio Account'` | Dynamic |
+
+### A.12 Client: UserAddModal.tsx (~30 lines to change)
+
+| Lines | What | Change |
+|---|---|---|
+| 50-53, 62 | `stremioEmail/stremioPassword/stremioAuthKey/stremioUsername/stremioRegisterNew` | Add provider type selector to form, rename vars |
+| 147 | `usersAPI.verifyAuthKey({ authKey })` | Add provider type param |
+| 298 | `'Stremio Username'` label | Dynamic |
+| 317 | `'Authenticate with Stremio OAuth'` | Dynamic |
+| 342 | `'Stremio OAuth'` tab button | Dynamic |
+| 406 | `'Stremio Auth Key'` placeholder | Dynamic |
+| Form | No provider selector exists | **NEW:** Add Stremio/Nuvio toggle at top of form |
+
+### A.13 Client: UserDetailModal.tsx (~10 lines to change)
+
+| Lines | What | Change |
+|---|---|---|
+| 35-36 | `stremioUsername/stremioEmail` interface fields | Add `providerType` to user interface |
+| 109 | `hasStremioConnection` check | Check `hasProviderConnection` |
+| 192-208 | `stremioAddons` query + variable | Rename, add provider-aware query |
+| 215 | `handleDebugStremioAddons` | Rename |
+| 294 | `'Stremio addons cleared'` toast | Dynamic |
+| 471 | `'Cinemeta'` default addon filter | Provider-specific defaults |
+
+### A.14 Client: Invite Flow Components (~15 lines to change)
+
+| File | Lines | What | Change |
+|---|---|---|---|
+| `UserInviteModal.tsx` | 267, 327 | `link.stremio.com` fetch calls | Provider-specific or route through backend |
+| `UserInviteModal.tsx` | 274, 280, 340, 524 | Error messages mentioning "Stremio" | Dynamic |
+| `InviteDetailModal.tsx` | 422 | `link.stremio.com` polling | Provider-specific |
+| `invite/[inviteCode]/page.tsx` | 609 | `link.stremio.com` polling | Provider-specific |
+| `RequestAcceptedPage` | 45, 55 | "authenticate with Stremio", "Connect to Stremio" | Dynamic |
+| `RequestRenewedPage` | 45, 55 | Same text | Dynamic |
+| `DeleteAccountPage` | 91, 102 | "Clear all your Stremio addons", "Connect to Stremio" | Dynamic |
+
+### A.15 Client: GenericEntityPage.tsx (~3 lines)
+
+| Lines | What | Change |
+|---|---|---|
+| ~954 | `'Manage your Stremio addons'` | Remove "Stremio" — just "Manage your addons" |
+| ~978 | `'Manage Stremio users for your group'` | Remove "Stremio" |
+| ~1003 | `'Manage your Stremio groups'` | Remove "Stremio" |
+
+### A.16 Client: GroupDetailModal.tsx
+
+| Lines | What | Change |
+|---|---|---|
+| ~620 | `'Syncing will delete all Stremio addons from its users'` | Dynamic provider name or generic "provider addons" |
+
+### A.17 Client: api.ts (~10 lines to change)
+
+| Lines | What | Change |
+|---|---|---|
+| 43-47 | Error handler skips `/stremio/` endpoints | Add `/nuvio/` to skip list |
+| 106-112 | `StremioAuthVerification` interface | Rename to `ProviderAuthVerification` |
+| 220-231 | `usersAPI.create()` calls `/stremio/connect-authkey` | Route based on provider type |
+| 249-261 | `stremioAPI.register/connect/verify` | Add `nuvioAPI` namespace |
+| 346-349 | `/stremio-addons` endpoint refs | Provider-aware routing |
+| 815 | `loginWithStremio` | Keep (admin-only) |
+
+### A.18 Client: hooks/useUserAuth.ts
+
+| Lines | What | Change |
+|---|---|---|
+| 9, 22, 35, 42 | `public-library-user` localStorage | Add `providerType` to stored object |
+
+### A.19 Client: URL Scheme Handling (NO CHANGE)
+
+| File | Lines | What | Decision |
+|---|---|---|---|
+| `AddonAddModal.tsx` | 75, 89-92 | `stremio://` → `https://` conversion | **KEEP** — URL scheme, not provider-specific |
+| `AddonDetailModal.tsx` | 22-23 | Same conversion | **KEEP** |
+| `UserHomePage.tsx` | 67, 81 | Same conversion | **KEEP** |
+
+---
+
+### A.20 New Files to Create
+
+| File | Purpose |
+|---|---|
+| `server/providers/index.js` | Provider factory: `getProvider(user)` returns Stremio or Nuvio provider |
+| `server/providers/stremio.js` | Wraps existing StremioAPIClient calls |
+| `server/providers/nuvio.js` | Supabase REST implementation |
+| `server/routes/nuvio.js` | Nuvio auth routes (validate, connect) |
+| `server/utils/nuvio.js` | `validateNuvioAuth(email, password)`, `refreshNuvioToken(refreshToken)` |
+| `client/src/components/auth/NuvioLoginCard.tsx` | Email/password login form for Nuvio users |
+
+---
+
+### Summary Counts
+
+| Category | Server | Client | Total |
+|---|---|---|---|
+| API client creation sites | 28 | 0 | 28 |
+| Auth key field access sites | 47 | 5 | 52 |
+| API request call sites | 30 | 0 | 30 |
+| External URL calls | 7 unique URLs | 4 unique URLs | 11 |
+| UI strings mentioning "Stremio" | 0 | ~40 | ~40 |
+| Route names with "stremio" | 12 | 0 | 12 |
+| localStorage keys | 0 | 4 | 4 |
+| New files to create | 5 | 1 | 6 |
+| **Total files to modify** | **~18** | **~16** | **~34** |
+| **Total individual change sites** | **~120** | **~80** | **~200** |
