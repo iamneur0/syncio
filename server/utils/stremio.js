@@ -63,12 +63,17 @@ async function validateStremioAuthKey(authKey) {
 /**
  * Filter out Stremio default addons
  */
-function filterDefaultAddons(addons, unsafeMode = false) {
+function filterDefaultAddons(addons, unsafeMode = false, providerType) {
   // In unsafe mode, don't filter out any addons - treat all as regular addons
   if (unsafeMode) {
     return addons
   }
-  
+
+  // Nuvio has no known default addons to filter
+  if (providerType === 'nuvio') {
+    return addons
+  }
+
   const defaultAddons = {
     names: [
       'Cinemeta',

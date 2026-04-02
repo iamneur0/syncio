@@ -805,6 +805,18 @@ export const stremioAPI = {
   },
 }
 
+// Nuvio API
+export const nuvioAPI = {
+  validate: async (credentials: { email: string; password: string }): Promise<{ valid: boolean; user?: any; error?: string }> => {
+    const response: AxiosResponse<{ valid: boolean; user?: any; error?: string }> = await api.post('/nuvio/validate', credentials)
+    return response.data
+  },
+  connect: async (data: { userId: string; email: string; password: string }): Promise<any> => {
+    const response: AxiosResponse<any> = await api.post('/nuvio/connect', data)
+    return response.data
+  },
+}
+
 // Public Auth API (for AUTH_ENABLED=true)
 export const publicAuthAPI = {
   register: async (payload: { uuid: string; password: string }): Promise<{ message: string; account: any }> => {
@@ -1033,12 +1045,18 @@ export const invitationsAPI = {
   },
 
   // Public: Complete OAuth and create user
-  complete: async (inviteCode: string, email: string, username: string, authKey: string, groupName?: string): Promise<any> => {
+  complete: async (inviteCode: string, email: string, username: string, authKey: string, groupName?: string, providerData?: { providerType: string; nuvioEmail?: string; nuvioPassword?: string }): Promise<any> => {
+    const body: any = { email, username, authKey, groupName }
+    if (providerData) {
+      body.providerType = providerData.providerType
+      if (providerData.nuvioEmail) body.nuvioEmail = providerData.nuvioEmail
+      if (providerData.nuvioPassword) body.nuvioPassword = providerData.nuvioPassword
+    }
     const response = await fetch(`/invite/${inviteCode}/complete`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({ email, username, authKey, groupName })
+      body: JSON.stringify(body)
     })
     if (!response.ok) {
       const error = await response.json().catch(() => ({ error: `HTTP ${response.status}` }))

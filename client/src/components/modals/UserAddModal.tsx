@@ -5,6 +5,7 @@ import { useTheme } from '@/contexts/ThemeContext'
 import { getEntityColorStyles } from '@/utils/colorMapping'
 import { ColorPicker } from '@/components/layout'
 import { StremioOAuthCard } from '@/components/auth/StremioOAuthCard'
+import NuvioLoginCard from '@/components/auth/NuvioLoginCard'
 import { usersAPI } from '@/services/api'
 import { useBodyScrollLock } from '@/hooks/useBodyScrollLock'
 
@@ -60,6 +61,9 @@ export default function UserAddModal({
   const [newGroupName, setNewGroupName] = useState('')
   const [isCreatingNewGroup, setIsCreatingNewGroup] = useState(false)
   const [stremioRegisterNew, setStremioRegisterNew] = useState(false)
+  const [providerType, setProviderType] = useState<'stremio' | 'nuvio'>('stremio')
+  const [nuvioEmail, setNuvioEmail] = useState('')
+  const [nuvioUserId, setNuvioUserId] = useState('')
   const [colorIndex, setColorIndex] = useState(0)
   const [colorIndexRef, setColorIndexRef] = useState(0)
   const colorStyles = useMemo(
@@ -96,6 +100,9 @@ export default function UserAddModal({
       setSelectedGroup('')
       setNewGroupName('')
       setStremioRegisterNew(false)
+      setProviderType('stremio')
+      setNuvioEmail('')
+      setNuvioUserId('')
       setColorIndex(0)
       setColorIndexRef(0)
       setIsCreatingNewGroup(false)
@@ -135,6 +142,9 @@ export default function UserAddModal({
       setOauthAuthKey(null)
       setOauthVerified(false)
       setUsernameManuallyEdited(false)
+      setProviderType('stremio')
+      setNuvioEmail('')
+      setNuvioUserId('')
     }
   }, [isOpen, editingUser])
 
@@ -170,15 +180,51 @@ export default function UserAddModal({
     }
   }
 
+  const handleNuvioAuth = (data: { email: string; nuvioUserId: string; nuvioRefreshToken?: string }) => {
+    setNuvioEmail(data.email)
+    setNuvioUserId(data.nuvioUserId)
+    if (!usernameManuallyEdited) {
+      const capitalizedUsername = data.email.split('@')[0].charAt(0).toUpperCase() + data.email.split('@')[0].slice(1)
+      setStremioUsername(capitalizedUsername)
+    }
+    setStremioEmail(data.email)
+  }
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    
+
+    // For Nuvio provider
+    if (providerType === 'nuvio') {
+      if (!nuvioUserId || !stremioUsername.trim()) {
+        return
+      }
+
+      const selectedGroupName = selectedGroup ? (groups.find((g: any) => g.id === selectedGroup)?.name || undefined) : undefined
+      const finalGroupName = (newGroupName.trim() || selectedGroupName) || undefined
+
+      const submitData: any = {
+        username: stremioUsername.trim(),
+        email: nuvioEmail.trim(),
+        groupName: finalGroupName,
+        colorIndex: colorIndexRef,
+        providerType: 'nuvio',
+        nuvioUserId,
+      }
+
+      try {
+        ;(onAddUser as any)(submitData)
+      } catch (error) {
+        console.error('Error calling onAddUser:', error)
+      }
+      return
+    }
+
     // For OAuth mode, we need the authKey
     if (authMode === 'oauth') {
       if (!oauthAuthKey || !stremioUsername.trim()) {
         return
       }
-      
+
       // Backend expects groupName (optional). Prefer newGroupName; otherwise map selectedGroup id to its name.
       const selectedGroupName = selectedGroup ? (groups.find((g: any) => g.id === selectedGroup)?.name || undefined) : undefined
       const finalGroupName = (newGroupName.trim() || selectedGroupName) || undefined
@@ -189,20 +235,21 @@ export default function UserAddModal({
         email: stremioEmail.trim(),
         groupName: finalGroupName,
         colorIndex: colorIndexRef,
+        providerType: 'stremio',
       }
 
       try {
         ;(onAddUser as any)(submitData)
       } catch (error) {
-        console.error('🔍 Error calling onAddUser:', error)
+        console.error('Error calling onAddUser:', error)
       }
       return
     }
-    
+
     // For credentials mode - check if using email/password or auth key
     const hasAuthKey = stremioAuthKey.trim().length > 0
     const hasEmailPassword = stremioEmail.trim().length > 0 && stremioPassword.trim().length > 0
-    
+
     if (!stremioUsername.trim() || (!hasAuthKey && !hasEmailPassword)) {
       return
     }
@@ -215,8 +262,9 @@ export default function UserAddModal({
       username: stremioUsername.trim(),
       groupName: finalGroupName,
       colorIndex: colorIndexRef,
+      providerType: 'stremio',
     }
-    
+
     if (hasAuthKey) {
       submitData.authKey = stremioAuthKey.trim()
       submitData.email = stremioEmail.trim() || stremioUsername.trim() + '@stremio.local'
@@ -244,6 +292,9 @@ export default function UserAddModal({
     setOauthAuthKey(null)
     setOauthVerified(false)
     setUsernameManuallyEdited(false)
+    setProviderType('stremio')
+    setNuvioEmail('')
+    setNuvioUserId('')
     onClose()
   }
 
@@ -329,42 +380,118 @@ export default function UserAddModal({
           </button>
         </div>
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
-          {/* Auth method toggle */}
+          {/* Provider type toggle */}
           <div className="w-full">
             <div className="grid grid-cols-2 gap-2 w-full">
               <button
                 type="button"
-                onClick={() => setAuthMode('oauth')}
-                className={`w-full py-3 px-4 rounded-lg cursor-pointer card card-selectable color-hover hover:shadow-lg transition-all ${
-                  authMode === 'oauth' ? 'card-selected' : ''
+                onClick={() => setProviderType('stremio')}
+                className={`w-full py-2 px-4 rounded-lg cursor-pointer card card-selectable color-hover hover:shadow-lg transition-all ${
+                  providerType === 'stremio' ? 'card-selected' : ''
                 }`}
               >
-                <span className="text-sm font-medium">Stremio OAuth</span>
+                <span className="text-sm font-medium">Stremio</span>
               </button>
               <button
                 type="button"
-                onClick={() => setAuthMode('credentials')}
-                className={`w-full py-3 px-4 rounded-lg cursor-pointer card card-selectable color-hover hover:shadow-lg transition-all ${
-                  authMode === 'credentials' ? 'card-selected' : ''
+                onClick={() => setProviderType('nuvio')}
+                className={`w-full py-2 px-4 rounded-lg cursor-pointer card card-selectable color-hover hover:shadow-lg transition-all ${
+                  providerType === 'nuvio' ? 'card-selected' : ''
                 }`}
               >
-                <span className="text-sm font-medium">Credentials</span>
+                <span className="text-sm font-medium">Nuvio</span>
               </button>
             </div>
           </div>
-          {authMode === 'oauth' ? (
+
+          {providerType === 'nuvio' ? (
             <>
-              <div className={oauthVerified ? 'hidden' : ''}>
-                <StremioOAuthCard
-                  active={authMode === 'oauth' && !oauthVerified}
-                  autoStart={true}
-                  onAuthKey={handleOAuthAuthKey}
-                  disabled={isCreating || isVerifyingOAuth}
-                  showSubmitButton={false}
-                />
-              </div>
+              <NuvioLoginCard
+                onAuth={handleNuvioAuth}
+                disabled={isCreating}
+                startButtonLabel="Validate Nuvio Credentials"
+              />
+              {nuvioUserId && (
+                <p className="text-sm text-green-600 dark:text-green-400">Nuvio account verified successfully.</p>
+              )}
+              {!editingUser && (
+                <>
+                  <div>
+                    <select
+                      value={isCreatingNewGroup ? '__create_new__' : selectedGroup}
+                      onChange={(e) => {
+                        if (e.target.value === '__create_new__') {
+                          setIsCreatingNewGroup(true)
+                          setSelectedGroup('')
+                          setNewGroupName('')
+                        } else {
+                          setIsCreatingNewGroup(false)
+                          setSelectedGroup(e.target.value)
+                          setNewGroupName('')
+                        }
+                      }}
+                      className={`w-full px-3 py-2 border rounded-lg focus:outline-none input`}
+                    >
+                      <option value="">Group (optional)</option>
+                      {groups?.map((group: any) => (
+                        <option key={group.id} value={group.id}>
+                          {group.name}
+                        </option>
+                      ))}
+                      <option value="__create_new__">+ Create new group...</option>
+                    </select>
+                    {isCreatingNewGroup && (
+                      <input
+                        type="text"
+                        value={newGroupName}
+                        onChange={(e) => setNewGroupName(e.target.value)}
+                        placeholder="Enter new group name"
+                        className={`w-full px-3 py-2 border rounded-lg focus:outline-none input mt-2`}
+                        autoFocus
+                      />
+                    )}
+                  </div>
+                </>
+              )}
             </>
-          ) : authMode === 'credentials' ? (
+          ) : (
+            <>
+              {/* Auth method toggle */}
+              <div className="w-full">
+                <div className="grid grid-cols-2 gap-2 w-full">
+                  <button
+                    type="button"
+                    onClick={() => setAuthMode('oauth')}
+                    className={`w-full py-3 px-4 rounded-lg cursor-pointer card card-selectable color-hover hover:shadow-lg transition-all ${
+                      authMode === 'oauth' ? 'card-selected' : ''
+                    }`}
+                  >
+                    <span className="text-sm font-medium">Stremio OAuth</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAuthMode('credentials')}
+                    className={`w-full py-3 px-4 rounded-lg cursor-pointer card card-selectable color-hover hover:shadow-lg transition-all ${
+                      authMode === 'credentials' ? 'card-selected' : ''
+                    }`}
+                  >
+                    <span className="text-sm font-medium">Credentials</span>
+                  </button>
+                </div>
+              </div>
+              {authMode === 'oauth' ? (
+                <>
+                  <div className={oauthVerified ? 'hidden' : ''}>
+                    <StremioOAuthCard
+                      active={authMode === 'oauth' && !oauthVerified}
+                      autoStart={true}
+                      onAuthKey={handleOAuthAuthKey}
+                      disabled={isCreating || isVerifyingOAuth}
+                      showSubmitButton={false}
+                    />
+                  </div>
+                </>
+              ) : authMode === 'credentials' ? (
             <>
           <div>
             <input
@@ -461,7 +588,9 @@ export default function UserAddModal({
           )}
             </>
           ) : null}
-            
+            </>
+          )}
+
             <div className="flex justify-end gap-3 pt-4">
               <button
                 type="button"
@@ -472,7 +601,7 @@ export default function UserAddModal({
               </button>
               <button
                 type="submit"
-                disabled={isCreating || isVerifyingOAuth || (authMode === 'oauth' && (!oauthAuthKey || !oauthVerified))}
+                disabled={isCreating || isVerifyingOAuth || (providerType === 'stremio' && authMode === 'oauth' && (!oauthAuthKey || !oauthVerified)) || (providerType === 'nuvio' && !nuvioUserId)}
                 onClick={() => {}}
                 className="px-4 py-2 text-sm font-medium rounded-lg transition-colors disabled:opacity-50 color-surface hover:opacity-90"
               >

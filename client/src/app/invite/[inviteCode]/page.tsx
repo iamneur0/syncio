@@ -113,6 +113,9 @@ export default function InviteRequestPage() {
       })
   }, [isMounted, inviteCode])
 
+  const [providerType, setProviderType] = React.useState<'stremio' | 'nuvio'>('stremio')
+  const [nuvioEmail, setNuvioEmail] = React.useState('')
+  const [nuvioPassword, setNuvioPassword] = React.useState('')
   const [authKey, setAuthKey] = React.useState<string | null>(null)
   const [oauthLinkGenerated, setOauthLinkGenerated] = React.useState(false)
   const [isGeneratingOAuth, setIsGeneratingOAuth] = React.useState(false)
@@ -376,11 +379,11 @@ export default function InviteRequestPage() {
     mutationFn: (authKey: string) => {
       const statusData = status as any
       const groupName = statusData?.groupName || undefined
-      
+
       // Use email/username from status if form state is missing (e.g., on "Request Renewed" page)
       const finalEmail = email || statusData?.email || ''
       const finalUsername = username || statusData?.username || ''
-      
+
       console.log('[InvitePage] completeMutation.mutationFn called with:', {
         inviteCode,
         email: finalEmail,
@@ -390,12 +393,23 @@ export default function InviteRequestPage() {
         usernameFromForm: username,
         usernameFromStatus: statusData?.username,
         authKeyLength: authKey?.length,
-        groupName
+        groupName,
+        providerType
       })
-      
+
       if (!finalEmail || !finalUsername) {
         throw new Error('Email and username are required')
       }
+
+      // Nuvio path: use email/password instead of authKey
+      if (providerType === 'nuvio') {
+        return invitationsAPI.complete(inviteCode, finalEmail, finalUsername, '', groupName, {
+          providerType: 'nuvio',
+          nuvioEmail,
+          nuvioPassword
+        })
+      }
+
       if (!authKey) {
         throw new Error('Auth key is required')
       }
