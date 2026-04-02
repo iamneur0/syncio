@@ -185,45 +185,114 @@ GET https://nuvioapp.space/api/addons/manifest-meta?url=<encoded_manifest_url>
 (No auth required)
 ```
 
-### 3.3 Library & Watch History (PARTIALLY CONFIRMED)
+### 3.3 Library & Watch History (CONFIRMED)
 
-**Read library:**
+**Read library (bookmarks/saved items):**
 ```
 POST /rest/v1/rpc/sync_pull_library
 Body: {"p_profile_id": 1}
-Response: (library items — response shape needs capture)
+Response: [] (empty for test user — library = saved/bookmarked items, separate from watch history)
 ```
 
-**Read watched items (paginated):**
+**Read watched items (paginated) — PRIMARY activity source:**
 ```
 POST /rest/v1/rpc/sync_pull_watched_items
 Body: {"p_page": 1, "p_page_size": 50, "p_profile_id": 1}
-Response: (watched items — response shape needs capture)
+Response: [
+  {
+    "id": "uuid",
+    "user_id": "uuid",
+    "content_id": "tt14824792",        // IMDb ID
+    "content_type": "series",           // "movie" or "series"
+    "title": "ted",                     // Human-readable title (Stremio lacks this)
+    "season": 1,                        // null for movies
+    "episode": 4,                       // null for movies
+    "watched_at": 1775044288655,        // Unix ms — equivalent to Stremio _mtime
+    "created_at": "2026-04-01T...",     // Row creation timestamp
+    "profile_id": 1
+  }, ...
+]
 ```
 
-**Read watch progress:**
+**Read watch progress (resume positions):**
 ```
 POST /rest/v1/rpc/sync_pull_watch_progress
 Body: {"p_profile_id": 1}
-Response: (progress data — response shape needs capture)
+Response: [
+  {
+    "id": "uuid",
+    "user_id": "uuid",
+    "content_id": "tt14824792",         // IMDb ID
+    "content_type": "series",
+    "video_id": "tt14824792:1:4",       // SAME format as Stremio state.video_id
+    "season": 1,
+    "episode": 4,
+    "position": 2280000,               // ms — equivalent to Stremio state.timeOffset
+    "duration": 2280000,               // ms — total duration (Stremio lacks this)
+    "last_watched": 1775044288640,     // Unix ms
+    "progress_key": "tt14824792_s1e4", // Nuvio convenience key
+    "profile_id": 1
+  }, ...
+]
 ```
 
-**Write library items:** UNKNOWN — needs reverse-engineering (see section 5)
+**Resolve watch metadata (enrich with poster/title from addons):**
+```
+POST https://nuvioapp.space/api/addons/resolve-watch-metadata
+Body: {
+  "items": [{"progress_key": "tt14824792_s1e4", "content_id": "tt14824792", "content_type": "series"}, ...],
+  "addons": [<user's addon list>]
+}
+(No Supabase auth required — Nuvio app endpoint. Equivalent to Syncio's Cinemeta enrichment.)
+```
 
-### 3.4 Sync Ownership
+**Write library items:** NOOP for now (per decision). Will be needed later for library sync feature.
 
-**Check sync owner (called frequently by Nuvio client):**
+### 3.4 Profiles (CONFIRMED)
+
+**List profiles:**
+```
+POST /rest/v1/rpc/sync_pull_profiles
+Body: {}
+Response: [
+  {
+    "id": "uuid",
+    "user_id": "uuid",
+    "profile_index": 1,                // This is what profile_id maps to in queries
+    "name": "Rory",
+    "avatar_color_hex": "#A80808",
+    "uses_primary_addons": false,       // If true, inherits addons from primary profile
+    "uses_primary_plugins": false,
+    "avatar_id": "avatar_dexter",
+    "pin_enabled": false,
+    "pin_locked_until": null,
+    "created_at": "...",
+    "updated_at": "..."
+  }
+]
+```
+
+**Profile locks:**
+```
+POST /rest/v1/rpc/sync_pull_profile_locks
+Body: {}
+Response: [{"profile_index": 1, "pin_enabled": false, "pin_locked_until": null}]
+```
+
+### 3.5 Sync Ownership (CONFIRMED — no blocker)
+
+**Check sync owner:**
 ```
 POST /rest/v1/rpc/get_sync_owner
 Body: {}
-Response: UNKNOWN — needs capture
+Response: "9f7d49dc-97be-4869-a645-13d2dca86f7b"  (returns the user's own UUID)
 ```
 
-This likely indicates Nuvio has its own concept of managed sync. Response body needed to understand implications for Syncio-managed users.
+Returns the user's own ID when they own their own sync. This means Syncio writing to addon collections won't conflict with Nuvio's sync ownership model. If a user were managed by another Nuvio account, this would return a different UUID — Syncio should check this and warn before overwriting.
 
-### 3.5 Likes/Favorites
+### 3.6 Likes/Favorites
 
-**Nuvio equivalent:** UNKNOWN — Stremio uses a separate `likes.stremio.com` service. Nuvio may store this in Supabase or may not have the feature at all. Needs investigation.
+**No Nuvio equivalent.** Stremio uses a separate `likes.stremio.com` service. Nuvio does not have this feature. Known feature gap — likes operations will NOOP for Nuvio users.
 
 ---
 
@@ -245,19 +314,35 @@ This likely indicates Nuvio has its own concept of managed sync. Response body n
 
 | Syncio Function | Stremio Approach | Nuvio Equivalent | Status |
 |---|---|---|---|
-| Read full library | `datastoreGet` collection=libraryItem | `rpc/sync_pull_library` | **LIKELY MAPS** — response shape needed |
-| Read watch history | Filter library by `_mtime`/`lastWatched` | `rpc/sync_pull_watched_items` (paginated) | **LIKELY MAPS** — response shape needed |
-| Read watch progress | `libraryItem.state.timeOffset` | `rpc/sync_pull_watch_progress` | **LIKELY MAPS** — response shape needed |
-| Add to library | `datastorePut` with item data | **UNKNOWN** | **NEEDS CAPTURE** |
-| Remove from library | `datastorePut` with `removed: true` | **UNKNOWN** | **NEEDS CAPTURE** |
-| Activity detection | Poll library, compare `_mtime` | Poll `sync_pull_watched_items`, compare timestamps? | **NEEDS DESIGN** |
+| Read full library | `datastoreGet` collection=libraryItem | `rpc/sync_pull_library` | **CONFIRMED** (empty for test user — bookmarks/saved items) |
+| Read watch history | Filter library by `_mtime`/`lastWatched` | `rpc/sync_pull_watched_items` (paginated) | **CONFIRMED** — includes title, IMDb ID, season/episode, timestamp |
+| Read watch progress | `libraryItem.state.timeOffset` | `rpc/sync_pull_watch_progress` | **CONFIRMED** — position/duration in ms, same video_id format |
+| Activity detection | Poll library, compare `_mtime` | Poll `sync_pull_watched_items`, compare `watched_at` | **MAPS CLEANLY** — `watched_at` is equivalent to Stremio's `_mtime` |
+| Metadata enrichment | Cinemeta (`cinemeta-live.strem.io`) | `nuvioapp.space/api/addons/resolve-watch-metadata` | **CONFIRMED** — takes IMDb IDs + addon list, returns enriched metadata |
+| Add to library | `datastorePut` with item data | **NOOP for now** | Deferred — will need reverse-engineering later |
+| Remove from library | `datastorePut` with `removed: true` | **NOOP for now** | Deferred |
+
+#### Watch Progress Field Mapping (Stremio → Nuvio)
+
+| Stremio (`libraryItem`) | Nuvio (`watch_progress`) | Notes |
+|---|---|---|
+| `_id` | `content_id` | IMDb ID (e.g. `tt14824792`) |
+| `type` | `content_type` | `movie` or `series` |
+| `state.video_id` | `video_id` | Same format: `tt14824792:1:4` |
+| `state.season` | `season` | Direct match (null for movies) |
+| `state.episode` | `episode` | Direct match (null for movies) |
+| `state.timeOffset` | `position` | Milliseconds — direct match |
+| `state.timeWatched` | `duration` | Nuvio tracks total duration (Stremio doesn't) |
+| `state.lastWatched` / `_mtime` | `last_watched` | Unix timestamp in ms — direct match |
+| `name` | (via `watched_items.title`) | Nuvio includes title in watched items, not progress |
+| `poster` | (via `resolve-watch-metadata`) | Enrichment needed separately |
 
 ### Likes/Favorites
 
 | Syncio Function | Stremio Approach | Nuvio Equivalent | Status |
 |---|---|---|---|
-| Get like status | `GET likes.stremio.com/api/get_status` | **UNKNOWN** | **NEEDS INVESTIGATION** |
-| Set like/love | `POST likes.stremio.com/api/send` | **UNKNOWN** | **NEEDS INVESTIGATION** |
+| Get like status | `GET likes.stremio.com/api/get_status` | N/A | **NO NUVIO EQUIVALENT** — NOOP |
+| Set like/love | `POST likes.stremio.com/api/send` | N/A | **NO NUVIO EQUIVALENT** — NOOP |
 
 ### Auth
 
@@ -284,23 +369,23 @@ This likely indicates Nuvio has its own concept of managed sync. Response body n
 
 ## 5. What Still Needs Reverse-Engineering
 
-### Priority 1 (Required for feature parity)
+### Priority 1 — RESOLVED
+
+All priority 1 items have been captured:
+- Watch progress response shape: CONFIRMED (position/duration in ms, same video_id format as Stremio)
+- Watched items response shape: CONFIRMED (includes title, IMDb ID, watched_at timestamp)
+- `get_sync_owner` response: CONFIRMED (returns own UUID — no conflict with Syncio)
+- Likes: CONFIRMED absent — no Nuvio equivalent
+
+### Remaining (Nice to have, non-blocking)
 
 | Operation | How to Capture |
 |---|---|
-| **Library write (add item)** | In Nuvio, add a movie/show to your library/watchlist. Look for POST/PATCH to an RPC or the library table. |
-| **Library write (remove item)** | Remove/unmark a library item. Look for DELETE or PATCH with a removal flag. |
-| **`sync_pull_library` response body** | Check the Response tab for one of those RPC calls — we need to see the field names (especially: does it include watch progress? modification timestamps? IMDb IDs?) |
-| **`sync_pull_watch_progress` response body** | Same — what fields does it return? |
-| **`get_sync_owner` response body** | This tells us if/how Nuvio enforces sync ownership — critical for understanding if Syncio-managed users will conflict with Nuvio's own sync. |
-
-### Priority 2 (Nice to have)
-
-| Operation | How to Capture |
-|---|---|
-| **Likes/favorites** | Does Nuvio have a like/love button? If so, capture the request. If not, it's a known feature gap. |
-| **Bulk delete confirmation** | Try `DELETE /rest/v1/addons?user_id=eq.<id>&profile_id=eq.1` (no `id` filter) — does it work? |
-| **Token refresh after 24hrs** | Wait a day, then try using the refresh token to get a new JWT. Confirms long-lived refresh tokens. |
+| **Library write (add/remove item)** | Deferred (NOOP for now). Will need capture when library sync is implemented. |
+| **Bulk delete confirmation** | Try `DELETE /rest/v1/addons?user_id=eq.<id>&profile_id=eq.1` (no `id` filter). |
+| **Token refresh after 24hrs** | Wait a day, then try using the refresh token to get a new JWT. |
+| **`uses_primary_addons` behavior** | If a profile has `uses_primary_addons: true`, does writing to its addon list work or is it read-only? |
+| **`get_sync_owner` for managed users** | What happens if user is managed by another account? Syncio should check this. |
 
 ---
 
@@ -368,9 +453,34 @@ Nuvio addon (Supabase row):
 }
 ```
 
-### Library Item Shape: Nuvio — UNKNOWN
+### Library Item Shape: Nuvio (CONFIRMED)
 
-Need to capture `sync_pull_library` response to determine field mapping. Likely uses similar IMDb IDs but different field names.
+Nuvio splits what Stremio combines into one `libraryItem` into two separate concepts:
+
+**Watch Progress (`sync_pull_watch_progress`):**
+```json
+{
+  "id": "uuid", "user_id": "uuid", "content_id": "tt14824792",
+  "content_type": "series", "video_id": "tt14824792:1:4",
+  "season": 1, "episode": 4,
+  "position": 2280000, "duration": 2280000,
+  "last_watched": 1775044288640, "progress_key": "tt14824792_s1e4",
+  "profile_id": 1
+}
+```
+
+**Watched Items (`sync_pull_watched_items`):**
+```json
+{
+  "id": "uuid", "user_id": "uuid", "content_id": "tt14824792",
+  "content_type": "series", "title": "ted",
+  "season": 1, "episode": 4,
+  "watched_at": 1775044288655, "created_at": "2026-04-01T...",
+  "profile_id": 1
+}
+```
+
+**Library (`sync_pull_library`):** Returns `[]` — appears to be for saved/bookmarked items (Nuvio equivalent of Stremio's `removed: false` bookmark list). Separate from watch history.
 
 ### User Model Changes Needed
 
@@ -473,14 +583,19 @@ Replace direct `StremioAPIClient` usage with provider calls:
 
 | Question | Severity | Impact |
 |---|---|---|
-| **Library write API** | HIGH | Without this, we can't toggle/remove library items for Nuvio users |
-| **`sync_pull_library` response shape** | HIGH | Need field mapping for activity monitoring + metrics |
-| **`get_sync_owner` behavior** | MEDIUM | Could block writes if Nuvio thinks another account owns the sync |
-| **Likes API in Nuvio** | LOW | Feature gap if absent — not critical for core sync |
+| **Library write API** | LOW (deferred) | NOOPing for now — only needed when library sync is implemented |
 | **Refresh token max lifetime** | LOW | Fallback: re-login with stored encrypted email/password |
-| **`profile_id` semantics** | LOW | Hardcode `1` for now; handle multi-profile later if needed |
+| **`uses_primary_addons` behavior** | LOW | May affect addon writes for secondary profiles |
 | **Rate limiting** | LOW | Supabase has generous limits; add request queuing if needed |
 | **RLS policies** | LOW | JWT scoped to own rows — fine for per-user operations |
+
+### Known Feature Gaps (Nuvio vs Stremio)
+
+| Feature | Status |
+|---|---|
+| Likes/favorites | No Nuvio equivalent — NOOP |
+| OAuth login | Nuvio uses email/password only — need login form instead of OAuth card |
+| Library write (add/remove bookmarks) | Deferred — NOOP for now |
 
 ---
 
@@ -490,7 +605,7 @@ Replace direct `StremioAPIClient` usage with provider calls:
 |---|---|---|
 | Provider interface + Stremio provider | 3 new files | Medium |
 | Nuvio provider (addons) | 1 new file | Low-Medium |
-| Nuvio provider (library) | Same file, pending API capture | Medium (blocked) |
+| Nuvio provider (library reads) | Same file | Low-Medium |
 | Refactor addon call sites | 5 files, ~15 locations | Medium |
 | Refactor library call sites | 4 files, ~12 locations | Medium |
 | Refactor likes call sites | 1 file, 2 locations | Low |
@@ -506,13 +621,10 @@ Replace direct `StremioAPIClient` usage with provider calls:
 
 **Addon sync is fully mappable today** — every operation has a confirmed Nuvio equivalent.
 
-**Library/watch history is partially mapped** — the read operations exist (`sync_pull_*` RPCs) but we need:
-1. Response shapes from those RPCs
-2. Library write operations (add/remove items)
-3. Clarity on `get_sync_owner` (sync ownership model)
+**Library/watch history reads are fully mapped** — all three `sync_pull_*` RPCs have confirmed response shapes with clean field mappings to Stremio equivalents. Activity monitoring can use `sync_pull_watched_items` (has timestamps + titles). Watch progress uses same `video_id` format as Stremio. Library writes are deferred (NOOP).
 
-**Likes may be a feature gap** — Stremio has a dedicated likes service. Nuvio may not have an equivalent.
+**Likes are a known gap** — Nuvio has no equivalent. NOOP for Nuvio users.
 
 **The code structure supports this** — while there's no formal provider abstraction today, Stremio calls are concentrated in ~8 files with a consistent pattern. The sync planning engine and all group/user management is already provider-agnostic.
 
-**Recommended next step:** Capture the remaining Priority 1 items (library write, RPC response shapes, `get_sync_owner` response) to unblock the full implementation.
+**No remaining blockers.** All API surfaces are mapped. Ready for implementation.
