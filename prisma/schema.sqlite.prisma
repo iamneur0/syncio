@@ -14,6 +14,9 @@ model User {
   email              String    @unique
   isActive           Boolean   @default(true)
   stremioAuthKey     String? // Encrypted Stremio auth key
+  providerType       String    @default("stremio") // "stremio" | "nuvio"
+  nuvioRefreshToken  String? // Encrypted Supabase refresh token
+  nuvioUserId        String? // Nuvio/Supabase user UUID
   excludedAddons     String? // JSON array of addon IDs that user has excluded
   protectedAddons    String? // JSON array of addon IDs that user has protected
   colorIndex         Int? // UI color theme index
