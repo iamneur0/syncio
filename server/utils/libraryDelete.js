@@ -1,4 +1,5 @@
 const { StremioAPIClient } = require('stremio-api-client')
+const { createProvider } = require('../providers')
 
 /**
  * Mark a single library item as removed in Stremio, using the minimal-field
@@ -9,29 +10,48 @@ const { StremioAPIClient } = require('stremio-api-client')
  * - users DELETE /:userId/library/:itemId
  *
  * @param {Object} options
- * @param {string} options.authKey - decrypted Stremio authKey
+ * @param {string} [options.authKey] - decrypted Stremio authKey (legacy path)
+ * @param {Object} [options.provider] - provider instance from createProvider (preferred)
+ * @param {Object} [options.user] - user object for createProvider
+ * @param {Function} [options.decrypt] - decrypt function for createProvider
+ * @param {Object} [options.req] - request object for createProvider
  * @param {string} options.itemId - raw item id from route (may be URL-encoded)
  * @param {string} [options.logPrefix] - prefix for console logs
  */
-async function markLibraryItemRemoved({ authKey, itemId, logPrefix = '[libraryDelete]' }) {
-  if (!authKey || !itemId) {
-    throw new Error(`${logPrefix} authKey and itemId are required`)
+async function markLibraryItemRemoved({ authKey, provider: providerArg, user, decrypt, req, itemId, logPrefix = '[libraryDelete]' }) {
+  if (!itemId) {
+    throw new Error(`${logPrefix} itemId is required`)
   }
 
-  const apiClient = new StremioAPIClient({
-    endpoint: 'https://api.strem.io',
-    authKey
-  })
+  // Resolve provider: explicit provider > createProvider from user > legacy apiClient
+  let provider = providerArg
+  if (!provider && user && decrypt) {
+    provider = createProvider(user, { decrypt, req })
+  }
+
+  if (!provider && !authKey) {
+    throw new Error(`${logPrefix} provider, user+decrypt, or authKey is required`)
+  }
+
+  let apiClient = null
+  if (!provider) {
+    apiClient = new StremioAPIClient({
+      endpoint: 'https://api.strem.io',
+      authKey
+    })
+  }
 
   // Decode itemId (it might be URL encoded)
   const decodedItemId = decodeURIComponent(itemId)
 
   // Get full library to find the item
-  const libraryItems = await apiClient.request('datastoreGet', {
-    collection: 'libraryItem',
-    ids: [],
-    all: true
-  })
+  const libraryItems = provider
+    ? await provider.getLibrary()
+    : await apiClient.request('datastoreGet', {
+        collection: 'libraryItem',
+        ids: [],
+        all: true
+      })
 
   let allItems = []
   if (Array.isArray(libraryItems)) {
@@ -69,14 +89,18 @@ async function markLibraryItemRemoved({ authKey, itemId, logPrefix = '[libraryDe
   console.log(`${logPrefix} Deleting item ${decodedItemId} (${updatedItem.name}) using minimal payload`)
 
   try {
-    const result = await apiClient.request('datastorePut', {
-      collection: 'libraryItem',
-      changes: [updatedItem]
-    })
-    console.log(`${logPrefix} Successfully marked item ${decodedItemId} as removed`)
-    if (result) {
-      console.log(`${logPrefix} Stremio response keys:`, Object.keys(result))
+    if (provider) {
+      await provider.removeLibraryItem([updatedItem])
+    } else {
+      const result = await apiClient.request('datastorePut', {
+        collection: 'libraryItem',
+        changes: [updatedItem]
+      })
+      if (result) {
+        console.log(`${logPrefix} Stremio response keys:`, Object.keys(result))
+      }
     }
+    console.log(`${logPrefix} Successfully marked item ${decodedItemId} as removed`)
     return { ok: true, itemId: decodedItemId }
   } catch (err) {
     console.error(`${logPrefix} Error in datastorePut:`, err?.message || err)

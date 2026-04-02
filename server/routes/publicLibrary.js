@@ -1,5 +1,4 @@
 const express = require('express');
-const { StremioAPIClient } = require('stremio-api-client');
 const { validateStremioAuthKey } = require('../utils/stremio');
 const { encrypt, decrypt } = require('../utils/encryption');
 const { canonicalizeManifestUrl } = require('../utils/validation');
@@ -8,7 +7,7 @@ const { canonicalizeManifestUrl } = require('../utils/validation');
  * Public Library Router - Allows users to access their library via OAuth
  * without requiring account authentication. Addons added are marked as protected.
  */
-module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibrary, setCachedLibrary }) => {
+module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibrary, setCachedLibrary, createProvider }) => {
   const { findLatestEpisode } = require('../utils/libraryHelpers')
   const router = express.Router();
 
@@ -39,7 +38,10 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
             accountId: true,  // Include accountId to use for group lookup
             stremioAuthKey: true,
             isActive: true,
-            protectedAddons: true
+            protectedAddons: true,
+            providerType: true,
+            nuvioRefreshToken: true,
+            nuvioUserId: true
           }
         });
       }
@@ -120,7 +122,10 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
           email: true,
           stremioAuthKey: true,
           isActive: true,
-          protectedAddons: true
+          protectedAddons: true,
+          providerType: true,
+          nuvioRefreshToken: true,
+          nuvioUserId: true
         }
       });
       return user;
@@ -504,7 +509,10 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
           stremioAuthKey: true,
           isActive: true,
           accountId: true,
-          activityVisibility: true
+          activityVisibility: true,
+          providerType: true,
+          nuvioRefreshToken: true,
+          nuvioUserId: true
         }
       });
 
@@ -543,32 +551,26 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
         return res.status(403).json({ error: 'Access denied: User library is private' });
       }
 
-      if (!user.stremioAuthKey) {
+      const libraryProvider = createProvider(user, { decrypt, req });
+      if (!libraryProvider) {
         return res.status(400).json({ error: 'User not connected to Stremio' });
       }
 
       // Get library from cache or fetch
       let library = getCachedLibrary(user.accountId, user.id);
-      
+
       // Check if cache only has removed items (stale cache) - if so, refresh from Stremio
       // Active items: removed === false (or missing/undefined, treated as in library)
       const hasActiveItems = library && Array.isArray(library) && library.some(item => {
         return item.removed === false || item.removed === undefined || item.removed === null;
       });
-      
+
       console.log(`[Library Cache] User ${user.id}: cache items=${library?.length || 0}, hasActiveItems=${hasActiveItems}`)
-      
+
       if (!library || !Array.isArray(library) || library.length === 0 || !hasActiveItems) {
         console.log(`[Library Cache] Refreshing from Stremio for user ${user.id}`)
-        const mockReq = { appAccountId: user.accountId };
-        const authKeyPlain = decrypt(user.stremioAuthKey, mockReq);
-        const apiClient = new StremioAPIClient({ endpoint: 'https://api.strem.io', authKey: authKeyPlain });
 
-        const libraryItems = await apiClient.request('datastoreGet', {
-          collection: 'libraryItem',
-          ids: [],
-          all: true
-        });
+        const libraryItems = await libraryProvider.getLibrary();
 
         library = Array.isArray(libraryItems) ? libraryItems : (libraryItems?.result || libraryItems?.library || []);
         
@@ -777,7 +779,10 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
           stremioAuthKey: true,
           isActive: true,
           accountId: true,
-          protectedAddons: true
+          protectedAddons: true,
+          providerType: true,
+          nuvioRefreshToken: true,
+          nuvioUserId: true
         }
       });
 
@@ -790,10 +795,11 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
         return res.status(403).json({ error: 'Access denied' });
       }
 
-      if (!user.stremioAuthKey) {
-        return res.status(400).json({ 
+      const addonProvider = createProvider(user, { decrypt, req });
+      if (!addonProvider) {
+        return res.status(400).json({
           error: 'User not connected to Stremio',
-          message: 'User not connected to Stremio. Please connect your Stremio account first.' 
+          message: 'User not connected to Stremio. Please connect your Stremio account first.'
         });
       }
 
@@ -838,14 +844,10 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
       }
 
       // Add to Stremio using the same approach as sync (get current, add new, set collection)
-      const mockReq = { appAccountId: user.accountId };
-      const authKeyPlain = decrypt(user.stremioAuthKey, mockReq);
-      const apiClient = new StremioAPIClient({ endpoint: 'https://api.strem.io', authKey: authKeyPlain });
-      
       try {
         console.log(`[public-library] Getting current Stremio addon collection`);
         // Get current addons
-        const currentCollection = await apiClient.request('addonCollectionGet', {});
+        const currentCollection = await addonProvider.getAddons();
         const rawAddons = currentCollection?.addons || currentCollection || [];
         const currentAddons = Array.isArray(rawAddons)
           ? rawAddons
@@ -878,7 +880,7 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
           console.log(`[public-library] New addon: ${manifest?.name || addonUrl}`);
           
           // Set the entire collection (like sync does)
-          await apiClient.request('addonCollectionSet', { addons: updatedAddons });
+          await addonProvider.setAddons(updatedAddons);
           
           console.log(`[public-library] Successfully added addon to Stremio collection`);
         }
@@ -972,17 +974,17 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
         // If no authKey provided, get it from the user's stored key (for backward compatibility)
         const user = await prisma.user.findUnique({
           where: { id: userId },
-          select: { stremioAuthKey: true, accountId: true, isActive: true }
+          select: { stremioAuthKey: true, accountId: true, isActive: true, providerType: true, nuvioRefreshToken: true, nuvioUserId: true }
         });
-        
+
         if (!user || !user.isActive) {
           return res.status(404).json({ error: 'User not found or inactive' });
         }
-        
-        if (!user.stremioAuthKey) {
+
+        if (!createProvider(user, { decrypt, req })) {
           return res.status(400).json({ error: 'User not connected to Stremio' });
         }
-        
+
         // Decrypt the stored auth key
         const mockReq = { appAccountId: user.accountId || DEFAULT_ACCOUNT_ID };
         authKeyToValidate = decrypt(user.stremioAuthKey, mockReq);
@@ -1023,7 +1025,10 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
           isActive: true,
           accountId: true,
           excludedAddons: true,
-          protectedAddons: true
+          protectedAddons: true,
+          providerType: true,
+          nuvioRefreshToken: true,
+          nuvioUserId: true
         }
       });
 
@@ -1031,7 +1036,8 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
         return res.status(404).json({ error: 'User not found or inactive' });
       }
 
-      if (!fullUser.stremioAuthKey) {
+      const addonsProvider = createProvider(fullUser, { decrypt, req });
+      if (!addonsProvider) {
         return res.status(400).json({ error: 'User not connected to Stremio' });
       }
 
@@ -1091,13 +1097,9 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
       // Get user's current Stremio addons with proper error handling
       let stremioAddons = [];
       try {
-        const mockReq = { appAccountId: userAccountId };
-        const authKeyPlain = decrypt(fullUser.stremioAuthKey, mockReq);
-        const apiClient = new StremioAPIClient({ endpoint: 'https://api.strem.io', authKey: authKeyPlain });
-        
-        const stremioAddonsResponse = await apiClient.request('addonCollectionGet', {});
-        stremioAddons = Array.isArray(stremioAddonsResponse) 
-          ? stremioAddonsResponse 
+        const stremioAddonsResponse = await addonsProvider.getAddons();
+        stremioAddons = Array.isArray(stremioAddonsResponse)
+          ? stremioAddonsResponse
           : (stremioAddonsResponse?.addons || []);
       } catch (stremioError) {
         const errorMsg = stremioError?.message || stremioError?.error || String(stremioError || '');
@@ -1274,7 +1276,10 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
           id: true,
           stremioAuthKey: true,
           isActive: true,
-          accountId: true
+          accountId: true,
+          providerType: true,
+          nuvioRefreshToken: true,
+          nuvioUserId: true
         }
       });
 
@@ -1287,19 +1292,16 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
         return res.status(403).json({ error: 'Access denied' });
       }
 
-      if (!user.stremioAuthKey) {
+      const deleteProvider = createProvider(user, { decrypt, req });
+      if (!deleteProvider) {
         return res.status(400).json({ error: 'User not connected to Stremio' });
       }
-
-      // Decrypt auth key
-      const mockReq = { appAccountId: DEFAULT_ACCOUNT_ID };
-      const authKeyPlain = decrypt(user.stremioAuthKey, mockReq);
 
       const { markLibraryItemRemoved } = require('../utils/libraryDelete');
 
       try {
         await markLibraryItemRemoved({
-          authKey: authKeyPlain,
+          provider: deleteProvider,
           itemId,
           logPrefix: '[public-library]'
         });
@@ -1428,7 +1430,10 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
           accountId: true,
           stremioAuthKey: true,
           isActive: true,
-          protectedAddons: true
+          protectedAddons: true,
+          providerType: true,
+          nuvioRefreshToken: true,
+          nuvioUserId: true
         }
       });
 
@@ -1441,13 +1446,14 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
         return res.status(403).json({ error: 'Access denied' });
       }
 
-      if (!user.stremioAuthKey) {
+      const removeProvider = createProvider(user, { decrypt, req });
+      if (!removeProvider) {
         return res.status(400).json({ error: 'User not connected to Stremio' });
       }
 
       const normalizeName = (n) => String(n || '').trim().toLowerCase();
       const targetNameNormalized = normalizeName(addonName);
-      
+
       // First, unprotect the addon if it's in the protected list (so user can delete their own protected addons)
       let userProtectedNames = [];
       try {
@@ -1458,7 +1464,7 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
       } catch {
         userProtectedNames = [];
       }
-      
+
       // Remove from protected list if present
       const updatedProtectedNames = userProtectedNames.filter(n => normalizeName(n) !== targetNameNormalized);
       if (updatedProtectedNames.length !== userProtectedNames.length) {
@@ -1470,13 +1476,8 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
         });
       }
 
-      // Decrypt auth key and delete from Stremio
-      const mockReq = { appAccountId: DEFAULT_ACCOUNT_ID };
-      const authKeyPlain = decrypt(user.stremioAuthKey, mockReq);
-      const apiClient = new StremioAPIClient({ endpoint: 'https://api.strem.io', authKey: authKeyPlain });
-
       // Get current collection
-      const current = await apiClient.request('addonCollectionGet', {});
+      const current = await removeProvider.getAddons();
       const currentAddonsRaw = current?.addons || current || [];
       const currentAddons = Array.isArray(currentAddonsRaw)
         ? currentAddonsRaw
@@ -1489,7 +1490,7 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
       });
 
       // Set the filtered addons
-      await apiClient.request('addonCollectionSet', { addons: filteredAddons });
+      await removeProvider.setAddons(filteredAddons);
 
       res.json({ message: 'Addon removed from Stremio account successfully' });
     } catch (error) {

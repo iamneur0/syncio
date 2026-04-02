@@ -37,21 +37,28 @@ function getLocalFilesAddon() {
 /**
  * Clear all addons (set to empty array)
  * Previously added Local Files addon, but that workaround is no longer needed
- * @param {Object} apiClient - StremioAPIClient instance
+ * @param {Object} apiClientOrProvider - StremioAPIClient instance or provider object
  * @returns {Promise<void>}
  */
-async function clearAddonsAndAddLocalFiles(apiClient) {
-  // Just set to empty array - no longer need Local Files workaround
-  await apiClient.request('addonCollectionSet', { addons: [] })
+async function clearAddonsAndAddLocalFiles(apiClientOrProvider) {
+  if (apiClientOrProvider && typeof apiClientOrProvider.clearAddons === 'function') {
+    await apiClientOrProvider.clearAddons()
+  } else {
+    await apiClientOrProvider.request('addonCollectionSet', { addons: [] })
+  }
 }
 
 /**
  * Clear all addons (alias for clearAddonsAndAddLocalFiles)
- * @param {Object} apiClient - StremioAPIClient instance
+ * @param {Object} apiClientOrProvider - StremioAPIClient instance or provider object
  * @returns {Promise<void>}
  */
-async function clearAddons(apiClient) {
-  await apiClient.request('addonCollectionSet', { addons: [] })
+async function clearAddons(apiClientOrProvider) {
+  if (apiClientOrProvider && typeof apiClientOrProvider.clearAddons === 'function') {
+    await apiClientOrProvider.clearAddons()
+  } else {
+    await apiClientOrProvider.request('addonCollectionSet', { addons: [] })
+  }
 }
 
 module.exports = {

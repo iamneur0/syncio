@@ -9,7 +9,7 @@ const { sendShareNotification } = require('../utils/activityMonitor');
 const { postDiscord } = require('../utils/notify');
 
 // Export a function that returns the router, allowing dependency injection
-module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, encrypt, parseAddonIds, parseProtectedAddons, getDecryptedManifestUrl, StremioAPIClient, StremioAPIStore, assignUserToGroup, debug, defaultAddons, canonicalizeManifestUrl, getAccountDek, getServerKey, aesGcmDecrypt, validateStremioAuthKey, manifestUrlHmac, manifestHash }) => {
+module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, encrypt, parseAddonIds, parseProtectedAddons, getDecryptedManifestUrl, StremioAPIClient, StremioAPIStore, assignUserToGroup, debug, defaultAddons, canonicalizeManifestUrl, getAccountDek, getServerKey, aesGcmDecrypt, validateStremioAuthKey, manifestUrlHmac, manifestHash, createProvider }) => {
   const { findLatestEpisode, enrichPostersFromCinemeta } = require('../utils/libraryHelpers')
   const router = express.Router();
 
@@ -105,25 +105,19 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
         
         // Calculate Stremio addons count by fetching live data
         let stremioAddonsCount = 0
-        if (user.stremioAuthKey) {
+        const provider = createProvider(user, { decrypt, req })
+        if (provider) {
           try {
-            // Decrypt stored auth key
-            const authKeyPlain = decrypt(user.stremioAuthKey, req)
-            
-            // Use stateless client with authKey to fetch addon collection directly
-            const apiClient = new StremioAPIClient({ endpoint: 'https://api.strem.io', authKey: authKeyPlain })
-            const collection = await apiClient.request('addonCollectionGet', {})
-            
+            const collection = await provider.getAddons()
+
             const rawAddons = collection?.addons || collection || {}
             const addonsNormalized = Array.isArray(rawAddons)
               ? rawAddons
               : (typeof rawAddons === 'object' ? Object.values(rawAddons) : [])
-            
+
             stremioAddonsCount = addonsNormalized.length
           } catch (error) {
             console.error(`Error fetching Stremio addons for user ${user.id}:`, error.message)
-            // Note: stremioAddons field was removed from User schema
-            // No fallback to database value available
           }
         }
         
@@ -1282,6 +1276,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
         getDecryptedManifestUrl,
         canonicalizeManifestUrl,
         StremioAPIClient,
+        createProvider,
       })
 
       const result = await getUserSyncStatus(id, { groupId, unsafe: unsafeMode }, req)
@@ -1303,10 +1298,13 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
           id,
           accountId: getAccountId(req)
         },
-        select: { 
+        select: {
           id: true,
           stremioAuthKey: true,
-          isActive: true
+          isActive: true,
+          providerType: true,
+          nuvioRefreshToken: true,
+          nuvioUserId: true
         }
       })
 
@@ -1314,17 +1312,19 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
         return responseUtils.notFound(res, 'User')
       }
 
-      if (!user.stremioAuthKey) {
-        return res.status(400).json({ message: 'User not connected to Stremio' })
+      const provider = createProvider(user, { decrypt, req })
+      if (!provider) {
+        return res.status(400).json({ message: 'User not connected to a provider' })
       }
 
       // Import the getUserAddons function
       const { getUserAddons } = require('../utils/sync')
-      
+
       // Get raw Stremio addons
       const result = await getUserAddons(user, req, {
         decrypt,
-        StremioAPIClient
+        StremioAPIClient,
+        createProvider
       })
 
       if (!result.success) {
@@ -1350,30 +1350,20 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
           id,
           accountId: getAccountId(req)
         },
-        select: { stremioAuthKey: true }
+        select: { stremioAuthKey: true, providerType: true, nuvioRefreshToken: true, nuvioUserId: true }
       })
 
       if (!user) {
         return responseUtils.notFound(res, 'User')
       }
 
-      if (!user.stremioAuthKey) {
-        return res.status(400).json({ message: 'User is not connected to Stremio' })
+      const provider = createProvider(user, { decrypt, req })
+      if (!provider) {
+        return res.status(400).json({ message: 'User not connected to a provider' })
       }
 
-      // Decrypt stored auth key
-      let authKeyPlain
       try {
-        authKeyPlain = decrypt(user.stremioAuthKey, req)
-      } catch (e) {
-        console.error('Decryption failed:', e.message)
-        return res.status(500).json({ message: 'Failed to decrypt Stremio credentials' })
-      }
-
-      // Use stateless client with authKey to fetch addon collection directly
-      try {
-        const apiClient = new StremioAPIClient({ endpoint: 'https://api.strem.io', authKey: authKeyPlain })
-        const collection = await apiClient.request('addonCollectionGet', {})
+        const collection = await provider.getAddons()
 
         const rawAddons = collection?.addons || collection || {}
         const addonsNormalized = Array.isArray(rawAddons)
@@ -1433,11 +1423,14 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
           id,
           accountId: getAccountId(req)
         },
-        select: { 
+        select: {
           id: true,
           stremioAuthKey: true,
           excludedAddons: true,
-          protectedAddons: true
+          protectedAddons: true,
+          providerType: true,
+          nuvioRefreshToken: true,
+          nuvioUserId: true
         }
       })
 
@@ -1447,10 +1440,10 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
 
       // Import the getDesiredAddons function
       const { getDesiredAddons } = require('../utils/sync')
-      
+
       // Get unsafe mode from query parameter
       const unsafe = req.query.unsafe === 'true'
-      
+
       // Call getDesiredAddons with all required dependencies
       const result = await getDesiredAddons(user, req, {
         prisma,
@@ -1460,6 +1453,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
         parseProtectedAddons,
         canonicalizeManifestUrl,
         StremioAPIClient,
+        createProvider,
         unsafeMode: unsafe
       })
 
@@ -1914,9 +1908,12 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
           id,
           accountId: getAccountId(req)
         },
-        select: { 
+        select: {
           stremioAuthKey: true,
-          isActive: true
+          isActive: true,
+          providerType: true,
+          nuvioRefreshToken: true,
+          nuvioUserId: true
         }
       })
 
@@ -1924,18 +1921,16 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
         return responseUtils.notFound(res, 'User')
       }
 
-      if (!user.stremioAuthKey) {
-        return res.status(400).json({ message: 'User not connected to Stremio' })
-      }
-
       if (!user.isActive) {
         return res.status(400).json({ message: 'User is disabled' })
       }
 
+      const provider = createProvider(user, { decrypt, req })
+      if (!provider) {
+        return res.status(400).json({ message: 'User not connected to a provider' })
+      }
+
       try {
-        const authKeyPlain = decrypt(user.stremioAuthKey, req)
-        const apiClient = new StremioAPIClient({ endpoint: 'https://api.strem.io', authKey: authKeyPlain })
-        
         let addedCount = 0
         const results = []
 
@@ -1949,10 +1944,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
             const manifest = await manifestResponse.json()
 
             // Add to Stremio
-            await apiClient.request('addonCollectionAdd', {
-              addonId: addonUrl,
-              manifest: manifest
-            })
+            await provider.addAddon(addonUrl, manifest)
 
             addedCount++
             results.push({
@@ -2010,7 +2002,10 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
           email: true,
           stremioAuthKey: true,
           colorIndex: true,
-          activityVisibility: true
+          activityVisibility: true,
+          providerType: true,
+          nuvioRefreshToken: true,
+          nuvioUserId: true
         }
       })
 
@@ -2044,14 +2039,10 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
           
           // If no cache file exists or cache only has removed items, fetch from Stremio and cache it
           if (!library || !Array.isArray(library) || library.length === 0 || !hasActiveItems) {
-            const authKeyPlain = decrypt(user.stremioAuthKey, req)
-            const apiClient = new StremioAPIClient({ endpoint: 'https://api.strem.io', authKey: authKeyPlain })
+            const provider = createProvider(user, { decrypt, req })
+            if (!provider) continue
 
-            const libraryItems = await apiClient.request('datastoreGet', {
-              collection: 'libraryItem',
-              ids: [],
-              all: true
-            })
+            const libraryItems = await provider.getLibrary()
 
             library = Array.isArray(libraryItems) ? libraryItems : (libraryItems?.result || libraryItems?.library || [])
             
@@ -2162,9 +2153,12 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
           id: userId,
           accountId: accountId
         },
-        select: { 
+        select: {
           stremioAuthKey: true,
-          isActive: true
+          isActive: true,
+          providerType: true,
+          nuvioRefreshToken: true,
+          nuvioUserId: true
         }
       })
 
@@ -2172,32 +2166,12 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
         return res.status(404).json({ message: 'User not found or inactive' })
       }
 
-      if (!user.stremioAuthKey) {
+      const provider = createProvider(user, { decrypt, req })
+      if (!provider) {
         return res.status(400).json({ message: 'User not connected to Stremio' })
       }
 
-      // Decrypt auth key
-      const authKeyPlain = decrypt(user.stremioAuthKey, req)
-
-      // Call Stremio likes API to get status
-      const response = await fetch(`https://likes.stremio.com/api/get_status?authToken=${encodeURIComponent(authKeyPlain)}&mediaId=${encodeURIComponent(mediaId)}&mediaType=${encodeURIComponent(mediaType)}`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json'
-        }
-      })
-
-      if (!response.ok) {
-        const errorText = await response.text()
-        console.error(`[Get Status] Stremio API error: ${response.status} - ${errorText}`)
-        return res.status(response.status).json({ 
-          message: 'Failed to get like/love status',
-          error: errorText 
-        })
-      }
-
-      const data = await response.json().catch(() => ({}))
-      // Stremio returns { status: 'liked' | 'loved' | null }
+      const data = await provider.getLikeStatus(mediaId, mediaType)
       res.json({ status: data.status || null })
     } catch (error) {
       console.error('Error getting like/love status:', error)
@@ -2226,9 +2200,12 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
           id: userId,
           accountId: accountId
         },
-        select: { 
+        select: {
           stremioAuthKey: true,
-          isActive: true
+          isActive: true,
+          providerType: true,
+          nuvioRefreshToken: true,
+          nuvioUserId: true
         }
       })
 
@@ -2236,37 +2213,12 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
         return res.status(404).json({ message: 'User not found or inactive' })
       }
 
-      if (!user.stremioAuthKey) {
+      const provider = createProvider(user, { decrypt, req })
+      if (!provider) {
         return res.status(400).json({ message: 'User not connected to Stremio' })
       }
 
-      // Decrypt auth key
-      const authKeyPlain = decrypt(user.stremioAuthKey, req)
-
-      // Call Stremio likes API
-      const response = await fetch('https://likes.stremio.com/api/send', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          authToken: authKeyPlain,
-          mediaId: mediaId,
-          mediaType: mediaType, // 'series' or 'movie'
-          status: status // 'liked', 'loved', or null to unlike/unlove
-        })
-      })
-
-      if (!response.ok) {
-        const errorText = await response.text()
-        console.error(`[Like/Love] Stremio API error: ${response.status} - ${errorText}`)
-        return res.status(response.status).json({ 
-          message: 'Failed to update like/love status',
-          error: errorText 
-        })
-      }
-
-      const data = await response.json().catch(() => ({}))
+      const data = await provider.setLikeStatus(mediaId, mediaType, status)
       res.json({ success: true, data })
     } catch (error) {
       console.error('Error updating like/love status:', error)
@@ -2291,9 +2243,12 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
           id: userId,
           accountId: accountId
         },
-        select: { 
+        select: {
           stremioAuthKey: true,
-          isActive: true
+          isActive: true,
+          providerType: true,
+          nuvioRefreshToken: true,
+          nuvioUserId: true
         }
       })
 
@@ -2301,11 +2256,11 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
         return res.status(404).json({ message: 'User not found or inactive' })
       }
 
-      if (!user.stremioAuthKey) {
+      const provider = createProvider(user, { decrypt, req })
+      if (!provider) {
         return res.status(400).json({ message: 'User not connected to Stremio' })
       }
 
-      // Decrypt auth key
       const authKeyPlain = decrypt(user.stremioAuthKey, req)
 
       const { toggleLibraryItemsBatch } = require('../utils/libraryToggle')
@@ -2323,8 +2278,8 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
         console.error(`[LibraryToggle] Failed to toggle library items for user ${userId}:`, error)
         console.error(`[LibraryToggle] Error stack:`, error?.stack)
         clearCache(accountId, userId)
-        return res.status(500).json({ 
-          error: 'Failed to toggle library items', 
+        return res.status(500).json({
+          error: 'Failed to toggle library items',
           message: error?.message || String(error),
           success: false,
           successCount: 0,
@@ -2338,13 +2293,8 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
 
       // Fetch updated library from Stremio and update cache
       try {
-        const apiClient = new StremioAPIClient({ endpoint: 'https://api.strem.io', authKey: authKeyPlain })
-        const libraryItems = await apiClient.request('datastoreGet', {
-          collection: 'libraryItem',
-          ids: [],
-          all: true
-        })
-        
+        const libraryItems = await provider.getLibrary()
+
         let library = []
         if (Array.isArray(libraryItems)) {
           library = libraryItems
@@ -2353,7 +2303,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
         } else if (libraryItems?.library) {
           library = Array.isArray(libraryItems.library) ? libraryItems.library : [libraryItems.library]
         }
-        
+
         if (Array.isArray(library) && library.length > 0) {
           setCachedLibrary(accountId, userId, library)
           console.log(`[LibraryToggle] Updated cache for user ${userId} with ${library.length} items`)
@@ -2394,13 +2344,16 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
 
       // Get user
       const user = await prisma.user.findUnique({
-        where: { 
+        where: {
           id: userId,
           accountId: accountId
         },
-        select: { 
+        select: {
           stremioAuthKey: true,
-          isActive: true
+          isActive: true,
+          providerType: true,
+          nuvioRefreshToken: true,
+          nuvioUserId: true
         }
       })
 
@@ -2412,11 +2365,11 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
         return res.status(400).json({ error: 'User is disabled' })
       }
 
-      if (!user.stremioAuthKey) {
+      const provider = createProvider(user, { decrypt, req })
+      if (!provider) {
         return res.status(400).json({ error: 'User not connected to Stremio' })
       }
 
-      // Decrypt auth key
       const authKeyPlain = decrypt(user.stremioAuthKey, req)
 
       const { markLibraryItemRemoved } = require('../utils/libraryDelete')
@@ -2461,11 +2414,14 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
           id,
           accountId: accountId
         },
-        select: { 
+        select: {
           stremioAuthKey: true,
           isActive: true,
           username: true,
-          email: true
+          email: true,
+          providerType: true,
+          nuvioRefreshToken: true,
+          nuvioUserId: true
         }
       })
 
@@ -2477,20 +2433,13 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
         return res.status(400).json({ error: 'User is disabled' })
       }
 
-      if (!user.stremioAuthKey) {
+      const provider = createProvider(user, { decrypt, req })
+      if (!provider) {
         return res.status(400).json({ error: 'User not connected to Stremio' })
       }
 
-      // Decrypt auth key
-      const authKeyPlain = decrypt(user.stremioAuthKey, req)
-      const apiClient = new StremioAPIClient({ endpoint: 'https://api.strem.io', authKey: authKeyPlain })
-
       // Get all library items
-      const libraryItems = await apiClient.request('datastoreGet', {
-        collection: 'libraryItem',
-        ids: [],
-        all: true
-      })
+      const libraryItems = await provider.getLibrary()
 
       let library = Array.isArray(libraryItems) ? libraryItems : (libraryItems?.result || libraryItems?.library || [])
 
@@ -2526,13 +2475,16 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
       const { id } = req.params
 
       const user = await prisma.user.findUnique({
-        where: { 
+        where: {
           id,
           accountId: getAccountId(req)
         },
-        select: { 
+        select: {
           stremioAuthKey: true,
-          isActive: true
+          isActive: true,
+          providerType: true,
+          nuvioRefreshToken: true,
+          nuvioUserId: true
         }
       })
 
@@ -2540,7 +2492,8 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
         return responseUtils.notFound(res, 'User')
       }
 
-      if (!user.stremioAuthKey) {
+      const provider = createProvider(user, { decrypt, req })
+      if (!provider) {
         return res.status(400).json({ message: 'User not connected to Stremio' })
       }
 
@@ -2553,22 +2506,14 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
         const accountId = getAccountId(req)
         const { getCachedLibrary, setCachedLibrary } = require('../utils/libraryCache')
         let library = getCachedLibrary(accountId, id)
-        
+
         // If no cache, fetch from Stremio and cache it
         if (!library || !Array.isArray(library) || library.length === 0) {
-          const authKeyPlain = decrypt(user.stremioAuthKey, req)
-          const apiClient = new StremioAPIClient({ endpoint: 'https://api.strem.io', authKey: authKeyPlain })
-
-          // Get library items from Stremio API using datastoreGet
-          const libraryItems = await apiClient.request('datastoreGet', {
-            collection: 'libraryItem',
-            ids: [],
-            all: true
-          })
+          const libraryItems = await provider.getLibrary()
 
           // The response might be wrapped or direct array
           library = Array.isArray(libraryItems) ? libraryItems : (libraryItems?.result || libraryItems?.library || [])
-          
+
           // Cache the library data
           if (Array.isArray(library) && library.length > 0) {
             setCachedLibrary(accountId, id, library)
@@ -2676,13 +2621,16 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
       const { id } = req.params
 
       const user = await prisma.user.findUnique({
-        where: { 
+        where: {
           id,
           accountId: getAccountId(req)
         },
-        select: { 
+        select: {
           stremioAuthKey: true,
-          isActive: true
+          isActive: true,
+          providerType: true,
+          nuvioRefreshToken: true,
+          nuvioUserId: true
         }
       })
 
@@ -2690,7 +2638,8 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
         return responseUtils.notFound(res, 'User')
       }
 
-      if (!user.stremioAuthKey) {
+      const provider = createProvider(user, { decrypt, req })
+      if (!provider) {
         return res.status(400).json({ message: 'User not connected to Stremio' })
       }
 
@@ -2699,12 +2648,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
       }
 
       try {
-        const authKeyPlain = decrypt(user.stremioAuthKey, req)
-        const apiClient = new StremioAPIClient({ endpoint: 'https://api.strem.io', authKey: authKeyPlain })
-
-        // Clear all addons
-        const { clearAddons } = require('../utils/addonHelpers')
-        await clearAddons(apiClient)
+        await provider.clearAddons()
 
         res.json({
           message: 'All addons cleared successfully',
@@ -2728,14 +2672,17 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
       
       // Get user to check for user-defined protected addons and Stremio auth
       const user = await prisma.user.findUnique({
-        where: { 
+        where: {
           id,
           accountId: getAccountId(req)
         },
-        select: { 
+        select: {
           stremioAuthKey: true,
           isActive: true,
-          protectedAddons: true
+          protectedAddons: true,
+          providerType: true,
+          nuvioRefreshToken: true,
+          nuvioUserId: true
         }
       })
 
@@ -2743,7 +2690,8 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
         return responseUtils.notFound(res, 'User')
       }
 
-      if (!user.stremioAuthKey) {
+      const provider = createProvider(user, { decrypt, req })
+      if (!provider) {
         return res.status(400).json({ message: 'User not connected to Stremio' })
       }
 
@@ -2757,11 +2705,11 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
       const { defaultAddons } = require('../utils/config')
       const normalizeName = (n) => String(n || '').trim().toLowerCase()
       const targetNameNormalized = normalizeName(addonName)
-      
+
       // Default protected addon names (only in safe mode)
       const defaultProtectedNames = unsafe === 'true' ? [] : (defaultAddons.names || [])
       const defaultProtectedNameSet = new Set(defaultProtectedNames.map(normalizeName))
-      
+
       // Parse user-defined protected addons (ALWAYS protected regardless of mode) - stored as plaintext names
       let userProtectedNames = []
       try {
@@ -2773,31 +2721,20 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
         console.warn('Failed to parse user protected addons in delete:', e)
         userProtectedNames = []
       }
-      
+
       const userProtectedNameSet = new Set(userProtectedNames)
       const allProtectedNameSet = new Set([...defaultProtectedNameSet, ...userProtectedNameSet])
-      
+
       // Check if the addon being deleted is protected (by name)
       const isProtected = allProtectedNameSet.has(targetNameNormalized)
-      
+
       // In unsafe mode, allow deletion of default Stremio addons but not user-defined protected addons
       if (isProtected && (unsafe !== 'true' || userProtectedNameSet.has(targetNameNormalized))) {
         return res.status(403).json({ message: 'This addon is protected and cannot be deleted' })
       }
 
-      // Decrypt stored auth key
-      let authKeyPlain
-      try {
-        authKeyPlain = decrypt(user.stremioAuthKey, req)
-      } catch (e) {
-        return res.status(500).json({ message: 'Failed to decrypt Stremio credentials' })
-      }
-
-      // Use StremioAPIClient with proper addon collection format
-      const apiClient = new StremioAPIClient({ endpoint: 'https://api.strem.io', authKey: authKeyPlain })
-
       // 1) Pull current collection
-      const current = await apiClient.request('addonCollectionGet', {})
+      const current = await provider.getAddons()
       const currentAddonsRaw = current?.addons || current || []
       const currentAddons = Array.isArray(currentAddonsRaw)
         ? currentAddonsRaw
@@ -2812,7 +2749,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
         })
 
         // Set the filtered addons using the proper format
-        await apiClient.request('addonCollectionSet', { addons: filteredAddons })
+        await provider.setAddons(filteredAddons)
       } catch (e) {
         console.error(`❌ Failed to remove addon:`, e.message)
         throw e
@@ -3120,21 +3057,12 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
         return responseUtils.notFound(res, 'User')
       }
       
-      if (!user.stremioAuthKey) {
+      const provider = createProvider(user, { decrypt, req })
+      if (!provider) {
         return res.status(400).json({ message: 'User is not connected to Stremio' })
       }
-      
-      // Decrypt auth key
-      let authKeyPlain
-      try { 
-        authKeyPlain = decrypt(user.stremioAuthKey, req) 
-      } catch { 
-        return res.status(500).json({ message: 'Failed to decrypt Stremio credentials' }) 
-      }
-      
-      // Use StremioAPIClient to get current addons
-      const apiClient = new StremioAPIClient({ endpoint: 'https://api.strem.io', authKey: authKeyPlain })
-      const current = await apiClient.request('addonCollectionGet', {})
+
+      const current = await provider.getAddons()
       const currentAddons = current?.addons || []
       
       // Build a map name -> queue of addons with that name to handle duplicates

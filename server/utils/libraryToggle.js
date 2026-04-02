@@ -1,4 +1,5 @@
 const { StremioAPIClient } = require('stremio-api-client')
+const { createProvider } = require('../providers')
 
 /**
  * Extract base ID from item ID (removes episode/season info for series)
@@ -18,28 +19,47 @@ function extractBaseId(itemId) {
  * Batch toggle library items (add/remove) in a single Stremio API call
  * 
  * @param {Object} options
- * @param {string} options.authKey - decrypted Stremio authKey
+ * @param {string} [options.authKey] - decrypted Stremio authKey (legacy path)
+ * @param {Object} [options.provider] - provider instance from createProvider (preferred)
+ * @param {Object} [options.user] - user object for createProvider
+ * @param {Function} [options.decrypt] - decrypt function for createProvider
+ * @param {Object} [options.req] - request object for createProvider
  * @param {Array} options.items - Array of { itemId, itemType, itemName, poster, addToLibrary }
  * @param {string} [options.logPrefix] - prefix for console logs
  */
-async function toggleLibraryItemsBatch({ authKey, items, logPrefix = '[libraryToggle]' }) {
-  if (!authKey || !items || !Array.isArray(items) || items.length === 0) {
-    throw new Error(`${logPrefix} authKey and items array are required`)
+async function toggleLibraryItemsBatch({ authKey, provider: providerArg, user, decrypt, req, items, logPrefix = '[libraryToggle]' }) {
+  if (!items || !Array.isArray(items) || items.length === 0) {
+    throw new Error(`${logPrefix} items array is required`)
   }
 
-  const apiClient = new StremioAPIClient({
-    endpoint: 'https://api.strem.io',
-    authKey
-  })
+  // Resolve provider: explicit provider > createProvider from user > legacy apiClient
+  let provider = providerArg
+  if (!provider && user && decrypt) {
+    provider = createProvider(user, { decrypt, req })
+  }
+
+  if (!provider && !authKey) {
+    throw new Error(`${logPrefix} provider, user+decrypt, or authKey is required`)
+  }
+
+  let apiClient = null
+  if (!provider) {
+    apiClient = new StremioAPIClient({
+      endpoint: 'https://api.strem.io',
+      authKey
+    })
+  }
 
   const now = new Date().toISOString()
 
   // Get all existing items from library
-  const libraryItems = await apiClient.request('datastoreGet', {
-    collection: 'libraryItem',
-    ids: [],
-    all: true
-  })
+  const libraryItems = provider
+    ? await provider.getLibrary()
+    : await apiClient.request('datastoreGet', {
+        collection: 'libraryItem',
+        ids: [],
+        all: true
+      })
 
   let allItems = []
   if (Array.isArray(libraryItems)) {
@@ -186,10 +206,14 @@ async function toggleLibraryItemsBatch({ authKey, items, logPrefix = '[libraryTo
 
   try {
     // Send all changes in a single batch call
-    const result = await apiClient.request('datastorePut', {
-      collection: 'libraryItem',
-      changes: changes
-    })
+    if (provider) {
+      await provider.addLibraryItem(changes)
+    } else {
+      await apiClient.request('datastorePut', {
+        collection: 'libraryItem',
+        changes: changes
+      })
+    }
     console.log(`${logPrefix} Successfully processed ${changes.length} item(s) in batch`)
     return { ok: true, processedCount: changes.length }
   } catch (err) {

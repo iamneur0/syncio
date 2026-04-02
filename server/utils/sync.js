@@ -3,12 +3,22 @@
 /**
  * Get addons from Stremio for a user
  */
-async function getUserAddons(user, req, { decrypt, StremioAPIClient }) {
-  if (!user.stremioAuthKey) {
-    return { success: false, addons: [], error: 'User not connected to Stremio' }
-  }
-
+async function getUserAddons(user, req, { decrypt, StremioAPIClient, createProvider }) {
   try {
+    // New path: use provider factory if available
+    if (createProvider) {
+      const provider = createProvider(user, { decrypt, req })
+      if (!provider) {
+        return { success: false, addons: [], error: 'Unable to create provider for user' }
+      }
+      const result = await provider.getAddons()
+      return { success: true, addons: result, error: null }
+    }
+
+    // Legacy path: direct StremioAPIClient usage (backward compat during migration)
+    if (!user.stremioAuthKey) {
+      return { success: false, addons: [], error: 'User not connected to Stremio' }
+    }
     const authKeyPlain = decrypt(user.stremioAuthKey, req)
     const apiClient = new StremioAPIClient({ endpoint: 'https://api.strem.io', authKey: authKeyPlain })
     const collection = await apiClient.request('addonCollectionGet', {})
@@ -38,7 +48,7 @@ async function getUserAddons(user, req, { decrypt, StremioAPIClient }) {
     // Use the same logic as /stremio-addons endpoint: try collection.addons first, then fall back to collection itself
     const rawAddons = collection?.addons !== undefined ? collection.addons : collection
     let addonsArray = []
-    
+
     if (rawAddons !== null && rawAddons !== undefined) {
       if (Array.isArray(rawAddons)) {
         addonsArray = rawAddons
@@ -75,7 +85,7 @@ async function getUserAddons(user, req, { decrypt, StremioAPIClient }) {
 /**
  * Get desired addons for a user (group addons + protected addons from Stremio)
  */
-async function getDesiredAddons(user, req, { prisma, getAccountId, decrypt, parseAddonIds, parseProtectedAddons, canonicalizeManifestUrl, StremioAPIClient, unsafeMode = false, useCustomFields = true }) {
+async function getDesiredAddons(user, req, { prisma, getAccountId, decrypt, parseAddonIds, parseProtectedAddons, canonicalizeManifestUrl, StremioAPIClient, createProvider, unsafeMode = false, useCustomFields = true }) {
   try {
     // Get group addons
     const groups = await prisma.group.findMany({
@@ -99,7 +109,7 @@ async function getDesiredAddons(user, req, { prisma, getAccountId, decrypt, pars
     const groupAddons = groups.length > 0 ? await getGroupAddons(prisma, groups[0].id, req) : []
 
     // Get user's Stremio addons
-    const { success, addons: userAddonsResponse, error } = await getUserAddons(user, req, { decrypt, StremioAPIClient })
+    const { success, addons: userAddonsResponse, error } = await getUserAddons(user, req, { decrypt, StremioAPIClient, createProvider })
     if (!success) {
       return { success: false, addons: [], error }
     }
@@ -255,7 +265,7 @@ async function getDesiredAddons(user, req, { prisma, getAccountId, decrypt, pars
   }
 }
 
-function createGetUserSyncStatus({ prisma, getAccountId, decrypt, parseAddonIds, parseProtectedAddons, getDecryptedManifestUrl, canonicalizeManifestUrl, StremioAPIClient }) {
+function createGetUserSyncStatus({ prisma, getAccountId, decrypt, parseAddonIds, parseProtectedAddons, getDecryptedManifestUrl, canonicalizeManifestUrl, StremioAPIClient, createProvider }) {
   const normalizeUrl = (u) => {
     try {
       return canonicalizeManifestUrl ? canonicalizeManifestUrl(u) : String(u || '').trim().toLowerCase()
@@ -270,7 +280,8 @@ function createGetUserSyncStatus({ prisma, getAccountId, decrypt, parseAddonIds,
       select: { id: true, stremioAuthKey: true, isActive: true, excludedAddons: true, protectedAddons: true, providerType: true, nuvioRefreshToken: true, nuvioUserId: true }
     })
     if (!user) return { status: 'error', isSynced: false, message: 'User not found' }
-    if (!user.stremioAuthKey) return { isSynced: false, status: 'connect', message: 'User not connected to Stremio' }
+    const hasCredentials = user.stremioAuthKey || (user.nuvioRefreshToken && user.nuvioUserId)
+    if (!hasCredentials) return { isSynced: false, status: 'connect', message: 'User not connected to a provider' }
 
     // Derive unsafe and useCustomFields from DB-backed account sync (single source of truth)
     let useCustomFields = true
@@ -292,7 +303,7 @@ function createGetUserSyncStatus({ prisma, getAccountId, decrypt, parseAddonIds,
     } catch {}
 
     // Get user's current Stremio addons
-    const { success: userAddonsSuccess, addons: userAddonsResponse, error: userAddonsError } = await getUserAddons(user, req, { decrypt, StremioAPIClient })
+    const { success: userAddonsSuccess, addons: userAddonsResponse, error: userAddonsError } = await getUserAddons(user, req, { decrypt, StremioAPIClient, createProvider })
     if (!userAddonsSuccess) {
       // If the error is related to authentication, treat it as "connect" status
       if (userAddonsError && (
@@ -328,6 +339,7 @@ function createGetUserSyncStatus({ prisma, getAccountId, decrypt, parseAddonIds,
       parseProtectedAddons,
       canonicalizeManifestUrl,
       StremioAPIClient,
+      createProvider,
       unsafeMode: unsafe,
       useCustomFields
     })
@@ -379,16 +391,16 @@ function createGetGroupSyncStatus(deps) {
  * Compute a user's sync plan (shared by sync-status and actual sync)
  * Returns: { alreadySynced, current, desired }
  */
-async function computeUserSyncPlan(user, req, { prisma, getAccountId, decrypt, parseAddonIds, parseProtectedAddons, canonicalizeManifestUrl, StremioAPIClient, unsafeMode = false, useCustomFields = true, useCustomNames = undefined }) {
+async function computeUserSyncPlan(user, req, { prisma, getAccountId, decrypt, parseAddonIds, parseProtectedAddons, canonicalizeManifestUrl, StremioAPIClient, createProvider, unsafeMode = false, useCustomFields = true, useCustomNames = undefined }) {
   // Backward compatibility: support both useCustomFields (new) and useCustomNames (old)
   const useCustomFieldsValue = useCustomFields !== undefined ? useCustomFields : (useCustomNames !== undefined ? useCustomNames : true)
   
   // 1) Current - getUserAddons already has repair logic built in
-  const currentRes = await getUserAddons(user, req, { decrypt, StremioAPIClient })
+  const currentRes = await getUserAddons(user, req, { decrypt, StremioAPIClient, createProvider })
   if (!currentRes.success) return { success: false, error: currentRes.error, alreadySynced: false, current: [], desired: [] }
   const current = currentRes.addons?.addons || currentRes.addons || []
   // 2) Desired
-  const desiredRes = await getDesiredAddons(user, req, { prisma, getAccountId, decrypt, parseAddonIds, parseProtectedAddons, canonicalizeManifestUrl, StremioAPIClient, unsafeMode, useCustomFields: useCustomFieldsValue })
+  const desiredRes = await getDesiredAddons(user, req, { prisma, getAccountId, decrypt, parseAddonIds, parseProtectedAddons, canonicalizeManifestUrl, StremioAPIClient, createProvider, unsafeMode, useCustomFields: useCustomFieldsValue })
   if (!desiredRes.success) return { success: false, error: desiredRes.error, alreadySynced: false, current, desired: [] }
   const desired = desiredRes.addons || []
   

@@ -2,6 +2,7 @@ const express = require('express');
 const { decrypt } = require('../utils/encryption')
 const { parseAddonIds, parseProtectedAddons, canonicalizeManifestUrl } = require('../utils/validation')
 const { StremioAPIClient } = require('stremio-api-client')
+const { createProvider } = require('../providers')
 const { handleDatabaseError, sendError } = require('../utils/handlers');
 const { findGroupById } = require('../utils/helpers');
 const { responseUtils, dbUtils } = require('../utils/routeUtils');
@@ -87,7 +88,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
         // Pre-compute current/desired and alreadySynced using the same comparator as the badge
         const userRec = await prisma.user.findUnique({
           where: { id: uid, accountId: getAccountId(req) },
-          select: { id: true, stremioAuthKey: true, excludedAddons: true, protectedAddons: true, isActive: true }
+          select: { id: true, stremioAuthKey: true, excludedAddons: true, protectedAddons: true, isActive: true, providerType: true, nuvioRefreshToken: true, nuvioUserId: true }
         })
         if (!userRec || userRec.isActive === false) { failed++; continue }
 
@@ -99,6 +100,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
           parseProtectedAddons,
           canonicalizeManifestUrl,
           StremioAPIClient,
+          createProvider,
           unsafeMode,
           useCustomFields
         })
@@ -833,6 +835,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
         getDecryptedManifestUrl: (addon) => addon?.manifestUrl,
         canonicalizeManifestUrl,
         StremioAPIClient,
+        createProvider,
       })
 
       const aggregated = await getGroupSyncStatus(id, req)

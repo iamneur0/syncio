@@ -2,7 +2,7 @@
 // Consumes cached libraries (from activityMonitor + libraryCache) and only
 // falls back to Stremio API when cache is missing.
 
-const { StremioAPIClient } = require('stremio-api-client')
+const { createProvider } = require('../providers')
 const { getCachedLibrary, setCachedLibrary } = require('./libraryCache')
 
 /**
@@ -64,7 +64,10 @@ async function buildMetricsForAccount({ prisma, accountId, period = '30d', decry
       createdAt: true,
       isActive: true,
       stremioAuthKey: true,
-      inviteCode: true
+      inviteCode: true,
+      providerType: true,
+      nuvioRefreshToken: true,
+      nuvioUserId: true
     },
     orderBy: { createdAt: 'asc' }
   })
@@ -92,7 +95,7 @@ async function buildMetricsForAccount({ prisma, accountId, period = '30d', decry
   })
 
   // Watch activity & time from WatchActivity table (accurate daily deltas)
-  const activeUsers = allUsers.filter(u => u.isActive && u.stremioAuthKey)
+  const activeUsers = allUsers.filter(u => u.isActive && (u.stremioAuthKey || u.nuvioRefreshToken))
   const watchActivityByDay = {}
   const watchActivityByUser = {}
   const watchTimeByDay = {}
@@ -292,30 +295,25 @@ async function buildMetricsForAccount({ prisma, accountId, period = '30d', decry
   if (shouldUseFallback) {
   for (const user of activeUsers) {
     try {
-      if (!user.stremioAuthKey) continue
+      if (!user.stremioAuthKey && !user.nuvioRefreshToken) continue
 
       // Try cached library first
       let library = getCachedLibrary(accountId, user.id)
 
-      // If no cache, fetch from Stremio and cache it
+      // If no cache, fetch via provider and cache it
       if (!library || !Array.isArray(library) || library.length === 0) {
         const mockReq = { appAccountId: accountId }
-        let authKey
+        let provider
         try {
-          authKey = decrypt(user.stremioAuthKey, mockReq)
-        } catch (decryptError) {
-          console.warn(`[Metrics] Failed to decrypt auth key for user ${user.id}:`, decryptError.message)
+          provider = createProvider(user, { decrypt, req: mockReq })
+        } catch (providerError) {
+          console.warn(`[Metrics] Failed to create provider for user ${user.id}:`, providerError.message)
           continue
         }
-        if (!authKey) continue
+        if (!provider) continue
 
-        const client = new StremioAPIClient({ endpoint: 'https://api.strem.io', authKey })
         try {
-          const libraryItems = await client.request('datastoreGet', {
-            collection: 'libraryItem',
-            ids: [],
-            all: true
-          })
+          const libraryItems = await provider.getLibrary()
           if (Array.isArray(libraryItems)) {
             library = libraryItems
           } else if (libraryItems?.result) {
@@ -328,8 +326,8 @@ async function buildMetricsForAccount({ prisma, accountId, period = '30d', decry
           if (library && Array.isArray(library) && library.length > 0) {
             setCachedLibrary(accountId, user.id, library)
           }
-        } catch (stremioError) {
-          console.warn(`[Metrics] Failed to fetch library for user ${user.id}:`, stremioError.message)
+        } catch (fetchError) {
+          console.warn(`[Metrics] Failed to fetch library for user ${user.id}:`, fetchError.message)
           continue
         }
       }

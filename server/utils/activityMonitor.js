@@ -1,5 +1,5 @@
 // Activity monitor - checks for new watch activity and sends Discord notifications
-const { StremioAPIClient } = require('stremio-api-client')
+const { createProvider } = require('../providers')
 const { postDiscord } = require('./notify')
 const { setCachedLibrary } = require('./libraryCache')
 
@@ -70,19 +70,25 @@ async function checkActivityForAccount(prisma, accountId, decrypt, getAccountId)
 
     const webhookUrl = syncCfg?.webhookUrl
 
-    // Get all active users with Stremio connections for this account
+    // Get all active users with Stremio or Nuvio connections for this account
     const users = await prisma.user.findMany({
       where: {
         accountId: accountId,
         isActive: true,
-        stremioAuthKey: { not: null }
+        OR: [
+          { stremioAuthKey: { not: null } },
+          { nuvioRefreshToken: { not: null } }
+        ]
       },
       select: {
         id: true,
         username: true,
         email: true,
         stremioAuthKey: true,
-        colorIndex: true
+        colorIndex: true,
+        providerType: true,
+        nuvioRefreshToken: true,
+        nuvioUserId: true
       }
     })
 
@@ -93,29 +99,29 @@ async function checkActivityForAccount(prisma, accountId, decrypt, getAccountId)
     try {
       const { processAccountMetrics } = require('./metricsProcessor')
       const { getCachedLibrary } = require('./libraryCache')
-      const { StremioAPIClient } = require('stremio-api-client')
-      
+
       // Helper function to get library for a user
-      // Always fetch fresh from Stremio for metrics processing to ensure we catch new items
+      // Always fetch fresh from provider for metrics processing to ensure we catch new items
       const getLibraryForUser = async (user) => {
         try {
           const mockReq = { appAccountId: accountId }
-          const authKeyPlain = decrypt(user.stremioAuthKey, mockReq)
-          const apiClient = new StremioAPIClient({ endpoint: 'https://api.strem.io', authKey: authKeyPlain })
-          
-          const libraryItems = await apiClient.request('datastoreGet', {
-            collection: 'libraryItem',
-            ids: [],
-            all: true
-          })
-          
+          const provider = createProvider(user, { decrypt, req: mockReq })
+
+          if (!provider) {
+            console.warn(`[ActivityMonitor] Could not create provider for user ${user.id}`)
+            const cachedLibrary = getCachedLibrary(accountId, user.id)
+            return cachedLibrary || []
+          }
+
+          const libraryItems = await provider.getLibrary()
+
           const library = Array.isArray(libraryItems) ? libraryItems : (libraryItems?.result || libraryItems?.library || [])
-          
+
           // Update cache with fresh data
           if (Array.isArray(library) && library.length > 0) {
             setCachedLibrary(accountId, user.id, library)
           }
-          
+
           return library || []
         } catch (error) {
           console.warn(`[ActivityMonitor] Failed to fetch library for user ${user.id}:`, error.message)
@@ -150,16 +156,13 @@ async function checkActivityForAccount(prisma, accountId, decrypt, getAccountId)
     // Check each user's library for new activity
     for (const user of users) {
       try {
-        // Create a mock request object for decrypt
+        // Create provider for this user
         const mockReq = { appAccountId: accountId }
-        const authKeyPlain = decrypt(user.stremioAuthKey, mockReq)
-        const apiClient = new StremioAPIClient({ endpoint: 'https://api.strem.io', authKey: authKeyPlain })
+        const provider = createProvider(user, { decrypt, req: mockReq })
 
-        const libraryItems = await apiClient.request('datastoreGet', {
-          collection: 'libraryItem',
-          ids: [],
-          all: true
-        })
+        if (!provider) continue
+
+        const libraryItems = await provider.getLibrary()
 
         let library = Array.isArray(libraryItems) ? libraryItems : (libraryItems?.result || libraryItems?.library || [])
         
