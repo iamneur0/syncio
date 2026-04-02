@@ -5,23 +5,7 @@
  * They define the contract that the factory must satisfy.
  */
 
-// This will be the real import once implemented:
-// const { createProvider } = require('../../providers')
-
-// For now, test the factory contract with a mock implementation
-// that matches what we'll build in Phase 1.
-
-function createProvider(user, { decrypt, req }) {
-  const type = user.providerType || 'stremio'
-
-  if (type === 'nuvio') {
-    if (!user.nuvioRefreshToken || !user.nuvioUserId) return null
-    return { type: 'nuvio', _userId: user.nuvioUserId }
-  }
-
-  if (!user.stremioAuthKey) return null
-  return { type: 'stremio', _authKey: 'decrypted' }
-}
+const { createProvider } = require('../../providers')
 
 const mockDecrypt = (val) => 'decrypted_' + val
 const mockReq = { appAccountId: 'test-account' }
@@ -86,7 +70,7 @@ describe('createProvider factory', () => {
       'addLibraryItem', 'removeLibraryItem'
     ]
 
-    test.skip('stremio provider has all required methods', () => {
+    test('stremio provider has all required methods', () => {
       const user = { providerType: 'stremio', stremioAuthKey: 'enc_key' }
       const provider = createProvider(user, { decrypt: mockDecrypt, req: mockReq })
       for (const method of REQUIRED_METHODS) {
@@ -94,7 +78,7 @@ describe('createProvider factory', () => {
       }
     })
 
-    test.skip('nuvio provider has all required methods', () => {
+    test('nuvio provider has all required methods', () => {
       const user = { providerType: 'nuvio', nuvioRefreshToken: 'enc_token', nuvioUserId: 'uuid-123' }
       const provider = createProvider(user, { decrypt: mockDecrypt, req: mockReq })
       for (const method of REQUIRED_METHODS) {
