@@ -267,7 +267,7 @@ function createGetUserSyncStatus({ prisma, getAccountId, decrypt, parseAddonIds,
   return async function getUserSyncStatus(userId, { groupId = undefined, unsafe = false } = {}, req) {
     const user = await prisma.user.findUnique({
       where: { id: userId, accountId: getAccountId(req) },
-      select: { id: true, stremioAuthKey: true, isActive: true, excludedAddons: true, protectedAddons: true }
+      select: { id: true, stremioAuthKey: true, isActive: true, excludedAddons: true, protectedAddons: true, providerType: true, nuvioRefreshToken: true, nuvioUserId: true }
     })
     if (!user) return { status: 'error', isSynced: false, message: 'User not found' }
     if (!user.stremioAuthKey) return { isSynced: false, status: 'connect', message: 'User not connected to Stremio' }
@@ -336,7 +336,8 @@ function createGetUserSyncStatus({ prisma, getAccountId, decrypt, parseAddonIds,
     }
 
     // Unified comparison using manifest fingerprint (order-sensitive)
-    const fingerprint = createManifestFingerprint(canonicalizeManifestUrl)
+    const urlOnly = (user.providerType || 'stremio') !== 'stremio'
+    const fingerprint = createManifestFingerprint(canonicalizeManifestUrl, { urlOnly })
     const currentKeys = userAddons.map(fingerprint)
     const desiredKeys = desiredAddons.map(fingerprint)
     const isSynced = currentKeys.length === desiredKeys.length && currentKeys.every((k, i) => k === desiredKeys[i])
@@ -394,7 +395,8 @@ async function computeUserSyncPlan(user, req, { prisma, getAccountId, decrypt, p
   // Ensure desired is always an array, never null
   const safeDesired = Array.isArray(desired) ? desired : []
   // 3) Compare (set + order) using manifest fingerprint
-  const fingerprint = createManifestFingerprint(canonicalizeManifestUrl)
+  const urlOnly = (user.providerType || 'stremio') !== 'stremio'
+  const fingerprint = createManifestFingerprint(canonicalizeManifestUrl, { urlOnly })
   const aKeys = current.map(fingerprint)
   const bKeys = desired.map(fingerprint)
   const alreadySynced = aKeys.length === bKeys.length && aKeys.every((k, i) => k === bKeys[i])
@@ -402,7 +404,7 @@ async function computeUserSyncPlan(user, req, { prisma, getAccountId, decrypt, p
 }
 
 // Build a stable fingerprint for an addon entry based on its manifest and canonical URL
-function createManifestFingerprint(canonicalizeManifestUrl) {
+function createManifestFingerprint(canonicalizeManifestUrl, { urlOnly = false } = {}) {
   const normalizeUrl = (u) => {
     try { return canonicalizeManifestUrl ? canonicalizeManifestUrl(u) : String(u || '').trim().toLowerCase() } catch { return String(u || '').trim().toLowerCase() }
   }
@@ -439,6 +441,7 @@ function createManifestFingerprint(canonicalizeManifestUrl) {
   
   return (addon) => {
     const url = normalizeUrl(addon?.transportUrl || addon?.manifestUrl || addon?.url || '')
+    if (urlOnly) return url
     const manifestNorm = normalizeManifest(addon?.manifest || addon)
     // Compare entire manifest - this catches all changes including name, description, and any other fields
     return url + '|' + JSON.stringify(manifestNorm)
