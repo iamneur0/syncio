@@ -3094,7 +3094,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
       }
       
       // Set the reordered collection
-      await apiClient.request('addonCollectionSet', { addons: reorderedAddons })
+      await provider.setAddons(reorderedAddons)
       
       res.json({ 
         message: 'Addons reordered successfully (by name)',
@@ -4419,29 +4419,20 @@ async function syncUserAddons(prismaClient, userId, excludedManifestUrls = [], u
         isActive: true,
         protectedAddons: true,
         excludedAddons: true,
-        accountId: true
+        accountId: true,
+        providerType: true,
+        nuvioRefreshToken: true,
+        nuvioUserId: true
       }
     })
 
     if (!user) return { success: false, error: 'User not found' }
     if (!user.isActive) return { success: false, error: 'User is disabled' }
-    if (!user.stremioAuthKey) return { success: false, error: 'User is not connected to Stremio' }
+
+    const provider = createProvider(user, { decrypt, req })
+    if (!provider) return { success: false, error: 'User is not connected to Stremio' }
 
     // syncUserAddons only handles the actual syncing - no mode handling
-
-    // Decrypt auth using account-scoped key (no req in this scope)
-    let authKeyPlain
-    try {
-      let key = null
-      try { key = (typeof getAccountDek === 'function' ? getAccountDek : getAccountDekUtil)(user.accountId) } catch {}
-      if (!key) { key = (typeof getServerKey === 'function' ? getServerKey : getServerKeyUtil)() }
-      authKeyPlain = (typeof aesGcmDecrypt === 'function' ? aesGcmDecrypt : aesGcmDecryptUtil)(key, user.stremioAuthKey)
-    } catch {
-      return { success: false, error: 'Failed to decrypt Stremio credentials' }
-    }
-
-    // Create StremioAPIClient for this user
-    const apiClient = new StremioAPIClient({ endpoint: 'https://api.strem.io', authKey: authKeyPlain })
 
     // Compute plan (shared logic); short-circuit if already synced
     try {
@@ -4457,6 +4448,7 @@ async function syncUserAddons(prismaClient, userId, excludedManifestUrls = [], u
         parseProtectedAddons: parseProtectedAddonsFn,
         canonicalizeManifestUrl: canonicalizeFn,
         StremioAPIClient,
+        createProvider,
         unsafeMode,
         useCustomFields
       })
@@ -4479,13 +4471,12 @@ async function syncUserAddons(prismaClient, userId, excludedManifestUrls = [], u
       let finalDesired = plan.desired || []
       if (finalDesired.length === 0) {
         // Empty group: clear all addons
-        const { clearAddons } = require('../utils/addonHelpers')
-        await clearAddons(apiClient)
+        await provider.clearAddons()
         console.log('📦 Empty group detected, cleared all addons')
         return { success: true, total: 0 }
       }
 
-      await apiClient.request('addonCollectionSet', { addons: finalDesired })
+      await provider.setAddons(finalDesired)
       console.log('✅ User now synced')
       return { success: true, total: (plan.desired || []).length }
       } catch (e) {

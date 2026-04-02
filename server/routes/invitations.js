@@ -930,10 +930,17 @@ module.exports.createPublicRouter = ({ prisma, encrypt, assignUserToGroup, decry
   publicRouter.post('/:inviteCode/complete', async (req, res) => {
     try {
       const { inviteCode } = req.params
-      const { email, username, authKey, groupName } = req.body
+      const { email, username, authKey, groupName, providerType: reqProviderType, nuvioEmail, nuvioPassword } = req.body
+      const providerType = reqProviderType || 'stremio'
 
-      if (!email || !username || !authKey) {
-        return res.status(400).json({ error: 'Email, username, and authKey are required' })
+      if (providerType === 'nuvio') {
+        if (!email || !username || !nuvioEmail || !nuvioPassword) {
+          return res.status(400).json({ error: 'Email, username, nuvioEmail, and nuvioPassword are required for Nuvio' })
+        }
+      } else {
+        if (!email || !username || !authKey) {
+          return res.status(400).json({ error: 'Email, username, and authKey are required' })
+        }
       }
 
       const invitation = await prisma.invitation.findUnique({
@@ -1011,25 +1018,45 @@ module.exports.createPublicRouter = ({ prisma, encrypt, assignUserToGroup, decry
       // group name priority: body > request > invitation > null
       const finalGroupName = groupName || request.groupName || invitation.groupName || null
 
-      // validate the stremio auth key and get email - this is required
-      let stremioEmail = null
-      try {
-        const validation = await validateStremioAuthKey(authKey)
-        if (validation && validation.user && validation.user.email) {
-          stremioEmail = validation.user.email.toLowerCase().trim()
+      // Validate provider credentials and get email
+      let providerEmail = null
+      let nuvioValidation = null
+      if (providerType === 'nuvio') {
+        try {
+          const { validateNuvioCredentials } = require('../providers/nuvioAuth')
+          nuvioValidation = await validateNuvioCredentials(nuvioEmail, nuvioPassword)
+          if (nuvioValidation && nuvioValidation.user && nuvioValidation.user.email) {
+            providerEmail = nuvioValidation.user.email.toLowerCase().trim()
+          }
+        } catch (error) {
+          console.error('Failed to validate Nuvio credentials:', error)
+          return res.status(400).json({
+            error: 'INVALID_AUTH_KEY',
+            message: 'Could not validate Nuvio authentication. Please try again.'
+          })
         }
-      } catch (error) {
-        console.error('Failed to validate Stremio auth key:', error)
-        return res.status(400).json({ 
-          error: 'INVALID_AUTH_KEY',
-          message: 'Could not validate Stremio authentication. Please try again.'
-        })
+      } else {
+        try {
+          const validation = await validateStremioAuthKey(authKey)
+          if (validation && validation.user && validation.user.email) {
+            providerEmail = validation.user.email.toLowerCase().trim()
+          }
+        } catch (error) {
+          console.error('Failed to validate Stremio auth key:', error)
+          return res.status(400).json({
+            error: 'INVALID_AUTH_KEY',
+            message: 'Could not validate Stremio authentication. Please try again.'
+          })
+        }
       }
 
-      if (!stremioEmail) {
-        return res.status(400).json({ 
+      // Alias for backward compat in the email matching section below
+      const stremioEmail = providerEmail
+
+      if (!providerEmail) {
+        return res.status(400).json({
           error: 'EMAIL_NOT_AVAILABLE',
-          message: 'Could not retrieve email from Stremio account. Please try again.'
+          message: 'Could not retrieve email from provider account. Please try again.'
         })
       }
 
@@ -1105,8 +1132,20 @@ module.exports.createPublicRouter = ({ prisma, encrypt, assignUserToGroup, decry
         return res.status(409).json({ error: 'User is already registered to Syncio' })
       }
 
-      // encrypt and create the user
-      const encryptedAuthKey = encrypt(authKey, { appAccountId: invitation.accountId })
+      // encrypt and create the user credentials
+      let userCredentials = {}
+      if (providerType === 'nuvio') {
+        userCredentials = {
+          providerType: 'nuvio',
+          nuvioRefreshToken: encrypt(nuvioValidation.tokens.refreshToken, { appAccountId: invitation.accountId }),
+          nuvioUserId: nuvioValidation.user.id
+        }
+      } else {
+        userCredentials = {
+          providerType: 'stremio',
+          stremioAuthKey: encrypt(authKey, { appAccountId: invitation.accountId })
+        }
+      }
 
       let computedExpiresAt = null
       const now = new Date()
@@ -1132,7 +1171,7 @@ module.exports.createPublicRouter = ({ prisma, encrypt, assignUserToGroup, decry
           accountId: invitation.accountId,
           email: email.trim().toLowerCase(),
           username: username.trim(),
-          stremioAuthKey: encryptedAuthKey,
+          ...userCredentials,
           isActive: true,
           expiresAt: computedExpiresAt,
           inviteCode: invitation.inviteCode

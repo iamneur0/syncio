@@ -25,6 +25,7 @@ const addonsRouter = require('./routes/addons');
 const groupsRouter = require('./routes/groups');
 const usersRouter = require('./routes/users');
 const stremioRouter = require('./routes/stremio');
+const nuvioRouter = require('./routes/nuvio');
 const settingsRouter = require('./routes/settings');
 const externalApiRouter = require('./routes/externalApi');
 const debugRouter = require('./routes/debug');
@@ -179,6 +180,7 @@ app.use('/api/addons', addonsRouter({ prisma, getAccountId, decrypt, encrypt, ge
 app.use('/api/groups', groupsRouter({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserToGroup, getDecryptedManifestUrl, manifestUrlHmac, decrypt }));
 app.use('/api/users', usersRouter({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, encrypt, parseAddonIds, parseProtectedAddons, getDecryptedManifestUrl, StremioAPIClient, StremioAPIStore, assignUserToGroup, debug, defaultAddons, canonicalizeManifestUrl, getAccountDek, getServerKey, aesGcmDecrypt, validateStremioAuthKey, manifestUrlHmac, manifestHash, createProvider }));
 app.use('/api/stremio', stremioRouter({ prisma, getAccountId, encrypt, decrypt, assignUserToGroup, AUTH_ENABLED }));
+app.use('/api/nuvio', nuvioRouter({ prisma, getAccountId, encrypt, decrypt }));
 app.use('/api/settings', settingsRouter({ prisma, AUTH_ENABLED, getAccountDek, getDecryptedManifestUrl, getAccountId }));
 // External API (API key protected, account-scoped)
 app.use('/api/ext', externalApiRouter({
