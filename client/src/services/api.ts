@@ -1045,12 +1045,13 @@ export const invitationsAPI = {
   },
 
   // Public: Complete OAuth and create user
-  complete: async (inviteCode: string, email: string, username: string, authKey: string, groupName?: string, providerData?: { providerType: string; nuvioEmail?: string; nuvioPassword?: string }): Promise<any> => {
+  complete: async (inviteCode: string, email: string, username: string, authKey: string, groupName?: string, providerData?: { providerType: string; nuvioEmail?: string; nuvioPassword?: string; nuvioUserId?: string }): Promise<any> => {
     const body: any = { email, username, authKey, groupName }
     if (providerData) {
       body.providerType = providerData.providerType
       if (providerData.nuvioEmail) body.nuvioEmail = providerData.nuvioEmail
       if (providerData.nuvioPassword) body.nuvioPassword = providerData.nuvioPassword
+      if (providerData.nuvioUserId) body.nuvioUserId = providerData.nuvioUserId
     }
     const response = await fetch(`/invite/${inviteCode}/complete`, {
       method: 'POST',

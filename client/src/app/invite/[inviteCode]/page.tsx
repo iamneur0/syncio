@@ -599,7 +599,7 @@ export default function InviteRequestPage() {
 
     setIsCreatingUser(true)
     try {
-      await invitationsAPI.complete(inviteCode, finalEmail, finalUsername, undefined as any, groupName, {
+      await invitationsAPI.complete(inviteCode, finalEmail, finalUsername, '', groupName, {
         providerType: 'nuvio',
         nuvioEmail: data.nuvioEmail,
         nuvioUserId: data.nuvioUserId,
