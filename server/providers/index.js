@@ -14,19 +14,23 @@ const { createNuvioProvider } = require('./nuvio')
 function createProvider(user, { decrypt, req }) {
   const type = user.providerType || 'stremio'
 
-  if (type === 'nuvio') {
-    if (!user.nuvioRefreshToken || !user.nuvioUserId) return null
-    return createNuvioProvider({
-      refreshToken: decrypt(user.nuvioRefreshToken, req),
-      userId: user.nuvioUserId
-    })
-  }
+  try {
+    if (type === 'nuvio') {
+      if (!user.nuvioRefreshToken || !user.nuvioUserId) return null
+      return createNuvioProvider({
+        refreshToken: decrypt(user.nuvioRefreshToken, req),
+        userId: user.nuvioUserId
+      })
+    }
 
-  // Default: stremio
-  if (!user.stremioAuthKey) return null
-  return createStremioProvider({
-    authKey: decrypt(user.stremioAuthKey, req)
-  })
+    // Default: stremio
+    if (!user.stremioAuthKey) return null
+    return createStremioProvider({
+      authKey: decrypt(user.stremioAuthKey, req)
+    })
+  } catch {
+    return null
+  }
 }
 
 module.exports = { createProvider }
