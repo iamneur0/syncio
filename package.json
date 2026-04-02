@@ -15,10 +15,8 @@
     "client:dev:public": "cd client && NEXT_PUBLIC_AUTH_ENABLED=true NEXT_PUBLIC_DEBUG=true npm run dev",
     "build": "cd client && npm run build",
     "start": "node server/index.js",
-    "test": "node test-suite-enhanced.js",
-    "test:encryption": "node test-encryption-suite.js",
-    "test:full": "node test-full-suite.js",
-    "test:enhanced": "node test-suite-enhanced.js",
+    "test": "jest --verbose",
+    "test:watch": "jest --watch",
     "lint": "eslint server/ client/src/",
     "lint:fix": "eslint server/ client/src/ --fix",
     "studio": "cp prisma/schema.sqlite.prisma prisma/schema.prisma && npx prisma generate && DATABASE_URL=\"file:./prisma/sqlite.db\" npx prisma studio",
@@ -51,6 +49,7 @@
     "@types/node": "^20.0.0",
     "concurrently": "^8.2.0",
     "eslint": "^8.57.0",
+    "jest": "^30.3.0",
     "nodemon": "^3.1.10",
     "prisma": "^6.19.1"
   }
