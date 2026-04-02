@@ -653,7 +653,157 @@ Replace direct `StremioAPIClient` usage with provider calls:
 
 ---
 
-## 10. Conclusion
+## 10. Deep Dive: Complete Stremio Dependency Audit
+
+Exhaustive search of every external API call, Stremio reference, and provider-specific assumption in the codebase.
+
+### 10.1 All Stremio API Methods Used
+
+| Method | Description | Call Sites | Notes |
+|---|---|---|---|
+| `addonCollectionGet` | Read addon list | ~17 sites | Already documented |
+| `addonCollectionSet` | Write addon list (full replace) | ~9 sites | Already documented |
+| `addonCollectionAdd` | Add single addon | 1 site (`users.js:1952`) | **NEW** — distinct from Set |
+| `datastoreGet` | Read library items | ~11 sites | Already documented |
+| `datastorePut` | Write library items | ~3 sites | Already documented (NOOP for Nuvio) |
+| `getUser` | Validate auth / get user info | ~2 sites | Already documented |
+
+### 10.2 Previously Undocumented Call Sites
+
+| File | Line | What | Impact |
+|---|---|---|---|
+| `server/utils/userExpiration.js` | 33 | Creates `StremioAPIClient` to clear addons on membership expiry | **Must add to provider abstraction** |
+| `server/utils/helpers/stremio.js` | 10, 38 | Factory: `createStremioClient()`, validates via `getUser` | **Must add to provider abstraction** |
+| `server/utils/libraryHelpers.js` | 78 | Fetches `v3-cinemeta.strem.io/meta/{type}/{id}.json` for library enrichment | Can use Nuvio's `resolve-watch-metadata` or keep Cinemeta (IMDb IDs work for both) |
+| `server/utils/helpers/validation.js` | 32-34 | Converts `stremio://` URL scheme to `https://` | Nuvio uses `https://` only — this can be kept as-is (harmless passthrough) |
+
+### 10.3 All External APIs Called (Complete List)
+
+| Service | URL Pattern | Files | Nuvio Impact |
+|---|---|---|---|
+| **Stremio API** | `https://api.strem.io` | 15+ server files | **REPLACE** with Supabase REST |
+| **Stremio OAuth** | `https://link.stremio.com/api/v2/` | `invitations.js`, `publicLibrary.js`, + 4 client files | **REPLACE** with email/password form |
+| **Stremio Likes** | `https://likes.stremio.com/api/` | `users.js:2183,2247` | **NOOP** — no Nuvio equivalent |
+| **Cinemeta** | `https://v3-cinemeta.strem.io/meta/` | `publicLibrary.js:610`, `libraryHelpers.js:78` | **KEEP** — uses IMDb IDs, provider-agnostic |
+| **Cinemeta Live** | `https://cinemeta-live.strem.io/meta/` | `activityMonitor.js:445-546` | **KEEP** — same reason |
+| **Kitsu** | `https://kitsu.app/api/edge/anime/` | `activityMonitor.js:319-364` | **KEEP** — anime metadata, provider-agnostic |
+| **Gravatar** | `https://www.gravatar.com/avatar/` | `avatarUtils.js:16`, `client/gravatar.ts:37` | **KEEP** — unrelated to provider |
+| **UI Avatars** | `https://ui-avatars.com/api/` | `avatarUtils.js:62` | **KEEP** — unrelated to provider |
+| **Discord Webhooks** | User-provided URLs | `notify.js:28-35` | **KEEP** — unrelated to provider |
+| **GitHub API** | `https://api.github.com/repos/` | `client/useGithubReleases.ts:199` | **KEEP** — changelog display |
+| **GitHub Raw** | `https://raw.githubusercontent.com/` | `invitations.js`, `activityMonitor.js`, `notify.js` | **KEEP** — logo for Discord embeds |
+| **Stremio pullUser** | `https://api.strem.io/api/pullUser` | `stremio.js:39` | **REPLACE** — auth validation fallback |
+
+### 10.4 Client-Side Stremio OAuth (ALL Locations)
+
+| Component | File | Lines | What it does |
+|---|---|---|---|
+| `StremioOAuthCard` | `auth/StremioOAuthCard.tsx` | 181, 308 | Creates + polls OAuth link (core component) |
+| `LoginPage` | `auth/LoginPage.tsx` | 91, 103, 407-450 | Uses StremioOAuthCard for user + admin login |
+| `Invite Page` | `app/invite/[inviteCode]/page.tsx` | 609 | Polls OAuth during invite completion |
+| `RequestAcceptedPage` | invite subcomponent | 45, 55 | "Connect to Stremio" button text |
+| `RequestRenewedPage` | invite subcomponent | 45, 55 | "Connect to Stremio" button text |
+| `DeleteAccountPage` | invite subcomponent | 91, 102 | "Clear all your Stremio addons" |
+| `UserInviteModal` | `modals/UserInviteModal.tsx` | 267, 327 | Admin creates user via OAuth invite |
+| `InviteDetailModal` | `modals/InviteDetailModal.tsx` | 422 | Admin views/polls invite OAuth |
+| `AccountMenuButton` | `auth/AccountMenuButton.tsx` | 291-322 | Admin links Stremio account |
+| `UserAddModal` | `modals/UserAddModal.tsx` | 299-408 | Create user with OAuth or credentials |
+
+### 10.5 User-Facing UI Strings Containing "Stremio" (~40+)
+
+| Component | String | Type |
+|---|---|---|
+| `LoginPage` | `'Manage your Stremio library and addons'` | Subtitle |
+| `LoginPage` | `'Sign in with Stremio'` | Button |
+| `LoginPage` | `'Connect with Stremio to get started'` | Description |
+| `StremioOAuthCard` | `'Sign in with Stremio'` | Default button label |
+| `StremioOAuthCard` | `'Authorize Syncio'` | Default authorize label |
+| `StremioOAuthCard` | `'Stremio link expired...'` | Error |
+| `StremioOAuthCard` | `'Stremio account email does not match...'` | Error |
+| `StremioOAuthCard` | `'Stremio responded with ${status}'` | Error |
+| `StremioOAuthCard` | `'Network error while checking Stremio status'` | Error |
+| `RequestAcceptedPage` | `'...authenticate with Stremio and be added to Syncio'` | Instruction |
+| `RequestAcceptedPage` | `'Connect to Stremio'` | Button |
+| `RequestRenewedPage` | `'...authenticate with Stremio and be added to Syncio'` | Instruction |
+| `RequestRenewedPage` | `'Connect to Stremio'` | Button |
+| `DeleteAccountPage` | `'Clear all your Stremio addons'` | Checkbox label |
+| `DeleteAccountPage` | `'Connect to Stremio'` | Button |
+| `InvitePage` | `'Wrong Stremio Account'` | Error title |
+| `InvitePage` | `'...different email than your Stremio account'` | Error message |
+| `InvitePage` | `'Failed to verify Stremio authentication'` | Error |
+| `UserAddModal` | `'Stremio Username'` | Label |
+| `UserAddModal` | `'Authenticate with Stremio OAuth'` | Subtitle |
+| `UserAddModal` | `'Authenticate with an Auth Key'` | Subtitle |
+| `UserAddModal` | `'Stremio OAuth'` | Tab button |
+| `UserAddModal` | `'Stremio Auth Key'` | Placeholder |
+| `UserDetailModal` | `'Stremio addons cleared'` | Toast |
+| `AccountMenuButton` | `'Link Stremio Account'` | Button |
+| `AccountMenuButton` | `'Unlink Stremio account'` | Tooltip |
+| `AccountMenuButton` | `'This Stremio account is already linked...'` | Error |
+| `AccountMenuButton` | `'...linked to a different Stremio account'` | Error |
+| `AccountMenuButton` | `'...Stremio authentication does not match...'` | Error |
+| `AccountMenuButton` | `'User exists but has no Stremio authentication...'` | Error |
+| `AccountMenuButton` | `'...stored Stremio authentication is invalid...'` | Error |
+| `AccountMenuButton` | `'Stremio account linked successfully!'` | Toast |
+| `GenericEntityPage` | `'Manage your Stremio addons'` | Page description |
+| `GenericEntityPage` | `'Manage Stremio users for your group'` | Page description |
+| `GenericEntityPage` | `'Manage your Stremio groups'` | Page description |
+| `UserDetailModal` | `'Cinemeta'` | Default addon name filter |
+
+### 10.6 Backend Route Names Containing "stremio"
+
+| Route | Method | File |
+|---|---|---|
+| `/api/stremio/validate` | POST | `stremio.js` |
+| `/api/stremio/register` | POST | `stremio.js` |
+| `/api/stremio/connect` | POST | `stremio.js` |
+| `/api/stremio/connect-authkey` | POST | `stremio.js` |
+| `/api/users/:id/stremio-addons` | GET | `users.js` |
+| `/api/users/:id/stremio-addons/add` | POST | `users.js` |
+| `/api/users/:id/stremio-addons/:name` | DELETE | `users.js` |
+| `/api/users/:id/stremio-addons/clear` | POST | `users.js` |
+| `/api/users/:id/stremio-addons/reorder` | POST | `users.js` |
+| `/api/public-auth/stremio-login` | POST | `publicAuth.js` |
+| `/api/public-auth/unlink-stremio` | POST | `publicAuth.js` |
+| `/api/public-library/stremio-addons/:name` | DELETE | `publicLibrary.js` |
+
+### 10.7 localStorage Keys Containing "stremio"
+
+From `AccountMenuButton.tsx`:
+- `stremio_user`
+- `stremio_addons`
+- `stremio_auth_key`
+- Any key matching `/^stremio_/` or containing `"stremio"`
+
+### 10.8 Database Fields
+
+| Table | Field | Usage |
+|---|---|---|
+| `User` | `stremioAuthKey` | Encrypted Stremio auth key |
+| `Addon` | `stremioAddonId` | Stremio addon manifest ID (e.g. `com.linvo.cinemeta`) |
+
+### 10.9 Hardcoded Stremio Default Addons
+
+| ID/URL | Name | Where Filtered |
+|---|---|---|
+| `com.linvo.cinemeta` | Cinemeta | `stremio.js:78`, `config.js:22` |
+| `org.stremio.local` | Local Files | `stremio.js:79`, `config.js:23` |
+| `http://127.0.0.1:11470/local-addon/manifest.json` | Local Files URL | `stremio.js:82`, `config.js:26`, `addonHelpers.js:12`, `addons.js:53` |
+| `https://v3-cinemeta.strem.io/manifest.json` | Cinemeta URL | `stremio.js:83`, `config.js:27` |
+
+These are filtered out during sync (`filterDefaultAddons()`). Nuvio may have its own default addons to filter.
+
+### 10.10 NPM Dependencies
+
+| Package | Version | Stremio-Specific? |
+|---|---|---|
+| `stremio-api-client` | ^1.6.0 | **YES** — only Stremio-specific npm package |
+
+No WebSocket connections. No streaming connections. All env vars are generic (no Stremio-specific env vars — endpoints are hardcoded).
+
+---
+
+## 11. Conclusion
 
 **Addon sync is fully mappable today** — every operation has a confirmed Nuvio equivalent.
 
@@ -661,6 +811,17 @@ Replace direct `StremioAPIClient` usage with provider calls:
 
 **Likes are a known gap** — Nuvio has no equivalent. NOOP for Nuvio users.
 
-**The code structure supports this** — while there's no formal provider abstraction today, Stremio calls are concentrated in ~8 files with a consistent pattern. The sync planning engine and all group/user management is already provider-agnostic.
+**Auth/identity flow is mappable** — Stremio OAuth becomes Nuvio email/password. Email is the identity in both systems. Invitation flow needs provider branching at the OAuth step.
+
+**The full Stremio dependency surface is:**
+- ~90 server-side call sites across ~15 files (API calls)
+- ~10 client-side external URL calls (OAuth)
+- ~40 user-facing UI strings saying "Stremio"
+- ~12 backend route names containing "stremio"
+- 2 database fields (`stremioAuthKey`, `stremioAddonId`)
+- 4 hardcoded default addon IDs/URLs
+- 1 npm package (`stremio-api-client`)
+
+**Metadata enrichment (Cinemeta, Kitsu) is provider-agnostic** — uses IMDb IDs which both Stremio and Nuvio share.
 
 **No remaining blockers.** All API surfaces are mapped. Ready for implementation.
