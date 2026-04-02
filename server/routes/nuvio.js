@@ -90,8 +90,7 @@ module.exports = ({ prisma, getAccountId, encrypt, decrypt }) => {
           email: result.user.email
         },
         providerType: 'nuvio',
-        nuvioUserId: result.user.id,
-        nuvioRefreshToken: result.tokens.refreshToken
+        nuvioUserId: result.user.id
       });
     } catch (error) {
       console.error('Nuvio connect-authkey error:', error);

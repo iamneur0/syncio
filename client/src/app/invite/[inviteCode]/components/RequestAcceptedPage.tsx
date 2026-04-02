@@ -15,7 +15,7 @@ interface RequestAcceptedPageProps {
   isCompleting: boolean
   onGenerateOAuth: () => void
   onAuthKey: (authKey: string) => void
-  onNuvioComplete?: (data: { providerType: 'nuvio'; nuvioEmail: string; nuvioUserId: string }) => void
+  onNuvioComplete?: (data: { providerType: 'nuvio'; nuvioEmail: string; nuvioUserId: string; nuvioPassword: string }) => void
 }
 
 export function RequestAcceptedPage({
@@ -85,6 +85,7 @@ export function RequestAcceptedPage({
                     providerType: 'nuvio',
                     nuvioEmail: data.email,
                     nuvioUserId: data.nuvioUserId,
+                    nuvioPassword: data.nuvioPassword,
                   })
                 }
               }}
