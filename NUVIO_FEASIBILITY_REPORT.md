@@ -70,9 +70,12 @@ Syncio uses **6 distinct Stremio API operations** plus 3 external metadata APIs:
 | Login | `StremioAPIStore.login(email, password)` | `stremio.js:~30-34` |
 | Register | `StremioAPIStore.register(email, password)` | `stremio.js` |
 | Get user | `StremioAPIClient.request('getUser')` | `stremio.js:12` |
-| Validate auth key | `pullUser` (HTTP fallback) | `stremio.js:39-55` |
-| OAuth link | `StremioAPIStore.createOAuthLink()` | `publicLibrary.js:149-173` |
-| OAuth poll | `StremioAPIStore.getOAuthToken(code)` | `publicLibrary.js:176-200` |
+| Validate auth key | `validateStremioAuthKey()` / `pullUser` fallback | `stremio.js:7-61`, `invitations.js:1017`, `publicLibrary.js:14-130` |
+| OAuth create link | `fetch('https://link.stremio.com/api/v2/create')` | `invitations.js:876`, `publicLibrary.js:149-173` |
+| OAuth poll for token | `fetch('https://link.stremio.com/api/v2/read')` | `invitations.js (client-side)`, `publicLibrary.js:176-200` |
+| Invite completion (identity) | `validateStremioAuthKey(authKey)` → extract email → match | `invitations.js:930-1300` |
+| User login (identity) | `validateStremioAuthKey(authKey)` → extract email → lookup | `publicLibrary.js:202-268` |
+| Admin Stremio login | `validateStremioAuthKey(authKey)` → link account | `publicAuth.js:271-535` |
 
 ### 2.5 Activity Monitoring (reads library, enriches with metadata)
 
@@ -344,15 +347,40 @@ Returns the user's own ID when they own their own sync. This means Syncio writin
 | Get like status | `GET likes.stremio.com/api/get_status` | N/A | **NO NUVIO EQUIVALENT** — NOOP |
 | Set like/love | `POST likes.stremio.com/api/send` | N/A | **NO NUVIO EQUIVALENT** — NOOP |
 
-### Auth
+### Auth & User Lifecycle
 
 | Syncio Function | Stremio Approach | Nuvio Equivalent | Status |
 |---|---|---|---|
 | Validate credentials | `StremioAPIStore.login()` | `POST /auth/v1/token?grant_type=password` | **CONFIRMED** |
 | Store auth | Encrypt authKey (long-lived) | Encrypt refresh_token + user_id | **CONFIRMED** |
 | Re-auth before sync | Use authKey directly | `POST /auth/v1/token?grant_type=refresh_token` | **CONFIRMED** |
-| Get user info | `getUser` | JWT payload or `GET /auth/v1/user` | **CONFIRMED** |
-| OAuth flow | `createOAuthLink` / `getOAuthToken` | N/A — Nuvio uses email/password only | **NO OAUTH** — email/pwd login form needed |
+| Get user info | `client.request('getUser')` | JWT payload or `GET /auth/v1/user` | **CONFIRMED** |
+| OAuth flow (invite) | `link.stremio.com/api/v2/create` → poll `read` → get authKey | N/A | **REPLACED** — email/password form |
+| OAuth flow (user login) | `validateStremioAuthKey(authKey)` → lookup by email | `POST /auth/v1/token` → lookup by email | **CONFIRMED** — same email-based identity |
+| OAuth flow (admin login) | Stremio OAuth to link admin account | N/A for Nuvio users | UUID/password admin auth still works |
+| Email identity matching | Stremio email = Syncio email (exact match) | Nuvio email = Syncio email (exact match) | **SAME PATTERN** |
+
+### Invitation Flow
+
+| Step | Stremio Approach | Nuvio Equivalent | Status |
+|---|---|---|---|
+| 1. Admin creates invite | Generic (no provider API) | Same | No change |
+| 2. User submits email+username | Generic | Same | No change |
+| 3. Admin approves | Generic | Same | No change |
+| 4. User connects provider | Stremio OAuth: redirect to `link.stremio.com` → user authorizes → poll for authKey | Nuvio login: user enters existing Nuvio email+password → `POST /auth/v1/token` → get JWT+refresh_token | **DIFFERENT UX** — form instead of OAuth |
+| 5. Complete signup | `validateStremioAuthKey(authKey)` → extract email → verify match → store encrypted authKey | Validate JWT → extract email from token → verify match → store encrypted refresh_token | **SAME PATTERN** different credential type |
+
+**Key insight:** Stremio auth is the **identity layer**, not just a sync credential. The Stremio email is the user's identity in Syncio. For Nuvio, email is also the identity (from Supabase auth), so the matching logic is identical — only the credential type changes (authKey → refresh_token).
+
+### User Login (Post-Signup)
+
+| Step | Stremio | Nuvio |
+|---|---|---|
+| User visits login page | Clicks "Sign in with Stremio" → OAuth flow → gets authKey | Enters Nuvio email+password → `POST /auth/v1/token` → gets JWT |
+| Server validates | `validateStremioAuthKey(authKey)` → extracts email | Decode JWT → extract email from `user.email` |
+| Lookup user | `WHERE email = stremioEmail` | `WHERE email = nuvioEmail` |
+| Update credentials | Store new authKey (encrypted) | Store new refresh_token (encrypted) |
+| Return session | Syncio JWT cookie | Same |
 
 ### Features Requiring No External API Changes
 
@@ -553,14 +581,20 @@ Replace direct `StremioAPIClient` usage with provider calls:
 
 ### Phase 4: Auth & Schema
 
-- New route: `server/routes/nuvio.js` (parallel to `stremio.js`)
+- New route: `server/routes/nuvio.js` (parallel to `stremio.js`) — validate Nuvio credentials, extract email
+- New util: `server/utils/nuvio.js` — `validateNuvioAuth(email, password)` that calls Supabase login, returns `{ user, refreshToken }`
 - Schema migration: Add `nuvioRefreshToken`, `nuvioUserId`, `providerType` to User model
-- Client: Nuvio login form (email/password — no OAuth) alongside Stremio OAuth
+- Refactor `server/routes/invitations.js`:
+  - Step 4 (generate-oauth): For Nuvio users, skip OAuth link generation — return a flag indicating email/password auth instead
+  - Step 5 (complete): For Nuvio users, accept `{ email, username, nuvioPassword }` instead of `{ authKey }`, call Supabase login to validate, store refresh_token
+  - Lines ~876-928 (OAuth create) and ~930-1300 (complete) need provider branching
 
 ### Phase 5: Client Updates
 
 - `client/src/services/api.ts` — Add `nuvioAPI` namespace
-- `LoginPage.tsx` — Add Nuvio login option (simple email/password form)
+- `LoginPage.tsx` — Add Nuvio login option (email/password form alongside Stremio OAuth card)
+- New component: `NuvioLoginCard.tsx` — simple email/password form (replaces `StremioOAuthCard` for Nuvio users)
+- Invite page (`client/src/app/invite/[inviteCode]/`): Add provider toggle — show OAuth card for Stremio, email/password form for Nuvio
 - `UserAddModal.tsx` — Provider type selector when creating users
 - `SyncBadge.tsx` — Show provider type indicator
 - Activity/library pages — handle different data shapes per provider
@@ -604,14 +638,16 @@ Replace direct `StremioAPIClient` usage with provider calls:
 | Component | Files | Complexity |
 |---|---|---|
 | Provider interface + Stremio provider | 3 new files | Medium |
-| Nuvio provider (addons) | 1 new file | Low-Medium |
-| Nuvio provider (library reads) | Same file | Low-Medium |
+| Nuvio provider (addons + library reads) | 1 new file | Low-Medium |
 | Refactor addon call sites | 5 files, ~15 locations | Medium |
 | Refactor library call sites | 4 files, ~12 locations | Medium |
 | Refactor likes call sites | 1 file, 2 locations | Low |
 | Schema migration | 2 Prisma files | Low |
-| Nuvio auth route | 1 new file | Low |
-| Client auth flow | 2-3 components | Medium |
+| Nuvio auth util + route | 2 new files | Medium |
+| **Invitation flow refactor** | `invitations.js` (~4 endpoints) | **Medium-High** |
+| **User login refactor** | `publicLibrary.js`, `publicAuth.js` | **Medium** |
+| Client: NuvioLoginCard component | 1 new component | Medium |
+| Client: Invite page provider toggle | 1 page + subcomponents | Medium |
 | Client API service | 1 file | Low |
 | Activity monitor adaptation | 1 file | Medium |
 
