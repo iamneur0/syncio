@@ -4,7 +4,7 @@
 
 **Verdict: Feasible and cleanly achievable.**
 
-Adding Nuvio as a sync target alongside Stremio is a medium-effort refactor. Syncio's entire Stremio API surface reduces to just 2 operations (`addonCollectionGet` / `addonCollectionSet`), both of which have direct Nuvio equivalents via Supabase REST. The sync engine's core planning logic is already provider-agnostic — only the "fetch current addons" and "push desired addons" steps need abstraction.
+Adding Nuvio as a sync target alongside Stremio is a medium-effort refactor. Syncio's Stremio API surface covers **4 major areas**: addon management, library/watch history, likes/favorites, and auth. All have Nuvio equivalents via Supabase REST, though library write operations and likes still need reverse-engineering.
 
 ---
 
@@ -21,7 +21,7 @@ Adding Nuvio as a sync target alongside Stremio is a medium-effort refactor. Syn
 server/
   routes/         # Express route handlers (addons, users, groups, stremio, etc.)
   middleware/     # Auth, validation, error handling
-  utils/          # Sync engine, encryption, Stremio helpers
+  utils/          # Sync engine, encryption, Stremio helpers, activity monitor, metrics
 client/
   src/services/   # Centralized API layer (api.ts - single file, 1200+ lines)
   src/components/ # React components (auth, modals, pages, entities)
@@ -29,35 +29,73 @@ client/
 prisma/           # Schema definitions (sqlite + postgres variants)
 ```
 
-### Stremio API Surface (exhaustive)
+---
 
-Syncio uses exactly **2 Stremio API operations** across the entire codebase:
+## 2. Complete Stremio API Surface in Syncio
 
-| Operation | Method | What it does |
+Syncio uses **6 distinct Stremio API operations** plus 3 external metadata APIs:
+
+### 2.1 Addon Management
+
+| Operation | Stremio API | Call Sites |
 |---|---|---|
-| `addonCollectionGet` | Read | Returns `{ addons: [{ transportUrl, transportName, manifest: {...} }] }` |
-| `addonCollectionSet` | Write | Accepts `{ addons: [...] }` — atomic full-collection replacement |
+| Read addon collection | `addonCollectionGet` | `sync.js:14`, `users.js:~115,1376,2800,3456`, `publicLibrary.js:~848,1098`, `debug.js:73`, `invitations.js:610` |
+| Write addon collection | `addonCollectionSet` | `users.js:~2815,3169,4560`, `addonHelpers.js:45,54`, `publicLibrary.js:~881,1479,1492` |
+| Add single addon | `addonCollectionAdd` | `users.js:1952` |
 
-Plus auth operations: `login()`, `register()`, `getUser()` via `StremioAPIStore`.
+### 2.2 Library & Watch History
 
-### Where Stremio Calls Live (all call sites)
-
-| File | Lines | Operations |
+| Operation | Stremio API | Call Sites |
 |---|---|---|
-| `server/utils/sync.js` | 6-73 | `addonCollectionGet` — fetch user's current addons |
-| `server/utils/addonHelpers.js` | 43-55 | `addonCollectionSet` — clear all addons |
-| `server/utils/stremio.js` | 7-61 | `getUser`, `addonCollectionGet` — validate auth key |
-| `server/routes/users.js` | ~115, 1376, 2800, 3137, 3456, 4516, 4560 | `addonCollectionGet` + `addonCollectionSet` — CRUD + sync |
-| `server/routes/publicLibrary.js` | ~848, 881, 1098, 1479, 1492 | `addonCollectionGet` + `addonCollectionSet` — public library |
-| `server/routes/stremio.js` | ~30-50, 381 | `login`, `register`, `pullAddonCollection` — auth flow |
-| `server/routes/debug.js` | ~73 | `addonCollectionGet` — debug endpoint |
-| `server/routes/invitations.js` | ~610 | `addonCollectionGet` — invitation flow |
+| Read library items | `datastoreGet` collection=`libraryItem` | `publicLibrary.js:567-573`, `users.js:2050-2056,2342-2354,2489-2495,2563-2570`, `libraryToggle.js:38-51`, `libraryDelete.js:30-51`, `activityMonitor.js:106-112,158-164`, `metricsBuilder.js:314-324` |
+| Write library items | `datastorePut` collection=`libraryItem` | `libraryToggle.js:189-191`, `libraryDelete.js:72-74` |
 
-**Total: ~15 call sites across 8 files.** All use the same `StremioAPIClient` pattern.
+**Data tracked per library item:**
+- `name`, `type`, `poster`, `posterShape`
+- `state.timeWatched`, `state.overallTimeWatched`, `state.timeOffset` (resume position)
+- `state.lastWatched`, `state.video_id`, `state.season`, `state.episode`
+- `_mtime` (modification timestamp — used for activity detection)
+
+### 2.3 Likes/Favorites
+
+| Operation | External API | Call Sites |
+|---|---|---|
+| Get like status | `GET https://likes.stremio.com/api/get_status?authToken={}&mediaId={}&mediaType={}` | `users.js:2183-2206` |
+| Set like status | `POST https://likes.stremio.com/api/send` body: `{authToken, mediaId, mediaType, status}` | `users.js:2247-2275` |
+
+### 2.4 Auth & User Validation
+
+| Operation | Stremio API | Call Sites |
+|---|---|---|
+| Login | `StremioAPIStore.login(email, password)` | `stremio.js:~30-34` |
+| Register | `StremioAPIStore.register(email, password)` | `stremio.js` |
+| Get user | `StremioAPIClient.request('getUser')` | `stremio.js:12` |
+| Validate auth key | `pullUser` (HTTP fallback) | `stremio.js:39-55` |
+| OAuth link | `StremioAPIStore.createOAuthLink()` | `publicLibrary.js:149-173` |
+| OAuth poll | `StremioAPIStore.getOAuthToken(code)` | `publicLibrary.js:176-200` |
+
+### 2.5 Activity Monitoring (reads library, enriches with metadata)
+
+| Operation | External API | Call Sites |
+|---|---|---|
+| Detect new watches | Polls `datastoreGet` every 5 minutes, compares `_mtime` | `activityMonitor.js:106-112,158-164` |
+| Movie/series metadata | `GET https://cinemeta-live.strem.io/meta/{movie|series}/{id}.json` | `activityMonitor.js:445-546` |
+| Anime metadata | `GET https://kitsu.app/api/edge/anime/{id}` | `activityMonitor.js:319-364` |
+| Discord notifications | Webhook POST to user's/account's Discord URL | `activityMonitor.js:762-875` |
+
+### 2.6 Features That Are Already Provider-Agnostic
+
+| Feature | Storage | Notes |
+|---|---|---|
+| Shares | JSON files on disk (`/data/shares/`) | No external API — works for any provider |
+| Backup | Internal config export | Reads from Syncio DB only |
+| Metrics/stats | `WatchActivity` + `WatchSnapshot` DB tables | Computed from locally-stored activity data |
+| Groups & user management | Syncio DB (Prisma) | Fully generic |
+| Discord notifications | Webhook URLs in DB | Generic — sends metadata from any source |
 
 ---
 
-## 2. Nuvio API — Complete Mapping
+## 3. Nuvio API — Complete Mapping
 
 ### Constants
 
@@ -75,7 +113,7 @@ authorization: Bearer <user JWT>
 content-type: application/json
 ```
 
-### 2.1 Authentication
+### 3.1 Authentication (CONFIRMED)
 
 **Login (email/password):**
 ```
@@ -106,43 +144,37 @@ Body: (empty)
 
 **Token lifecycle:**
 - Access token: **60-minute TTL** (confirmed from JWT `exp - iat`)
-- Refresh token: Supabase default is **long-lived** (configurable, typically days/weeks)
-- Syncio can store the refresh token (encrypted) and use it to get fresh JWTs before each sync
+- Refresh token: long-lived (Supabase default)
+- Strategy: store encrypted refresh token, get fresh JWT before each operation
 
-### 2.2 Addon Operations
+### 3.2 Addon Operations (ALL CONFIRMED)
 
 **List addons:**
 ```
 GET /rest/v1/addons?select=*&user_id=eq.<uuid>&profile_id=eq.1&order=sort_order.asc,created_at.asc
-Response: [
-  { "id": "uuid", "user_id": "uuid", "profile_id": 1, "url": "https://...", "name": "...", "enabled": true, "sort_order": 0, "created_at": "..." },
-  ...
-]
+Response: [{ "id": "uuid", "user_id": "uuid", "profile_id": 1, "url": "https://...", "name": "...", "enabled": true, "sort_order": 0 }, ...]
 ```
 
 **Add addon(s):**
 ```
 POST /rest/v1/addons
 Headers: prefer: return=representation
-Body: [{"user_id": "...", "profile_id": 1, "url": "<manifest_url>", "name": "...", "enabled": true, "sort_order": <int>}]
-Response: (created rows)
+Body: [{"user_id": "...", "profile_id": 1, "url": "<manifest_url>", "name": "" (optional override), "enabled": true, "sort_order": <int>}]
 ```
 
 **Update addon (reorder / toggle enabled):**
 ```
 PATCH /rest/v1/addons?id=eq.<addon_uuid>&profile_id=eq.1
 Headers: prefer: return=representation
-Body: {"sort_order": <int>}  OR  {"enabled": false}  OR both
-Response: (updated rows)
+Body: {"sort_order": <int>} OR {"enabled": false} OR both
 ```
 
 **Delete addon:**
 ```
 DELETE /rest/v1/addons?id=eq.<addon_uuid>&profile_id=eq.1
-Response: (empty, 200/204)
 ```
 
-**Clear all addons (inferred from PostgREST patterns):**
+**Clear all addons (inferred):**
 ```
 DELETE /rest/v1/addons?user_id=eq.<uuid>&profile_id=eq.1
 ```
@@ -150,57 +182,129 @@ DELETE /rest/v1/addons?user_id=eq.<uuid>&profile_id=eq.1
 **Get addon manifest metadata:**
 ```
 GET https://nuvioapp.space/api/addons/manifest-meta?url=<encoded_manifest_url>
-(No auth required — same-origin Nuvio endpoint)
+(No auth required)
 ```
 
-### 2.3 Additional Nuvio Endpoints (library/progress — not needed for addon sync)
+### 3.3 Library & Watch History (PARTIALLY CONFIRMED)
 
-| Endpoint | Purpose |
+**Read library:**
+```
+POST /rest/v1/rpc/sync_pull_library
+Body: {"p_profile_id": 1}
+Response: (library items — response shape needs capture)
+```
+
+**Read watched items (paginated):**
+```
+POST /rest/v1/rpc/sync_pull_watched_items
+Body: {"p_page": 1, "p_page_size": 50, "p_profile_id": 1}
+Response: (watched items — response shape needs capture)
+```
+
+**Read watch progress:**
+```
+POST /rest/v1/rpc/sync_pull_watch_progress
+Body: {"p_profile_id": 1}
+Response: (progress data — response shape needs capture)
+```
+
+**Write library items:** UNKNOWN — needs reverse-engineering (see section 5)
+
+### 3.4 Sync Ownership
+
+**Check sync owner (called frequently by Nuvio client):**
+```
+POST /rest/v1/rpc/get_sync_owner
+Body: {}
+Response: UNKNOWN — needs capture
+```
+
+This likely indicates Nuvio has its own concept of managed sync. Response body needed to understand implications for Syncio-managed users.
+
+### 3.5 Likes/Favorites
+
+**Nuvio equivalent:** UNKNOWN — Stremio uses a separate `likes.stremio.com` service. Nuvio may store this in Supabase or may not have the feature at all. Needs investigation.
+
+---
+
+## 4. Operation-by-Operation Feasibility
+
+### Addon Sync (FULLY MAPPED)
+
+| Syncio Function | Stremio Approach | Nuvio Equivalent | Status |
+|---|---|---|---|
+| Get user's current addons | `addonCollectionGet` → full manifest array | `GET /rest/v1/addons` → URL + metadata rows | **CONFIRMED** |
+| Set user's desired addons (sync) | `addonCollectionSet` → atomic replacement | DELETE all + POST desired set | **CONFIRMED** |
+| Add single addon | Read → append → write back | `POST /rest/v1/addons` | **CONFIRMED** |
+| Remove single addon | Read → filter → write back | `DELETE /rest/v1/addons?id=eq.<id>` | **CONFIRMED** |
+| Reorder addons | Read → reorder → write back | `PATCH` each addon's `sort_order` | **CONFIRMED** |
+| Clear all addons | `addonCollectionSet({addons: []})` | `DELETE ...?user_id=eq.<id>&profile_id=eq.1` | **INFERRED** |
+| Enable/disable addon | N/A (Stremio lacks this) | `PATCH` with `{"enabled": false}` | **NUVIO RICHER** |
+
+### Library & Watch History
+
+| Syncio Function | Stremio Approach | Nuvio Equivalent | Status |
+|---|---|---|---|
+| Read full library | `datastoreGet` collection=libraryItem | `rpc/sync_pull_library` | **LIKELY MAPS** — response shape needed |
+| Read watch history | Filter library by `_mtime`/`lastWatched` | `rpc/sync_pull_watched_items` (paginated) | **LIKELY MAPS** — response shape needed |
+| Read watch progress | `libraryItem.state.timeOffset` | `rpc/sync_pull_watch_progress` | **LIKELY MAPS** — response shape needed |
+| Add to library | `datastorePut` with item data | **UNKNOWN** | **NEEDS CAPTURE** |
+| Remove from library | `datastorePut` with `removed: true` | **UNKNOWN** | **NEEDS CAPTURE** |
+| Activity detection | Poll library, compare `_mtime` | Poll `sync_pull_watched_items`, compare timestamps? | **NEEDS DESIGN** |
+
+### Likes/Favorites
+
+| Syncio Function | Stremio Approach | Nuvio Equivalent | Status |
+|---|---|---|---|
+| Get like status | `GET likes.stremio.com/api/get_status` | **UNKNOWN** | **NEEDS INVESTIGATION** |
+| Set like/love | `POST likes.stremio.com/api/send` | **UNKNOWN** | **NEEDS INVESTIGATION** |
+
+### Auth
+
+| Syncio Function | Stremio Approach | Nuvio Equivalent | Status |
+|---|---|---|---|
+| Validate credentials | `StremioAPIStore.login()` | `POST /auth/v1/token?grant_type=password` | **CONFIRMED** |
+| Store auth | Encrypt authKey (long-lived) | Encrypt refresh_token + user_id | **CONFIRMED** |
+| Re-auth before sync | Use authKey directly | `POST /auth/v1/token?grant_type=refresh_token` | **CONFIRMED** |
+| Get user info | `getUser` | JWT payload or `GET /auth/v1/user` | **CONFIRMED** |
+| OAuth flow | `createOAuthLink` / `getOAuthToken` | N/A — Nuvio uses email/password only | **NO OAUTH** — email/pwd login form needed |
+
+### Features Requiring No External API Changes
+
+| Feature | Why |
 |---|---|
-| `POST /rest/v1/rpc/sync_pull_library` | Pull media library (body: `{"p_profile_id": 1}`) |
-| `POST /rest/v1/rpc/sync_pull_watched_items` | Pull watch history (paginated) |
-| `POST /rest/v1/rpc/sync_pull_watch_progress` | Pull watch progress |
-
-These are out of scope for addon sync but could be relevant for future library sync features.
-
----
-
-## 3. Operation-by-Operation Feasibility
-
-### Core Sync Operations
-
-| Syncio Function | Stremio Approach | Nuvio Equivalent | Feasibility |
-|---|---|---|---|
-| **Get user's current addons** | `addonCollectionGet` → full manifest array | `GET /rest/v1/addons` → URL + metadata rows | **Full parity.** Nuvio returns URLs; manifests fetched separately via `manifest-meta` if needed. |
-| **Set user's desired addons** (sync) | `addonCollectionSet` → atomic replacement | DELETE all + POST desired set | **Full parity.** Two-step instead of atomic, but achieves same result. |
-| **Add single addon** | Read full collection → append → write back | `POST /rest/v1/addons` with single row | **Simpler in Nuvio** — direct insert, no read-modify-write. |
-| **Remove single addon** | Read → filter out → write back | `DELETE /rest/v1/addons?id=eq.<id>` | **Simpler in Nuvio** — direct delete. |
-| **Reorder addons** | Read → reorder array → write back | `PATCH` each addon's `sort_order` | **Equivalent.** Multiple PATCH calls or could batch. |
-| **Clear all addons** | `addonCollectionSet({addons: []})` | `DELETE /rest/v1/addons?user_id=eq.<id>&profile_id=eq.1` | **Full parity.** |
-| **Enable/disable addon** | N/A (Stremio has no concept) | `PATCH` with `{"enabled": false}` | **Nuvio is richer** — has native enable/disable. |
-
-### Auth Operations
-
-| Syncio Function | Stremio Approach | Nuvio Equivalent | Feasibility |
-|---|---|---|---|
-| **Validate credentials** | `StremioAPIStore.login(email, pwd)` | `POST /auth/v1/token?grant_type=password` | **Full parity.** |
-| **Store auth for later sync** | Encrypt `authKey` (long-lived) | Encrypt `refresh_token` + `user_id` | **Full parity.** Refresh tokens are long-lived. |
-| **Re-auth before sync** | Use stored `authKey` directly | `POST /auth/v1/token?grant_type=refresh_token` → fresh JWT | **Full parity.** One extra step. |
-| **Get user info** | `client.request('getUser')` | Decoded from JWT payload or `GET /auth/v1/user` | **Full parity.** |
-
-### Sync Engine (the planning layer)
-
-| Component | Provider-specific? | Notes |
-|---|---|---|
-| `computeUserSyncPlan()` | **No** — operates on addon arrays | Core logic is generic: compare current vs desired by manifest URL fingerprint |
-| `getDesiredAddons()` | **No** — reads from Syncio's own DB | Groups, protected addons, exclusions — all provider-agnostic |
-| `getUserAddons()` | **Yes** — calls `StremioAPIClient` | Needs provider abstraction |
-| `syncUserAddons()` | **Yes** — calls `addonCollectionSet` | Needs provider abstraction |
-| `filterDefaultAddons()` | **Partially** — hardcoded Stremio defaults | Nuvio may have its own defaults to filter |
+| Shares | Stored in Syncio (JSON files), no external API |
+| Backup | Internal config export |
+| Metrics/stats | Computed from Syncio's `WatchActivity` DB table |
+| Groups | Syncio DB only |
+| Discord notifications | Generic webhook calls |
+| Cinemeta/Kitsu metadata enrichment | Same APIs work regardless of provider — they use IMDb/TMDB IDs |
 
 ---
 
-## 4. Data Model Differences
+## 5. What Still Needs Reverse-Engineering
+
+### Priority 1 (Required for feature parity)
+
+| Operation | How to Capture |
+|---|---|
+| **Library write (add item)** | In Nuvio, add a movie/show to your library/watchlist. Look for POST/PATCH to an RPC or the library table. |
+| **Library write (remove item)** | Remove/unmark a library item. Look for DELETE or PATCH with a removal flag. |
+| **`sync_pull_library` response body** | Check the Response tab for one of those RPC calls — we need to see the field names (especially: does it include watch progress? modification timestamps? IMDb IDs?) |
+| **`sync_pull_watch_progress` response body** | Same — what fields does it return? |
+| **`get_sync_owner` response body** | This tells us if/how Nuvio enforces sync ownership — critical for understanding if Syncio-managed users will conflict with Nuvio's own sync. |
+
+### Priority 2 (Nice to have)
+
+| Operation | How to Capture |
+|---|---|
+| **Likes/favorites** | Does Nuvio have a like/love button? If so, capture the request. If not, it's a known feature gap. |
+| **Bulk delete confirmation** | Try `DELETE /rest/v1/addons?user_id=eq.<id>&profile_id=eq.1` (no `id` filter) — does it work? |
+| **Token refresh after 24hrs** | Wait a day, then try using the refresh token to get a new JWT. Confirms long-lived refresh tokens. |
+
+---
+
+## 6. Data Model Differences
 
 ### Addon Shape: Stremio vs Nuvio
 
@@ -222,18 +326,51 @@ Stremio addon (in-memory during sync):
 
 Nuvio addon (Supabase row):
 {
-  id: "uuid",              // Supabase row ID
-  user_id: "uuid",         // Nuvio user UUID
-  profile_id: 1,           // Profile (always 1 for default)
+  id: "uuid",
+  user_id: "uuid",
+  profile_id: 1,
   url: "https://addon.example/manifest.json",
-  name: "My Addon",
+  name: "" (optional override — Nuvio resolves from manifest if empty),
   enabled: true,
   sort_order: 0,
   created_at: "2026-..."
 }
 ```
 
-**Key difference:** Stremio carries full manifests inline. Nuvio stores only the URL and name. For sync comparison, Syncio fingerprints manifests — for Nuvio, it would compare by URL (which is actually more reliable).
+**Key difference:** Stremio carries full manifests inline. Nuvio stores only the URL. Sync comparison for Nuvio would use URL matching (more reliable than manifest fingerprinting).
+
+### Library Item Shape: Stremio
+
+```javascript
+// Stremio libraryItem (from datastoreGet)
+{
+  _id: "tt1234567",           // IMDb ID
+  name: "Movie Title",
+  type: "movie",              // or "series"
+  poster: "https://...",
+  posterShape: "poster",
+  state: {
+    timeWatched: 5400000,     // ms watched
+    timeOffset: 3200000,      // resume position (ms)
+    overallTimeWatched: 5400000,
+    timesWatched: 1,
+    lastWatched: "2026-04-01T20:00:00Z",
+    video_id: "tt1234567:1:3", // series: imdb:season:episode
+    season: 1,
+    episode: 3
+  },
+  _mtime: 1743544800000,     // modification timestamp (ms)
+  _ctime: 1743000000000,     // creation timestamp (ms)
+  removed: false,            // true = removed from library
+  behaviorHints: {
+    defaultVideoId: "tt1234567"
+  }
+}
+```
+
+### Library Item Shape: Nuvio — UNKNOWN
+
+Need to capture `sync_pull_library` response to determine field mapping. Likely uses similar IMDb IDs but different field names.
 
 ### User Model Changes Needed
 
@@ -249,11 +386,9 @@ model User {
 }
 ```
 
-Alternative: a generic `providerCredentials` JSON field, but explicit fields are safer and easier to query.
-
 ---
 
-## 5. Implementation Plan (High-Level)
+## 7. Implementation Plan (High-Level)
 
 ### Phase 1: Provider Abstraction Layer
 
@@ -262,13 +397,27 @@ Create `server/providers/` with a common interface:
 ```javascript
 // Each provider implements:
 {
+  // Addon operations
   async getAddons(credentials)          // → [{ url, name, manifest?, enabled?, sort_order? }]
   async setAddons(credentials, addons)  // → void (atomic sync)
   async addAddon(credentials, addon)    // → created addon
   async removeAddon(credentials, id)    // → void
   async clearAddons(credentials)        // → void
+
+  // Library operations
+  async getLibrary(credentials)         // → [{ id, name, type, poster, state, ... }]
+  async getWatchProgress(credentials)   // → [{ id, timeOffset, timeWatched, ... }]
+  async getWatchedItems(credentials, page, pageSize) // → paginated watched items
+  async addLibraryItem(credentials, item)    // → void
+  async removeLibraryItem(credentials, id)   // → void
+
+  // Likes (if supported by provider)
+  async getLikeStatus(credentials, mediaId, mediaType)   // → status or null
+  async setLikeStatus(credentials, mediaId, mediaType, status) // → void or null
+
+  // Auth
   async validateAuth(loginData)         // → { userId, credentials, userInfo }
-  async refreshAuth(credentials)        // → fresh credentials (or same for Stremio)
+  async refreshAuth(credentials)        // → fresh credentials
 }
 ```
 
@@ -276,65 +425,94 @@ Create `server/providers/` with a common interface:
 
 ### Phase 2: Refactor Existing Code
 
-Replace direct `StremioAPIClient` usage with provider calls. Touch points:
+Replace direct `StremioAPIClient` usage with provider calls:
 - `server/utils/sync.js` — `getUserAddons()` → `provider.getAddons()`
 - `server/utils/addonHelpers.js` — `clearAddons()` → `provider.clearAddons()`
-- `server/routes/users.js` — ~7 call sites → use provider factory
-- `server/routes/publicLibrary.js` — ~5 call sites → use provider factory
+- `server/utils/libraryToggle.js` — library read/write → `provider.getLibrary()` / `provider.addLibraryItem()`
+- `server/utils/libraryDelete.js` — library delete → `provider.removeLibraryItem()`
+- `server/utils/activityMonitor.js` — library polling → `provider.getLibrary()` or `provider.getWatchedItems()`
+- `server/utils/metricsBuilder.js` — library read → `provider.getLibrary()`
+- `server/routes/users.js` — ~10+ call sites → use provider factory
+- `server/routes/publicLibrary.js` — ~8+ call sites → use provider factory
 
-### Phase 3: Nuvio Auth Flow
+### Phase 3: Nuvio Provider Implementation
+
+- Implement all provider methods using Supabase REST calls
+- Handle JWT refresh transparently (refresh before each operation if token near expiry)
+- Map Nuvio's flat addon format to/from Syncio's internal format
+
+### Phase 4: Auth & Schema
 
 - New route: `server/routes/nuvio.js` (parallel to `stremio.js`)
-- Client: Add Nuvio login option alongside Stremio OAuth in `LoginPage.tsx`
 - Schema migration: Add `nuvioRefreshToken`, `nuvioUserId`, `providerType` to User model
+- Client: Nuvio login form (email/password — no OAuth) alongside Stremio OAuth
 
-### Phase 4: Client Updates
+### Phase 5: Client Updates
 
 - `client/src/services/api.ts` — Add `nuvioAPI` namespace
-- `LoginPage.tsx` / `StremioOAuthCard.tsx` — Add Nuvio auth card
+- `LoginPage.tsx` — Add Nuvio login option (simple email/password form)
 - `UserAddModal.tsx` — Provider type selector when creating users
 - `SyncBadge.tsx` — Show provider type indicator
+- Activity/library pages — handle different data shapes per provider
 
 ---
 
-## 6. Risks & Open Questions
+## 8. Risks & Open Questions
 
 ### Resolved (from API capture)
 
 | Question | Answer |
 |---|---|
 | Can we delete addons? | Yes — `DELETE /rest/v1/addons?id=eq.<id>&profile_id=eq.1` |
-| Is there a refresh token? | Yes — login returns `refresh_token` field, standard Supabase flow |
+| Is there a refresh token? | Yes — login returns `refresh_token` field |
 | JWT lifetime? | 60 minutes, refresh token is long-lived |
-| Bulk operations? | PostgREST supports array POST (confirmed from add-addon request body) |
+| Bulk addon insert? | Yes — POST accepts array body |
+| Addon name field? | Optional override — Nuvio resolves from manifest if empty |
 
-### Remaining Risks
+### Remaining Unknowns
 
-| Risk | Severity | Mitigation |
+| Question | Severity | Impact |
 |---|---|---|
-| **Refresh token expiry policy** | Medium | Supabase defaults to long-lived refresh tokens, but Nuvio's project config could override. Test by refreshing after 24hrs+. Fallback: store encrypted email/password for re-login. |
-| **`profile_id` semantics** | Low | All observed requests use `profile_id=1`. If Nuvio adds multi-profile support, we'd need to handle it. For now, hardcode `1`. |
-| **Rate limiting** | Low | Supabase free tier has generous limits. Bulk sync (many users) could hit PostgREST connection limits. Implement request queuing if needed. |
-| **RLS policies** | Low | Supabase Row Level Security means the JWT can only access its own user's rows. This is fine — each user has their own credentials. But it means we can't do admin-level bulk operations. |
-| **Nuvio API stability** | Medium | These are internal APIs, not documented. They could change. The Supabase REST layer is auto-generated from schema, so it's relatively stable as long as the table structure doesn't change. |
-
-### Not Needed for Addon Sync (future scope)
-
-- Library sync (`sync_pull_library`, `sync_pull_watched_items`, `sync_pull_watch_progress`) — interesting for future features but not needed for the addon management use case.
-- Nuvio profile management — no evidence of multi-profile CRUD in the captured traffic.
+| **Library write API** | HIGH | Without this, we can't toggle/remove library items for Nuvio users |
+| **`sync_pull_library` response shape** | HIGH | Need field mapping for activity monitoring + metrics |
+| **`get_sync_owner` behavior** | MEDIUM | Could block writes if Nuvio thinks another account owns the sync |
+| **Likes API in Nuvio** | LOW | Feature gap if absent — not critical for core sync |
+| **Refresh token max lifetime** | LOW | Fallback: re-login with stored encrypted email/password |
+| **`profile_id` semantics** | LOW | Hardcode `1` for now; handle multi-profile later if needed |
+| **Rate limiting** | LOW | Supabase has generous limits; add request queuing if needed |
+| **RLS policies** | LOW | JWT scoped to own rows — fine for per-user operations |
 
 ---
 
-## 7. Effort Estimate
+## 9. Effort Estimate
 
 | Component | Files | Complexity |
 |---|---|---|
-| Provider abstraction + Stremio provider | 3 new files | Medium |
-| Nuvio provider | 1 new file | Low-Medium |
-| Refactor existing Stremio call sites | 5 files, ~15 locations | Medium |
+| Provider interface + Stremio provider | 3 new files | Medium |
+| Nuvio provider (addons) | 1 new file | Low-Medium |
+| Nuvio provider (library) | Same file, pending API capture | Medium (blocked) |
+| Refactor addon call sites | 5 files, ~15 locations | Medium |
+| Refactor library call sites | 4 files, ~12 locations | Medium |
+| Refactor likes call sites | 1 file, 2 locations | Low |
 | Schema migration | 2 Prisma files | Low |
 | Nuvio auth route | 1 new file | Low |
 | Client auth flow | 2-3 components | Medium |
 | Client API service | 1 file | Low |
+| Activity monitor adaptation | 1 file | Medium |
 
-**Conclusion:** This is a clean, well-scoped integration. The hardest part is the refactor of existing call sites (Phase 2), not the Nuvio implementation itself. The Nuvio API is actually simpler than Stremio's — direct CRUD vs read-modify-write.
+---
+
+## 10. Conclusion
+
+**Addon sync is fully mappable today** — every operation has a confirmed Nuvio equivalent.
+
+**Library/watch history is partially mapped** — the read operations exist (`sync_pull_*` RPCs) but we need:
+1. Response shapes from those RPCs
+2. Library write operations (add/remove items)
+3. Clarity on `get_sync_owner` (sync ownership model)
+
+**Likes may be a feature gap** — Stremio has a dedicated likes service. Nuvio may not have an equivalent.
+
+**The code structure supports this** — while there's no formal provider abstraction today, Stremio calls are concentrated in ~8 files with a consistent pattern. The sync planning engine and all group/user management is already provider-agnostic.
+
+**Recommended next step:** Capture the remaining Priority 1 items (library write, RPC response shapes, `get_sync_owner` response) to unblock the full implementation.
