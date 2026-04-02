@@ -586,6 +586,37 @@ export default function InviteRequestPage() {
     }
   }
 
+  const handleNuvioComplete = async (data: { providerType: 'nuvio'; nuvioEmail: string; nuvioUserId: string }) => {
+    const statusData = status as any
+    const finalEmail = email || statusData?.email || ''
+    const finalUsername = username || statusData?.username || ''
+    const groupName = statusData?.groupName || undefined
+
+    if (!finalEmail || !finalUsername) {
+      toast.error('Email and username are required. Please submit a request first.')
+      return
+    }
+
+    setIsCreatingUser(true)
+    try {
+      await invitationsAPI.complete(inviteCode, finalEmail, finalUsername, undefined as any, groupName, {
+        providerType: 'nuvio',
+        nuvioEmail: data.nuvioEmail,
+        nuvioUserId: data.nuvioUserId,
+      })
+      await queryClient.invalidateQueries({
+        queryKey: ['invite-status', inviteCode, email, username]
+      })
+      await refetchStatus()
+      toast.success('Account created successfully! You can now log in.')
+    } catch (error: any) {
+      const errorMessage = error?.response?.data?.error || error?.response?.data?.message || error?.message || 'Failed to complete account creation'
+      toast.error(errorMessage)
+    } finally {
+      setIsCreatingUser(false)
+    }
+  }
+
   const pollOAuthCompletion = React.useCallback(async () => {
     const statusData = status as any
     if (statusData?.status === 'completed') {
@@ -1120,9 +1151,10 @@ export default function InviteRequestPage() {
             oauthLinkGenerated={oauthLinkGenerated}
             oauthKeyVersion={oauthKeyVersion}
             isGeneratingOAuth={isGeneratingOAuth}
-            isCompleting={completeMutation.isPending}
+            isCompleting={completeMutation.isPending || isCreatingUser}
             onGenerateOAuth={handleGenerateOAuth}
             onAuthKey={handleOAuthAuthKey}
+            onNuvioComplete={handleNuvioComplete}
           />
         )
       }
@@ -1132,10 +1164,11 @@ export default function InviteRequestPage() {
           oauthLink={statusData?.oauthLink || null}
           oauthCode={statusData?.oauthCode || null}
           oauthExpiresAt={statusData?.oauthExpiresAt || null}
+          onNuvioComplete={handleNuvioComplete}
           oauthLinkGenerated={oauthLinkGenerated}
           oauthKeyVersion={oauthKeyVersion}
           isGeneratingOAuth={isGeneratingOAuth}
-          isCompleting={completeMutation.isPending}
+          isCompleting={completeMutation.isPending || isCreatingUser}
           onGenerateOAuth={handleGenerateOAuth}
           onAuthKey={handleOAuthAuthKey}
         />
