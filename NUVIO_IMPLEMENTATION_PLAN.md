@@ -1,193 +1,209 @@
 # Nuvio Integration — Implementation Plan
 
-## Architecture
+## Honest Design Constraints
 
-### The Role Separation
+Before the architecture, here are the realities of THIS codebase that drive the design:
 
-Syncio has three distinct concerns that must stay cleanly separated:
+1. **Plain JS, no TypeScript.** No formal interfaces, no class hierarchies. Functional style with `require`, plain objects. The design must feel native to this codebase.
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                    SYNCIO CORE                          │
-│  (Groups, Users, Addon DB, Sync Planning, Metrics)      │
-│  Provider-agnostic. Works with universal addon shape.    │
-└──────────────┬──────────────────────┬───────────────────┘
-               │                      │
-       ┌───────▼───────┐      ┌───────▼───────┐
-       │  AddonTransport│      │  AddonTransport│
-       │   (Stremio)    │      │   (Nuvio)      │
-       └───────┬───────┘      └───────┬───────┘
-               │                      │
-       ┌───────▼───────┐      ┌───────▼───────┐
-       │  AuthProvider  │      │  AuthProvider  │
-       │   (Stremio)    │      │   (Nuvio)      │
-       └───────────────┘      └───────────────┘
-```
+2. **One credential = everything.** In Stremio, one `authKey` creates one `StremioAPIClient` that does addons, library, likes, and user validation. In Nuvio, one JWT does the same. Splitting into multiple factory patterns that each decrypt the credential separately is wasteful.
 
-**Syncio Core** — The orchestrator. It decides WHAT addons a user should have (from groups, protected addons, exclusions). It doesn't know HOW to push them.
+3. **We're adding ONE new provider.** Not five. Don't over-abstract for a future that may never come.
 
-**AddonTransport** — The delivery mechanism. Given a list of addons, it knows how to read/write them to a specific platform. This is the only thing that differs between Stremio and Nuvio.
+4. **The fingerprint compares full manifests.** `createManifestFingerprint()` in `sync.js:404-446` hashes `url + '|' + JSON.stringify(normalizedManifest)`. This means the transport CANNOT return stub manifests — the Nuvio side must return manifests that match what `getDesiredAddons()` produces, or every sync will rewrite all addons even when nothing changed.
 
-**AuthProvider** — How users prove their identity. Stremio uses OAuth + authKey. Nuvio uses email/password + JWT. Completely separate from addon transport.
-
-### Why NOT a Single Fat Provider
-
-A single `Provider` class with `getAddons()`, `getLibrary()`, `getLikeStatus()`, `validateAuth()` all mixed together is a god object. It conflates:
-- Transport (how addons move)
-- Content (library, watch history)
-- Social (likes)
-- Identity (auth)
-
-These change for different reasons and at different rates. Keep them separate.
-
-### The Interfaces
-
-```
-server/
-  transports/
-    index.js              # Factory: getTransport(user, deps)
-    stremio.js            # StremioTransport
-    nuvio.js              # NuvioTransport
-    supabaseClient.js     # Low-level Supabase HTTP helper
-  auth/
-    index.js              # Factory: getAuthProvider(providerType)
-    stremio.js            # Stremio OAuth + authKey validation
-    nuvio.js              # Supabase email/password + JWT refresh
-  content/
-    index.js              # Factory: getContentReader(user, deps)
-    stremio.js            # datastoreGet for library, likes.stremio.com
-    nuvio.js              # sync_pull_* RPCs, NOOP for likes
-```
+5. **The sync engine's "desired" addons come from Syncio's DB** (`getDesiredAddons()` in `sync.js:78-256`). These already have full manifests stored (encrypted) in the Addon table. The "current" addons come from the provider. For the fingerprint comparison to work, both sides must have equivalent manifest data.
 
 ---
 
-## Design Principles
+## Architecture
 
-1. **Per-user provider** — Each user is `stremio` or `nuvio`. Both coexist in the same groups, same addon sets, same Syncio instance.
-2. **Separate transports from auth from content** — Three focused interfaces, not one god object.
-3. **Universal addon shape = Stremio's native format** — `{ transportUrl, transportName, manifest }`. The sync engine doesn't change at all. Only the Nuvio transport translates.
-4. **No breaking changes** — `providerType` defaults to `"stremio"`. Existing code paths unchanged for Stremio users.
-5. **Test before refactor** — Integration tests for critical paths before any code moves.
-6. **Manifest resolution is infrastructure** — Both transports return the universal shape. Nuvio's transport fetches manifests as needed, using Syncio's existing addon DB as cache.
+### One Provider, Grouped Methods
+
+A single `createProvider(user, deps)` returns a plain object with methods grouped by concern. Not three separate factories — one object, one credential decryption, clear groupings:
+
+```javascript
+const provider = createProvider(user, { decrypt, req })
+
+// Addon transport
+provider.getAddons()
+provider.setAddons(addons)
+provider.addAddon(url, manifest)
+provider.clearAddons()
+
+// Content (library, likes)
+provider.getLibrary()
+provider.getWatchedItems(page, size)
+provider.getWatchProgress()
+provider.getLikeStatus(mediaId, type)
+provider.setLikeStatus(mediaId, type, status)
+provider.addLibraryItem(item)
+provider.removeLibraryItem(id)
+```
+
+Auth is NOT on the provider instance — it's a module-level function used at connection time (invitations, login), not during sync operations.
+
+```javascript
+// Auth (module-level, not instance)
+const stremioAuth = require('./providers/stremioAuth')
+const nuvioAuth = require('./providers/nuvioAuth')
+```
+
+### Directory Structure
+
+```
+server/providers/
+  index.js              # Factory: createProvider(user, deps) → provider
+  stremio.js            # Stremio provider implementation
+  nuvio.js              # Nuvio provider implementation
+  supabase.js           # Low-level Supabase HTTP client
+  stremioAuth.js        # Stremio auth validation (module-level)
+  nuvioAuth.js          # Nuvio auth validation (module-level)
+```
+
+6 files. One directory. No over-abstraction.
+
+---
+
+## The Fingerprint Problem — Solved
+
+### The Problem
+
+`computeUserSyncPlan()` compares current addons (from provider) against desired addons (from Syncio DB). The comparison uses `createManifestFingerprint()` which hashes `url + '|' + JSON.stringify(manifest)`.
+
+- **Stremio** returns full manifests from `addonCollectionGet` → fingerprints match desired (also full manifests) ✓
+- **Nuvio** only stores URLs + names → stub manifests won't match → every sync rewrites everything ✗
+
+### The Solution
+
+Two options, in order of preference:
+
+**Option A (recommended): URL-only fingerprint for Nuvio users.**
+
+Add a `providerType` parameter to `computeUserSyncPlan`. For Nuvio users, use a URL-only fingerprint:
+
+```javascript
+function createManifestFingerprint(canonicalizeManifestUrl, urlOnly = false) {
+  return (addon) => {
+    const url = normalizeUrl(addon?.transportUrl || addon?.manifestUrl || addon?.url || '')
+    if (urlOnly) return url  // Nuvio: compare by URL only
+    const manifestNorm = normalizeManifest(addon?.manifest || addon)
+    return url + '|' + JSON.stringify(manifestNorm)
+  }
+}
+```
+
+This is correct because: Syncio manages addon URLs. If the URL set and order matches, the user is synced. Manifest content changes (e.g., addon author updates description) are detected by Syncio's addon reload mechanism, not by the sync plan.
+
+**Option B: Nuvio provider fetches manifests.**
+
+`getAddons()` in the Nuvio provider fetches each manifest from its URL, caching in Syncio's addon DB. Returns full universal shape. Fingerprints match. Downside: adds N HTTP requests per sync check for Nuvio users.
+
+**Decision: Option A.** URL-only comparison is more correct anyway — it separates "right addons installed?" from "addon manifest changed?". One line change to the fingerprint function. Minimal sync engine impact.
 
 ---
 
 ## Phase 0: Safety Net
 
-### 0.1 — Test Framework
+### 0.1 — Jest Setup
 
-Install Jest. Write tests for the functions we're about to wrap:
+```bash
+npm install --save-dev jest
+```
+
+Write tests for the exact code paths we're wrapping:
 
 ```
 server/__tests__/
-  transports/
-    stremio.test.js        # Mock StremioAPIClient, verify universal shape output
-    nuvio.test.js          # Mock Supabase HTTP, verify universal shape output
-    factory.test.js        # getTransport returns correct type per user.providerType
-  auth/
-    stremio.test.js        # Mock api.strem.io, verify validateStremioAuthKey
-    nuvio.test.js          # Mock Supabase auth, verify login/refresh/validate
-  content/
-    stremio.test.js        # Mock datastoreGet, verify library item shape
-    nuvio.test.js          # Mock sync_pull_*, verify translated shape
+  providers/
+    stremio.test.js          # Mock StremioAPIClient, verify getAddons/setAddons
+    nuvio.test.js            # Mock supabase HTTP, verify getAddons/setAddons
+    factory.test.js          # createProvider returns correct type
   sync/
-    computePlan.test.js    # Test plan computation with mock transport data
-    getUserAddons.test.js  # Test with mock transport
-    syncUserAddons.test.js # Test full flow with mock transport
+    fingerprint.test.js      # Test URL-only vs full fingerprint modes
+    computePlan.test.js      # Test with mock provider data
+  auth/
+    stremioAuth.test.js      # Mock api.strem.io
+    nuvioAuth.test.js        # Mock supabase auth
 ```
 
-Tests mock at the HTTP boundary (mock `fetch`, mock `StremioAPIClient.request`), not at the transport level. This means tests verify the actual translation logic.
+Mock at the HTTP boundary. Tests verify that:
+- Stremio provider normalizes `addonCollectionGet` response correctly
+- Nuvio provider transforms Supabase rows to universal shape
+- Factory dispatches on `user.providerType`
+- URL-only fingerprint correctly detects synced state
+- Full fingerprint still works for Stremio users (no regression)
 
 ### 0.2 — ESLint
 
-Create `.eslintrc.json`:
-- `eslint:recommended`, `env: { node: true, es2022: true }`
-- `no-unused-vars: warn`, `no-undef: error`
-- Run `npm run lint`, fix anything that would mask refactor bugs.
+Create `.eslintrc.json`: `eslint:recommended`, `node: true`, `es2022: true`. Fix blocking errors.
 
 ### 0.3 — CLAUDE.md
 
-Document:
-- Architecture (transport / auth / content separation)
-- Universal addon shape definition
-- How to add a new provider (implement 3 interfaces)
-- How to run tests and lint
-- Encryption pattern for credentials
+Document architecture, universal addon shape, how to run tests/lint.
 
 ---
 
-## Phase 1: Transport Layer
+## Phase 1: Provider Layer
 
-### 1.1 — AddonTransport Interface
-
-Both transports implement:
+### 1.1 — `server/providers/index.js`
 
 ```javascript
-/**
- * AddonTransport — reads and writes addons to a user's account on a platform.
- *
- * All methods work with the universal addon shape:
- *   { transportUrl: string, transportName: string, manifest: { id, name, version, ... } }
- *
- * The transport handles authentication internally (authKey for Stremio, JWT for Nuvio).
- */
-{
-  async getAddons()              // → { addons: UniversalAddon[] }
-  async setAddons(addons)        // → void (atomic full replace)
-  async addAddon(url, manifest)  // → void (append one)
-  async clearAddons()            // → void (remove all)
-}
-```
-
-That's it. Four methods. Clean, focused, testable.
-
-### 1.2 — `server/transports/index.js`
-
-```javascript
-const { createStremioTransport } = require('./stremio')
-const { createNuvioTransport } = require('./nuvio')
+const { createStremioProvider } = require('./stremio')
+const { createNuvioProvider } = require('./nuvio')
 
 /**
- * Factory: creates the correct addon transport for a user.
- * Returns null if user has no credentials for their provider.
+ * Creates the correct provider for a user based on their providerType.
+ * Returns null if user has no credentials.
+ *
+ * Usage:
+ *   const provider = createProvider(user, { decrypt, req })
+ *   const { addons } = await provider.getAddons()
+ *   await provider.setAddons(desiredAddons)
  */
-function getTransport(user, { decrypt, req }) {
+function createProvider(user, { decrypt, req }) {
   const type = user.providerType || 'stremio'
 
   if (type === 'nuvio') {
     if (!user.nuvioRefreshToken || !user.nuvioUserId) return null
-    return createNuvioTransport({
+    return createNuvioProvider({
       refreshToken: decrypt(user.nuvioRefreshToken, req),
       userId: user.nuvioUserId
     })
   }
 
   if (!user.stremioAuthKey) return null
-  return createStremioTransport({
+  return createStremioProvider({
     authKey: decrypt(user.stremioAuthKey, req)
   })
 }
 
-module.exports = { getTransport }
+module.exports = { createProvider }
 ```
 
-### 1.3 — `server/transports/stremio.js`
+### 1.2 — `server/providers/stremio.js`
 
-Wraps existing `StremioAPIClient`. Moves the normalization logic (currently in `sync.js:14-62`) inside:
+Wraps existing code. Moves normalization logic from `sync.js:14-62` into `getAddons()`:
 
 ```javascript
 const { StremioAPIClient } = require('stremio-api-client')
 
-function createStremioTransport({ authKey }) {
+function createStremioProvider({ authKey }) {
   const client = new StremioAPIClient({
     endpoint: 'https://api.strem.io',
     authKey
   })
 
   return {
+    type: 'stremio',
+
+    // --- Addon Transport ---
+
     async getAddons() {
       const collection = await client.request('addonCollectionGet', {})
-      const addons = normalizeCollection(collection) // Existing logic from sync.js
+      // Normalization logic currently in sync.js:16-62
+      // Handles null collection, non-array responses, etc.
+      const addons = normalizeAddonCollection(collection)
       return { addons }
     },
 
@@ -201,20 +217,56 @@ function createStremioTransport({ authKey }) {
 
     async clearAddons() {
       await client.request('addonCollectionSet', { addons: [] })
-    }
+    },
+
+    // --- Content ---
+
+    async getLibrary() {
+      return await client.request('datastoreGet', {
+        collection: 'libraryItem', ids: [], all: true
+      })
+    },
+
+    async addLibraryItem(changes) {
+      await client.request('datastorePut', {
+        collection: 'libraryItem', changes
+      })
+    },
+
+    async removeLibraryItem(changes) {
+      await client.request('datastorePut', {
+        collection: 'libraryItem', changes
+      })
+    },
+
+    async getLikeStatus(authToken, mediaId, mediaType) {
+      const resp = await fetch(
+        `https://likes.stremio.com/api/get_status?authToken=${authToken}&mediaId=${mediaId}&mediaType=${mediaType}`
+      )
+      return await resp.json()
+    },
+
+    async setLikeStatus(authToken, mediaId, mediaType, status) {
+      await fetch('https://likes.stremio.com/api/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ authToken, mediaId, mediaType, status })
+      })
+    },
+
+    // Raw client access (for edge cases during migration)
+    get client() { return client }
   }
 }
 ```
 
-### 1.4 — `server/transports/nuvio.js`
-
-Translates between Supabase REST rows and the universal addon shape:
+### 1.3 — `server/providers/nuvio.js`
 
 ```javascript
-const { supabaseGet, supabasePost, supabaseDelete } = require('./supabaseClient')
-const { refreshNuvioToken, isTokenExpired } = require('../auth/nuvio')
+const { supabaseGet, supabasePost, supabaseDelete, supabaseRpc } = require('./supabase')
+const { refreshNuvioToken, isTokenExpired } = require('./nuvioAuth')
 
-function createNuvioTransport({ refreshToken, userId }) {
+function createNuvioProvider({ refreshToken, userId }) {
   let accessToken = null
 
   async function ensureAuth() {
@@ -224,6 +276,10 @@ function createNuvioTransport({ refreshToken, userId }) {
   }
 
   return {
+    type: 'nuvio',
+
+    // --- Addon Transport ---
+
     async getAddons() {
       await ensureAuth()
       const rows = await supabaseGet('addons', {
@@ -233,16 +289,14 @@ function createNuvioTransport({ refreshToken, userId }) {
         select: '*'
       }, accessToken)
 
-      // Transform rows → universal shape
-      // Manifest resolution uses Syncio's addon DB cache (not live fetch)
+      // Transform to universal shape
+      // Manifest is minimal — sync comparison uses URL-only mode for Nuvio
       const addons = rows.map(row => ({
         transportUrl: row.url,
         transportName: '',
         manifest: {
-          id: row.url,    // Use URL as ID (manifests resolved by sync engine)
-          name: row.name || '',
-          version: '',
-          description: ''
+          id: row.url,
+          name: row.name || ''
         }
       }))
       return { addons }
@@ -250,7 +304,6 @@ function createNuvioTransport({ refreshToken, userId }) {
 
     async setAddons(addons) {
       await ensureAuth()
-      // Atomic-ish: delete then insert
       await supabaseDelete('addons', {
         user_id: `eq.${userId}`,
         profile_id: 'eq.1'
@@ -269,9 +322,8 @@ function createNuvioTransport({ refreshToken, userId }) {
       }
     },
 
-    async addAddon(url, manifest) {
+    async addAddon(url) {
       await ensureAuth()
-      // Get current max sort_order
       const current = await supabaseGet('addons', {
         user_id: `eq.${userId}`,
         profile_id: 'eq.1',
@@ -297,358 +349,276 @@ function createNuvioTransport({ refreshToken, userId }) {
         user_id: `eq.${userId}`,
         profile_id: 'eq.1'
       }, accessToken)
-    }
+    },
+
+    // --- Content ---
+
+    async getLibrary() {
+      await ensureAuth()
+      const items = await supabaseRpc('sync_pull_library', { p_profile_id: 1 }, accessToken)
+      return items  // Shape TBD when library sync is implemented
+    },
+
+    async getWatchProgress() {
+      await ensureAuth()
+      return await supabaseRpc('sync_pull_watch_progress', { p_profile_id: 1 }, accessToken)
+    },
+
+    async getWatchedItems(page = 1, pageSize = 50) {
+      await ensureAuth()
+      return await supabaseRpc('sync_pull_watched_items', {
+        p_page: page, p_page_size: pageSize, p_profile_id: 1
+      }, accessToken)
+    },
+
+    // Library writes — NOOP (deferred)
+    async addLibraryItem() { return null },
+    async removeLibraryItem() { return null },
+
+    // Likes — no Nuvio equivalent
+    async getLikeStatus() { return null },
+    async setLikeStatus() { return null },
   }
 }
 ```
 
-### 1.5 — `server/transports/supabaseClient.js`
+### 1.4 — `server/providers/supabase.js`
 
-Thin HTTP wrapper for Supabase PostgREST. Single responsibility: make authenticated REST calls.
-
-```javascript
-const SUPABASE_URL = 'https://dpyhjjcoabcglfmgecug.supabase.co'
-const SUPABASE_ANON_KEY = '...' // From env or config
-
-async function supabaseGet(table, params, accessToken) { /* GET /rest/v1/{table}?{params} */ }
-async function supabasePost(table, rows, accessToken) { /* POST /rest/v1/{table} */ }
-async function supabaseDelete(table, params, accessToken) { /* DELETE /rest/v1/{table}?{params} */ }
-async function supabasePatch(table, params, body, accessToken) { /* PATCH /rest/v1/{table}?{params} */ }
-async function supabaseRpc(fn, body, accessToken) { /* POST /rest/v1/rpc/{fn} */ }
-
-module.exports = { supabaseGet, supabasePost, supabaseDelete, supabasePatch, supabaseRpc }
-```
-
-### 1.6 — Manifest Resolution Strategy
-
-**Problem:** Nuvio stores only URLs. The universal shape needs manifest data. Fetching manifests live adds latency.
-
-**Solution:** The sync engine's comparison logic (`computeUserSyncPlan`) compares by **manifest URL** (via `canonicalizeManifestUrl`), not by manifest content. So the Nuvio transport can return a **stub manifest** (URL as ID, empty name) and the comparison still works correctly. Full manifests are only needed for display — and Syncio's addon DB already stores them.
-
-For operations that need the manifest (like `addAddon`), the caller already has it (fetched from the manifest URL before calling the transport).
-
-This means: **no live manifest fetching in the transport layer**. Clean separation.
-
----
-
-## Phase 2: Auth Layer
-
-### 2.1 — AuthProvider Interface
+Thin HTTP wrapper. One file, four functions:
 
 ```javascript
-/**
- * AuthProvider — validates user identity and manages credentials.
- * Separate from transport — auth happens at connection time, not on every sync.
- */
-{
-  async validate(credentials)    // → { user: { id, email }, tokens: { ... } }
-  async refresh(refreshToken)    // → { accessToken, refreshToken }
-}
-```
+const SUPABASE_URL = process.env.NUVIO_SUPABASE_URL || 'https://dpyhjjcoabcglfmgecug.supabase.co'
+const SUPABASE_ANON_KEY = process.env.NUVIO_SUPABASE_ANON_KEY || '...'
 
-### 2.2 — `server/auth/stremio.js`
-
-Wraps existing `validateStremioAuthKey()` and `StremioAPIStore.login()`:
-
-```javascript
-module.exports = {
-  async validate({ authKey }) {
-    // Existing validateStremioAuthKey logic
-    return { user: { id: user.id, email: user.email }, tokens: { authKey } }
-  },
-  async validateCredentials({ email, password }) {
-    // Existing StremioAPIStore.login() logic
-    return { user: { email }, tokens: { authKey } }
-  },
-  // Stremio authKeys don't expire, so refresh is identity
-  async refresh(authKey) {
-    return { accessToken: authKey, refreshToken: authKey }
+function headers(accessToken) {
+  return {
+    'apikey': SUPABASE_ANON_KEY,
+    'authorization': `Bearer ${accessToken}`,
+    'content-type': 'application/json',
+    'prefer': 'return=representation'
   }
 }
+
+async function supabaseGet(table, params, accessToken) { /* ... */ }
+async function supabasePost(table, rows, accessToken) { /* ... */ }
+async function supabaseDelete(table, params, accessToken) { /* ... */ }
+async function supabaseRpc(fn, body, accessToken) { /* ... */ }
+
+module.exports = { supabaseGet, supabasePost, supabaseDelete, supabaseRpc }
 ```
 
-### 2.3 — `server/auth/nuvio.js`
+### 1.5 — Auth Modules (separate from provider instance)
+
+**`server/providers/stremioAuth.js`** — wraps existing `validateStremioAuthKey()` and `StremioAPIStore.login()`. Used by invitation completion and user login routes. Not on the provider instance.
+
+**`server/providers/nuvioAuth.js`** — Supabase email/password login, JWT refresh, token expiry check. Used by Nuvio invitation completion and user login.
 
 ```javascript
-module.exports = {
-  async validate({ email, password }) {
-    // POST /auth/v1/token?grant_type=password
-    return { user: { id, email }, tokens: { accessToken, refreshToken } }
-  },
-  async refresh(refreshToken) {
-    // POST /auth/v1/token?grant_type=refresh_token
-    return { accessToken, refreshToken }
-  },
-  isTokenExpired(jwt) {
-    // Decode JWT, check exp claim vs now
-  }
-}
-```
-
-### 2.4 — `server/auth/index.js`
-
-```javascript
-function getAuthProvider(providerType) {
-  if (providerType === 'nuvio') return require('./nuvio')
-  return require('./stremio')
-}
-
-module.exports = { getAuthProvider }
+async function validateNuvioCredentials(email, password) { /* POST /auth/v1/token?grant_type=password */ }
+async function refreshNuvioToken(refreshToken) { /* POST /auth/v1/token?grant_type=refresh_token */ }
+function isTokenExpired(jwt) { /* decode, check exp vs now */ }
+module.exports = { validateNuvioCredentials, refreshNuvioToken, isTokenExpired }
 ```
 
 ---
 
-## Phase 3: Content Layer
+## Phase 2: Schema Migration
 
-### 3.1 — ContentReader Interface
-
-```javascript
-/**
- * ContentReader — reads library/watch data from a user's platform.
- * Read-only for now (library writes are NOOP for Nuvio, deferred).
- */
-{
-  async getLibrary()                   // → Stremio libraryItem[] shape (normalized)
-  async getWatchedItems(page, size)    // → WatchedItem[]
-  async getWatchProgress()             // → WatchProgress[]
-  async getLikeStatus(mediaId, type)   // → status | null
-  async setLikeStatus(mediaId, type, status) // → void | null
-  async addLibraryItem(item)           // → void | null (NOOP for Nuvio)
-  async removeLibraryItem(id)          // → void | null (NOOP for Nuvio)
-}
-```
-
-### 3.2 — Stremio ContentReader
-
-Wraps existing `datastoreGet`/`datastorePut` and `likes.stremio.com` calls.
-
-### 3.3 — Nuvio ContentReader
-
-- `getLibrary()` → calls `rpc/sync_pull_library` + `rpc/sync_pull_watch_progress`, translates to Stremio libraryItem shape
-- `getWatchedItems()` → calls `rpc/sync_pull_watched_items`
-- `getWatchProgress()` → calls `rpc/sync_pull_watch_progress`
-- `getLikeStatus()` → returns `null` (NOOP)
-- `setLikeStatus()` → returns `null` (NOOP)
-- `addLibraryItem()` → returns `null` (NOOP, deferred)
-- `removeLibraryItem()` → returns `null` (NOOP, deferred)
-
-### 3.4 — `server/content/index.js`
-
-```javascript
-function getContentReader(user, { decrypt, req }) {
-  const type = user.providerType || 'stremio'
-  if (type === 'nuvio') return createNuvioContentReader(user, { decrypt, req })
-  return createStremioContentReader(user, { decrypt, req })
-}
-
-module.exports = { getContentReader }
-```
-
----
-
-## Phase 4: Schema Migration
+Both Prisma schemas:
 
 ```prisma
 model User {
-  // Existing (unchanged)
-  stremioAuthKey     String?
-
-  // New
-  providerType       String    @default("stremio")  // "stremio" | "nuvio"
-  nuvioRefreshToken  String?   // Encrypted Supabase refresh token
-  nuvioUserId        String?   // Nuvio user UUID
+  stremioAuthKey     String?                          // Keep (Stremio users)
+  providerType       String    @default("stremio")    // "stremio" | "nuvio"
+  nuvioRefreshToken  String?                          // Encrypted (Nuvio users)
+  nuvioUserId        String?                          // Nuvio UUID (Nuvio users)
 }
 ```
 
-Apply to both `schema.sqlite.prisma` and `schema.postgres.prisma`. Generate migration. Existing users get `providerType: "stremio"` automatically.
+Existing users get `providerType: "stremio"` by default. Zero disruption.
 
 ---
 
-## Phase 5: Server Refactor
+## Phase 3: Sync Engine Tweak
 
-Replace direct `StremioAPIClient` usage with the three interfaces. The substitution pattern:
+One surgical change to `createManifestFingerprint()` in `sync.js`:
 
 ```diff
-  // BEFORE (addon operations):
+- function createManifestFingerprint(canonicalizeManifestUrl) {
++ function createManifestFingerprint(canonicalizeManifestUrl, { urlOnly = false } = {}) {
+    // ... existing normalizeUrl and normalizeManifest helpers ...
+
+    return (addon) => {
+      const url = normalizeUrl(addon?.transportUrl || addon?.manifestUrl || addon?.url || '')
++     if (urlOnly) return url
+      const manifestNorm = normalizeManifest(addon?.manifest || addon)
+      return url + '|' + JSON.stringify(manifestNorm)
+    }
+  }
+```
+
+Then in `computeUserSyncPlan`:
+
+```diff
+- const fingerprint = createManifestFingerprint(canonicalizeManifestUrl)
++ const urlOnly = (user.providerType || 'stremio') === 'nuvio'
++ const fingerprint = createManifestFingerprint(canonicalizeManifestUrl, { urlOnly })
+```
+
+**Why this is correct:** Syncio controls what URL each user should have. If the URL set and order match, the user is synced. Manifest content changes are detected by addon reload, not sync comparison.
+
+**Why this is safe:** Stremio users still get the full manifest fingerprint (no regression). Only Nuvio users get URL-only.
+
+---
+
+## Phase 4: Server Refactor
+
+The bulk of the work. Substitution pattern at every call site:
+
+```diff
+  // BEFORE:
   const authKeyPlain = decrypt(user.stremioAuthKey, req)
   const apiClient = new StremioAPIClient({ endpoint: 'https://api.strem.io', authKey: authKeyPlain })
   const collection = await apiClient.request('addonCollectionGet', {})
 
   // AFTER:
-  const transport = getTransport(user, { decrypt, req })
-  if (!transport) return res.status(400).json({ error: 'User not connected' })
-  const { addons } = await transport.getAddons()
+  const provider = createProvider(user, { decrypt, req })
+  if (!provider) return res.status(400).json({ error: 'User not connected' })
+  const { addons } = await provider.getAddons()
 ```
+
+### Refactor order (lowest risk first):
+
+1. **`sync.js`** — `getUserAddons()` (2 changes)
+2. **`addonHelpers.js`** — `clearAddons()` (2 changes)
+3. **`users.js:4470-4570`** — `syncUserAddons()` (3 changes)
+4. **`users.js`** — addon CRUD endpoints (11 changes)
+5. **`users.js`** — likes endpoints (2 changes, NOOP branch for Nuvio)
+6. **`libraryToggle.js`** + **`libraryDelete.js`** (4 changes)
+7. **`activityMonitor.js`** — library polling (3 changes)
+8. **`metricsBuilder.js`** — library reads (2 changes)
+9. **`userExpiration.js`** — addon clearing on expiry (2 changes)
+10. **`publicLibrary.js`** — public user operations (8 changes)
+11. **`invitations.js`** — addon fetch on completion (2 changes)
+12. **`debug.js`** — debug endpoint (1 change)
+13. **`index.js`** — dependency injection (pass `createProvider` instead of `StremioAPIClient`)
+
+Each step: make the change, run tests, commit.
+
+### Where `user.stremioAuthKey` is checked:
+
+Every `if (!user.stremioAuthKey)` becomes:
 
 ```diff
-  // BEFORE (library operations):
-  const items = await apiClient.request('datastoreGet', { collection: 'libraryItem', ... })
-
-  // AFTER:
-  const content = getContentReader(user, { decrypt, req })
-  const items = await content.getLibrary()
+- if (!user.stremioAuthKey) {
+-   return { error: 'User not connected to Stremio' }
+- }
++ const provider = createProvider(user, { decrypt, req })
++ if (!provider) {
++   return { error: 'User not connected' }
++ }
 ```
+
+The factory already checks for credentials internally. Call sites don't need to know which field to check.
+
+### Where `stremioAuthKey: { not: null }` appears in Prisma queries:
 
 ```diff
-  // BEFORE (auth validation):
-  const validation = await validateStremioAuthKey(authKey)
-
-  // AFTER:
-  const authProvider = getAuthProvider(providerType)
-  const validation = await authProvider.validate({ authKey })  // or { email, password }
+- where: { isActive: true, stremioAuthKey: { not: null } }
++ where: {
++   isActive: true,
++   OR: [
++     { stremioAuthKey: { not: null } },
++     { nuvioRefreshToken: { not: null } }
++   ]
++ }
 ```
 
-### Files to refactor (in order):
-
-**5.1 — Core sync** (lowest risk, highest value):
-- `server/utils/sync.js` — `getUserAddons()` uses `getTransport`
-- `server/utils/addonHelpers.js` — `clearAddons()` uses transport
-- `server/routes/users.js:4470-4570` — `syncUserAddons()` uses transport
-
-**5.2 — Addon CRUD in user routes**:
-- `server/routes/users.js` — get/add/remove/reorder/clear addon endpoints (~11 sites)
-
-**5.3 — Library and activity**:
-- `server/utils/libraryToggle.js` — uses `getContentReader`
-- `server/utils/libraryDelete.js` — uses `getContentReader`
-- `server/utils/activityMonitor.js` — polls via `getContentReader`
-- `server/utils/metricsBuilder.js` — reads via `getContentReader`
-
-**5.4 — Likes**:
-- `server/routes/users.js:2183,2247` — uses `getContentReader`
-
-**5.5 — User expiration**:
-- `server/utils/userExpiration.js` — uses `getTransport`
-
-**5.6 — Public library**:
-- `server/routes/publicLibrary.js` — uses `getTransport` + `getContentReader`
-
-**5.7 — Invitations & auth routes**:
-- `server/routes/invitations.js` — uses `getAuthProvider` + `getTransport`
-- `server/routes/stremio.js` — keep as-is (Stremio-specific auth route)
-- New: `server/routes/nuvio.js` — Nuvio-specific auth route
-
-**5.8 — Dependency injection**:
-- `server/index.js` — pass `getTransport`, `getContentReader`, `getAuthProvider` instead of `StremioAPIClient`
-
-**5.9 — Supporting utilities**:
-- `server/utils/stremio.js` — `filterDefaultAddons()` gets `providerType` param
-- `server/utils/config.js` — provider-specific default addon lists
-- `server/utils/helpers/validation.js` — `stremio://` conversion stays (harmless)
+Or add a helper: `hasProviderCredentials()` that builds the query.
 
 ---
 
-## Phase 6: Nuvio Auth Routes
+## Phase 5: Nuvio Auth Routes
 
 ### `server/routes/nuvio.js`
 
-```javascript
-// POST /api/nuvio/validate — validate Nuvio email+password
-// POST /api/nuvio/connect  — connect user to Nuvio (store encrypted refresh token)
-```
+- `POST /api/nuvio/validate` — call `validateNuvioCredentials(email, password)`, return `{ valid: true/false, user }`
+- `POST /api/nuvio/connect` — validate, encrypt refresh token, store on user
 
-### Invitation flow changes in `server/routes/invitations.js`:
+### Invitation flow (`invitations.js`)
 
-- `generate-oauth`: If provider is Nuvio, return `{ providerType: 'nuvio', requiresCredentials: true }` instead of OAuth link
-- `complete`: If provider is Nuvio, accept `{ email, username, nuvioPassword }`, validate via `authProvider.validate()`, store tokens
+- `generate-oauth`: If `providerType === 'nuvio'`, return `{ providerType: 'nuvio' }` — no OAuth link
+- `complete`: If `providerType === 'nuvio'`, accept `{ email, username, nuvioEmail, nuvioPassword }`, call `validateNuvioCredentials()`, verify email match, store encrypted tokens
 
 ---
 
-## Phase 7: Client Changes
+## Phase 6: Client Changes
 
-### 7.1 — New: `NuvioLoginCard.tsx`
+### 6.1 — `NuvioLoginCard.tsx` (new)
 
-Simple email/password form. Same callback shape as `StremioOAuthCard` but returns `{ email, tokens }` instead of `{ authKey }`.
+Email/password form. Calls `/api/nuvio/validate`. Returns credentials to parent via callback.
 
-### 7.2 — Provider-Aware Components
-
-Pattern for all ~40 UI string changes:
+### 6.2 — Provider-aware rendering
 
 ```tsx
-// Utility
-function providerLabel(type: string) {
-  return type === 'nuvio' ? 'Nuvio' : 'Stremio'
-}
-
-// Auth card selection
 function ProviderAuthCard({ providerType, onAuth, ...props }) {
   if (providerType === 'nuvio') return <NuvioLoginCard onAuth={onAuth} {...props} />
   return <StremioOAuthCard onAuthKey={onAuth} {...props} />
 }
+
+const label = providerType === 'nuvio' ? 'Nuvio' : 'Stremio'
 ```
 
-Apply to: `LoginPage`, `UserAddModal`, `AccountMenuButton`, invite pages, `UserDetailModal`, `GenericEntityPage`, `GroupDetailModal`.
+Apply to: `LoginPage`, `UserAddModal`, `AccountMenuButton`, invite pages, detail modals, entity pages.
 
-### 7.3 — UserAddModal
+### 6.3 — UserAddModal
 
-Add provider selector toggle (Stremio / Nuvio) at top of form. Conditionally render OAuth card or login form.
+Add provider toggle at top: `[Stremio] [Nuvio]`. Shows OAuth card or login form accordingly. Passes `providerType` with create request.
 
-### 7.4 — Invite Page
+### 6.4 — Invite page
 
-User chooses provider type when accepting invite. Shows OAuth for Stremio, email/password for Nuvio.
+User chooses provider when accepting invite. Stremio → OAuth flow. Nuvio → email/password form.
 
-### 7.5 — API Service
+### 6.5 — Route naming
 
-Add `nuvioAPI` namespace to `api.ts`. Update `usersAPI.create()` to pass `providerType`.
+Rename `/stremio-addons` → `/provider-addons`. Handler reads `user.providerType` from DB, dispatches to provider. Old routes kept as aliases.
 
-### 7.6 — Route Naming
+### 6.6 — api.ts
 
-Rename `/stremio-addons` → `/provider-addons` (generic). The handler reads `user.providerType` and dispatches to the correct transport. Keep `/stremio-addons` as alias for backward compat.
+Add `nuvioAPI` namespace. Update `usersAPI.create()` to pass `providerType`.
 
 ---
 
-## Phase 8: Polish & Defaults
+## Phase 7: Polish
 
-- `filterDefaultAddons()` — provider-specific default lists
-- `get_sync_owner` check — warn on Nuvio user connection if owned by another account
-- Nuvio `setAddons` atomicity — try/catch DELETE+INSERT, restore from Syncio state on failure
-- Manifest caching — Nuvio transport uses Syncio's addon DB for manifest data
+- `filterDefaultAddons()` — pass `providerType`, empty defaults for Nuvio
+- `get_sync_owner` check — warn on Nuvio connection if owned by another account
+- Nuvio `setAddons` error handling — if INSERT fails after DELETE, return error (Syncio DB has desired state for retry)
+- Env vars: `NUVIO_SUPABASE_URL`, `NUVIO_SUPABASE_ANON_KEY`
 
 ---
 
 ## Implementation Order
 
 ```
-Phase 0  [Safety]      Tests + ESLint + CLAUDE.md
-  ↓
-Phase 1  [Transport]   server/transports/ (stremio.js, nuvio.js, supabaseClient.js)
-  ↓
-Phase 2  [Auth]        server/auth/ (stremio.js, nuvio.js)
-  ↓
-Phase 3  [Content]     server/content/ (stremio.js, nuvio.js)
-  ↓
-Phase 4  [Schema]      Prisma migration
-  ↓
-Phase 5  [Refactor]    Server — swap ~120 call sites to use factories
-  ↓
-Phase 6  [Routes]      Nuvio auth routes + invitation flow
-  ↓
-Phase 7  [Client]      NuvioLoginCard + provider-aware UI (~80 sites)
-  ↓
-Phase 8  [Polish]      Defaults, edge cases, final test pass
+Phase 0  [Safety]       Tests + ESLint + CLAUDE.md
+Phase 1  [Providers]    server/providers/ (6 files)
+Phase 2  [Schema]       Prisma migration (3 fields)
+Phase 3  [Sync tweak]   URL-only fingerprint for Nuvio (1 function, ~5 lines)
+Phase 4  [Refactor]     Server call site swap (~45 locations across 13 files)
+Phase 5  [Auth routes]  Nuvio auth + invitation flow
+Phase 6  [Client]       NuvioLoginCard + provider-aware UI
+Phase 7  [Polish]       Defaults, edge cases, env vars
 ```
 
-Each phase is independently testable. Tests must pass after each phase.
-
 ---
 
-## Risk Mitigations
+## What Makes This Clean
 
-| Risk | Mitigation |
-|---|---|
-| Breaking Stremio users | `providerType` defaults to `"stremio"`. Stremio transport wraps existing code unchanged. Phase 0 tests verify Stremio path before refactor. |
-| Nuvio manifest resolution | Transport returns stub manifests (URL as ID). Sync comparison uses URL, not manifest content. Full manifests from Syncio's addon DB cache. |
-| JWT expiry mid-operation | `ensureAuth()` at start of every transport method. Transparent refresh. |
-| Supabase rate limits | Sequential requests per user. No parallel Supabase calls within a single sync. |
-| `get_sync_owner` conflict | Check on user connection. Warn if user is managed by another Nuvio account. |
-| Nuvio DELETE+INSERT non-atomicity | try/catch around setAddons. On failure, log and return error (Syncio's DB still has the desired state for retry). |
-
----
-
-## Why This Is Clean
-
-1. **Single Responsibility** — Transport does addons. Auth does identity. Content does library/likes. No god objects.
-2. **Open/Closed** — Adding a third provider (e.g., Stremio V5, another fork) means implementing 3 small interfaces and a factory case. Zero changes to sync engine, UI framework, or existing providers.
-3. **Dependency Inversion** — Sync engine depends on transport interface, not on `StremioAPIClient`. Testable with mocks.
-4. **Liskov Substitution** — Both transports return the same shape. Sync engine doesn't know or care which one it's talking to.
-5. **Interface Segregation** — Components that only need addons get `getTransport()`. Components that only need library get `getContentReader()`. Nobody gets a fat interface they don't need.
+1. **One provider object per user.** Not three factories. One `createProvider()` call, one credential decryption.
+2. **Factory encapsulates credential logic.** Call sites don't know about `stremioAuthKey` vs `nuvioRefreshToken`. They just get a provider or null.
+3. **Auth is separate from the instance.** Login/validation is module-level (used at connection time). Provider instance is for operations (used at sync time). Different lifecycles.
+4. **Minimal sync engine changes.** One parameter added to `createManifestFingerprint()`. No rewrite.
+5. **The fingerprint problem is solved, not hidden.** URL-only comparison for Nuvio is explicitly designed and tested, not a stub that "should work".
+6. **Matches codebase style.** Plain objects, `require`, functional factories. No classes, no TypeScript interfaces, no abstract patterns the codebase doesn't use.
+7. **Each phase is independently shippable.** Phase 1 (providers) can be merged without any call site changes. Phase 3 (fingerprint) is a 5-line diff. Phase 4 is mechanical substitution.
