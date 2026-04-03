@@ -31,6 +31,7 @@ interface UserAddModalProps {
     email: string
     groupId?: string
     colorIndex: number
+    providerType?: string
   }
 }
 
@@ -87,6 +88,7 @@ export default function UserAddModal({
       setSelectedGroup(editingUser.groupId || '')
       setColorIndex(editingUser.colorIndex || 0)
       setColorIndexRef(editingUser.colorIndex || 0)
+      setProviderType((editingUser.providerType as 'stremio' | 'nuvio') || 'stremio')
       setAuthMode('credentials') // Default to credentials mode for reconnection
       setStremioRegisterNew(false) // Hide register option for reconnection
       setIsCreatingNewGroup(false)

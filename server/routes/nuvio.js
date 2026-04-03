@@ -35,34 +35,46 @@ module.exports = ({ prisma, getAccountId, encrypt, decrypt }) => {
   // Connect a user to Nuvio (store encrypted refresh token)
   router.post('/connect', async (req, res) => {
     try {
-      const { userId, email, password } = req.body;
+      const { userId, email, password, nuvioUserId: oauthNuvioUserId, refreshToken: oauthRefreshToken } = req.body;
 
-      if (!userId || !email || !password) {
-        return res.status(400).json({ error: 'userId, email, and password are required' });
+      if (!userId) {
+        return res.status(400).json({ error: 'userId is required' });
       }
 
-      // Validate credentials with Nuvio
-      const result = await validateNuvioCredentials(email, password);
+      let nuvioUserId, nuvioEmail, refreshToken;
 
-      // Encrypt and store the refresh token
-      const encryptedRefreshToken = encrypt(result.tokens.refreshToken, req);
+      if (oauthNuvioUserId && oauthRefreshToken) {
+        // OAuth reconnection — tokens already exchanged
+        nuvioUserId = oauthNuvioUserId;
+        nuvioEmail = email;
+        refreshToken = oauthRefreshToken;
+      } else if (email && password) {
+        // Credentials reconnection
+        const result = await validateNuvioCredentials(email, password);
+        nuvioUserId = result.user.id;
+        nuvioEmail = result.user.email;
+        refreshToken = result.tokens.refreshToken;
+      } else {
+        return res.status(400).json({ error: 'Either email+password or OAuth tokens are required' });
+      }
 
-      // Update user with Nuvio credentials
+      const encryptedRefreshToken = encrypt(refreshToken, req);
+
       await prisma.user.update({
         where: { id: userId, accountId: getAccountId(req) },
         data: {
           providerType: 'nuvio',
           nuvioRefreshToken: encryptedRefreshToken,
-          nuvioUserId: result.user.id,
-          email: result.user.email
+          nuvioUserId,
+          email: nuvioEmail || email
         }
       });
 
       res.json({
         success: true,
         user: {
-          id: result.user.id,
-          email: result.user.email
+          id: nuvioUserId,
+          email: nuvioEmail || email
         }
       });
     } catch (error) {

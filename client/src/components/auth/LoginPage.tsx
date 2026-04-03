@@ -154,6 +154,7 @@ export default function LoginPage({
             const userData = {
               userId: result.user.id,
               authKey: authKey,
+              providerType: 'stremio',
               userInfo: result.user
             }
             localStorage.setItem('public-library-user', JSON.stringify(userData))
@@ -250,6 +251,7 @@ export default function LoginPage({
         const userData = {
           userId: result.user.id,
           authKey: `nuvio:${data.nuvioUserId}`,
+          providerType: 'nuvio',
           userInfo: result.user
         }
         localStorage.setItem('public-library-user', JSON.stringify(userData))

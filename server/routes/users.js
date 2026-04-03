@@ -1209,6 +1209,18 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
         return responseUtils.notFound(res, 'User')
       }
 
+      // Try to clear provider addons before deletion
+      try {
+        const provider = createProvider(existingUser, { decrypt, req })
+        if (provider) {
+          await provider.clearAddons()
+          console.log(`✅ Cleared provider addons for user ${id} before deletion`)
+        }
+      } catch (e) {
+        console.error(`⚠️ Failed to clear provider addons for user ${id}:`, e?.message)
+        // Continue with deletion even if addon clearing fails
+      }
+
       // Remove user from all groups first (update userIds arrays)
       const groups = await prisma.group.findMany({
         where: {
@@ -2170,10 +2182,11 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
 
       const provider = createProvider(user, { decrypt, req })
       if (!provider) {
-        return res.status(400).json({ message: 'User not connected to Stremio' })
+        return res.status(400).json({ message: 'User not connected to a provider' })
       }
 
       const data = await provider.getLikeStatus(mediaId, mediaType)
+      if (data === null) return res.json({ status: 'unsupported' })
       res.json({ status: data.status || null })
     } catch (error) {
       console.error('Error getting like/love status:', error)
@@ -2217,10 +2230,11 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
 
       const provider = createProvider(user, { decrypt, req })
       if (!provider) {
-        return res.status(400).json({ message: 'User not connected to Stremio' })
+        return res.status(400).json({ message: 'User not connected to a provider' })
       }
 
       const data = await provider.setLikeStatus(mediaId, mediaType, status)
+      if (data === null) return res.json({ success: false, status: 'unsupported' })
       res.json({ success: true, data })
     } catch (error) {
       console.error('Error updating like/love status:', error)
