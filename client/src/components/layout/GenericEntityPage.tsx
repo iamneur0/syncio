@@ -951,7 +951,7 @@ export function createEntityPageConfig(entityType: Exclude<EntityType, 'invite'>
     addon: {
       entityType: 'addon' as const,
       title: 'Addons',
-      description: 'Manage your Stremio addons',
+      description: 'Manage your addons',
       searchPlaceholder: 'Search addons...',
       emptyStateTitle: 'No addons yet',
       emptyStateDescription: 'Add your first addon to get started.',
@@ -975,7 +975,7 @@ export function createEntityPageConfig(entityType: Exclude<EntityType, 'invite'>
     user: {
       entityType: 'user' as const,
       title: 'Users',
-      description: 'Manage Stremio users for your group',
+      description: 'Manage users for your group',
       searchPlaceholder: 'Search users...',
       emptyStateTitle: 'No users yet',
       emptyStateDescription: 'Add your first user to get started.',
@@ -1000,7 +1000,7 @@ export function createEntityPageConfig(entityType: Exclude<EntityType, 'invite'>
     group: {
       entityType: 'group' as const,
       title: 'Groups',
-      description: 'Manage your Stremio groups',
+      description: 'Manage your groups',
       searchPlaceholder: 'Search groups...',
       emptyStateTitle: 'No groups yet',
       emptyStateDescription: 'Create your first group to get started.',

@@ -19,7 +19,7 @@ export const useSyncStatusRefresh = () => {
   const refreshUserSyncStatus = (userId?: string) => {
     // Remove the specific user's sync-status query entirely if provided (prevents 404s after deletion)
     if (userId) {
-      try { queryClient.removeQueries({ queryKey: ['user', userId, 'sync-status'], exact: true }) } catch {}
+      try { queryClient.removeQueries({ queryKey: ['user', userId, 'sync-status'] }) } catch {}
     }
     // Invalidate general user lists to refresh UI where needed
     queryClient.invalidateQueries({ queryKey: ['user'] })

@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { useTheme } from '@/contexts/ThemeContext'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import api, { usersAPI, groupsAPI } from '@/services/api'
+import ProviderBadge from '@/components/ui/ProviderBadge'
 import { getEntityColorStyles } from '@/utils/colorMapping'
 import UserAvatar from '@/components/ui/UserAvatar'
 import { invalidateUserQueries, invalidateSyncStatusQueries } from '@/utils/queryUtils'
@@ -456,7 +457,7 @@ export default function UserDetailModal({
       .then(() => {
         // Refresh the data from the server instead of local state manipulation
         queryClient.invalidateQueries({ queryKey: ['user', id, 'stremio-addons'] })
-        toast.success('Addon removed from Stremio account')
+        toast.success('Addon removed from account')
         // Refresh sync badge
         refreshAllSyncStatus(undefined, id)
       })
@@ -616,7 +617,8 @@ export default function UserDetailModal({
                     placeholder="Enter username..."
                     maxLength={50}
                   />
-                  <SyncBadge 
+                  <ProviderBadge providerType={(currentUser as any).providerType} size="md" />
+                  <SyncBadge
                     userId={currentUser.id} 
                     onSync={() => {
                       const groupAddonCount = userGroupAddons?.addons?.length || 0
@@ -737,17 +739,17 @@ export default function UserDetailModal({
             emptyMessage="No group addons assigned to this user"
           />
 
-          {/* Stremio Account Addons Section */}
+          {/* Account Addons Section */}
           <EntityList
-            title="Stremio Account Addons"
+            title="Account Addons"
             count={stremioAddons.length}
             items={stremioAddons}
             isLoading={false}
             onClear={handleResetStremioAddons}
             onTitleClick={isDebugMode ? handleDebugStremioAddons : undefined}
             confirmReset={{
-              title: 'Reset Stremio Addons',
-              description: "This will clear all addons from this user's Stremio account. Continue?",
+              title: 'Reset Account Addons',
+              description: "This will clear all addons from this user's account. Continue?",
               confirmText: 'Reset',
               isDanger: true,
             }}
@@ -758,7 +760,7 @@ export default function UserDetailModal({
                   className={`px-3 py-1 text-sm rounded transition-colors ${
                     'color-text-secondary color-hover'
                   }`}
-                  title="Show current Stremio addons"
+                  title="Show current account addons"
                 >
                   Current
                 </button>
@@ -795,7 +797,7 @@ export default function UserDetailModal({
               )
             }}
             emptyIcon={<Puzzle className={`w-12 h-12 mx-auto mb-4 color-text-secondary`} />}
-            emptyMessage="No Stremio addons found for this user"
+            emptyMessage="No addons found for this user"
           >
             <DndContext
               sensors={sensors}

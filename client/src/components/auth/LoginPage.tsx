@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation'
 import { useTheme } from '@/contexts/ThemeContext'
 import { publicAuthAPI, publicLibraryAPI } from '@/services/api'
 import StremioOAuthCard from './StremioOAuthCard'
+import NuvioLoginCard from './NuvioLoginCard'
+import NuvioOAuthCard from './NuvioOAuthCard'
 import { Eye, EyeOff, LogIn, User, Lock, Settings, Users } from 'lucide-react'
 import Image from 'next/image'
 import toast from 'react-hot-toast'
@@ -40,6 +42,7 @@ export default function LoginPage({
   const [isRegisterMode, setIsRegisterMode] = useState(false)
   const [showUuidNotice, setShowUuidNotice] = useState(false)
   const [showStremioLogin, setShowStremioLogin] = useState(false)
+  const [userProviderType, setUserProviderType] = useState<'stremio' | 'nuvio'>('stremio')
 
   // Detect mode: Public, Private (no auth), Private (with auth)
   // AUTH_ENABLED=true → Public
@@ -219,6 +222,53 @@ export default function LoginPage({
     }
   }, [mode, onAdminLogin, onUserLogin, router])
 
+  const handleNuvioAuth = useCallback(async (data: { email: string; nuvioUserId: string; nuvioPassword?: string; refreshToken?: string }) => {
+    try {
+      const result = await publicLibraryAPI.authenticateNuvio(data.email, data.nuvioPassword, data.nuvioUserId)
+
+      if (result.error) {
+        const errorCode = result.error
+        const errorMessage = result.message
+        if (errorCode === 'USER_NOT_FOUND') {
+          toast.error(errorMessage || 'Your account is not registered with Syncio.', { duration: 6000 })
+        } else if (errorCode === 'USER_NOT_ACTIVE') {
+          toast.error(errorMessage || 'Your account has been disabled.', { duration: 6000 })
+        } else if (errorCode === 'USER_NOT_IN_GROUP') {
+          toast.error(errorMessage || 'Your account is not part of any Syncio group.', { duration: 6000 })
+        } else {
+          toast.error(errorMessage || 'Authentication failed')
+        }
+        return
+      }
+
+      if (!result.success || !result.user) {
+        toast.error('Authentication failed')
+        return
+      }
+
+      if (typeof window !== 'undefined') {
+        const userData = {
+          userId: result.user.id,
+          authKey: `nuvio:${data.nuvioUserId}`,
+          userInfo: result.user
+        }
+        localStorage.setItem('public-library-user', JSON.stringify(userData))
+      }
+
+      await new Promise(resolve => setTimeout(resolve, 100))
+      toast.success('Welcome! You\'re now connected.')
+
+      if (onUserLogin) {
+        onUserLogin(result.user.id, `nuvio:${data.nuvioUserId}`, result.user)
+      } else {
+        window.location.href = '/user/home'
+      }
+    } catch (err: any) {
+      const errorMessage = err?.response?.data?.message || err?.message || 'Authentication failed'
+      toast.error(errorMessage)
+    }
+  }, [onUserLogin])
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     
@@ -325,7 +375,7 @@ export default function LoginPage({
             Welcome to Syncio
           </h1>
           <p className="text-xl theme-text-3">
-            {mode === 'admin' ? 'Enter your account credentials to continue' : 'Manage your Stremio library and addons'}
+            {mode === 'admin' ? 'Enter your account credentials to continue' : 'Manage your library and addons'}
           </p>
         </div>
 
@@ -437,15 +487,50 @@ export default function LoginPage({
 
           {mode === 'user' && (
             <div className="mb-6">
-              <p className="text-sm theme-text-3 mb-4 text-center">
-                Connect with Stremio to get started
-              </p>
-              <StremioOAuthCard
-                active={true}
-                autoStart={true}
-                onAuthKey={handleStremioAuth}
-                withContainer={false}
-              />
+              <div className="grid grid-cols-2 gap-2 w-full mb-4">
+                <button
+                  type="button"
+                  onClick={() => setUserProviderType('stremio')}
+                  className={`card card-selectable color-hover hover:shadow-lg transition-all py-2 text-center ${
+                    userProviderType === 'stremio' ? 'card-selected' : ''
+                  }`}
+                >
+                  <span className="text-sm font-medium">Stremio</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setUserProviderType('nuvio')}
+                  className={`card card-selectable color-hover hover:shadow-lg transition-all py-2 text-center ${
+                    userProviderType === 'nuvio' ? 'card-selected' : ''
+                  }`}
+                >
+                  <span className="text-sm font-medium">Nuvio</span>
+                </button>
+              </div>
+              {userProviderType === 'stremio' ? (
+                <>
+                  <p className="text-sm theme-text-3 mb-4 text-center">
+                    Connect with Stremio to get started
+                  </p>
+                  <StremioOAuthCard
+                    active={true}
+                    autoStart={true}
+                    onAuthKey={handleStremioAuth}
+                    withContainer={false}
+                  />
+                </>
+              ) : (
+                <>
+                  <p className="text-sm theme-text-3 mb-4 text-center">
+                    Sign in with your Nuvio account
+                  </p>
+                  <NuvioOAuthCard
+                    onAuth={handleNuvioAuth}
+                    autoStart={true}
+                    withContainer={false}
+                  />
+                </>
+              )}
             </div>
           )}
 

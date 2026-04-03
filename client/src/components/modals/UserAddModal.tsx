@@ -6,6 +6,7 @@ import { getEntityColorStyles } from '@/utils/colorMapping'
 import { ColorPicker } from '@/components/layout'
 import { StremioOAuthCard } from '@/components/auth/StremioOAuthCard'
 import NuvioLoginCard from '@/components/auth/NuvioLoginCard'
+import NuvioOAuthCard from '@/components/auth/NuvioOAuthCard'
 import { usersAPI } from '@/services/api'
 import { useBodyScrollLock } from '@/hooks/useBodyScrollLock'
 
@@ -62,8 +63,11 @@ export default function UserAddModal({
   const [isCreatingNewGroup, setIsCreatingNewGroup] = useState(false)
   const [stremioRegisterNew, setStremioRegisterNew] = useState(false)
   const [providerType, setProviderType] = useState<'stremio' | 'nuvio'>('stremio')
+  const [nuvioAuthMode, setNuvioAuthMode] = useState<'oauth' | 'credentials'>('oauth')
   const [nuvioEmail, setNuvioEmail] = useState('')
+  const [nuvioPassword, setNuvioPassword] = useState('')
   const [nuvioUserId, setNuvioUserId] = useState('')
+  const [nuvioRefreshToken, setNuvioRefreshToken] = useState('')
   const [colorIndex, setColorIndex] = useState(0)
   const [colorIndexRef, setColorIndexRef] = useState(0)
   const colorStyles = useMemo(
@@ -180,14 +184,16 @@ export default function UserAddModal({
     }
   }
 
-  const handleNuvioAuth = (data: { email: string; nuvioUserId: string; nuvioRefreshToken?: string }) => {
+  const handleNuvioAuth = (data: { email: string; nuvioUserId: string; nuvioPassword?: string; refreshToken?: string }) => {
+    const username = usernameManuallyEdited ? stremioUsername : (data.email.split('@')[0].charAt(0).toUpperCase() + data.email.split('@')[0].slice(1))
     setNuvioEmail(data.email)
     setNuvioUserId(data.nuvioUserId)
+    if (data.refreshToken) setNuvioRefreshToken(data.refreshToken)
     if (!usernameManuallyEdited) {
-      const capitalizedUsername = data.email.split('@')[0].charAt(0).toUpperCase() + data.email.split('@')[0].slice(1)
-      setStremioUsername(capitalizedUsername)
+      setStremioUsername(username)
     }
     setStremioEmail(data.email)
+
   }
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -195,9 +201,11 @@ export default function UserAddModal({
 
     // For Nuvio provider
     if (providerType === 'nuvio') {
-      if (!nuvioUserId || !stremioUsername.trim()) {
-        return
-      }
+      // OAuth mode: need nuvioUserId from OAuth flow
+      // Credentials mode: need email + password
+      if (nuvioAuthMode === 'oauth' && !nuvioUserId) return
+      if (nuvioAuthMode === 'credentials' && (!nuvioEmail.trim() || !nuvioPassword.trim())) return
+      if (!stremioUsername.trim()) return
 
       const selectedGroupName = selectedGroup ? (groups.find((g: any) => g.id === selectedGroup)?.name || undefined) : undefined
       const finalGroupName = (newGroupName.trim() || selectedGroupName) || undefined
@@ -208,7 +216,10 @@ export default function UserAddModal({
         groupName: finalGroupName,
         colorIndex: colorIndexRef,
         providerType: 'nuvio',
-        nuvioUserId,
+        nuvioUserId: nuvioUserId || undefined,
+        nuvioEmail: nuvioEmail.trim(),
+        nuvioPassword: nuvioAuthMode === 'credentials' ? nuvioPassword.trim() : undefined,
+        nuvioRefreshToken: nuvioAuthMode === 'oauth' ? nuvioRefreshToken : undefined,
       }
 
       try {
@@ -346,7 +357,7 @@ export default function UserAddModal({
             />
             <div className="flex flex-col">
               <label className="sr-only" htmlFor="stremio-username-input">
-                Stremio Username
+                Username
               </label>
               <input
                 id="stremio-username-input"
@@ -364,7 +375,9 @@ export default function UserAddModal({
                 }`}
               />
               <span className="text-sm color-text-secondary">
-                {authMode === 'oauth'
+                {providerType === 'nuvio'
+                  ? (stremioEmail.trim() || (nuvioAuthMode === 'oauth' ? 'Authenticate with Nuvio OAuth' : 'Provide credentials below'))
+                  : authMode === 'oauth'
                   ? (oauthVerified ? (stremioEmail.trim() || 'user') : (stremioEmail.trim() || 'Authenticate with Stremio OAuth'))
                   : authMode === 'credentials'
                   ? (stremioEmail.trim() || 'Provide credentials below')
@@ -406,13 +419,57 @@ export default function UserAddModal({
 
           {providerType === 'nuvio' ? (
             <>
-              <NuvioLoginCard
-                onAuth={handleNuvioAuth}
-                disabled={isCreating}
-                startButtonLabel="Validate Nuvio Credentials"
-              />
-              {nuvioUserId && (
-                <p className="text-sm text-green-600 dark:text-green-400">Nuvio account verified successfully.</p>
+              {/* Nuvio Auth Mode Toggle */}
+              <div className="grid grid-cols-2 gap-2 w-full">
+                <button
+                  type="button"
+                  onClick={() => setNuvioAuthMode('oauth')}
+                  className={`card card-selectable color-hover hover:shadow-lg transition-all py-2 text-center ${
+                    nuvioAuthMode === 'oauth' ? 'card-selected' : ''
+                  }`}
+                >
+                  <span className="text-sm font-medium">Nuvio OAuth</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setNuvioAuthMode('credentials')}
+                  className={`card card-selectable color-hover hover:shadow-lg transition-all py-2 text-center ${
+                    nuvioAuthMode === 'credentials' ? 'card-selected' : ''
+                  }`}
+                >
+                  <span className="text-sm font-medium">Credentials</span>
+                </button>
+              </div>
+
+              {nuvioAuthMode === 'oauth' ? (
+                <>
+                  <NuvioOAuthCard
+                    onAuth={handleNuvioAuth}
+                    disabled={isCreating}
+                    autoStart={true}
+                    withContainer={false}
+                  />
+                  {nuvioUserId && (
+                    <p className="text-sm text-green-600 dark:text-green-400">Nuvio account verified successfully.</p>
+                  )}
+                </>
+              ) : (
+                <>
+                  <input
+                    type="email"
+                    value={nuvioEmail}
+                    onChange={(e) => setNuvioEmail(e.target.value)}
+                    placeholder="Email"
+                    className="w-full px-3 py-2 border rounded-lg focus:outline-none input"
+                  />
+                  <input
+                    type="password"
+                    value={nuvioPassword}
+                    onChange={(e) => setNuvioPassword(e.target.value)}
+                    placeholder="Password"
+                    className="w-full px-3 py-2 border rounded-lg focus:outline-none input"
+                  />
+                </>
               )}
               {!editingUser && (
                 <>
@@ -601,7 +658,7 @@ export default function UserAddModal({
               </button>
               <button
                 type="submit"
-                disabled={isCreating || isVerifyingOAuth || (providerType === 'stremio' && authMode === 'oauth' && (!oauthAuthKey || !oauthVerified)) || (providerType === 'nuvio' && !nuvioUserId)}
+                disabled={isCreating || isVerifyingOAuth || (providerType === 'stremio' && authMode === 'oauth' && (!oauthAuthKey || !oauthVerified)) || (providerType === 'nuvio' && nuvioAuthMode === 'oauth' && !nuvioUserId) || (providerType === 'nuvio' && nuvioAuthMode === 'credentials' && (!nuvioEmail.trim() || !nuvioPassword.trim()))}
                 onClick={() => {}}
                 className="px-4 py-2 text-sm font-medium rounded-lg transition-colors disabled:opacity-50 color-surface hover:opacity-90"
               >

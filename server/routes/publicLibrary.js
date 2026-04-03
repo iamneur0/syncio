@@ -207,12 +207,73 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
   // Authenticate with OAuth and get/create user
   router.post('/authenticate', async (req, res) => {
     try {
-      const { authKey } = req.body;
-      if (!authKey) {
-        return res.status(400).json({ error: 'Auth key is required' });
-      }
+      const { authKey, nuvioEmail, nuvioPassword, nuvioUserId } = req.body;
 
-      const user = await getPublicUser(authKey, req);
+      let user;
+      if (nuvioUserId) {
+        // Nuvio OAuth path — user already authenticated via TV login exchange
+        user = await prisma.user.findFirst({
+          where: {
+            nuvioUserId,
+            isActive: true
+          },
+          select: {
+            id: true, username: true, email: true, accountId: true,
+            stremioAuthKey: true, isActive: true, protectedAddons: true,
+            providerType: true, nuvioRefreshToken: true, nuvioUserId: true
+          }
+        });
+      } else if (nuvioEmail && nuvioPassword) {
+        // Nuvio credentials path
+        const { validateNuvioCredentials } = require('../providers/nuvioAuth');
+        const nuvioResult = await validateNuvioCredentials(nuvioEmail, nuvioPassword);
+        if (!nuvioResult || !nuvioResult.user) {
+          return res.status(401).json({ error: 'Invalid Nuvio credentials' });
+        }
+
+        // Find user by nuvioUserId
+        user = await prisma.user.findFirst({
+          where: {
+            nuvioUserId: nuvioResult.user.id,
+            isActive: true
+          },
+          select: {
+            id: true, username: true, email: true, accountId: true,
+            stremioAuthKey: true, isActive: true, protectedAddons: true,
+            providerType: true, nuvioRefreshToken: true, nuvioUserId: true
+          }
+        });
+
+        if (!user) {
+          throw new Error('USER_NOT_FOUND');
+        }
+        if (!user.isActive) {
+          throw new Error('USER_NOT_ACTIVE');
+        }
+
+        // Check group membership (same logic as getPublicUser)
+        const groups = await prisma.group.findMany({
+          where: { isActive: true },
+          select: { id: true, userIds: true, accountId: true }
+        });
+        const userGroups = groups.filter(group => {
+          try {
+            const ids = typeof group.userIds === 'string' ? JSON.parse(group.userIds) : (group.userIds || []);
+            return Array.isArray(ids) && ids.includes(user.id);
+          } catch { return false; }
+        });
+        if (userGroups.length === 0) {
+          throw new Error('USER_NOT_IN_GROUP');
+        }
+
+        // Set accountId on req for downstream use
+        req.appAccountId = user.accountId || userGroups[0]?.accountId;
+      } else if (authKey) {
+        // Stremio authentication path (existing)
+        user = await getPublicUser(authKey, req);
+      } else {
+        return res.status(400).json({ error: 'Auth key or Nuvio credentials are required' });
+      }
       
       // Fetch full user details including createdAt and expiresAt
       const fullUser = await prisma.user.findUnique({
@@ -268,7 +329,7 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
       
       res.status(401).json({ 
         error: 'Authentication failed', 
-        message: error?.message || 'Invalid Stremio auth key' 
+        message: error?.message || 'Invalid credentials'
       });
     }
   });

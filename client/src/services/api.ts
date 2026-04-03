@@ -216,8 +216,30 @@ export const usersAPI = {
     return response.data
   },
 
-  // Create new user (via Stremio connect endpoint)
+  // Create new user (via Stremio or Nuvio connect endpoint)
   create: async (userData: CreateUserData): Promise<User> => {
+    // Nuvio provider path
+    if ((userData as any).providerType === 'nuvio') {
+      const payload: any = {
+        email: (userData as any).nuvioEmail || userData.email,
+        username: userData.username,
+        groupName: userData.groupName,
+        colorIndex: userData.colorIndex,
+        create: true,
+      }
+      if ((userData as any).nuvioPassword) {
+        payload.password = (userData as any).nuvioPassword
+      }
+      if ((userData as any).nuvioUserId) {
+        payload.nuvioUserId = (userData as any).nuvioUserId
+      }
+      if ((userData as any).nuvioRefreshToken) {
+        payload.refreshToken = (userData as any).nuvioRefreshToken
+      }
+      const response: AxiosResponse<any> = await api.post('/nuvio/connect-authkey', payload)
+      return response.data?.user || response.data
+    }
+
     if (userData.authKey) {
       const payload: any = {
         authKey: userData.authKey,
@@ -815,6 +837,18 @@ export const nuvioAPI = {
     const response: AxiosResponse<any> = await api.post('/nuvio/connect', data)
     return response.data
   },
+  startOAuth: async (): Promise<any> => {
+    const response: AxiosResponse<any> = await api.post('/nuvio/start-oauth')
+    return response.data
+  },
+  pollOAuth: async (data: { code: string; deviceNonce: string; anonToken: string }): Promise<any> => {
+    const response: AxiosResponse<any> = await api.post('/nuvio/poll-oauth', data)
+    return response.data
+  },
+  exchangeOAuth: async (data: { code: string; deviceNonce: string; anonToken: string }): Promise<any> => {
+    const response: AxiosResponse<any> = await api.post('/nuvio/exchange-oauth', data)
+    return response.data
+  },
 }
 
 // Public Auth API (for AUTH_ENABLED=true)
@@ -1045,13 +1079,14 @@ export const invitationsAPI = {
   },
 
   // Public: Complete OAuth and create user
-  complete: async (inviteCode: string, email: string, username: string, authKey: string, groupName?: string, providerData?: { providerType: string; nuvioEmail?: string; nuvioPassword?: string; nuvioUserId?: string }): Promise<any> => {
+  complete: async (inviteCode: string, email: string, username: string, authKey: string, groupName?: string, providerData?: { providerType: string; nuvioEmail?: string; nuvioPassword?: string; nuvioUserId?: string; nuvioRefreshToken?: string }): Promise<any> => {
     const body: any = { email, username, authKey, groupName }
     if (providerData) {
       body.providerType = providerData.providerType
       if (providerData.nuvioEmail) body.nuvioEmail = providerData.nuvioEmail
       if (providerData.nuvioPassword) body.nuvioPassword = providerData.nuvioPassword
       if (providerData.nuvioUserId) body.nuvioUserId = providerData.nuvioUserId
+      if (providerData.nuvioRefreshToken) body.nuvioRefreshToken = providerData.nuvioRefreshToken
     }
     const response = await fetch(`/invite/${inviteCode}/complete`, {
       method: 'POST',
@@ -1068,13 +1103,19 @@ export const invitationsAPI = {
     return response.json()
   },
 
-  // Public: Delete user via OAuth
-  deleteUser: async (authKey: string): Promise<any> => {
+  // Public: Delete user via OAuth (Stremio or Nuvio)
+  deleteUser: async (authKey?: string, nuvioData?: { nuvioUserId: string; refreshToken: string }): Promise<any> => {
+    const body: any = {}
+    if (authKey) body.authKey = authKey
+    if (nuvioData) {
+      body.nuvioUserId = nuvioData.nuvioUserId
+      body.nuvioRefreshToken = nuvioData.refreshToken
+    }
     const response = await fetch(`/invite/delete-user`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({ authKey })
+      body: JSON.stringify(body)
     })
     
     const contentType = response.headers.get('content-type')
@@ -1128,6 +1169,16 @@ export const publicLibraryAPI = {
   // Authenticate with OAuth and get/create user
   authenticate: async (authKey: string): Promise<any> => {
     const response: AxiosResponse<any> = await api.post(`/public-library/authenticate`, { authKey })
+    return response.data
+  },
+
+  // Authenticate with Nuvio credentials or OAuth userId
+  authenticateNuvio: async (nuvioEmail: string, nuvioPassword?: string, nuvioUserId?: string): Promise<any> => {
+    const body: any = {}
+    if (nuvioUserId) body.nuvioUserId = nuvioUserId
+    if (nuvioEmail) body.nuvioEmail = nuvioEmail
+    if (nuvioPassword) body.nuvioPassword = nuvioPassword
+    const response: AxiosResponse<any> = await api.post(`/public-library/authenticate`, body)
     return response.data
   },
 

@@ -54,7 +54,7 @@ function createNuvioProvider({ refreshToken, userId }) {
           user_id: userId,
           profile_id: 1,
           url: addon.transportUrl,
-          name: '',
+          name: addon.manifest?.name || addon.transportName || addon.name || '',
           enabled: true,
           sort_order: i
         }))
@@ -62,7 +62,7 @@ function createNuvioProvider({ refreshToken, userId }) {
       }
     },
 
-    async addAddon(url) {
+    async addAddon(url, manifest) {
       await ensureAuth()
       // Get current max sort_order
       const current = await supabaseGet('addons', {
@@ -78,7 +78,7 @@ function createNuvioProvider({ refreshToken, userId }) {
         user_id: userId,
         profile_id: 1,
         url,
-        name: '',
+        name: manifest?.name || '',
         enabled: true,
         sort_order: nextOrder
       }], accessToken)

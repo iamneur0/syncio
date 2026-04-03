@@ -136,6 +136,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
           groups: groups.length,
           lastActive: null,
           hasStremioConnection: !!user.stremioAuthKey,
+          providerType: user.providerType || 'stremio',
           isActive: user.isActive,
           excludedAddons: excludedAddons,
           protectedAddons: protectedAddons,
@@ -910,6 +911,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, decrypt, en
         email: user.email,
         username: user.username,
         hasStremioConnection: !!user.stremioAuthKey,
+        providerType: user.providerType || 'stremio',
         status: user.isActive ? 'active' : 'inactive',
         addons: orderedAddons,
         groups: userGroups,
@@ -4315,6 +4317,9 @@ const { manifestHash } = require('../utils/hashing')
 // Import the shared reload addon helper at module level
 const { reloadAddon } = require('./addons')
 
+// Import createProvider for standalone syncUserAddons usage
+const { createProvider } = require('../providers')
+
 // Helper function to reload all addons for a group
 async function reloadGroupAddons(prisma, getAccountId, groupId, req, decrypt) {
   let reloadedCount = 0
@@ -4430,7 +4435,7 @@ async function syncUserAddons(prismaClient, userId, excludedManifestUrls = [], u
     if (!user.isActive) return { success: false, error: 'User is disabled' }
 
     const provider = createProvider(user, { decrypt, req })
-    if (!provider) return { success: false, error: 'User is not connected to Stremio' }
+    if (!provider) return { success: false, error: 'User is not connected to a provider' }
 
     // syncUserAddons only handles the actual syncing - no mode handling
 

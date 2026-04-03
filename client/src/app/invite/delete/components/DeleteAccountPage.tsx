@@ -1,8 +1,9 @@
 'use client'
 
-import React from 'react'
+import React, { useState } from 'react'
 import { Trash2, CheckCircle, XCircle } from 'lucide-react'
 import { StremioOAuthCard } from '@/components/auth/StremioOAuthCard'
+import NuvioOAuthCard from '@/components/auth/NuvioOAuthCard'
 
 interface DeleteUserPageProps {
   oauthLink: string | null
@@ -14,6 +15,7 @@ interface DeleteUserPageProps {
   isDeleting: boolean
   onGenerateOAuth: () => void
   onAuthKey: (authKey: string) => void
+  onNuvioAuth: (data: { nuvioUserId: string; refreshToken: string }) => void
   isSuccess?: boolean
   isError?: boolean
   errorMessage?: string
@@ -29,12 +31,12 @@ export function DeleteUserPage({
   isDeleting,
   onGenerateOAuth,
   onAuthKey,
+  onNuvioAuth,
   isSuccess = false,
   isError = false,
   errorMessage
 }: DeleteUserPageProps) {
-  const isOAuthExpired = oauthExpiresAt && new Date(oauthExpiresAt) < new Date()
-  const isOAuthValid = oauthExpiresAt && new Date(oauthExpiresAt) > new Date()
+  const [providerType, setProviderType] = useState<'stremio' | 'nuvio'>('stremio')
 
   if (isSuccess) {
     return (
@@ -88,50 +90,86 @@ export function DeleteUserPage({
           </p>
           <ul className="text-sm list-disc list-inside space-y-1" style={{ color: 'var(--color-text-secondary)' }}>
             <li>Remove you from all groups</li>
-            <li>Clear all your Stremio addons</li>
+            <li>Clear all your addons</li>
           </ul>
         </div>
 
-        {!oauthLinkGenerated && !oauthLink && !isGeneratingOAuth && (
+        {/* Provider Toggle */}
+        <div className="grid grid-cols-2 gap-2 w-full">
           <button
-            onClick={onGenerateOAuth}
-            disabled={isGeneratingOAuth}
-            className="w-full px-4 py-3 rounded-lg transition-colors disabled:opacity-50 text-white font-medium"
-            style={{ backgroundColor: '#ef4444' }}
+            type="button"
+            onClick={() => setProviderType('stremio')}
+            className={`card card-selectable color-hover hover:shadow-lg transition-all py-2 text-center ${
+              providerType === 'stremio' ? 'card-selected' : ''
+            }`}
           >
-            Connect to Stremio
+            <span className="text-sm font-medium">Stremio</span>
           </button>
-        )}
-
-        {isGeneratingOAuth && !oauthLink && (
           <button
-            disabled
-            className="w-full px-4 py-3 rounded-lg transition-colors disabled:opacity-50 text-white font-medium"
-            style={{ backgroundColor: '#ef4444' }}
+            type="button"
+            onClick={() => setProviderType('nuvio')}
+            className={`card card-selectable color-hover hover:shadow-lg transition-all py-2 text-center ${
+              providerType === 'nuvio' ? 'card-selected' : ''
+            }`}
           >
-            Generating OAuth Link...
+            <span className="text-sm font-medium">Nuvio</span>
           </button>
-        )}
+        </div>
 
-        {(oauthLinkGenerated || oauthLink) && oauthLink && oauthCode && (
-          <div className="p-4 rounded-lg border" style={{ borderColor: '#ef4444' }}>
-            <StremioOAuthCard
-              key={`oauth-${oauthLink || 'none'}-${oauthCode || 'none'}-${oauthKeyVersion}`}
-              active={true}
-              autoStart={!!oauthLink}
-              onAuthKey={onAuthKey}
-              disabled={isDeleting}
-              showSubmitButton={false}
-              withContainer={false}
-              showStartButton={false}
-              initialLink={oauthLink || null}
-              initialCode={oauthCode || null}
-              initialExpiresAt={oauthExpiresAt ? new Date(oauthExpiresAt).getTime() : null}
-            />
-          </div>
+        {providerType === 'stremio' ? (
+          <>
+            {!oauthLinkGenerated && !oauthLink && !isGeneratingOAuth && (
+              <button
+                onClick={onGenerateOAuth}
+                disabled={isGeneratingOAuth}
+                className="w-full px-4 py-3 rounded-lg transition-colors disabled:opacity-50 text-white font-medium"
+                style={{ backgroundColor: '#ef4444' }}
+              >
+                Connect to Stremio
+              </button>
+            )}
+
+            {isGeneratingOAuth && !oauthLink && (
+              <button
+                disabled
+                className="w-full px-4 py-3 rounded-lg transition-colors disabled:opacity-50 text-white font-medium"
+                style={{ backgroundColor: '#ef4444' }}
+              >
+                Generating OAuth Link...
+              </button>
+            )}
+
+            {(oauthLinkGenerated || oauthLink) && oauthLink && oauthCode && (
+              <div className="p-4 rounded-lg border" style={{ borderColor: '#ef4444' }}>
+                <StremioOAuthCard
+                  key={`oauth-${oauthLink || 'none'}-${oauthCode || 'none'}-${oauthKeyVersion}`}
+                  active={true}
+                  autoStart={!!oauthLink}
+                  onAuthKey={onAuthKey}
+                  disabled={isDeleting}
+                  showSubmitButton={false}
+                  withContainer={false}
+                  showStartButton={false}
+                  initialLink={oauthLink || null}
+                  initialCode={oauthCode || null}
+                  initialExpiresAt={oauthExpiresAt ? new Date(oauthExpiresAt).getTime() : null}
+                />
+              </div>
+            )}
+          </>
+        ) : (
+          <NuvioOAuthCard
+            onAuth={(data) => onNuvioAuth({ nuvioUserId: data.nuvioUserId, refreshToken: data.refreshToken })}
+            disabled={isDeleting}
+            autoStart={false}
+            withContainer={false}
+            startButtonLabel="Connect to Nuvio"
+            authorizeLabel="Authorize Deletion"
+            buttonClassName="w-full px-4 py-3 rounded-lg transition-colors disabled:opacity-50 text-white font-medium"
+            buttonStyle={{ backgroundColor: '#ef4444' }}
+          />
         )}
       </div>
     </>
   )
 }
-

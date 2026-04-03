@@ -8,6 +8,7 @@ import { formatDate } from '@/utils/dateUtils'
 import { useSyncStatusRefresh } from '@/hooks/useSyncStatusRefresh'
 import { EmptyState, VersionChip, SyncBadge } from '@/components/ui'
 import UserAvatar from '@/components/ui/UserAvatar'
+import ProviderBadge from '@/components/ui/ProviderBadge'
 import AccountMenuButton from '@/components/auth/AccountMenuButton'
 import toast from 'react-hot-toast'
 import { createPortal } from 'react-dom'
@@ -154,7 +155,7 @@ export default function UserHomePage() {
     if (!userId) return
     try {
       await publicLibraryAPI.removeStremioAddon(userId, addonName, false)
-      toast.success('Addon removed from Stremio account')
+      toast.success('Addon removed from account')
       await refetchAddons()
     } catch (error: any) {
       console.error('Failed to remove addon:', error)
@@ -195,8 +196,9 @@ export default function UserHomePage() {
                   size="lg"
                 />
                 <div>
-                  <h2 className="text-xl font-bold">
+                  <h2 className="text-xl font-bold inline-flex items-center gap-1.5">
                     {displayUserInfo?.username || displayUserInfo?.stremioUsername || 'User'}
+                    <ProviderBadge providerType={displayUserInfo?.providerType} size="md" />
                   </h2>
                   <p className="text-sm color-text-secondary">
                     {displayUserInfo?.email || displayUserInfo?.stremioEmail || 'No email'}

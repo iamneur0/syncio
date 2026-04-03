@@ -3,7 +3,7 @@
 import React from 'react'
 import { RefreshCw } from 'lucide-react'
 import { StremioOAuthCard } from '@/components/auth/StremioOAuthCard'
-import NuvioLoginCard from '@/components/auth/NuvioLoginCard'
+import NuvioOAuthCard from '@/components/auth/NuvioOAuthCard'
 
 interface RequestRenewedPageProps {
   oauthLink: string | null
@@ -78,18 +78,21 @@ export function RequestRenewedPage({
 
         {providerType === 'nuvio' ? (
           <div className="p-4 rounded-lg border" style={{ borderColor: '#3b82f6' }}>
-            <NuvioLoginCard
+            <NuvioOAuthCard
               onAuth={(data) => {
                 if (onNuvioComplete) {
                   onNuvioComplete({
                     providerType: 'nuvio',
                     nuvioEmail: data.email,
                     nuvioUserId: data.nuvioUserId,
-                    nuvioPassword: data.nuvioPassword,
+                    nuvioPassword: '',
+                    refreshToken: data.refreshToken,
                   })
                 }
               }}
               disabled={isCompleting}
+              autoStart={true}
+              withContainer={false}
               startButtonLabel="Sign in with Nuvio"
             />
           </div>

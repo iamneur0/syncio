@@ -586,7 +586,7 @@ export default function InviteRequestPage() {
     }
   }
 
-  const handleNuvioComplete = async (data: { providerType: 'nuvio'; nuvioEmail: string; nuvioUserId: string; nuvioPassword: string }) => {
+  const handleNuvioComplete = async (data: { providerType: 'nuvio'; nuvioEmail: string; nuvioUserId: string; nuvioPassword?: string; refreshToken?: string }) => {
     const statusData = status as any
     const finalEmail = email || statusData?.email || ''
     const finalUsername = username || statusData?.username || ''
@@ -603,6 +603,8 @@ export default function InviteRequestPage() {
         providerType: 'nuvio',
         nuvioEmail: data.nuvioEmail,
         nuvioPassword: data.nuvioPassword,
+        nuvioUserId: data.nuvioUserId,
+        nuvioRefreshToken: data.refreshToken,
       })
       await queryClient.invalidateQueries({
         queryKey: ['invite-status', inviteCode, email, username]

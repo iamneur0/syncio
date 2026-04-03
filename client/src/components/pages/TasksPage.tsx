@@ -664,7 +664,7 @@ export default function TasksPage() {
       <div className={`p-4 rounded-lg border mt-6 card`}>
         <h2 className={`text-lg font-semibold ${textColor}`}>Library Export</h2>
         <p className={`text-sm mt-1 ${mutedTextColor}`}>
-          Export a user's Stremio library to a JSON file.
+          Export a user's library to a JSON file.
         </p>
         <div className="mt-4 flex gap-4 flex-wrap items-center">
           <div className="relative flex-1 min-w-[200px]">

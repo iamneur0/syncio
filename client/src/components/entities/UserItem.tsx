@@ -3,6 +3,7 @@ import { useTheme } from '@/contexts/ThemeContext'
 import { SyncBadge } from '@/components/ui'
 import UserAvatar from '@/components/ui/UserAvatar'
 import { X } from 'lucide-react'
+import ProviderBadge from '@/components/ui/ProviderBadge'
 
 interface UserItemProps {
   user: {
@@ -38,7 +39,8 @@ export default function UserItem({ user, groupId, onRemove, onSync }: UserItemPr
               <h4 className={`font-medium truncate`}>
                 {user.username || user.email}
               </h4>
-              <SyncBadge 
+              <ProviderBadge providerType={(user as any).providerType} size="sm" />
+              <SyncBadge
                 userId={user.id} 
                 groupId={groupId}
                 onSync={() => onSync(user.id, groupId)}

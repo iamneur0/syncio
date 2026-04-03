@@ -8,6 +8,7 @@ import { useTheme } from '@/contexts/ThemeContext'
 import { getEntityColorStyles } from '@/utils/colorMapping'
 import UserAvatar from '@/components/ui/UserAvatar'
 import { getAddonIconUrl } from '@/utils/addonIcon'
+import ProviderBadge from '@/components/ui/ProviderBadge'
 // ToggleSwitch and VersionChip are imported from '@/components/ui' above
 
 const MANIFEST_SUFFIX_REGEX = /\/manifest(\.[^/?#]+)?$/i
@@ -456,6 +457,7 @@ export default function EntityCard({
                     <span className="truncate color-hover">{displayName}</span>
                   )}
                 </h3>
+                {variant === 'user' && <ProviderBadge providerType={(entity as any).providerType} size="sm" />}
                 {variant === 'addon' && (entity as any).version && (
                   <VersionChip version={(entity as any).version} size="sm" />
                 )}
@@ -727,23 +729,26 @@ export default function EntityCard({
             {renderAvatar()}
           </div>
           <div className="min-w-0 flex-1">
-            <h3
-              className={`font-medium transition-colors truncate ${!hasAddonLink ? 'cursor-pointer color-hover' : ''}`}
-              title={displayName}
-            >
-              {hasAddonLink ? (
-                <button
-                  type="button"
-                  onClick={handleOpenConfigure}
-                  className="truncate text-left color-hover cursor-pointer hover:underline underline-offset-2 focus:outline-none bg-transparent border-0 p-0"
-                  title={displayName}
-                >
-              {displayName}
-                </button>
-              ) : (
-                <span className="truncate">{displayName}</span>
-              )}
-            </h3>
+            <div className="flex items-center gap-1.5">
+              <h3
+                className={`font-medium transition-colors truncate ${!hasAddonLink ? 'cursor-pointer color-hover' : ''}`}
+                title={displayName}
+              >
+                {hasAddonLink ? (
+                  <button
+                    type="button"
+                    onClick={handleOpenConfigure}
+                    className="truncate text-left color-hover cursor-pointer hover:underline underline-offset-2 focus:outline-none bg-transparent border-0 p-0"
+                    title={displayName}
+                  >
+                {displayName}
+                  </button>
+                ) : (
+                  <span className="truncate">{displayName}</span>
+                )}
+              </h3>
+              {variant === 'user' && <ProviderBadge providerType={(entity as any).providerType} size="sm" />}
+            </div>
             {/* Inline Sync Badge for groups next to name */}
             {variant === 'group' && onSync && (
               <div className="mt-1 mb-0">

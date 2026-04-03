@@ -1,7 +1,7 @@
 'use client'
 
-import React, { useState, useEffect } from 'react'
-import { useQuery, useMutation } from '@tanstack/react-query'
+import React, { useState } from 'react'
+import { useMutation } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import { invitationsAPI } from '@/services/api'
 import { InvitePageLayout } from '../[inviteCode]/components/InvitePageLayout'
@@ -17,31 +17,29 @@ export default function DeleteUserRequestPage() {
   const [isError, setIsError] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string>('')
 
-  // Generate OAuth link
+  // Generate Stremio OAuth link
   const generateOAuthMutation = useMutation({
     mutationFn: () => invitationsAPI.generateOAuth(),
     onSuccess: (data) => {
-      console.log('OAuth generation success:', data)
       setOAuthLink(data.oauthLink)
       setOAuthCode(data.oauthCode)
-      // Convert Date to ISO string if needed
-      const expiresAt = data.oauthExpiresAt instanceof Date 
-        ? data.oauthExpiresAt.toISOString() 
+      const expiresAt = data.oauthExpiresAt instanceof Date
+        ? data.oauthExpiresAt.toISOString()
         : data.oauthExpiresAt
       setOAuthExpiresAt(expiresAt)
       setOAuthLinkGenerated(true)
       setOAuthKeyVersion(prev => prev + 1)
     },
     onError: (error: any) => {
-      console.error('OAuth generation error:', error)
-      const errorMessage = error?.response?.data?.error || error?.response?.data?.details || error?.message || 'Failed to generate OAuth link'
-      toast.error(errorMessage)
+      const msg = error?.response?.data?.error || error?.message || 'Failed to generate OAuth link'
+      toast.error(msg)
     }
   })
 
-  // Delete user via OAuth
+  // Delete user (Stremio via authKey, or Nuvio via nuvioUserId)
   const deleteUserMutation = useMutation({
-    mutationFn: (authKey: string) => invitationsAPI.deleteUser(authKey),
+    mutationFn: (params: { authKey?: string; nuvioData?: { nuvioUserId: string; refreshToken: string } }) =>
+      invitationsAPI.deleteUser(params.authKey, params.nuvioData),
     onSuccess: () => {
       setIsSuccess(true)
       setIsError(false)
@@ -62,10 +60,14 @@ export default function DeleteUserRequestPage() {
 
   const handleOAuthAuthKey = async (authKey: string) => {
     try {
-      await deleteUserMutation.mutateAsync(authKey)
-    } catch (error) {
-      // Error already handled in mutation
-    }
+      await deleteUserMutation.mutateAsync({ authKey })
+    } catch {}
+  }
+
+  const handleNuvioAuth = async (data: { nuvioUserId: string; refreshToken: string }) => {
+    try {
+      await deleteUserMutation.mutateAsync({ nuvioData: data })
+    } catch {}
   }
 
   return (
@@ -80,6 +82,7 @@ export default function DeleteUserRequestPage() {
         isDeleting={deleteUserMutation.isPending}
         onGenerateOAuth={handleGenerateOAuth}
         onAuthKey={handleOAuthAuthKey}
+        onNuvioAuth={handleNuvioAuth}
         isSuccess={isSuccess}
         isError={isError}
         errorMessage={errorMessage}
@@ -87,4 +90,3 @@ export default function DeleteUserRequestPage() {
     </InvitePageLayout>
   )
 }
-

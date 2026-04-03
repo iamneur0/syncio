@@ -118,6 +118,10 @@ prisma/migrations/dev.db*
 *.bak
 *.tmp
 
+# Claude Code
+.mcp.json
+.claude/
+
 # Local development
 local-addon/
 README-CI-CD.md
