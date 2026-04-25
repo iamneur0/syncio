@@ -15,6 +15,10 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Release Please
         uses: googleapis/release-please-action@v4
         with:
