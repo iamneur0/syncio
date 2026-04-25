@@ -1,19 +1,18 @@
 # Multi-stage Dockerfile for Syncio
 FROM oven/bun:1-alpine AS base
 
-# Install dependencies only when needed
-FROM base AS deps
-RUN apk add --no-cache libc6-compat openssl3 curl
+# Install npm for building
+RUN apk add --no-cache libc6-compat openssl3 curl npm
 WORKDIR /app
 
-# Copy package files for both frontend and backend
+# Deps stage - install dependencies
+FROM base AS deps
+WORKDIR /app
 COPY package*.json ./
 COPY client/package*.json ./client/
 COPY prisma ./prisma/
-
-# Install all dependencies
-RUN bun install --frozen-lockfile
-RUN cd client && bun install --frozen-lockfile
+RUN npm ci --legacy-peer-deps
+RUN cd client && npm ci --legacy-peer-deps
 
 # Build stage
 FROM base AS builder
@@ -35,7 +34,7 @@ RUN if [ "$INSTANCE" = "public" ]; then \
         cp prisma/schema.sqlite.prisma prisma/schema.prisma; \
     fi
 # Use the main schema file for generation
-RUN bunx prisma generate --schema=prisma/schema.prisma
+RUN npx prisma generate --schema=prisma/schema.prisma
 
 # Set environment variables
 ARG NEXT_PUBLIC_API_URL
@@ -46,7 +45,7 @@ ENV INSTANCE=$INSTANCE
 RUN cd client && \
     NEXT_PUBLIC_AUTH_ENABLED=$( [ "$INSTANCE" = "public" ] && echo true || echo false ) \
     NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-} \
-    bun run build
+    npm run build
 
 # Production stage
 FROM base AS production
@@ -60,7 +59,7 @@ RUN adduser --system --uid 1001 appuser
 RUN mkdir -p /app/data /app/logs && chown -R appuser:nodejs /app/data /app/logs
 
 # Install runtime dependencies
-RUN apk add --no-cache curl openssl3
+RUN apk add --no-cache curl openssl3 npm
 
 # Set environment variables for Prisma
 ENV PRISMA_CLI_BINARY_TARGETS="linux-musl-openssl-3.0.x,linux-musl-arm64-openssl-3.0.x"
