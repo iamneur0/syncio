@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.0.0](https://github.com/iamneur0/syncio/compare/v0.4.0...v1.0.0) (2026-04-25)
+
+
+### ⚠ BREAKING CHANGES
+
+* prepare for 1.0.0 release
+
+### Features
+
+* add new client app router pages and layouts ([a87316d](https://github.com/iamneur0/syncio/commit/a87316d688137550aacecc6ea1b75e2f7822e026))
+* new server proxy routes and utils, proxy feature completed ([f1edf6c](https://github.com/iamneur0/syncio/commit/f1edf6c5b575f3e02e2d626820543b79d0a247f8))
+* new UI with admin, invite and user components ([e571f81](https://github.com/iamneur0/syncio/commit/e571f81183ce9ca4d29b9c6d63e385d3b062747a))
+* prepare for 1.0.0 release ([25824fe](https://github.com/iamneur0/syncio/commit/25824fec249883394d54c90967377c1a67d71c10))
+
 ## [0.4.0](https://github.com/iamneur0/syncio/compare/v0.4.0...v0.4.0) (2025-12-23)
 
 
