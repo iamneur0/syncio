@@ -4,7 +4,7 @@ const { handleStremioError, handleDatabaseError, StremioAPIUtils } = require('..
 const { validateStremioAuthKey } = require('../utils/stremio');
 const { validateStremioCredentials, sanitizeUrl } = require('../utils/helpers');
 
-module.exports = ({ prisma, getAccountId, encrypt, decrypt, assignUserToGroup, AUTH_ENABLED }) => {
+module.exports = ({ prisma, getAccountId, encrypt, decrypt, assignUserToGroup, INSTANCE_TYPE }) => {
   const router = express.Router();
 
   // Validate Stremio credentials

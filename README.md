@@ -119,17 +119,17 @@ openssl rand -hex 16
 # 1. Clone and install dependencies
 git clone https://github.com/iamneur0/syncio.git
 cd syncio
-npm install
-cd client && npm install && cd ..
+bun install
+cd client && bun install && cd ..
 
 # 2. Set up environment
 cp env.example .env
 # Edit .env with your configuration
 
 # 3. Start development servers
-npm run dev  # Private instance
+bun run dev  # Private instance
 # or
-npm run dev:public  # Public instance with auth
+bun run dev:public  # Public instance with auth
 ```
 
 ## 🐳 Docker Deployment

@@ -128,12 +128,23 @@ function buildAddonDbData(req, params) {
 
   const resources = (() => {
     try {
+      let names = []
       if (Array.isArray(resourcesInput)) {
-        const names = resourcesInput.map(r => (typeof r === 'string' ? r : (r && (r.name || r.type)))).filter(Boolean)
-        return names.length ? JSON.stringify(names) : null
+        names = resourcesInput.map(r => (typeof r === 'string' ? r : (r && (r.name || r.type)))).filter(Boolean)
+      } else {
+        const src = Array.isArray(manifestToPersist?.resources) ? manifestToPersist.resources : Array.isArray(manifestObj?.resources) ? manifestObj.resources : []
+        names = src.map(r => (typeof r === 'string' ? r : (r && (r.name || r.type)))).filter(Boolean)
       }
-      const src = Array.isArray(manifestToPersist?.resources) ? manifestToPersist.resources : Array.isArray(manifestObj?.resources) ? manifestObj.resources : []
-      const names = src.map(r => (typeof r === 'string' ? r : (r && (r.name || r.type)))).filter(Boolean)
+      
+      // Auto-add "search" resource if any catalog has search functionality
+      const catalogsToCheck = catalogsInput || manifestToPersist?.catalogs || manifestObj?.catalogs || []
+      const hasSearchCatalog = Array.isArray(catalogsToCheck) && catalogsToCheck.some(c => 
+        c?.extra?.some(e => e.name === 'search')
+      )
+      if (hasSearchCatalog && !names.includes('search')) {
+        names.push('search')
+      }
+      
       return names.length ? JSON.stringify(names) : null
     } catch { return null }
   })()
@@ -153,14 +164,20 @@ function buildAddonDbData(req, params) {
           }
           if (c && typeof c === 'object' && c.type && c.id) {
             // Object format: { type, id, search? }
-            return { type: c.type, id: c.id, search: c.search || false }
+            // Check for search in extra array if search field not explicitly set
+            const hasSearchExtra = c.extra?.some(e => e.name === 'search')
+            return { type: c.type, id: c.id, search: c.search || hasSearchExtra || false }
           }
           return null
         }).filter(c => c && c.type && c.id)
         return compact.length ? JSON.stringify(compact) : null
       }
       const src = Array.isArray(manifestToPersist?.catalogs) ? manifestToPersist.catalogs : Array.isArray(manifestObj?.catalogs) ? manifestObj.catalogs : []
-      const compact = src.map(c => ({ type: c.type, id: c.id, search: false })).filter(c => c.type && c.id)
+      const compact = src.map(c => {
+        // Check for search in extra array
+        const hasSearchExtra = c.extra?.some(e => e.name === 'search')
+        return { type: c.type, id: c.id, search: hasSearchExtra || false }
+      }).filter(c => c.type && c.id)
       return compact.length ? JSON.stringify(compact) : null
     } catch { return null }
   })()

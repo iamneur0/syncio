@@ -49,12 +49,12 @@ function writeSyncFrequencyMinutes(minutes) {
   } catch {}
 }
 
-async function performSyncOnce(prisma, getAccountId, scopedWhere, decrypt, reloadGroupAddons, req, AUTH_ENABLED = false) {
+async function performSyncOnce(prisma, getAccountId, scopedWhere, decrypt, reloadGroupAddons, req, INSTANCE_TYPE = 'private') {
   try {
     const QUIET = process.env.QUIET === 'true' || process.env.QUIET === '1'
     if (!QUIET) console.log('🔄 Starting scheduled sync of all groups')
 
-    if (!AUTH_ENABLED) {
+    if (INSTANCE_TYPE !== 'public') {
       const groups = await prisma.group.findMany({ where: scopedWhere(req, {}), select: { id: true } })
       let syncedCount = 0
       let failedCount = 0
@@ -80,7 +80,7 @@ function clearSyncSchedule() {
   isSchedulerRunning = false
 }
 
-function scheduleSyncs(frequency, prisma, getAccountId, scopedWhere, decrypt, reloadGroupAddons, req, AUTH_ENABLED = false) {
+function scheduleSyncs(frequency, prisma, getAccountId, scopedWhere, decrypt, reloadGroupAddons, req, INSTANCE_TYPE = 'private') {
   clearSyncSchedule()
   if (!frequency || String(frequency) === '0') return
 
@@ -117,7 +117,7 @@ function scheduleSyncs(frequency, prisma, getAccountId, scopedWhere, decrypt, re
   }
 
   const seedHeap = async () => {
-    if (AUTH_ENABLED) {
+    if (INSTANCE_TYPE === 'public') {
       try {
         const accounts = await prisma.appAccount.findMany({ select: { id: true, sync: true } })
         for (const acc of accounts) {
@@ -185,7 +185,7 @@ function scheduleSyncs(frequency, prisma, getAccountId, scopedWhere, decrypt, re
         let syncCfg = null
         let accountUuid = null
         try {
-          const acc = await prisma.appAccount.findUnique({ where: { id: accountIdOrNull }, select: { sync: true, uuid: true } })
+          const acc = await prisma.appAccount.findFirst({ where: { id: accountIdOrNull }, select: { sync: true, uuid: true } })
           syncCfg = acc?.sync || null
           accountUuid = acc?.uuid || null
           if (typeof syncCfg === 'string') syncCfg = JSON.parse(syncCfg)

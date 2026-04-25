@@ -10,6 +10,7 @@ const { canonicalizeManifestUrl } = require('../utils/validation');
  */
 module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibrary, setCachedLibrary }) => {
   const { findLatestEpisode } = require('../utils/libraryHelpers')
+  const { getShares, getGroupMembers } = require('../utils/sharesManager')
   const router = express.Router();
 
   // Helper to get existing user from Stremio auth (does NOT create new users)
@@ -145,34 +146,70 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
     }
   }
 
-  // Generate OAuth link
+  // Generate OAuth link (admin/public-library flow)
   router.post('/generate-oauth', async (req, res) => {
     try {
-      const { StremioAPIStore } = require('stremio-api-client');
-      const store = new StremioAPIStore();
-      
-      const result = await store.createOAuthLink();
-      
-      if (!result || !result.success || !result.code || !result.link) {
+      // Mirror the working implementation used in invitations public router
+      let oauthCode = null;
+      let oauthLink = null;
+      let oauthExpiresAt = null;
+
+      try {
+        const host = req.headers.host || req.headers.origin || 'syncio.local';
+        const origin = req.headers.origin || (host.startsWith('http') ? host : `http://${host}`);
+
+        const stremioResponse = await fetch('https://link.stremio.com/api/v2/create?type=Create', {
+          headers: {
+            'X-Requested-With': host,
+            Origin: origin,
+          },
+          // Keep request minimal; Stremio ignores referrer for this endpoint
+          referrerPolicy: 'no-referrer',
+        });
+
+        if (stremioResponse.ok) {
+          const stremioData = await stremioResponse.json().catch(() => ({}));
+          const result = stremioData?.result;
+          if (result?.success && result?.code && result?.link) {
+            oauthCode = result.code;
+            oauthLink = result.link;
+            // 5 min expiry - convert to ISO string for JSON serialization
+            oauthExpiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+          } else {
+            return res.status(500).json({
+              error: 'Failed to generate OAuth link - Stremio API returned invalid response',
+              details: stremioData?.error?.message || 'Missing code or link in response',
+            });
+          }
+        } else {
+          const errorText = await stremioResponse.text();
+          return res.status(500).json({
+            error: 'Failed to generate OAuth link from Stremio',
+            details: `HTTP ${stremioResponse.status}: ${errorText}`,
+          });
+        }
+      } catch (error) {
         return res.status(500).json({
-          error: 'Failed to generate OAuth link - Stremio API returned invalid response',
-          details: result
+          error: 'Failed to generate OAuth link',
+          details: error?.message || 'Unknown error',
         });
       }
 
+      res.setHeader('Content-Type', 'application/json');
       res.json({
         success: true,
-        code: result.code,
-        link: result.link,
-        expiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString()
+        code: oauthCode,
+        link: oauthLink,
+        expiresAt: oauthExpiresAt,
       });
     } catch (error) {
       console.error('Error generating OAuth link:', error);
+      res.setHeader('Content-Type', 'application/json');
       res.status(500).json({ error: 'Failed to generate OAuth link', message: error?.message });
     }
   });
 
-  // Poll for OAuth completion
+  // Poll for OAuth completion (admin/public-library flow)
   router.post('/poll-oauth', async (req, res) => {
     try {
       const { code } = req.body;
@@ -180,29 +217,64 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
         return res.status(400).json({ error: 'OAuth code is required' });
       }
 
-      const { StremioAPIStore } = require('stremio-api-client');
-      const store = new StremioAPIStore();
-      
-      const result = await store.getOAuthToken(code);
-      
-      if (!result || !result.authKey) {
-        return res.json({ success: false, authKey: null });
-      }
+      try {
+        const host = req.headers.host || req.headers.origin || 'syncio.local';
+        const origin = req.headers.origin || (host.startsWith('http') ? host : `http://${host}`);
 
-      res.json({
-        success: true,
-        authKey: result.authKey
-      });
+        const stremioResponse = await fetch(
+          `https://link.stremio.com/api/v2/read?type=Read&code=${encodeURIComponent(code)}`,
+          {
+            headers: {
+              'X-Requested-With': host,
+              Origin: origin,
+            },
+            referrerPolicy: 'no-referrer',
+          }
+        );
+
+        const data = await stremioResponse.json().catch(() => ({}));
+        const result = data?.result;
+
+        if (result?.success && result?.authKey) {
+          return res.json({
+            success: true,
+            authKey: result.authKey,
+          });
+        }
+
+        // Pending or no auth key yet
+        if (data?.error && data.error.code && data.error.code !== 101) {
+          return res.json({
+            success: false,
+            authKey: null,
+            error: data.error.message || 'Stremio reported an error while polling OAuth',
+          });
+        }
+
+        return res.json({ success: false, authKey: null });
+      } catch (error) {
+        console.error('Error polling OAuth from Stremio:', error);
+        return res.json({
+          success: false,
+          authKey: null,
+          error: error?.message || 'Failed to poll OAuth status',
+        });
+      }
     } catch (error) {
       console.error('Error polling OAuth:', error);
       res.json({ success: false, authKey: null, error: error?.message });
     }
   });
 
+  // Helper to extract auth key from header or query
+  const getAuthKey = (req) => {
+    return req.headers['x-stremio-auth'] || req.query.authKey || req.body?.authKey;
+  };
+
   // Authenticate with OAuth and get/create user
   router.post('/authenticate', async (req, res) => {
     try {
-      const { authKey } = req.body;
+      const authKey = getAuthKey(req);
       if (!authKey) {
         return res.status(400).json({ error: 'Auth key is required' });
       }
@@ -271,7 +343,8 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
   // Validate user session (check if user exists, is active, and is in a group)
   router.post('/validate', async (req, res) => {
     try {
-      const { authKey, userId } = req.body;
+      const { userId } = req.body;
+      const authKey = getAuthKey(req);
       
       if (!authKey && !userId) {
         return res.status(400).json({ error: 'Auth key or user ID is required' });
@@ -344,7 +417,8 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
   // Get current user's info (including activityVisibility)
   router.get('/user-info', async (req, res) => {
     try {
-      const { userId, authKey } = req.query;
+      const { userId } = req.query;
+      const authKey = getAuthKey(req);
       
       if (!userId && !authKey) {
         return res.status(400).json({ error: 'User ID or auth key is required' });
@@ -397,11 +471,6 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
           return res.status(403).json({ error: 'User account is disabled' });
         }
 
-        // Verify user belongs to default account (public users)
-        if (foundUser.accountId !== DEFAULT_ACCOUNT_ID) {
-          return res.status(403).json({ error: 'Access denied' });
-        }
-
         // Check if user belongs to at least one active group
         const { getGroupMembers } = require('../utils/sharesManager');
         const groupMembers = await getGroupMembers(prisma, foundUser.accountId, foundUser.id);
@@ -427,10 +496,11 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
     }
   });
 
-  // Update current user's activity visibility
+  // Update activity visibility
   router.patch('/activity-visibility', async (req, res) => {
     try {
-      const { userId, authKey, activityVisibility } = req.body;
+      const { userId, activityVisibility } = req.body;
+      const authKey = getAuthKey(req);
       
       if (!userId || !authKey) {
         return res.status(400).json({ error: 'User ID and auth key are required' });
@@ -442,6 +512,7 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
 
       // Validate user using getPublicUser (checks existence, active status, and group membership)
       const user = await getPublicUser(authKey, req);
+
       
       // Verify the userId matches the authenticated user
       if (user.id !== userId) {
@@ -492,6 +563,8 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
     try {
       const userId = req.query.userId || req.query.user;
       const requestingUserId = req.query.requestingUserId; // Optional: ID of user making the request
+      const authKey = getAuthKey(req);
+      
       if (!userId) {
         return res.status(400).json({ error: 'User ID is required' });
       }
@@ -501,6 +574,7 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
         where: { id: userId },
         select: {
           id: true,
+          email: true,
           stremioAuthKey: true,
           isActive: true,
           accountId: true,
@@ -512,11 +586,6 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
         return res.status(404).json({ error: 'User not found or inactive' });
       }
 
-      // Verify user belongs to default account (public users)
-      if (user.accountId !== DEFAULT_ACCOUNT_ID) {
-        return res.status(403).json({ error: 'Access denied' });
-      }
-
       // Security check: If requesting a different user's library, verify access
       if (requestingUserId && requestingUserId !== userId) {
         // Verify requesting user exists and belongs to same account
@@ -525,13 +594,13 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
           select: { id: true, accountId: true }
         });
         
-        if (!requestingUser || requestingUser.accountId !== DEFAULT_ACCOUNT_ID) {
+        if (!requestingUser || requestingUser.accountId !== user.accountId) {
           return res.status(403).json({ error: 'Access denied: Invalid requesting user' });
         }
         
         // Check if requesting user is in the same group and target user is public
         const { getGroupMembers } = require('../utils/sharesManager');
-        const groupMembers = await getGroupMembers(prisma, DEFAULT_ACCOUNT_ID, requestingUserId);
+        const groupMembers = await getGroupMembers(prisma, user.accountId, requestingUserId);
         const requestingUserInGroup = groupMembers.some(m => m.id === userId);
         
         if (!requestingUserInGroup || user.activityVisibility !== 'public') {
@@ -548,13 +617,11 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
       }
 
       // Get library from cache or fetch
-      let library = getCachedLibrary(user.accountId, user.id);
+      let library = getCachedLibrary(user.accountId, user);
       
-      // Check if cache only has removed items (stale cache) - if so, refresh from Stremio
-      // Active items: removed === false (or missing/undefined, treated as in library)
-      const hasActiveItems = library && Array.isArray(library) && library.some(item => {
-        return item.removed === false || item.removed === undefined || item.removed === null;
-      });
+      // Check if cache only has removed items ( stale cache) - if so, refresh from Stremio
+      // Active items: !item.removed (handles false, undefined, null, 0)
+      const hasActiveItems = library && Array.isArray(library) && library.some(item => !item.removed);
       
       console.log(`[Library Cache] User ${user.id}: cache items=${library?.length || 0}, hasActiveItems=${hasActiveItems}`)
       
@@ -572,14 +639,12 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
 
         library = Array.isArray(libraryItems) ? libraryItems : (libraryItems?.result || libraryItems?.library || []);
         
-        // Active items: removed === false (or missing/undefined, treated as in library)
-        const activeFromStremio = library.filter(item => {
-          return item.removed === false || item.removed === undefined || item.removed === null;
-        }).length
+        // Active items: !item.removed
+        const activeFromStremio = library.filter(item => !item.removed).length
         console.log(`[Library Cache] Stremio returned: total=${library.length}, active=${activeFromStremio}`)
         
         if (Array.isArray(library) && library.length > 0) {
-          setCachedLibrary(user.accountId, user.id, library);
+          setCachedLibrary(user.accountId, user, library);
         }
       }
 
@@ -724,20 +789,15 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
 
       console.log(`[Library API] User ${user.id}: expanded=${expandedLibrary.length}, total=${allLibrary.length}`)
 
-      // Sort by watch date (least recent of _mtime vs lastWatched)
+      // Sort by watch date (lastWatched only)
+      // IMPORTANT: Do NOT use _mtime - that's just when the library item was modified (e.g., added to library)
       allLibrary.sort((a, b) => {
         const getWatchDate = (item) => {
-          const dates = []
-          if (item._mtime) {
-            const d = new Date(item._mtime)
-            if (!isNaN(d.getTime())) dates.push(d.getTime())
-          }
           if (item.state?.lastWatched) {
             const d = new Date(item.state.lastWatched)
-            if (!isNaN(d.getTime())) dates.push(d.getTime())
+            if (!isNaN(d.getTime())) return d.getTime()
           }
-          if (dates.length === 0) return 0
-          return Math.min(...dates)
+          return 0
         }
 
         const dateA = getWatchDate(a)
@@ -757,10 +817,11 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
     }
   });
 
-  // Add addon and mark as protected
+  // Add an addon to Stremio and protect it
   router.post('/add-addon', async (req, res) => {
     try {
       const { userId, addonUrl, manifestData: providedManifestData } = req.body;
+      const authKey = getAuthKey(req);
       
       if (!userId || !addonUrl) {
         return res.status(400).json({ 
@@ -783,11 +844,6 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
 
       if (!user || !user.isActive) {
         return res.status(404).json({ error: 'User not found or inactive' });
-      }
-
-      // Verify user belongs to default account (public users)
-      if (user.accountId !== DEFAULT_ACCOUNT_ID) {
-        return res.status(403).json({ error: 'Access denied' });
       }
 
       if (!user.stremioAuthKey) {
@@ -957,16 +1013,17 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
     }
   });
 
-  // Get user's addons (group addons and current Stremio addons)
+  // Get user's addons (group addons and Stremio addons)
   router.get('/addons', async (req, res) => {
     try {
-      const { userId, authKey } = req.query;
+      const { userId } = req.query;
+      const authKey = getAuthKey(req);
       
       if (!userId) {
         return res.status(400).json({ error: 'User ID is required' });
       }
 
-      // Validate user authentication - get authKey from query or from user's stored key
+      // Validate user authentication - get authKey from header/query/body or from user's stored key
       let authKeyToValidate = authKey;
       if (!authKeyToValidate) {
         // If no authKey provided, get it from the user's stored key (for backward compatibility)
@@ -1101,8 +1158,12 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
           : (stremioAddonsResponse?.addons || []);
       } catch (stremioError) {
         const errorMsg = stremioError?.message || stremioError?.error || String(stremioError || '');
-        // Check if it's a session/auth error
-        if (/session does not exist|invalid|expired|authentication/i.test(errorMsg)) {
+        // Check if it's a decryption error (encryption key mismatch or corrupted data)
+        if (/unsupported state|unable to authenticate data|invalid encrypted data|decryption failed/i.test(errorMsg)) {
+          console.error(`Error fetching Stremio addons for user ${userId}: ${errorMsg}`);
+          // Return empty addons instead of failing - user needs to reconnect with correct encryption key
+          stremioAddons = [];
+        } else if (/session does not exist|invalid|expired|authentication/i.test(errorMsg)) {
           console.error(`Error fetching Stremio addons for user ${userId}: Session does not exist`);
           // Return empty addons instead of failing - user can reconnect later
           stremioAddons = [];
@@ -1164,11 +1225,6 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
         return res.status(404).json({ error: 'User not found' });
       }
 
-      // Verify user belongs to default account (public users)
-      if (user.accountId !== DEFAULT_ACCOUNT_ID) {
-        return res.status(403).json({ error: 'Access denied' });
-      }
-
       // Parse current excluded addons
       let currentExcluded = [];
       try {
@@ -1223,11 +1279,6 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
         return res.status(404).json({ error: 'User not found' });
       }
 
-      // Verify user belongs to default account (public users)
-      if (user.accountId !== DEFAULT_ACCOUNT_ID) {
-        return res.status(403).json({ error: 'Access denied' });
-      }
-
       // Parse current excluded addons
       let currentExcluded = [];
       try {
@@ -1262,6 +1313,7 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
     try {
       const { userId } = req.query;
       const { itemId } = req.params;
+      const authKey = getAuthKey(req);
       
       if (!userId) {
         return res.status(400).json({ error: 'User ID is required' });
@@ -1272,6 +1324,7 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
         where: { id: userId },
         select: {
           id: true,
+          email: true,
           stremioAuthKey: true,
           isActive: true,
           accountId: true
@@ -1282,17 +1335,12 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
         return res.status(404).json({ error: 'User not found or inactive' });
       }
 
-      // Verify user belongs to default account (public users)
-      if (user.accountId !== DEFAULT_ACCOUNT_ID) {
-        return res.status(403).json({ error: 'Access denied' });
-      }
-
       if (!user.stremioAuthKey) {
         return res.status(400).json({ error: 'User not connected to Stremio' });
       }
 
       // Decrypt auth key
-      const mockReq = { appAccountId: DEFAULT_ACCOUNT_ID };
+      const mockReq = { appAccountId: user.accountId || DEFAULT_ACCOUNT_ID };
       const authKeyPlain = decrypt(user.stremioAuthKey, mockReq);
 
       const { markLibraryItemRemoved } = require('../utils/libraryDelete');
@@ -1317,7 +1365,7 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
 
       // Clear the cache for this user
       const { clearCache } = require('../utils/libraryCache');
-      clearCache(DEFAULT_ACCOUNT_ID, userId);
+      clearCache(DEFAULT_ACCOUNT_ID, user);
 
       res.json({ 
         success: true,
@@ -1329,11 +1377,12 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
     }
   });
 
-  // Protect/unprotect addon
+  // Toggle addon protection status
   router.post('/protect-addon', async (req, res) => {
     try {
       const { userId, name } = req.body;
       const { unsafe } = req.query;
+      const authKey = getAuthKey(req);
       
       if (!userId || !name) {
         return res.status(400).json({ error: 'User ID and addon name are required' });
@@ -1363,11 +1412,6 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
 
       if (!user) {
         return res.status(404).json({ error: 'User not found' });
-      }
-
-      // Verify user belongs to default account (public users)
-      if (user.accountId !== DEFAULT_ACCOUNT_ID) {
-        return res.status(403).json({ error: 'Access denied' });
       }
 
       // Parse current protected addons (plaintext names)
@@ -1415,6 +1459,7 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
     try {
       const { userId } = req.query;
       const { addonName } = req.params;
+      const authKey = getAuthKey(req);
       
       if (!userId) {
         return res.status(400).json({ error: 'User ID is required' });
@@ -1434,11 +1479,6 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
 
       if (!user || !user.isActive) {
         return res.status(404).json({ error: 'User not found or inactive' });
-      }
-
-      // Verify user belongs to default account (public users)
-      if (user.accountId !== DEFAULT_ACCOUNT_ID) {
-        return res.status(403).json({ error: 'Access denied' });
       }
 
       if (!user.stremioAuthKey) {
@@ -1502,6 +1542,7 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
   router.post('/user-api-key', async (req, res) => {
     try {
       const { userId } = req.body;
+      const authKey = getAuthKey(req);
       
       if (!userId) {
         return res.status(400).json({ error: 'User ID is required' });
@@ -1513,12 +1554,24 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
         select: {
           id: true,
           accountId: true,
-          isActive: true
+          isActive: true,
+          stremioAuthKey: true
         }
       });
 
       if (!user || !user.isActive) {
         return res.status(404).json({ error: 'User not found or inactive' });
+      }
+
+      // Verify auth key
+      if (!authKey) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+
+      try {
+        await getPublicUser(authKey, req);
+      } catch (e) {
+        return res.status(401).json({ error: 'Invalid auth key' });
       }
 
       // Generate new API key
@@ -1549,6 +1602,8 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
   router.get('/user-api-key', async (req, res) => {
     try {
       const { userId } = req.query;
+      const authKey = getAuthKey(req);
+
       if (!userId) {
         return res.status(400).json({ error: 'User ID is required' });
       }
@@ -1558,12 +1613,24 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
         where: { id: userId },
         select: {
           id: true,
-          apiKey: true
+          apiKey: true,
+          stremioAuthKey: true
         }
       });
 
       if (!user) {
         return res.status(404).json({ error: 'User not found' });
+      }
+
+      // Verify auth key
+      if (!authKey) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+
+      try {
+        await getPublicUser(authKey, req);
+      } catch (e) {
+        return res.status(401).json({ error: 'Invalid auth key' });
       }
 
       if (!user.apiKey) {
@@ -1593,6 +1660,8 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
   router.get('/user-api-key-status', async (req, res) => {
     try {
       const { userId } = req.query;
+      const authKey = getAuthKey(req);
+
       if (!userId) {
         return res.status(400).json({ error: 'User ID is required' });
       }
@@ -1602,7 +1671,8 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
         where: { id: userId },
         select: {
           id: true,
-          apiKey: true
+          apiKey: true,
+          stremioAuthKey: true
         }
       });
 
@@ -1610,10 +1680,429 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
         return res.status(404).json({ error: 'User not found' });
       }
 
+      // Verify auth key
+      if (!authKey) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+
+      try {
+        await getPublicUser(authKey, req);
+      } catch (e) {
+        return res.status(401).json({ error: 'Invalid auth key' });
+      }
+
       res.json({ hasKey: !!user.apiKey });
     } catch (error) {
       console.error('Error checking user API key status:', error);
       res.status(500).json({ error: 'Failed to check API key status', message: error?.message });
+    }
+  });
+
+  // Get user's activity (watch sessions and stats)
+  router.get('/activity', async (req, res) => {
+    try {
+      const { userId, limit = 100 } = req.query;
+      const authKey = getAuthKey(req);
+      
+      if (!userId) {
+        return res.status(400).json({ error: 'User ID is required' });
+      }
+
+      // Get user
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: {
+          id: true,
+          username: true,
+          email: true,
+          colorIndex: true,
+          accountId: true,
+          isActive: true,
+          stremioAuthKey: true
+        }
+      });
+
+      if (!user || !user.isActive) {
+        return res.status(404).json({ error: 'User not found or inactive' });
+      }
+
+      // Verify auth key
+      if (!authKey) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+
+      try {
+        await getPublicUser(authKey, req);
+      } catch (e) {
+        return res.status(401).json({ error: 'Invalid auth key' });
+      }
+
+      // Fetch watch activity for this user (using WatchActivity table like old syncio)
+      console.log('Fetching watch activity for user:', userId, 'account:', user.accountId);
+      const watchActivities = await prisma.watchActivity.findMany({
+        where: {
+          userId: userId,
+          accountId: user.accountId || DEFAULT_ACCOUNT_ID
+        },
+        orderBy: { date: 'desc' },
+        take: parseInt(limit) || 100
+      });
+      console.log('Watch activities found:', watchActivities.length);
+
+      // Load library cache to get item names and posters
+      console.log('Loading library cache for account:', user.accountId);
+      const libraryCache = getCachedLibrary(user.accountId || DEFAULT_ACCOUNT_ID, user) || [];
+      console.log('Library cache items:', libraryCache.length);
+      const libraryItemMap = new Map();
+      libraryCache.forEach(item => {
+        if (item._id || item.id) {
+          libraryItemMap.set(item._id || item.id, item);
+        }
+      });
+      console.log('Library item map size:', libraryItemMap.size);
+
+      // Helper function to extract season/episode from itemId
+      function extractSeasonEpisodeFromId(itemId) {
+        if (!itemId) return { season: null, episode: null };
+        const parts = itemId.split(':');
+        
+        // Kitsu format: "kitsu:46676:1"
+        if (itemId.startsWith('kitsu:') && parts.length >= 3) {
+          const episodePart = parts[parts.length - 1];
+          const parsedEpisode = parseInt(episodePart, 10);
+          return {
+            season: 1,
+            episode: !isNaN(parsedEpisode) ? parsedEpisode : null
+          };
+        }
+        
+        // IMDb format: "tt8080122:4:6" (season:episode)
+        if (parts.length >= 3 && parts[0].startsWith('tt')) {
+          return {
+            season: parseInt(parts[1], 10) || null,
+            episode: parseInt(parts[2], 10) || null
+          };
+        }
+        
+        // IMDb format: "tt8080122:6" (episode only)
+        if (parts.length === 2 && parts[0].startsWith('tt')) {
+          return {
+            season: null,
+            episode: parseInt(parts[1], 10) || null
+          };
+        }
+        
+        return { season: null, episode: null };
+      }
+
+      // Fetch episode watch history for additional detail
+      const episodeHistory = await prisma.episodeWatchHistory.findMany({
+        where: {
+          userId: userId,
+          accountId: user.accountId || DEFAULT_ACCOUNT_ID
+        },
+        orderBy: { watchedAt: 'desc' },
+        take: parseInt(limit) || 100
+      });
+
+      // Transform watch activity into activity items (like old syncio)
+      const activityItems = watchActivities.map(activity => {
+        // Get item details from library cache
+        const libraryItem = libraryItemMap.get(activity.itemId);
+        const { season, episode } = extractSeasonEpisodeFromId(activity.itemId);
+        
+        // Calculate end time from date + watchTimeSeconds
+        const startTime = new Date(activity.date);
+        const endTime = new Date(startTime.getTime() + (activity.watchTimeSeconds * 1000));
+        
+        return {
+          id: activity.id,
+          type: 'session',
+          userId: activity.userId,
+          username: user.username || user.email || 'Unknown',
+          userEmail: user.email,
+          userColorIndex: user.colorIndex || 0,
+          itemId: activity.itemId,
+          videoId: activity.itemId, // Use itemId as videoId for series
+          itemName: libraryItem?.name || activity.itemId,
+          itemType: activity.itemType,
+          season: season,
+          episode: episode,
+          poster: libraryItem?.poster || null,
+          startTime: startTime,
+          endTime: endTime,
+          durationSeconds: activity.watchTimeSeconds,
+          isActive: false, // Historical data, never active
+          isSynthetic: false
+        };
+      });
+
+      // Transform episode history into activity items (as fallback/additional data)
+      const episodeItems = episodeHistory.map(history => ({
+        id: history.id,
+        type: 'episode',
+        userId: history.userId,
+        username: user.username || user.email || 'Unknown',
+        userEmail: user.email,
+        userColorIndex: user.colorIndex || 0,
+        itemId: history.itemId,
+        videoId: history.videoId,
+        itemName: history.itemName,
+        itemType: 'series',
+        season: history.season,
+        episode: history.episode,
+        poster: history.poster,
+        startTime: history.watchedAt,
+        endTime: history.watchedAt,
+        durationSeconds: history.durationSeconds || 0,
+        isActive: false,
+        isSynthetic: false
+      }));
+
+      // Calculate stats
+      const now = new Date();
+      const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const oneWeekAgo = new Date(todayStart.getTime() - 7 * 24 * 60 * 60 * 1000);
+
+      // Total watch time (all watch activities)
+      const totalWatchTimeSeconds = watchActivities
+        .reduce((sum, a) => sum + (a.watchTimeSeconds || 0), 0);
+
+      // Watch time today
+      const watchTimeTodaySeconds = watchActivities
+        .filter(a => new Date(a.date) >= todayStart)
+        .reduce((sum, a) => sum + (a.watchTimeSeconds || 0), 0);
+
+      // Count movies and series from unique items
+      const uniqueItems = new Map();
+      watchActivities.forEach(a => {
+        if (!uniqueItems.has(a.itemId)) {
+          uniqueItems.set(a.itemId, a.itemType);
+        }
+      });
+      const moviesCount = [...uniqueItems.values()].filter(t => t === 'movie').length;
+      const seriesCount = [...uniqueItems.values()].filter(t => t === 'series').length;
+
+      // Items watched this week
+      const recentItemsCount = watchActivities
+        .filter(a => new Date(a.date) >= oneWeekAgo)
+        .length;
+
+      // Watch time by day (last 7 days)
+      const watchTimeByDay = [];
+      for (let i = 6; i >= 0; i--) {
+        const date = new Date(todayStart);
+        date.setDate(date.getDate() - i);
+        const dayStart = new Date(date);
+        const dayEnd = new Date(date);
+        dayEnd.setHours(23, 59, 59, 999);
+
+        const dayActivities = watchActivities.filter(a => {
+          const activityDate = new Date(a.date);
+          return activityDate >= dayStart && activityDate <= dayEnd;
+        });
+
+        const daySeconds = dayActivities.reduce((sum, a) => sum + (a.watchTimeSeconds || 0), 0);
+        const dayMovies = dayActivities.filter(a => a.itemType === 'movie').length;
+        const daySeries = dayActivities.filter(a => a.itemType === 'series').length;
+
+        watchTimeByDay.push({
+          date: date.toLocaleDateString('en-US', { weekday: 'short' }),
+          hours: daySeconds / 3600,
+          minutes: Math.round(daySeconds / 60),
+          movies: dayMovies,
+          series: daySeries,
+          total: dayActivities.length
+        });
+      }
+
+      // === ADDITIONAL STATS FOR USER HOME ===
+
+      // Watched today count
+      const watchedTodayCount = watchActivities
+        .filter(a => new Date(a.date) >= todayStart)
+        .length;
+
+      // Calculate watch streak
+      let currentStreak = 0;
+      let longestStreak = 0;
+      let tempStreak = 0;
+      const activitiesByDay = new Map();
+      
+      // Group activities by date
+      watchActivities.forEach(a => {
+        const dateKey = new Date(a.date).toISOString().split('T')[0];
+        if (!activitiesByDay.has(dateKey)) {
+          activitiesByDay.set(dateKey, true);
+        }
+      });
+
+      // Calculate current streak (consecutive days from today going backwards)
+      const checkDate = new Date(todayStart);
+      while (true) {
+        const dateKey = checkDate.toISOString().split('T')[0];
+        if (activitiesByDay.has(dateKey)) {
+          currentStreak++;
+          checkDate.setDate(checkDate.getDate() - 1);
+        } else {
+          // Allow 1 day gap only if today has no activity yet
+          if (currentStreak === 0 && checkDate.getTime() === todayStart.getTime()) {
+            checkDate.setDate(checkDate.getDate() - 1);
+            continue;
+          }
+          break;
+        }
+      }
+
+      // Calculate longest streak
+      const sortedDates = [...activitiesByDay.keys()].sort();
+      tempStreak = 0;
+      for (let i = 0; i < sortedDates.length; i++) {
+        if (i === 0) {
+          tempStreak = 1;
+        } else {
+          const prevDate = new Date(sortedDates[i - 1]);
+          const currDate = new Date(sortedDates[i]);
+          const diffDays = Math.round((currDate.getTime() - prevDate.getTime()) / (24 * 60 * 60 * 1000));
+          if (diffDays === 1) {
+            tempStreak++;
+          } else {
+            if (tempStreak > longestStreak) longestStreak = tempStreak;
+            tempStreak = 1;
+          }
+        }
+      }
+      if (tempStreak > longestStreak) longestStreak = tempStreak;
+
+      // Average watch time per day (last 7 days with activity)
+      const daysWithActivity = watchTimeByDay.filter(d => d.total > 0);
+      const avgWatchTimeSeconds = daysWithActivity.length > 0
+        ? daysWithActivity.reduce((sum, d) => sum + (d.hours * 3600), 0) / daysWithActivity.length
+        : 0;
+
+      // Most watched item
+      const itemCounts = new Map();
+      watchActivities.forEach(a => {
+        const key = a.itemId;
+        const libraryItem = libraryItemMap.get(a.itemId);
+        if (!itemCounts.has(key)) {
+          itemCounts.set(key, { 
+            count: 0, 
+            name: libraryItem?.name || a.itemId, 
+            type: a.itemType,
+            poster: libraryItem?.poster || null,
+            totalDuration: 0
+          });
+        }
+        const item = itemCounts.get(key);
+        item.count++;
+        item.totalDuration += (a.watchTimeSeconds || 0);
+      });
+      
+      const mostWatched = [...itemCounts.entries()]
+        .sort((a, b) => b[1].totalDuration - a[1].totalDuration)
+        .slice(0, 1)
+        .map(([id, data]) => ({
+          id,
+          name: data.name,
+          type: data.type,
+          poster: data.poster,
+          count: data.count,
+          totalDuration: data.totalDuration
+        }))[0] || null;
+
+      // Binge watches (3+ episodes of same series in one day)
+      const bingeWatches = [];
+      const seriesActivitiesByDay = new Map();
+      
+      watchActivities.filter(a => a.itemType === 'series').forEach(a => {
+        const dateKey = new Date(a.date).toISOString().split('T')[0];
+        const seriesKey = `${dateKey}:${a.itemId}`;
+        const libraryItem = libraryItemMap.get(a.itemId);
+        const { season, episode } = extractSeasonEpisodeFromId(a.itemId);
+        
+        if (!seriesActivitiesByDay.has(seriesKey)) {
+          seriesActivitiesByDay.set(seriesKey, { 
+            name: libraryItem?.name || a.itemId, 
+            poster: libraryItem?.poster || null,
+            episodes: [],
+            totalDuration: 0,
+            date: dateKey
+          });
+        }
+        const series = seriesActivitiesByDay.get(seriesKey);
+        series.episodes.push({ season, episode });
+        series.totalDuration += (a.watchTimeSeconds || 0);
+      });
+
+      for (const [key, data] of seriesActivitiesByDay.entries()) {
+        if (data.episodes.length >= 3) {
+          bingeWatches.push({
+            name: data.name,
+            poster: data.poster,
+            episodeCount: data.episodes.length,
+            totalDuration: data.totalDuration,
+            date: data.date
+          });
+        }
+      }
+      bingeWatches.sort((a, b) => b.episodeCount - a.episodeCount);
+
+      // Now playing - query watchSession for real-time active sessions
+      const activeSessions = await prisma.watchSession.findMany({
+        where: {
+          userId: userId,
+          accountId: user.accountId || DEFAULT_ACCOUNT_ID,
+          isActive: true
+        },
+        orderBy: { startTime: 'desc' }
+      });
+      
+      const nowPlaying = activeSessions.map(s => ({
+        item: {
+          id: s.itemId,
+          name: s.itemName,
+          type: s.itemType,
+          poster: s.poster,
+          season: s.season,
+          episode: s.episode
+        },
+        startTime: s.startTime,
+        videoId: s.videoId
+      }));
+
+      res.json({
+        sessions: activityItems,
+        episodeHistory: episodeItems,
+        stats: {
+          totalWatchTimeSeconds,
+          totalWatchTimeHours: totalWatchTimeSeconds / 3600,
+          watchTimeTodaySeconds,
+          watchTimeTodayHours: watchTimeTodaySeconds / 3600,
+          watchedTodayCount,
+          moviesCount,
+          seriesCount,
+          recentItemsCount,
+          totalSessions: watchActivities.length,
+          currentStreak,
+          longestStreak,
+          avgWatchTimeSeconds,
+          avgWatchTimeHours: avgWatchTimeSeconds / 3600
+        },
+        watchTimeByDay,
+        nowPlaying,
+        mostWatched,
+        bingeWatches: bingeWatches.slice(0, 5),
+        user: {
+          id: user.id,
+          username: user.username,
+          email: user.email,
+          colorIndex: user.colorIndex
+        }
+      });
+    } catch (error) {
+      console.error('Error fetching user activity:', error);
+      res.status(500).json({ error: 'Failed to fetch activity', message: error?.message });
     }
   });
 
@@ -1644,6 +2133,214 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
     } catch (error) {
       console.error('Error revoking user API key:', error);
       res.status(500).json({ error: 'Failed to revoke API key', message: error?.message });
+    }
+  });
+
+  // Sync user's addons (public endpoint)
+  router.post('/sync', async (req, res) => {
+    try {
+      const { userId } = req.body;
+      const authKey = getAuthKey(req);
+      
+      if (!userId) {
+        return res.status(400).json({ error: 'User ID is required' });
+      }
+
+      // Get user and verify auth
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: {
+          id: true,
+          username: true,
+          email: true,
+          accountId: true,
+          isActive: true,
+          stremioAuthKey: true,
+          groupId: true
+        }
+      });
+
+      if (!user || !user.isActive) {
+        return res.status(404).json({ error: 'User not found or inactive' });
+      }
+
+      // Optionally verify authKey matches
+      if (authKey && user.stremioAuthKey && authKey !== user.stremioAuthKey) {
+        return res.status(403).json({ error: 'Invalid auth key' });
+      }
+
+      // Import syncUserAddons from users route
+      const { syncUserAddons } = require('./users');
+      
+      // Perform sync
+      const result = await syncUserAddons(prisma, userId, [], false, req, decrypt, getAccountId, true);
+      
+      if (result.success) {
+        res.json({ 
+          success: true, 
+          message: 'Sync completed successfully',
+          details: result
+        });
+      } else {
+        res.status(400).json({ 
+          success: false, 
+          error: result.error || 'Sync failed',
+          details: result
+        });
+      }
+    } catch (error) {
+      console.error('Error syncing user:', error);
+      res.status(500).json({ error: 'Failed to sync', message: error?.message });
+    }
+  });
+
+  // Check if user is at risk (public endpoint)
+  router.get('/at-risk-status', async (req, res) => {
+    try {
+      const { userId } = req.query;
+      
+      if (!userId) {
+        return res.status(400).json({ error: 'User ID is required' });
+      }
+
+      // Get user with sync status info
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: {
+          id: true,
+          isActive: true,
+          accountId: true,
+          lastSyncedAt: true,
+          syncStatus: true,
+          syncErrorMessage: true
+        }
+      });
+
+      if (!user || !user.isActive) {
+        return res.status(404).json({ error: 'User not found or inactive' });
+      }
+
+      // Check last activity (from watch activity)
+      const lastActivity = await prisma.watchActivity.findFirst({
+        where: { userId },
+        orderBy: { date: 'desc' },
+        select: { date: true }
+      });
+
+      const now = new Date();
+      const lastActivityDate = lastActivity?.date || user.lastSyncedAt;
+      const daysSinceActivity = lastActivityDate 
+        ? Math.floor((now.getTime() - new Date(lastActivityDate).getTime()) / (1000 * 60 * 60 * 24))
+        : null;
+
+      // Determine risk level
+      let riskLevel = 'healthy'; // healthy, warning, critical
+      let riskReason = null;
+
+      if (user.syncStatus === 'error' || user.syncStatus === 'failed') {
+        riskLevel = 'critical';
+        riskReason = user.syncErrorMessage || 'Sync is failing';
+      } else if (daysSinceActivity !== null) {
+        if (daysSinceActivity >= 14) {
+          riskLevel = 'critical';
+          riskReason = `No activity for ${daysSinceActivity} days`;
+        } else if (daysSinceActivity >= 7) {
+          riskLevel = 'warning';
+          riskReason = `No activity for ${daysSinceActivity} days`;
+        }
+      }
+
+      res.json({
+        userId,
+        riskLevel,
+        riskReason,
+        lastActivity: lastActivityDate,
+        daysSinceActivity,
+        syncStatus: user.syncStatus,
+        syncErrorMessage: user.syncErrorMessage,
+        lastSyncedAt: user.lastSyncedAt
+      });
+    } catch (error) {
+      console.error('Error checking at-risk status:', error);
+      res.status(500).json({ error: 'Failed to check status', message: error?.message });
+    }
+  });
+
+  // Public endpoint: Get user shares
+  router.get('/shares', async (req, res) => {
+    try {
+      const { userId } = req.query;
+      const authKey = getAuthKey(req);
+      
+      if (!userId) {
+        return res.status(400).json({ error: 'User ID is required' });
+      }
+
+      // Verify auth key
+      if (!authKey) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+
+      try {
+        await getPublicUser(authKey, req);
+      } catch (e) {
+        return res.status(401).json({ error: 'Invalid auth key' });
+      }
+
+      // Get user
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { id: true, accountId: true, isActive: true }
+      });
+
+      if (!user || !user.isActive) {
+        return res.status(404).json({ error: 'User not found or inactive' });
+      }
+
+      const shares = getShares(user.accountId, userId);
+      res.json(shares);
+    } catch (error) {
+      console.error(`Failed to get shares for user ${req.query.userId}:`, error);
+      res.status(500).json({ error: 'Failed to get shares', message: error?.message });
+    }
+  });
+
+  // Public endpoint: Get user group members
+  router.get('/group-members', async (req, res) => {
+    try {
+      const { userId } = req.query;
+      const authKey = getAuthKey(req);
+      
+      if (!userId) {
+        return res.status(400).json({ error: 'User ID is required' });
+      }
+
+      // Verify auth key
+      if (!authKey) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+
+      try {
+        await getPublicUser(authKey, req);
+      } catch (e) {
+        return res.status(401).json({ error: 'Invalid auth key' });
+      }
+
+      // Get user
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { id: true, accountId: true, isActive: true }
+      });
+
+      if (!user || !user.isActive) {
+        return res.status(404).json({ error: 'User not found or inactive' });
+      }
+
+      const groupMembers = await getGroupMembers(prisma, user.accountId, userId);
+      res.json({ members: groupMembers });
+    } catch (error) {
+      console.error(`Failed to get group members for user ${req.query.userId}:`, error);
+      res.status(500).json({ error: 'Failed to get group members', message: error?.message });
     }
   });
 

@@ -1,11 +1,113 @@
 /**
  * Metrics Processor - Computes and stores watch snapshots and deltas
- * 
+ *
  * This module processes library items to:
  * 1. Store daily snapshots (only when values change)
  * 2. Compute deltas (watch time changes) for accurate daily/weekly stats
  * 3. Store watch activity events
+ * 4. Track episode-level watch history for series
  */
+
+/**
+ * Extract season/episode from video_id
+ * Handles various formats:
+ * - "tt8080122:4:6" -> season 4, episode 6
+ * - "kitsu:46676:1" -> season 1 (default), episode 1
+ * - "tt8080122:6" -> episode 6 (no season)
+ */
+function extractSeasonEpisode(videoId) {
+  if (!videoId) return { season: null, episode: null }
+
+  const parts = videoId.split(':')
+
+  // Kitsu format: "kitsu:46676:1"
+  if (videoId.startsWith('kitsu:') && parts.length >= 3) {
+    const episodePart = parts[parts.length - 1]
+    const parsedEpisode = parseInt(episodePart, 10)
+    return {
+      season: 1, // Default to season 1 for anime
+      episode: !isNaN(parsedEpisode) ? parsedEpisode : null
+    }
+  }
+
+  // IMDb format: "tt8080122:4:6" (season:episode)
+  if (parts.length >= 3 && parts[0].startsWith('tt')) {
+    return {
+      season: parseInt(parts[1], 10) || null,
+      episode: parseInt(parts[2], 10) || null
+    }
+  }
+
+  // IMDb format: "tt8080122:6" (episode only)
+  if (parts.length === 2 && parts[0].startsWith('tt')) {
+    return {
+      season: null,
+      episode: parseInt(parts[1], 10) || null
+    }
+  }
+
+  return { season: null, episode: null }
+}
+
+/**
+ * Record episode watch in history (for series items)
+ */
+async function recordEpisodeWatch(prisma, accountId, userId, item) {
+  try {
+    // Only process series items with video_id
+    if (item.type !== 'series' || !item.state?.video_id) return
+
+    const videoId = item.state.video_id
+    const showId = item._id || item.id
+    const showName = item.name || 'Unknown Show'
+    const poster = item.poster || null
+    const { season, episode } = extractSeasonEpisode(videoId)
+
+    // Get watch date from item
+    // IMPORTANT: Only use state.lastWatched - this is the actual watch timestamp
+    // Do NOT use _mtime - that's just when the library item was modified (e.g., added to library)
+    let watchedAt = new Date()
+    if (item.state?.lastWatched) {
+      const d = new Date(item.state.lastWatched)
+      if (!isNaN(d.getTime())) watchedAt = d
+    }
+
+    // Upsert the episode watch (updates watchedAt if already exists)
+    await prisma.episodeWatchHistory.upsert({
+      where: {
+        accountId_userId_videoId: {
+          accountId: accountId || 'default',
+          userId,
+          videoId
+        }
+      },
+      create: {
+        accountId: accountId || 'default',
+        userId,
+        showId,
+        showName,
+        videoId,
+        season,
+        episode,
+        poster,
+        watchedAt
+      },
+      update: {
+        watchedAt, // Update watch time if re-watching
+        showName, // Update in case show name changed
+        poster // Update in case poster changed
+      }
+    })
+
+    return true
+  } catch (error) {
+    // Silently fail - episode history is optional
+    if (error.code !== 'P2002') { // Ignore unique constraint errors
+      console.warn(`[MetricsProcessor] Error recording episode watch:`, error.message)
+    }
+    return false
+  }
+}
 
 /**
  * Get the most recent snapshot for an item on or before today.
@@ -227,6 +329,12 @@ async function processLibraryItem(prisma, accountId, userId, item, today) {
         console.warn(`[MetricsProcessor] Error storing snapshot for ${userId}/${itemId}:`, error.message)
         console.warn(`[MetricsProcessor] Error stack:`, error.stack)
       }
+    }
+
+    // Record episode watch history for series items
+    // This runs regardless of whether snapshot changed, to capture all watched episodes
+    if (item.type === 'series' && item.state?.video_id) {
+      await recordEpisodeWatch(prisma, accountIdValue, userId, item)
     }
 
     return { snapshotCreated, activityCreated }

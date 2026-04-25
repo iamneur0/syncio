@@ -15,14 +15,23 @@ function createAccountScopedPrisma(originalPrisma, accountId) {
       const originalMethod = target[prop]
       
       // Only intercept model methods (user, group, addon, etc.)
-      // Exclude appAccount from account scoping as it doesn't have accountId
-      if (typeof originalMethod === 'object' && originalMethod !== null && prop !== 'appAccount') {
+      // Exclude models that don't have accountId
+      const unscopedModels = ['appAccount', 'groupAddon']
+      if (typeof originalMethod === 'object' && originalMethod !== null && !unscopedModels.includes(prop)) {
+        if (typeof prop === 'string' && prop !== 'constructor' && !prop.startsWith('_')) {
+           // console.log(`🔍 Scoping Prisma model: ${prop}`)
+        }
         return new Proxy(originalMethod, {
           get(modelTarget, methodName) {
             const originalQuery = modelTarget[methodName]
             
             if (typeof originalQuery === 'function') {
               return function(...args) {
+                // For findUnique, we must switch to findFirst if we're adding accountId
+                // because findUnique only allows unique fields.
+                const queryMethod = methodName === 'findUnique' ? 'findFirst' : methodName;
+                const queryFn = modelTarget[queryMethod];
+
                 // Add accountId filter to the query
                 const [queryArgs] = args
                 
@@ -38,7 +47,7 @@ function createAccountScopedPrisma(originalPrisma, accountId) {
                   args[0] = { where: { accountId } }
                 }
                 
-                return originalQuery.apply(this, args)
+                return queryFn.apply(this, args)
               }
             }
             
@@ -77,9 +86,9 @@ function createAccountScopingMiddleware(prismaInstance) {
   return function accountScopingMiddleware(req, res, next) {
     // Skip if no accountId and auth is disabled
     if (!req.appAccountId) {
-      // If auth is disabled, use default account ID
-      const AUTH_ENABLED = String(process.env.AUTH_ENABLED || 'false').toLowerCase() === 'true'
-      if (!AUTH_ENABLED) {
+      // If instance is private, use default account ID
+      const { INSTANCE_TYPE } = require('../utils/config')
+      if (INSTANCE_TYPE !== 'public') {
         req.appAccountId = 'default'
       } else {
         console.error('🚨 Account scoping middleware called without appAccountId!')

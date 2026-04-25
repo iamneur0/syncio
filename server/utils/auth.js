@@ -11,6 +11,8 @@ function pathIsAllowlisted(path) {
   const AUTH_ALLOWLIST = [
     '/health',
     '/api/health',
+    '/api/auth/login',
+    '/api/public-auth',
     '/api/public-auth/login',
     '/api/public-auth/register',
     '/api/public-auth/generate-uuid',

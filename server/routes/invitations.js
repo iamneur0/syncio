@@ -10,7 +10,7 @@ function generateInviteCode() {
   return crypto.randomBytes(4).toString('base64url').substring(0, 8).toUpperCase()
 }
 
-module.exports = ({ prisma, getAccountId, AUTH_ENABLED, encrypt, decrypt, assignUserToGroup }) => {
+module.exports = ({ prisma, getAccountId, INSTANCE_TYPE, encrypt, decrypt, assignUserToGroup }) => {
   const router = express.Router()
 
   router.get('/', async (req, res) => {
@@ -41,7 +41,7 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, encrypt, decrypt, assign
       const accountId = getAccountId(req)
       if (!accountId) return res.status(401).json({ error: 'Unauthorized' })
 
-      const { maxUses, expiresAt, groupName, syncOnJoin, membershipDurationDays } = req.body
+      const { name, maxUses, expiresAt, groupName, syncOnJoin, membershipDurationDays } = req.body
 
       // make sure code is unique
       let inviteCode
@@ -54,18 +54,32 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, encrypt, decrypt, assign
         if (attempts > 10) return res.status(500).json({ error: 'Failed to generate unique invite code' })
       } while (true)
 
+      // Normalize numeric fields
+      // When left empty, treat as 0 = unlimited
+      const parsedMaxUses =
+        maxUses === null ||
+          maxUses === undefined ||
+          maxUses === '' ||
+          Number.isNaN(Number(maxUses))
+          ? 0
+          : Number(maxUses)
+
+      const parsedMembershipDuration =
+        membershipDurationDays === null || membershipDurationDays === undefined || Number.isNaN(Number(membershipDurationDays))
+          ? null
+          : Number(membershipDurationDays)
+
       const invitation = await prisma.invitation.create({
         data: {
           accountId,
+          name: name || null,
           inviteCode,
           groupName: groupName || null,
-          maxUses: maxUses || 1,
+          // When maxUses is 0, the invite is unlimited
+          maxUses: parsedMaxUses,
           currentUses: 0,
           expiresAt: expiresAt ? new Date(expiresAt) : null,
-          membershipDurationDays:
-            typeof membershipDurationDays === 'number' && !Number.isNaN(membershipDurationDays)
-              ? Number(membershipDurationDays)
-              : null,
+          membershipDurationDays: parsedMembershipDuration,
           isActive: true,
           syncOnJoin: syncOnJoin === true
         }
@@ -102,7 +116,15 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, encrypt, decrypt, assign
             fields: [
               { name: 'Invite Code', value: formatCodeBlock(invitation.inviteCode), inline: true },
               { name: 'Group', value: formatCodeBlock(invitation.groupName || 'No group'), inline: true },
-              { name: 'Uses', value: formatCodeBlock(invitation.maxUses?.toString() || 'Unlimited'), inline: true },
+              {
+                name: 'Uses',
+                value: formatCodeBlock(
+                  invitation.maxUses && invitation.maxUses > 0
+                    ? invitation.maxUses.toString()
+                    : 'Unlimited'
+                ),
+                inline: true
+              },
               { name: 'Invite Link', value: formatCodeBlock(inviteLink), inline: false }
             ],
             timestamp: (invitation.createdAt || new Date()).toISOString()
@@ -140,7 +162,7 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, encrypt, decrypt, assign
 
       const invitation = await prisma.invitation.findFirst({ where: { id, accountId } })
       if (!invitation) return res.status(404).json({ error: 'Invitation not found' })
- 
+
       const updated = await prisma.invitation.update({
         where: { id },
         data: { isActive: isActive },
@@ -164,12 +186,13 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, encrypt, decrypt, assign
       if (!accountId) return res.status(401).json({ error: 'Unauthorized' })
 
       const { id } = req.params
-      const { groupName, syncOnJoin, expiresAt, membershipDurationDays, createdAt } = req.body
+      const { name, groupName, syncOnJoin, expiresAt, membershipDurationDays, maxUses, createdAt } = req.body
 
       const invitation = await prisma.invitation.findFirst({ where: { id, accountId } })
       if (!invitation) return res.status(404).json({ error: 'Invitation not found' })
 
       const updateData = {}
+      if (name !== undefined) updateData.name = name || null
       if (groupName !== undefined) updateData.groupName = groupName || null
       if (syncOnJoin !== undefined) updateData.syncOnJoin = syncOnJoin === true
       if (expiresAt !== undefined) updateData.expiresAt = expiresAt ? new Date(expiresAt) : null
@@ -178,6 +201,13 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, encrypt, decrypt, assign
           membershipDurationDays === null || Number.isNaN(Number(membershipDurationDays))
             ? null
             : Number(membershipDurationDays)
+      }
+      if (maxUses !== undefined) {
+        // Treat empty/null as 0 = unlimited
+        updateData.maxUses =
+          maxUses === null || maxUses === '' || Number.isNaN(Number(maxUses))
+            ? 0
+            : Number(maxUses)
       }
       if (createdAt !== undefined) updateData.createdAt = createdAt ? new Date(createdAt) : invitation.createdAt
 
@@ -287,13 +317,200 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, encrypt, decrypt, assign
       if (request.invitation.expiresAt && new Date(request.invitation.expiresAt) < new Date()) {
         return res.status(400).json({ error: 'Invitation has expired' })
       }
-      if (request.invitation.currentUses >= request.invitation.maxUses) {
+      if (
+        request.invitation.maxUses != null &&
+        request.invitation.maxUses > 0 &&
+        request.invitation.currentUses >= request.invitation.maxUses
+      ) {
         return res.status(400).json({ error: 'Invitation has reached maximum uses' })
       }
 
-      // prefer groupName from body, then from invite, else null
-      const finalGroupName = groupName || request.invitation.groupName || null
+      // prefer groupName from body, then from request, then from invite, else null
+      const finalGroupName = groupName || request.groupName || request.invitation.groupName || null
 
+      // NEW FLOW: If request has stremioAuthKey, auto-create user on accept
+      if (request.stremioAuthKey) {
+        // Ensure email uniqueness across all accounts
+        const { ensureEmailUniqueness } = require('../utils/helpers/database')
+        await ensureEmailUniqueness(prisma, request.email, request.invitation.accountId)
+
+        // Check if user already exists in this account
+        const existingUser = await prisma.user.findFirst({
+          where: {
+            accountId: request.invitation.accountId,
+            email: request.email
+          }
+        })
+
+        if (existingUser) {
+          await prisma.inviteRequest.update({
+            where: { id: request.id },
+            data: { status: 'rejected' }
+          })
+          return res.status(409).json({ error: 'User is already registered to Syncio' })
+        }
+
+        // Compute expiration
+        let computedExpiresAt = null
+        const now = new Date()
+        const durationRaw = request.invitation.membershipDurationDays
+        if (durationRaw != null && !Number.isNaN(durationRaw)) {
+          const days = Number(durationRaw)
+          const debugMode =
+            process.env.DEBUG === 'true' ||
+            process.env.DEBUG === '1' ||
+            process.env.NEXT_PUBLIC_DEBUG === 'true' ||
+            process.env.NEXT_PUBLIC_DEBUG === '1'
+
+          if (debugMode && days === -1) {
+            computedExpiresAt = new Date(now.getTime() + 60 * 1000)
+          } else if (days > 0) {
+            computedExpiresAt = new Date(now.getTime() + days * 24 * 60 * 60 * 1000)
+          }
+        }
+
+        // Create the user
+        const newUser = await prisma.user.create({
+          data: {
+            accountId: request.invitation.accountId,
+            email: request.email,
+            username: request.username,
+            stremioAuthKey: request.stremioAuthKey,
+            isActive: true,
+            expiresAt: computedExpiresAt,
+            inviteCode: request.invitation.inviteCode
+          }
+        })
+
+        // Assign to group
+        if (finalGroupName) {
+          try {
+            const group = await prisma.group.findFirst({
+              where: {
+                accountId: request.invitation.accountId,
+                name: finalGroupName
+              }
+            })
+            if (group) {
+              // Remove user from all other groups first
+              const allGroups = await prisma.group.findMany({
+                where: { accountId: request.invitation.accountId },
+                select: { id: true, userIds: true }
+              })
+
+              for (const g of allGroups) {
+                if (g.userIds) {
+                  const userIds = JSON.parse(g.userIds)
+                  const updatedUserIds = userIds.filter(id => id !== newUser.id)
+                  if (updatedUserIds.length !== userIds.length) {
+                    await prisma.group.update({
+                      where: { id: g.id },
+                      data: { userIds: JSON.stringify(updatedUserIds) }
+                    })
+                  }
+                }
+              }
+
+              // Add user to target group
+              const currentUserIds = group.userIds ? JSON.parse(group.userIds) : []
+              if (!currentUserIds.includes(newUser.id)) {
+                currentUserIds.push(newUser.id)
+                await prisma.group.update({
+                  where: { id: group.id },
+                  data: { userIds: JSON.stringify(currentUserIds) }
+                })
+              }
+
+              // Sync user addons if syncOnJoin is enabled
+              if (request.invitation.syncOnJoin) {
+                try {
+                  const { syncUserAddons } = require('./users')
+                  const reqLike = { appAccountId: request.invitation.accountId, headers: {} }
+                  const syncResult = await syncUserAddons(prisma, newUser.id, [], false, reqLike, decrypt, () => request.invitation.accountId, true)
+                  if (syncResult?.success) {
+                    console.log('✅ User synced on join')
+                  } else {
+                    console.warn('⚠️ Sync on join failed:', syncResult?.error)
+                  }
+                } catch (syncError) {
+                  console.error('❌ Error syncing user on join:', syncError)
+                }
+              }
+            }
+          } catch (error) {
+            console.error('Error assigning user to group:', error)
+          }
+        }
+
+        // Bump use count
+        const updatedInvitation = await prisma.invitation.update({
+          where: { id: request.invitation.id },
+          data: { currentUses: request.invitation.currentUses + 1 }
+        })
+
+        // Mark request as completed
+        const updatedRequest = await prisma.inviteRequest.update({
+          where: { id: requestId },
+          data: {
+            status: 'completed',
+            groupName: finalGroupName,
+            respondedAt: new Date(),
+            respondedBy: accountId
+          }
+        })
+
+        // Send webhook
+        try {
+          const account = await prisma.appAccount.findUnique({
+            where: { id: request.invitation.accountId },
+            select: { sync: true }
+          })
+          const syncCfg = parseSyncConfig(account?.sync)
+          const webhookUrl = syncCfg?.webhookUrl
+          if (webhookUrl) {
+            const hasLimit = updatedInvitation.maxUses != null && updatedInvitation.maxUses > 0
+            const usesLeft = hasLimit
+              ? Math.max(0, updatedInvitation.maxUses - updatedInvitation.currentUses)
+              : null
+            const usesLeftText = hasLimit && usesLeft !== null
+              ? `${usesLeft} / ${updatedInvitation.maxUses}`
+              : 'Unlimited'
+
+            const titleGroup = finalGroupName ? ` ${finalGroupName}` : ''
+            const title = `User ${newUser.username} Accepted${titleGroup} via Invite`
+
+            const embed = {
+              title: title,
+              description: `Admin accepted invite request. User has been automatically created.`,
+              color: 0x22c55e,
+              fields: [
+                { name: 'Username', value: formatCodeBlock(newUser.username), inline: true },
+                { name: 'Email', value: formatCodeBlock(newUser.email), inline: true },
+                { name: 'Group', value: formatCodeBlock(finalGroupName || 'No group'), inline: true },
+                { name: 'Invite Code', value: formatCodeBlock(request.invitation.inviteCode), inline: true },
+                { name: 'Uses Left', value: formatCodeBlock(usesLeftText), inline: true }
+              ],
+              timestamp: new Date().toISOString()
+            }
+
+            const appVersion = getAppVersion()
+            if (appVersion) {
+              embed.footer = { text: `Syncio v${appVersion}` }
+            }
+
+            await postDiscord(webhookUrl, null, {
+              embeds: [embed],
+              avatar_url: 'https://raw.githubusercontent.com/iamneur0/syncio/refs/heads/main/client/public/logo-black.png'
+            })
+          }
+        } catch (webhookError) {
+          console.error('Failed to send user accepted webhook:', webhookError)
+        }
+
+        return res.json(updatedRequest)
+      }
+
+      // LEGACY FLOW: No stremioAuthKey — just mark as accepted (user will do OAuth separately)
       const updatedRequest = await prisma.inviteRequest.update({
         where: { id: requestId },
         data: {
@@ -364,7 +581,11 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, encrypt, decrypt, assign
       if (request.invitation.expiresAt && new Date(request.invitation.expiresAt) < new Date()) {
         return res.status(400).json({ error: 'Invitation has expired' })
       }
-      if (request.invitation.maxUses != null && request.invitation.currentUses >= request.invitation.maxUses) {
+      if (
+        request.invitation.maxUses != null &&
+        request.invitation.maxUses > 0 &&
+        request.invitation.currentUses >= request.invitation.maxUses
+      ) {
         return res.status(400).json({ error: 'Invitation has reached maximum uses' })
       }
 
@@ -464,7 +685,7 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, encrypt, decrypt, assign
 // Helper function to get Stremio user info from authKey
 async function getStremioUserInfo(authKey, username, email) {
   const { validateStremioAuthKey } = require('../utils/stremio')
-  
+
   let verifiedUser = null
   try {
     const validation = await validateStremioAuthKey(authKey)
@@ -509,13 +730,13 @@ module.exports.createPublicRouter = ({ prisma, encrypt, assignUserToGroup, decry
 
       try {
         const host = req.headers.host || req.headers.origin || 'syncio.local'
-        
+
         const stremioResponse = await fetch('https://link.stremio.com/api/v2/create?type=Create', {
           headers: {
             'X-Requested-With': host,
           },
         })
-        
+
         if (stremioResponse.ok) {
           const stremioData = await stremioResponse.json()
           const result = stremioData?.result
@@ -525,20 +746,20 @@ module.exports.createPublicRouter = ({ prisma, encrypt, assignUserToGroup, decry
             // 5 min expiry - convert to ISO string for JSON serialization
             oauthExpiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString()
           } else {
-            return res.status(500).json({ 
+            return res.status(500).json({
               error: 'Failed to generate OAuth link - Stremio API returned invalid response',
               details: stremioData?.error?.message || 'Missing code or link in response'
             })
           }
         } else {
           const errorText = await stremioResponse.text()
-          return res.status(500).json({ 
+          return res.status(500).json({
             error: 'Failed to generate OAuth link from Stremio',
             details: `HTTP ${stremioResponse.status}: ${errorText}`
           })
         }
       } catch (error) {
-        return res.status(500).json({ 
+        return res.status(500).json({
           error: 'Failed to generate OAuth link',
           details: error?.message || 'Unknown error'
         })
@@ -601,11 +822,11 @@ module.exports.createPublicRouter = ({ prisma, encrypt, assignUserToGroup, decry
         // The authKey from OAuth is already plain text, no decryption needed
         console.log(`🔄 Attempting to clear Stremio addons for email: ${stremioEmail}`)
         const apiClient = new StremioAPIClient({ endpoint: 'https://api.strem.io', authKey: authKey })
-        
+
         // Clear all addons
         const { clearAddons } = require('../utils/addonHelpers')
         await clearAddons(apiClient)
-        
+
         // Verify addons were cleared
         const verifyResult = await apiClient.request('addonCollectionGet', {})
         const remainingAddons = verifyResult?.addons || []
@@ -703,10 +924,17 @@ module.exports.createPublicRouter = ({ prisma, encrypt, assignUserToGroup, decry
   publicRouter.post('/:inviteCode/request', async (req, res) => {
     try {
       const { inviteCode } = req.params
-      const { email, username } = req.body
+      const { username, authKey, email: legacyEmail } = req.body
 
-      if (!email || !username) {
-        return res.status(400).json({ error: 'Email and username are required' })
+      // Support both new flow (username + authKey) and legacy flow (email + username)
+      const hasAuthKey = authKey && typeof authKey === 'string' && authKey.trim()
+
+      if (!username) {
+        return res.status(400).json({ error: 'Username is required' })
+      }
+
+      if (!hasAuthKey && !legacyEmail) {
+        return res.status(400).json({ error: 'Either authKey (Stremio login) or email is required' })
       }
 
       const invitation = await prisma.invitation.findUnique({
@@ -718,15 +946,48 @@ module.exports.createPublicRouter = ({ prisma, encrypt, assignUserToGroup, decry
       if (invitation.expiresAt && new Date(invitation.expiresAt) < new Date()) {
         return res.status(400).json({ error: 'Invitation has expired' })
       }
-      if (invitation.currentUses >= invitation.maxUses) {
+      if (
+        invitation.maxUses != null &&
+        invitation.maxUses > 0 &&
+        invitation.currentUses >= invitation.maxUses
+      ) {
         return res.status(400).json({ error: 'Invitation has reached maximum uses' })
+      }
+
+      let email = legacyEmail ? legacyEmail.trim().toLowerCase() : null
+      let encryptedAuthKey = null
+
+      // New flow: validate authKey via Stremio to get email
+      if (hasAuthKey) {
+        let stremioInfo
+        try {
+          stremioInfo = await validateStremioAuthKey(authKey.trim())
+        } catch (err) {
+          const code = err?.code
+          if (code === 1) {
+            return res.status(401).json({ error: 'Invalid or expired Stremio session' })
+          }
+          return res.status(400).json({ error: err?.message || 'Failed to validate Stremio auth key' })
+        }
+
+        email = String(stremioInfo?.user?.email || '').trim().toLowerCase()
+        if (!email) {
+          return res.status(400).json({ error: 'Could not retrieve email from Stremio account' })
+        }
+
+        // Encrypt the auth key for storage
+        encryptedAuthKey = encrypt(authKey.trim(), { appAccountId: invitation.accountId })
+      }
+
+      if (!email) {
+        return res.status(400).json({ error: 'Email is required' })
       }
 
       // check if user already exists (by email or username)
       const existingUserByEmail = await prisma.user.findFirst({
         where: {
           accountId: invitation.accountId,
-          email: email.trim().toLowerCase()
+          email
         }
       })
 
@@ -751,14 +1012,14 @@ module.exports.createPublicRouter = ({ prisma, encrypt, assignUserToGroup, decry
       const existingRequest = await prisma.inviteRequest.findFirst({
         where: {
           invitationId: invitation.id,
-          email: email.trim().toLowerCase(),
+          email,
           username: username.trim()
         },
         orderBy: { createdAt: 'desc' }
       })
 
       if (existingRequest) {
-        return res.status(409).json({ 
+        return res.status(409).json({
           error: 'A request already exists for this email and username',
           status: existingRequest.status
         })
@@ -768,9 +1029,10 @@ module.exports.createPublicRouter = ({ prisma, encrypt, assignUserToGroup, decry
         data: {
           invitationId: invitation.id,
           accountId: invitation.accountId,
-          email: email.trim().toLowerCase(),
+          email,
           username: username.trim(),
-          status: 'pending'
+          status: 'pending',
+          stremioAuthKey: encryptedAuthKey
         }
       })
 
@@ -872,13 +1134,13 @@ module.exports.createPublicRouter = ({ prisma, encrypt, assignUserToGroup, decry
 
       try {
         const host = req.headers.host || req.headers.origin || 'syncio.local'
-        
+
         const stremioResponse = await fetch('https://link.stremio.com/api/v2/create?type=Create', {
           headers: {
             'X-Requested-With': host,
           },
         })
-        
+
         if (stremioResponse.ok) {
           const stremioData = await stremioResponse.json()
           const result = stremioData?.result
@@ -888,20 +1150,20 @@ module.exports.createPublicRouter = ({ prisma, encrypt, assignUserToGroup, decry
             // 5 min expiry
             oauthExpiresAt = new Date(Date.now() + 5 * 60 * 1000)
           } else {
-            return res.status(500).json({ 
+            return res.status(500).json({
               error: 'Failed to generate OAuth link - Stremio API returned invalid response',
               details: stremioData?.error?.message || 'Missing code or link in response'
             })
           }
         } else {
           const errorText = await stremioResponse.text()
-          return res.status(500).json({ 
+          return res.status(500).json({
             error: 'Failed to generate OAuth link from Stremio',
             details: `HTTP ${stremioResponse.status}: ${errorText}`
           })
         }
       } catch (error) {
-        return res.status(500).json({ 
+        return res.status(500).json({
           error: 'Failed to generate OAuth link',
           details: error?.message || 'Unknown error'
         })
@@ -963,8 +1225,8 @@ module.exports.createPublicRouter = ({ prisma, encrypt, assignUserToGroup, decry
           },
           orderBy: { createdAt: 'desc' }
         })
-        
-        request = allRequests.find(r => 
+
+        request = allRequests.find(r =>
           r.email.toLowerCase() === email.trim().toLowerCase() &&
           r.username.trim() === username.trim()
         ) || null
@@ -981,7 +1243,7 @@ module.exports.createPublicRouter = ({ prisma, encrypt, assignUserToGroup, decry
           },
           orderBy: { createdAt: 'desc' }
         })
-        
+
         if (!completedRequest) {
           const allCompletedRequests = await prisma.inviteRequest.findMany({
             where: {
@@ -990,13 +1252,13 @@ module.exports.createPublicRouter = ({ prisma, encrypt, assignUserToGroup, decry
             },
             orderBy: { createdAt: 'desc' }
           })
-          
-          completedRequest = allCompletedRequests.find(r => 
+
+          completedRequest = allCompletedRequests.find(r =>
             r.email.toLowerCase() === email.trim().toLowerCase() &&
             r.username.trim() === username.trim()
           ) || null
         }
-        
+
         if (completedRequest) {
           // already done, just return success
           return res.json({
@@ -1004,7 +1266,7 @@ module.exports.createPublicRouter = ({ prisma, encrypt, assignUserToGroup, decry
             message: 'User already created'
           })
         }
-        
+
         return res.status(404).json({ error: 'No accepted request found' })
       }
 
@@ -1020,14 +1282,14 @@ module.exports.createPublicRouter = ({ prisma, encrypt, assignUserToGroup, decry
         }
       } catch (error) {
         console.error('Failed to validate Stremio auth key:', error)
-        return res.status(400).json({ 
+        return res.status(400).json({
           error: 'INVALID_AUTH_KEY',
           message: 'Could not validate Stremio authentication. Please try again.'
         })
       }
 
       if (!stremioEmail) {
-        return res.status(400).json({ 
+        return res.status(400).json({
           error: 'EMAIL_NOT_AVAILABLE',
           message: 'Could not retrieve email from Stremio account. Please try again.'
         })
@@ -1076,8 +1338,8 @@ module.exports.createPublicRouter = ({ prisma, encrypt, assignUserToGroup, decry
         } catch (webhookError) {
           console.error('Failed to send email mismatch webhook:', webhookError)
         }
-        
-        return res.status(400).json({ 
+
+        return res.status(400).json({
           error: 'EMAIL_MISMATCH',
           message: 'The Stremio account email does not match the email used in your request'
         })
@@ -1158,13 +1420,13 @@ module.exports.createPublicRouter = ({ prisma, encrypt, assignUserToGroup, decry
               // The function uses prisma from closure, but we need to pass it
               // Actually, let's manually do the assignment since we have prisma here
               const accId = invitation.accountId
-              
+
               // Remove user from all other groups
               const allGroups = await prisma.group.findMany({
                 where: { accountId: accId },
                 select: { id: true, userIds: true }
               })
-              
+
               for (const g of allGroups) {
                 if (g.userIds) {
                   const userIds = JSON.parse(g.userIds)
@@ -1177,17 +1439,17 @@ module.exports.createPublicRouter = ({ prisma, encrypt, assignUserToGroup, decry
                   }
                 }
               }
-              
+
               // Add user to target group
               const targetGroup = await prisma.group.findUnique({
                 where: { id: groupId, accountId: accId },
                 select: { id: true, userIds: true }
               })
-              
+
               if (!targetGroup) {
                 throw new Error(`Target group not found: ${groupId}`)
               }
-              
+
               const currentUserIds = targetGroup.userIds ? JSON.parse(targetGroup.userIds) : []
               if (!currentUserIds.includes(userId)) {
                 currentUserIds.push(userId)
@@ -1197,9 +1459,9 @@ module.exports.createPublicRouter = ({ prisma, encrypt, assignUserToGroup, decry
                 })
               }
             }
-            
+
             await assignUserToGroupWithPrisma(newUser.id, group.id, { appAccountId: invitation.accountId })
-            
+
             // Sync user addons if syncOnJoin is enabled
             if (invitation.syncOnJoin) {
               try {
@@ -1246,13 +1508,14 @@ module.exports.createPublicRouter = ({ prisma, encrypt, assignUserToGroup, decry
         const webhookUrl = syncCfg?.webhookUrl
         if (webhookUrl) {
           // uses left after incrementing
-          const usesLeft = updatedInvitation.maxUses != null 
+          const hasLimit = updatedInvitation.maxUses != null && updatedInvitation.maxUses > 0
+          const usesLeft = hasLimit
             ? Math.max(0, updatedInvitation.maxUses - updatedInvitation.currentUses)
             : null
-          const usesLeftText = usesLeft !== null 
+          const usesLeftText = hasLimit && usesLeft !== null
             ? `${usesLeft} / ${updatedInvitation.maxUses}`
             : 'Unlimited'
-          
+
           const titleGroup = finalGroupName ? ` ${finalGroupName}` : ''
           const title = `User ${newUser.username} Joined${titleGroup} via Invite`
 
@@ -1284,7 +1547,7 @@ module.exports.createPublicRouter = ({ prisma, encrypt, assignUserToGroup, decry
         console.error('Failed to send user joined webhook:', webhookError)
       }
 
-      res.json({ 
+      res.json({
         message: 'User created successfully',
         status: 'completed',
         user: {

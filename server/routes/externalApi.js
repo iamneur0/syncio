@@ -9,6 +9,9 @@ module.exports = ({ prisma, getAccountId, scopedWhere, reloadDeps, syncGroupUser
 
   // API key auth middleware - iterate accounts to find matching key
   router.use(async (req, res, next) => {
+    // If request already has appAccountId (e.g. from global JWT auth), allow it to pass through
+    if (req.appAccountId) return next()
+
     try {
       const presented = parsePresentedKey(req.headers['authorization'] || '')
       if (!presented) return res.status(401).json({ message: 'Missing or invalid API key' })
@@ -39,15 +42,31 @@ module.exports = ({ prisma, getAccountId, scopedWhere, reloadDeps, syncGroupUser
   // GET /ext/account - brief stats
   router.get('/account', async (req, res) => {
     try {
-      const account = await prisma.appAccount.findUnique({ where: { id: req.appAccountId }, select: { sync: true } })
+      console.log(`[ext/account] Fetching stats for accountId: "${req.appAccountId}"`)
+      const account = await prisma.appAccount.findUnique({ 
+        where: { id: req.appAccountId }, 
+        select: { id: true, uuid: true, email: true, sync: true } 
+      })
       const sync = account?.sync && typeof account.sync === 'string' ? JSON.parse(account.sync) : account?.sync || {}
-      const [usersCount, groupsCount, addonsCount] = await Promise.all([
+      const [totalUsers, totalGroups, totalAddons, pendingInvites] = await Promise.all([
         prisma.user.count({ where: { accountId: req.appAccountId } }),
         prisma.group.count({ where: { accountId: req.appAccountId } }),
         prisma.addon.count({ where: { accountId: req.appAccountId } }),
+        prisma.inviteRequest.count({ where: { accountId: req.appAccountId, status: 'pending' } })
       ])
-      return res.json({ lastRunAt: sync?.lastRunAt || null, usersCount, groupsCount, addonsCount })
+      console.log(`[ext/account] Result: users=${totalUsers}, groups=${totalGroups}, addons=${totalAddons}`)
+      return res.json({ 
+        id: account?.id,
+        uuid: account?.uuid,
+        email: account?.email,
+        lastRunAt: sync?.lastRunAt || null, 
+        totalUsers, 
+        totalGroups, 
+        totalAddons, 
+        pendingInvites 
+      })
     } catch (e) {
+      console.error(`[ext/account] Error:`, e.message)
       return res.status(500).json({ message: 'Failed to get account info' })
     }
   })

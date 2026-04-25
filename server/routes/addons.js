@@ -3,6 +3,7 @@ const { StremioAPIClient } = require('stremio-api-client');
 const { handleDatabaseError, sendError, createRouteHandler, DatabaseTransactions } = require('../utils/handlers');
 const { findAddonById, sanitizeUrl, validateAccountContext } = require('../utils/helpers');
 const { responseUtils, dbUtils } = require('../utils/routeUtils');
+const { readProxyLogs } = require('../utils/proxyLogger');
 
 // In-memory manifest cache (short TTL) to avoid hammering when multiple addons share a URL
 const _manifestCache = new Map() // key: url, value: { data, ts }
@@ -76,74 +77,79 @@ async function reloadAddon(prisma, getAccountId, addonId, req, { filterManifestB
   if (cached) {
     manifestData = cached
   } else {
-  try {
-    const manifestResponse = await fetch(transportUrl);
+    try {
+      const manifestResponse = await fetch(transportUrl);
       if (!manifestResponse.ok) throw new Error(`HTTP ${manifestResponse.status}: ${manifestResponse.statusText}`)
       manifestData = await manifestResponse.json();
       setCachedManifest(cacheKey, manifestData)
-  } catch (e) {
-    console.error(`❌ Failed to fetch manifest:`, e.message);
-    throw new Error(`Failed to fetch addon manifest: ${e.message}`);
-  }
+    } catch (e) {
+      console.error(`❌ Failed to fetch manifest:`, e.message);
+      throw new Error(`Failed to fetch addon manifest: ${e.message}`);
+    }
   }
 
   // 1. Save current selections from DB
   // Load current selections from DB
-  
-  const savedResources = (() => { 
-    try { 
+
+  const savedResources = (() => {
+    try {
       const parsed = addon.resources ? JSON.parse(addon.resources) : []
       // Saved resources parsed
       return parsed
-    } catch (e) { 
+    } catch (e) {
       console.log(`❌ Error parsing saved resources:`, e.message)
-      return [] 
-    } 
+      return []
+    }
   })()
-  const savedCatalogs = (() => { 
-    try { 
+  const savedCatalogs = (() => {
+    try {
       const parsed = addon.catalogs ? JSON.parse(addon.catalogs) : []
       // Saved catalogs parsed
       return parsed
-    } catch (e) { 
+    } catch (e) {
       console.log(`❌ Error parsing saved catalogs:`, e.message)
-      return [] 
-    } 
+      return []
+    }
   })()
+
+  // Detect uninitialized selections: both empty but addon has an originalManifest
+  // This means the addon was imported without proper resource/catalog data (a known bug).
+  // Treat as "select all" so reload fixes these addons.
+  const isUninitializedSelections = savedResources.length === 0 && savedCatalogs.length === 0 && addon.originalManifest
 
   // 2. Get all available resources and catalogs from fresh manifest
   // Process fresh manifest
   const manifestResources = Array.isArray(manifestData?.resources) ? manifestData.resources : []
   const manifestCatalogs = Array.isArray(manifestData?.catalogs) ? manifestData.catalogs : []
-  
+
   // Fresh manifest parsed
-  
+
   // Check if there are any search catalogs
-  const hasSearchCatalogs = manifestCatalogs.some((catalog) => 
+  const hasSearchCatalogs = manifestCatalogs.some((catalog) =>
     catalog.extra?.some((extra) => extra.name === 'search')
   )
   // Has search catalogs computed
-  
+
   // 3. RESET FIRST: Select all resources and catalogs (like reset button)
   // Create reset selections
-  const resetResources = [...manifestResources.map(r => 
+  const resetResources = [...manifestResources.map(r =>
     typeof r === 'string' ? r : r.name  // Handle both strings and objects
   )]
   if (hasSearchCatalogs && !resetResources.includes('search')) {
     resetResources.push('search')
   }
   // Reset resources computed
-  
+
   const resetCatalogs = manifestCatalogs.map((c) => ({
     type: c.type,
     id: c.id,
     search: c.extra?.some((extra) => extra.name === 'search') || false
   }))
   // Reset catalogs computed
-  
+
   // 4. REAPPLY: Preserve user selections and only auto-select truly new items
   // Debug summary removed (noise)
-  
+
   // Get original manifest to determine what was available before
   let originalResources = []
   let originalCatalogs = []
@@ -154,12 +160,12 @@ async function reloadAddon(prisma, getAccountId, addonId, req, { filterManifestB
       const originalManifestData = decryptedOriginalManifest
       const originalManifestResources = Array.isArray(originalManifestData?.resources) ? originalManifestData.resources : []
       const originalManifestCatalogs = Array.isArray(originalManifestData?.catalogs) ? originalManifestData.catalogs : []
-      
+
       // Extract resource names (handle both strings and objects)
-      originalResources = originalManifestResources.map(r => 
+      originalResources = originalManifestResources.map(r =>
         typeof r === 'string' ? r : r.name
       )
-      
+
       // Extract catalog info (preserve name so removals can show it)
       originalCatalogs = originalManifestCatalogs.map(c => ({
         type: c.type,
@@ -170,7 +176,7 @@ async function reloadAddon(prisma, getAccountId, addonId, req, { filterManifestB
   } catch (e) {
     console.log('⚠️ Could not parse original manifest:', e.message)
   }
-  
+
   // Diff logs (availability changes between original manifest and freshly fetched manifest)
   try {
     // IMPORTANT: compare raw manifest resources, not our derived selections
@@ -179,7 +185,7 @@ async function reloadAddon(prisma, getAccountId, addonId, req, { filterManifestB
     const newResSet = new Set(freshResourcesRaw)
     addedRes = [...newResSet].filter(k => !originalResSet.has(k))
     removedRes = [...originalResSet].filter(k => !newResSet.has(k))
-  
+
     // Compare catalogs on raw manifest too (ignore our computed search flag)
     const toKey = (c) => `${c?.type || ''}:${c?.id || ''}`
     const originalCatalogsRaw = (Array.isArray(manifestCatalogs) ? [] : []) // placeholder to keep structure clear
@@ -205,57 +211,63 @@ async function reloadAddon(prisma, getAccountId, addonId, req, { filterManifestB
       if (removedCat.length) parts.push(`-catalogs: ${removedCat.join(', ')}`)
       if (parts.length) console.log(`🧩 ${addon.name} diffs → ${parts.join(' | ')}`)
     }
-  } catch {}
-  
+  } catch { }
+
   // Original manifest summary removed
-  
+
   // Keep only saved selections that still exist in the fresh manifest
   const validResources = savedResources.filter(r => resetResources.includes(r))
-  const validCatalogs = savedCatalogs.filter(c => 
-    resetCatalogs.some(reset => 
+  const validCatalogs = savedCatalogs.filter(c =>
+    resetCatalogs.some(reset =>
       reset.type === c.type && reset.id === c.id
     )
   )
-  
+
   // Valid preserved selections computed
-  
+
   // 5. Handle auto-selection of truly new elements
   let finalResources = validResources
   let finalCatalogs = validCatalogs
-  
-  if (autoSelectNewElements) {
+
+  if (isUninitializedSelections) {
+    // Uninitialized selections detected: addon was imported without proper resource/catalog data.
+    // Select all available resources and catalogs from the fresh manifest.
+    if (!silent) console.log(`🔧 ${addon.name}: uninitialized selections detected, selecting all resources and catalogs`)
+    finalResources = [...resetResources]
+    finalCatalogs = [...resetCatalogs]
+  } else if (autoSelectNewElements) {
     // Auto-selecting new elements
-    
+
     // Find resources that exist in fresh manifest but were NOT in original manifest
     // This excludes items that were previously unselected by the user
-    const trulyNewResources = resetResources.filter(r => 
+    const trulyNewResources = resetResources.filter(r =>
       !originalResources.includes(r) && !savedResources.includes(r)
     )
     // New resources auto-selected
-    
+
     // Find catalogs that exist in fresh manifest but were NOT in original manifest
     // This excludes catalogs that were previously unselected by the user
-    const trulyNewCatalogs = resetCatalogs.filter(fresh => 
+    const trulyNewCatalogs = resetCatalogs.filter(fresh =>
       !originalCatalogs.some(orig => orig.type === fresh.type && orig.id === fresh.id)
     )
     // New catalogs auto-selected
-    
+
     // Combine preserved + truly new selections
     finalResources = [...validResources, ...trulyNewResources]
     finalCatalogs = [...validCatalogs, ...trulyNewCatalogs]
   }
-  
+
   // Final selections computed
-  
+
   // Apply filtering using final resources/catalogs
   let filtered = manifestData
   if (Array.isArray(finalResources) || Array.isArray(finalCatalogs)) {
     try {
-      
+
       if (Array.isArray(finalResources) && finalResources.length > 0) {
         filtered = filterManifestByResources(manifestData, finalResources)
       }
-      
+
       // Apply catalog filtering if catalogs are provided
       if (Array.isArray(finalCatalogs) && finalCatalogs.length > 0 && filtered) {
         // Convert tuples to objects for filtering
@@ -276,7 +288,7 @@ async function reloadAddon(prisma, getAccountId, addonId, req, { filterManifestB
   // Update the addon using the same logic as the update endpoint
   // Note: customLogo is preserved in DB and applied at runtime in sync.js
   const updatedAddon = await prisma.addon.update({
-    where: { 
+    where: {
       id: addonId,
       accountId: getAccountId(req)
     },
@@ -291,7 +303,7 @@ async function reloadAddon(prisma, getAccountId, addonId, req, { filterManifestB
       manifestHash: manifestHash(filtered),
       // Store final selections (validated + optionally auto-selected new elements)
       resources: JSON.stringify(finalResources),
-      catalogs: JSON.stringify(finalCatalogs.map(c => ({ type: c.type, id: c.id, search: c.search })).filter((c, index, arr) => 
+      catalogs: JSON.stringify(finalCatalogs.map(c => ({ type: c.type, id: c.id, search: c.search })).filter((c, index, arr) =>
         arr.findIndex(item => item.type === c.type && item.id === c.id) === index
       )),
       // Preserve customLogo
@@ -320,7 +332,7 @@ async function reloadAddon(prisma, getAccountId, addonId, req, { filterManifestB
 }
 
 // Export a function that returns the router, allowing dependency injection
-module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifestUrl, scopedWhere, AUTH_ENABLED, manifestHash, filterManifestByResources, filterManifestByCatalogs, manifestUrlHmac }) => {
+module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifestUrl, scopedWhere, INSTANCE_TYPE, manifestHash, filterManifestByResources, filterManifestByCatalogs, manifestUrlHmac }) => {
   const router = express.Router();
 
 
@@ -338,31 +350,32 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
                 include: {
                   _count: {
                     select: {
-                        addons: true
+                      addons: true
                     }
                   }
                 }
               }
             }
-          }
+          },
+          backupAddon: true
         },
-          orderBy: { id: 'asc' }
+        orderBy: { id: 'asc' }
       });
 
       const transformedAddons = await Promise.all(addons.map(async addon => {
         // Filter groupAddons to only include those from the current account
         const currentAccountId = getAccountId(req)
-        const filteredGroupAddons = addon.groupAddons.filter(ga => 
+        const filteredGroupAddons = addon.groupAddons.filter(ga =>
           ga.group && ga.group.accountId === currentAccountId
         )
 
         // Calculate total users across all groups that contain this addon (only from current account)
         let totalUsers = 0
-        
+
         if (filteredGroupAddons && filteredGroupAddons.length > 0) {
           // Get all unique user IDs from all groups that contain this addon
           const allUserIds = new Set()
-          
+
           for (const groupAddon of filteredGroupAddons) {
             if (groupAddon.group && groupAddon.group.userIds) {
               try {
@@ -375,7 +388,7 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
               }
             }
           }
-          
+
           // Count active users
           if (allUserIds.size > 0) {
             const activeUsers = await prisma.user.findMany({
@@ -389,20 +402,57 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
             totalUsers = activeUsers.length
           }
         }
-        
+
         return {
           id: addon.id,
           name: addon.name,
           description: addon.description,
-        manifestUrl: getDecryptedManifestUrl(addon, req),
-        url: getDecryptedManifestUrl(addon, req), // Keep both for compatibility
+          manifestUrl: getDecryptedManifestUrl(addon, req),
+          url: getDecryptedManifestUrl(addon, req), // Keep both for compatibility
           version: addon.version,
           iconUrl: addon.iconUrl,
           customLogo: addon.customLogo || null,
           status: addon.isActive ? 'active' : 'inactive',
           users: totalUsers,
           groups: filteredGroupAddons.length,
-          accountId: addon.accountId
+          accountId: addon.accountId,
+          stremioAddonId: addon.stremioAddonId,
+          resources: (() => { try { return addon.resources ? JSON.parse(addon.resources) : [] } catch { return [] } })(),
+          catalogs: (() => { try { return addon.catalogs ? JSON.parse(addon.catalogs) : [] } catch { return [] } })(),
+          // Proxy info
+          proxyEnabled: addon.proxyEnabled || false,
+          proxyUuid: addon.proxyUuid || null,
+          proxyManifestUrl: addon.proxyEnabled && addon.proxyUuid
+            ? `${req.protocol}://${req.get('host')}/proxy/${addon.proxyUuid}/manifest.json`
+            : null,
+          // Health check info
+          isOnline: addon.isOnline,
+          lastHealthCheck: addon.lastHealthCheck,
+          healthCheckError: addon.healthCheckError,
+          // Backup info
+          backupAddonId: addon.backupAddonId,
+          hasBackup: !!addon.backupAddon,
+          backupAddon: addon.backupAddon ? (() => {
+            // Decrypt manifest for backup addon
+            let backupManifest = null;
+            try {
+              if (addon.backupAddon.manifest) {
+                const dec = decrypt(addon.backupAddon.manifest, req);
+                backupManifest = typeof dec === 'string' ? JSON.parse(dec) : dec;
+              }
+            } catch { }
+
+            return {
+              id: addon.backupAddon.id,
+              name: addon.backupAddon.name,
+              isActive: addon.backupAddon.isActive,
+              isOnline: addon.backupAddon.isOnline,
+              version: addon.backupAddon.version,
+              iconUrl: addon.backupAddon.iconUrl,
+              customLogo: addon.backupAddon.customLogo,
+              manifest: backupManifest,
+            };
+          })() : null,
         }
       }));
 
@@ -417,7 +467,7 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
   router.put('/:id/enable', async (req, res) => {
     try {
       const { id } = req.params
-      
+
       // Validate addon exists
       const addon = await dbUtils.findEntity(prisma, 'addon', id, getAccountId(req))
       if (!addon) {
@@ -426,7 +476,7 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
 
       // Update addon
       const updated = await dbUtils.updateEntity(prisma, 'addon', id, { isActive: true }, getAccountId(req))
-      
+
       return responseUtils.success(res, {
         id: updated.id,
         name: updated.name,
@@ -447,7 +497,7 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
   router.put('/:id/disable', async (req, res) => {
     try {
       const { id } = req.params
-      
+
       // Validate addon exists
       const addon = await dbUtils.findEntity(prisma, 'addon', id, getAccountId(req))
       if (!addon) {
@@ -456,7 +506,7 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
 
       // Update addon
       const updated = await dbUtils.updateEntity(prisma, 'addon', id, { isActive: false }, getAccountId(req))
-      
+
       return responseUtils.success(res, {
         id: updated.id,
         name: updated.name,
@@ -478,7 +528,7 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
     try {
       const { id } = req.params
       const { isActive } = req.body
-      
+
       // Validate addon exists
       const addon = await dbUtils.findEntity(prisma, 'addon', id, getAccountId(req))
       if (!addon) {
@@ -487,7 +537,7 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
 
       // Update addon
       const updated = await dbUtils.updateEntity(prisma, 'addon', id, { isActive }, getAccountId(req))
-      
+
       return responseUtils.success(res, {
         id: updated.id,
         name: updated.name,
@@ -507,14 +557,14 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
   // Create new addon
   router.post('/', async (req, res) => {
     try {
-      const { url, name, description, customLogo, groupIds, manifestData: providedManifestData } = req.body;
-    
+      const { url, name, description, customLogo, groupIds, manifestData: providedManifestData, catalogs, resources } = req.body;
+
       if (!url) {
         return responseUtils.badRequest(res, 'Addon URL is required');
       }
 
       // Validate account context
-      const accountValidation = validateAccountContext(req, AUTH_ENABLED);
+      const accountValidation = validateAccountContext(req, INSTANCE_TYPE === 'public');
       if (!accountValidation.isValid) {
         return sendError(res, 401, accountValidation.error);
       }
@@ -524,15 +574,15 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
       if (!sanitizedUrl) {
         return responseUtils.badRequest(res, 'Invalid URL provided');
       }
-      
+
       const lowerUrl = sanitizedUrl.toLowerCase()
 
       // Check for duplicate addon name instead of URL
-      const existingByName = await prisma.addon.findFirst({ 
-        where: { 
+      const existingByName = await prisma.addon.findFirst({
+        where: {
           name: name.trim(),
           accountId: getAccountId(req)
-        } 
+        }
       })
 
       // Use provided manifest data if available, otherwise fetch it
@@ -556,97 +606,101 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
           // Addon with this name already exists and is active
           return res.status(409).json({ message: 'Addon with this name already exists.' })
         } else {
-        // Reactivate and refresh meta for inactive record
-        const reactivated = await prisma.addon.update({
-          where: { 
-            id: existingByName.id,
-            accountId: getAccountId(req)
-          },
-          data: {
-            isActive: true,
-            // Use provided name or manifest name when reactivating
-            name: (name && name.trim()) ? name.trim() : (manifestData?.name || existingByName.name),
-            description: description || manifestData?.description || existingByName.description || '',
-            version: manifestData?.version || existingByName.version || null,
-            iconUrl: manifestData?.logo || existingByName.iconUrl || null, // Store logo URL from manifest
-            stremioAddonId: manifestData?.id || existingByName.stremioAddonId || null
-          },
-          select: { id: true, name: true, description: true, manifestUrl: true, version: true, isActive: true }
-        })
+          // Reactivate and refresh meta for inactive record
+          const reactivated = await prisma.addon.update({
+            where: {
+              id: existingByName.id,
+              accountId: getAccountId(req)
+            },
+            data: {
+              isActive: true,
+              // Use provided name or manifest name when reactivating
+              name: (name && name.trim()) ? name.trim() : (manifestData?.name || existingByName.name),
+              description: description || manifestData?.description || existingByName.description || '',
+              version: manifestData?.version || existingByName.version || null,
+              iconUrl: manifestData?.logo || existingByName.iconUrl || null, // Store logo URL from manifest
+              stremioAddonId: manifestData?.id || existingByName.stremioAddonId || null
+            },
+            select: { id: true, name: true, description: true, manifestUrl: true, version: true, isActive: true }
+          })
 
-        // Handle group assignments for reactivated addon
-        let assignedGroups = [];
-        if (groupIds && Array.isArray(groupIds) && groupIds.length > 0) {
-          try {
-            
-            // Create group addon relationships
-            for (const groupId of groupIds) {
-              try {
-                // Check if relationship already exists
-                const existingGroupAddon = await prisma.groupAddon.findFirst({
-                  where: {
-                    groupId: groupId,
-                    addonId: reactivated.id
-                  }
-                });
+          // Handle group assignments for reactivated addon
+          let assignedGroups = [];
+          if (groupIds && Array.isArray(groupIds) && groupIds.length > 0) {
+            try {
 
-                if (!existingGroupAddon) {
-                  // Get the next available position for this group
-                  const maxPosition = await prisma.groupAddon.aggregate({
-                    where: { 
+              // Create group addon relationships
+              for (const groupId of groupIds) {
+                try {
+                  // Check if relationship already exists
+                  const existingGroupAddon = await prisma.groupAddon.findFirst({
+                    where: {
                       groupId: groupId,
-                      position: { not: null }
-                    },
-                    _max: { position: true }
-                  })
-                  const nextPosition = (maxPosition._max.position ?? -1) + 1
-                  
-                  await prisma.groupAddon.create({
-                    data: {
-                      groupId: groupId,
-                      addonId: reactivated.id,
-                      isEnabled: true,
-                      position: nextPosition
+                      addonId: reactivated.id
                     }
                   });
-                  assignedGroups.push(groupId);
-                }
-              } catch (groupError) {
-                console.error(`Error assigning addon to group ${groupId}:`, groupError);
-              }
-            }
-          } catch (error) {
-            console.error('Error handling group assignments:', error);
-          }
-        }
 
-        return res.json({
-          message: 'Addon reactivated successfully',
-          addon: {
-            id: reactivated.id,
-            name: reactivated.name,
-            description: reactivated.description,
-            url: getDecryptedManifestUrl(reactivated, req),
-            version: reactivated.version,
-            status: reactivated.isActive ? 'active' : 'inactive',
-            users: 0,
-            groups: assignedGroups.length
-          },
-          assignedGroups
-        });
-      }
+                  if (!existingGroupAddon) {
+                    // Get the next available position for this group
+                    const maxPosition = await prisma.groupAddon.aggregate({
+                      where: {
+                        groupId: groupId,
+                        position: { not: null }
+                      },
+                      _max: { position: true }
+                    })
+                    const nextPosition = (maxPosition._max.position ?? -1) + 1
+
+                    await prisma.groupAddon.create({
+                      data: {
+                        groupId: groupId,
+                        addonId: reactivated.id,
+                        isEnabled: true,
+                        position: nextPosition
+                      }
+                    });
+                    assignedGroups.push(groupId);
+                  }
+                } catch (groupError) {
+                  console.error(`Error assigning addon to group ${groupId}:`, groupError);
+                }
+              }
+            } catch (error) {
+              console.error('Error handling group assignments:', error);
+            }
+          }
+
+          return res.json({
+            message: 'Addon reactivated successfully',
+            addon: {
+              id: reactivated.id,
+              name: reactivated.name,
+              description: reactivated.description,
+              url: getDecryptedManifestUrl(reactivated, req),
+              version: reactivated.version,
+              iconUrl: reactivated.iconUrl,
+              customLogo: reactivated.customLogo,
+              status: reactivated.isActive ? 'active' : 'inactive',
+              users: 0,
+              groups: assignedGroups.length
+            },
+            assignedGroups
+          });
+        }
       }
 
       // Filter manifest according to selected resources
       let filtered = manifestData
       if (Array.isArray(manifestData?.resources) && manifestData.resources.length > 0) {
         filtered = filterManifestByResources(manifestData, manifestData.resources)
+        console.log('🔍 DEBUG: After filtering, catalogs count:', filtered?.catalogs?.length || 0)
+        console.log('🔍 DEBUG: Original catalogs count:', manifestData?.catalogs?.length || 0)
       }
 
       // Extract simplified resources and catalogs for storage
       const simplifiedResources = (() => {
         try {
-          const src = Array.isArray(manifestData?.resources) ? manifestData.resources : []
+          const src = Array.isArray(resources) && resources.length > 0 ? resources : (Array.isArray(manifestData?.resources) ? manifestData.resources : [])
           return src.map(r => {
             if (typeof r === 'string') return r
             if (r && typeof r === 'object' && r.name) return r.name
@@ -654,22 +708,28 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
           }).filter(Boolean)
         } catch { return [] }
       })()
-      
+
       const simplifiedCatalogs = (() => {
         try {
+          // DEBUG: Trace catalog processing
+          console.log('[DEBUG] 1. catalogs from req.body:', catalogs)
+
           // Use the UI state (catalogs parameter) if available, otherwise fall back to manifest data
           const src = Array.isArray(catalogs) && catalogs.length > 0 ? catalogs : (Array.isArray(manifestData?.catalogs) ? manifestData.catalogs : [])
+          console.log('[DEBUG] 2. src after fallback logic:', src)
+          console.log('[DEBUG] 3. Number of catalogs in src:', src.length)
+
           const processedCatalogs = []
-          
+
           for (const catalog of src) {
             if (!catalog?.type || !catalog?.id) continue
-            
+
             // Check if catalog has search functionality enabled in UI state
             const hasSearch = catalog?.extra?.some((extra) => extra.name === 'search')
             const hasOtherExtras = catalog?.extra?.some((extra) => extra.name !== 'search')
             const isEmbeddedSearch = hasSearch && hasOtherExtras
             const isStandaloneSearch = hasSearch && !hasOtherExtras
-            
+
             if (isStandaloneSearch) {
               // Standalone search catalog: add with original ID (no suffix)
               // Set search: true for search catalogs (matching reset behavior)
@@ -700,12 +760,20 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
               })
             }
           }
-          
+
+          console.log('[DEBUG] 4. Number of catalogs in processedCatalogs:', processedCatalogs.length)
+          console.log('[DEBUG] 5. Final simplifiedCatalogs result:', processedCatalogs)
+
           return processedCatalogs
         } catch { return [] }
       })()
 
       // Centralize DB data build (consistent with repair and elsewhere)
+      // Use raw catalogs from manifest (with extra arrays) so buildAddonDbData can detect search
+      const rawCatalogs = Array.isArray(catalogs) && catalogs.length > 0
+        ? catalogs
+        : (Array.isArray(manifestData?.catalogs) ? manifestData.catalogs : [])
+
       const { buildAddonDbData } = require('../utils/stremio')
       const dbData = buildAddonDbData(req, {
         name: (name && name.trim()) ? name.trim() : (manifestData?.name || 'Unknown'),
@@ -717,8 +785,8 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
         version: manifestData?.version,
         stremioAddonId: manifestData?.id,
         isActive: true,
-        resources: simplifiedResources,
-        catalogs: simplifiedCatalogs,
+        // Don't pass resources - let buildAddonDbData auto-detect from catalogs
+        catalogs: rawCatalogs,
         customLogo: customLogo && customLogo.trim() ? customLogo.trim() : null
       })
 
@@ -729,20 +797,20 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
       let assignedGroups = [];
       if (groupIds && Array.isArray(groupIds) && groupIds.length > 0) {
         try {
-          
+
           // Create group addon relationships
           for (const groupId of groupIds) {
             try {
               // Get the next available position for this group
               const maxPosition = await prisma.groupAddon.aggregate({
-                where: { 
+                where: {
                   groupId: groupId,
                   position: { not: null }
                 },
                 _max: { position: true }
               })
               const nextPosition = (maxPosition._max.position ?? -1) + 1
-              
+
               await prisma.groupAddon.create({
                 data: {
                   groupId: groupId,
@@ -769,9 +837,13 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
           description: newAddon.description,
           url: getDecryptedManifestUrl(newAddon, req),
           version: newAddon.version,
+          iconUrl: newAddon.iconUrl,
+          customLogo: newAddon.customLogo,
           status: newAddon.isActive ? 'active' : 'inactive',
           users: 0,
-          groups: assignedGroups.length
+          groups: assignedGroups.length,
+          resources: (() => { try { return newAddon.resources ? JSON.parse(newAddon.resources) : [] } catch { return [] } })(),
+          catalogs: (() => { try { return newAddon.catalogs ? JSON.parse(newAddon.catalogs) : [] } catch { return [] } })()
         },
         assignedGroups
       });
@@ -790,15 +862,15 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
     try {
       const { id } = req.params;
       const { autoSelectNewElements = true } = req.body; // Default to true to auto-select truly new elements
-      
+
       // Use the shared reload helper function
-      const result = await reloadAddon(prisma, getAccountId, id, req, { 
-        filterManifestByResources, 
-        filterManifestByCatalogs, 
-        encrypt, 
+      const result = await reloadAddon(prisma, getAccountId, id, req, {
+        filterManifestByResources,
+        filterManifestByCatalogs,
+        encrypt,
         decrypt,
-        getDecryptedManifestUrl, 
-        manifestHash 
+        getDecryptedManifestUrl,
+        manifestHash
       }, autoSelectNewElements);
 
       res.json({
@@ -807,7 +879,7 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
       });
     } catch (error) {
       console.error('Error reloading addon:', error);
-      
+
       // Handle specific error cases
       if (error.message === 'Addon not found') {
         return responseUtils.notFound(res, 'Addon');
@@ -824,7 +896,7 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
       if (error.message.includes('Failed to fetch addon manifest')) {
         return responseUtils.badRequest(res, 'Failed to fetch addon manifest');
       }
-      
+
       return responseUtils.internalError(res, error?.message || 'Failed to reload addon');
     }
   });
@@ -833,7 +905,7 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
   router.delete('/:id', createRouteHandler(async (req, res) => {
     const { id } = req.params;
     const accountId = getAccountId(req);
-    
+
     // Ensure addon exists
     const existing = await findAddonById(prisma, id, accountId);
     if (!existing) {
@@ -851,26 +923,26 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
   router.post('/:id/clone', async (req, res) => {
     try {
       const { id } = req.params;
-      
+
       // Find the original addon
-      const originalAddon = await prisma.addon.findUnique({
-        where: { 
+      const originalAddon = await prisma.addon.findFirst({
+        where: {
           id,
           accountId: getAccountId(req)
         }
       });
-      
+
       if (!originalAddon) {
         return res.status(404).json({ message: 'Addon not found' });
       }
-      
-;
-      
+
+      ;
+
       // Find unique name for the clone
       const baseCloneName = `${originalAddon.name} (Copy)`
       let cloneName = baseCloneName
       let copyNumber = 1
-      
+
       while (true) {
         const nameExists = await prisma.addon.findFirst({
           where: {
@@ -878,14 +950,14 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
             accountId: getAccountId(req)
           }
         })
-        
+
         if (!nameExists) break
-        
+
         cloneName = copyNumber === 1 ? `${originalAddon.name} (Copy)` : `${originalAddon.name} (Copy #${copyNumber})`
         copyNumber++
       }
-      
-      
+
+
       // Create a clone with a modified name
       const clonedAddon = await prisma.addon.create({
         data: {
@@ -905,9 +977,9 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
           accountId: getAccountId(req)
         }
       });
-      
-;
-      
+
+      ;
+
       // Clone group associations
       if (originalAddon.groups && originalAddon.groups.length > 0) {
         await prisma.addon.update({
@@ -919,8 +991,8 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
           }
         });
       }
-      
-      res.json({ 
+
+      res.json({
         message: 'Addon cloned successfully',
         addon: clonedAddon
       });
@@ -934,8 +1006,8 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
   router.get('/:id', async (req, res) => {
     try {
       const { id } = req.params;
-      
-      const addon = await prisma.addon.findUnique({
+
+      const addon = await prisma.addon.findFirst({
         where: { id },
         include: {
           groupAddons: {
@@ -944,7 +1016,24 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
                 include: {
                   _count: {
                     select: {
-                        addons: true
+                      addons: true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          backupAddon: {
+            include: {
+              backupAddon: {
+                include: {
+                  backupAddon: {
+                    include: {
+                      backupAddon: {
+                        include: {
+                          backupAddon: true
+                        }
+                      }
                     }
                   }
                 }
@@ -960,7 +1049,7 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
 
       // Filter groupAddons to only include those from the current account
       const currentAccountId = getAccountId(req)
-      const filteredGroupAddons = addon.groupAddons.filter(ga => 
+      const filteredGroupAddons = addon.groupAddons.filter(ga =>
         ga.group && ga.group.accountId === currentAccountId
       )
 
@@ -969,6 +1058,35 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
         return sum + (groupAddon.group._count.users || 0)
       }, 0)
 
+      // Recursively build backup chain data
+      const buildBackupChain = (backupAddon) => {
+        if (!backupAddon) return null;
+
+        // Decrypt manifest for this backup addon
+        let backupManifest = null;
+        try {
+          if (backupAddon.manifest) {
+            const dec = decrypt(backupAddon.manifest, req);
+            backupManifest = typeof dec === 'string' ? JSON.parse(dec) : dec;
+          }
+        } catch { }
+
+        return {
+          id: backupAddon.id,
+          name: backupAddon.name,
+          isActive: backupAddon.isActive,
+          isOnline: backupAddon.isOnline,
+          lastHealthCheck: backupAddon.lastHealthCheck,
+          version: backupAddon.version,
+          iconUrl: backupAddon.iconUrl,
+          customLogo: backupAddon.customLogo,
+          manifest: backupManifest,
+          backupAddon: buildBackupChain(backupAddon.backupAddon),
+        };
+      };
+
+      const backupData = buildBackupChain(addon.backupAddon);
+
       const transformedAddon = {
         id: addon.id,
         name: addon.name,
@@ -976,48 +1094,65 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
         url: (() => {
           try {
             if (addon.manifestUrl) return decrypt(addon.manifestUrl, req)
-          } catch {}
+          } catch { }
           return addon.manifestUrl
         })(),
         version: addon.version,
+        iconUrl: addon.iconUrl || null,
         category: addon.category || 'Other',
         status: addon.isActive ? 'active' : 'inactive',
         users: totalUsers,
         groups: filteredGroupAddons.map(ga => ({
           id: ga.group.id,
           name: ga.group.name
-      })),
+        })),
         resources: (() => { try { return addon.resources ? JSON.parse(addon.resources) : [] } catch { return [] } })(),
         catalogs: (() => { try { return addon.catalogs ? JSON.parse(addon.catalogs) : [] } catch { return [] } })(),
         customLogo: addon.customLogo || null,
         originalManifest: (() => {
           try {
             if (addon.originalManifest) return JSON.parse(decrypt(addon.originalManifest, req))
-          } catch {}
+          } catch { }
           return null
         })(),
-      // include manifest details for UI configuration (resources/types/etc.)
-      manifest: (() => {
-        let manifestObj = null
-        try {
-          if (addon.manifest) {
-            manifestObj = JSON.parse(decrypt(addon.manifest, req))
-          }
-        } catch {}
-        // Always return an object to avoid null checks client-side
-        if (!manifestObj) {
-          manifestObj = {
-            id: addon.stremioAddonId || addon.name || 'unknown',
-            name: addon.name || 'Unknown',
-            version: addon.version || 'unknown',
-            description: addon.description || '',
-            types: [],
+        createdAt: addon.createdAt,
+        updatedAt: addon.updatedAt,
+        // include manifest details for UI configuration (resources/types/etc.)
+        manifest: (() => {
+          let manifestObj = null
+          try {
+            if (addon.manifest) {
+              manifestObj = JSON.parse(decrypt(addon.manifest, req))
+            }
+          } catch { }
+          // Always return an object to avoid null checks client-side
+          if (!manifestObj) {
+            manifestObj = {
+              id: addon.stremioAddonId || addon.name || 'unknown',
+              name: addon.name || 'Unknown',
+              version: addon.version || 'unknown',
+              description: addon.description || '',
+              logo: addon.iconUrl || null,
+              types: [],
               resources: (() => { try { return addon.resources ? JSON.parse(addon.resources) : [] } catch { return [] } })(),
-            catalogs: []
+              catalogs: []
+            }
           }
-        }
-        return manifestObj
-      })()
+          return manifestObj
+        })(),
+        // Proxy info
+        proxyEnabled: addon.proxyEnabled || false,
+        proxyUuid: addon.proxyUuid || null,
+        proxyManifestUrl: addon.proxyEnabled && addon.proxyUuid
+          ? `${req.protocol}://${req.get('host')}/proxy/${addon.proxyUuid}/manifest.json`
+          : null,
+        // Health check info
+        isOnline: addon.isOnline,
+        lastHealthCheck: addon.lastHealthCheck,
+        healthCheckError: addon.healthCheckError,
+        // Backup info
+        backupAddonId: addon.backupAddonId,
+        backupAddon: backupData,
       };
 
       res.json(transformedAddon);
@@ -1027,16 +1162,320 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
     }
   });
 
+  // Get addon health check history
+  router.get('/:id/health-history', async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { limit = '50' } = req.query;
+
+      // Check if addon exists
+      const addon = await prisma.addon.findFirst({
+        where: { id },
+        select: { id: true, name: true }
+      });
+
+      if (!addon) {
+        return res.status(404).json({ error: 'Addon not found' });
+      }
+
+      // Get health history
+      const history = await prisma.addonHealthHistory.findMany({
+        where: { addonId: id },
+        orderBy: { checkedAt: 'desc' },
+        take: parseInt(limit, 10) || 50,
+        select: {
+          id: true,
+          isOnline: true,
+          error: true,
+          checkedAt: true,
+          responseTimeMs: true,
+        }
+      });
+
+      res.json({
+        addonId: id,
+        addonName: addon.name,
+        history: history.map(h => ({
+          id: h.id,
+          isOnline: h.isOnline,
+          error: h.error,
+          checkedAt: h.checkedAt,
+          responseTimeMs: h.responseTimeMs,
+        }))
+      });
+    } catch (error) {
+      console.error('Error fetching addon health history:', error);
+      res.status(500).json({ error: 'Failed to fetch health history' });
+    }
+  });
+
+  // Get addon backup status
+  router.get('/:id/backup', async (req, res) => {
+    try {
+      const { id } = req.params;
+
+      const addon = await prisma.addon.findFirst({
+        where: { id },
+        select: {
+          id: true,
+          name: true,
+          backupAddonId: true,
+          backupAddon: {
+            select: {
+              id: true,
+              name: true,
+              isActive: true,
+              isOnline: true,
+              lastHealthCheck: true,
+            }
+          }
+        }
+      });
+
+      if (!addon) {
+        return res.status(404).json({ error: 'Addon not found' });
+      }
+
+      res.json({
+        addonId: addon.id,
+        addonName: addon.name,
+        backupAddonId: addon.backupAddonId,
+        backupAddon: addon.backupAddon,
+      });
+    } catch (error) {
+      console.error('Error fetching addon backup:', error);
+      res.status(500).json({ error: 'Failed to fetch backup' });
+    }
+  });
+
+  // Link an existing addon as backup
+  router.put('/:id/backup', async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { backupAddonId } = req.body;
+
+      if (!backupAddonId) {
+        return res.status(400).json({ error: 'Backup addon ID is required' });
+      }
+
+      if (backupAddonId === id) {
+        return res.status(400).json({ error: 'An addon cannot be its own backup' });
+      }
+
+      // Get primary addon
+      const primaryAddon = await prisma.addon.findFirst({
+        where: { id },
+      });
+
+      if (!primaryAddon) {
+        return res.status(404).json({ error: 'Addon not found' });
+      }
+
+      // Check for circular references - ensure backup doesn't eventually point back to primary
+      async function wouldCreateCircularReference(startId, targetId, depth = 0) {
+        if (depth > 10) return false; // Safety limit
+
+        const addon = await prisma.addon.findFirst({
+          where: { id: startId },
+          select: { backupAddonId: true }
+        });
+
+        if (!addon || !addon.backupAddonId) return false;
+        if (addon.backupAddonId === targetId) return true;
+
+        return wouldCreateCircularReference(addon.backupAddonId, targetId, depth + 1);
+      }
+
+      const hasCircularRef = await wouldCreateCircularReference(backupAddonId, id);
+      if (hasCircularRef) {
+        return res.status(400).json({ error: 'Cannot create circular backup chain' });
+      }
+
+      // Verify the backup addon exists and belongs to same account
+      const backupAddon = await prisma.addon.findFirst({
+        where: {
+          id: backupAddonId,
+          accountId: primaryAddon.accountId,
+        },
+        select: {
+          id: true,
+          name: true,
+          isActive: true,
+          isOnline: true,
+          lastHealthCheck: true,
+          iconUrl: true,
+          version: true,
+          description: true,
+        }
+      });
+
+      if (!backupAddon) {
+        return res.status(404).json({ error: 'Backup addon not found' });
+      }
+
+      // Link backup to primary
+      await prisma.addon.update({
+        where: { id },
+        data: { backupAddonId: backupAddon.id }
+      });
+
+      res.json({
+        message: 'Backup linked successfully',
+        backupAddon: {
+          id: backupAddon.id,
+          name: backupAddon.name,
+          isActive: backupAddon.isActive,
+          isOnline: backupAddon.isOnline,
+        }
+      });
+    } catch (error) {
+      console.error('Error linking backup:', error);
+      res.status(500).json({ error: error.message || 'Failed to link backup' });
+    }
+  });
+
+  // Remove addon backup (unlink)
+  router.delete('/:id/backup', async (req, res) => {
+    try {
+      const { id } = req.params;
+
+      const primaryAddon = await prisma.addon.findFirst({
+        where: { id }
+      });
+
+      if (!primaryAddon) {
+        return res.status(404).json({ error: 'Addon not found' });
+      }
+
+      if (!primaryAddon.backupAddonId) {
+        return res.status(404).json({ error: 'No backup configured for this addon' });
+      }
+
+      // Unlink backup from primary (but keep the backup addon in DB)
+      await prisma.addon.update({
+        where: { id },
+        data: { backupAddonId: null }
+      });
+
+      res.json({ message: 'Backup unlinked successfully' });
+    } catch (error) {
+      console.error('Error unlinking backup:', error);
+      res.status(500).json({ error: error.message || 'Failed to unlink backup' });
+    }
+  });
+
+  // Check which addon in the chain is currently active (would be used for sync)
+  router.get('/:id/backup/active', async (req, res) => {
+    try {
+      const { id } = req.params;
+
+      // Fetch the addon with its backup chain
+      const addon = await prisma.addon.findFirst({
+        where: { id },
+        select: {
+          id: true,
+          name: true,
+          isActive: true,
+          isOnline: true,
+          lastHealthCheck: true,
+          manifestUrl: true,
+          backupAddonId: true,
+          backupAddon: {
+            select: {
+              id: true,
+              name: true,
+              isActive: true,
+              isOnline: true,
+              lastHealthCheck: true,
+              manifestUrl: true,
+              backupAddonId: true,
+              backupAddon: {
+                select: {
+                  id: true,
+                  name: true,
+                  isActive: true,
+                  isOnline: true,
+                  lastHealthCheck: true,
+                  manifestUrl: true,
+                  backupAddonId: true,
+                  backupAddon: {
+                    select: {
+                      id: true,
+                      name: true,
+                      isActive: true,
+                      isOnline: true,
+                      lastHealthCheck: true,
+                      manifestUrl: true,
+                      backupAddonId: true,
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      });
+
+      if (!addon) {
+        return res.status(404).json({ error: 'Addon not found' });
+      }
+
+      // Traverse the chain to find which addon would be used
+      // Logic: Use the first online addon in the chain, or the last one if all offline
+      const chain = [];
+      let current = addon;
+      let depth = 0;
+      const maxDepth = 10;
+
+      while (current && depth < maxDepth) {
+        chain.push({
+          id: current.id,
+          name: current.name,
+          isActive: current.isActive,
+          isOnline: current.isOnline,
+          lastHealthCheck: current.lastHealthCheck,
+        });
+
+        // Check if online - if so, this is the active one
+        if (current.isOnline && current.isActive !== false) {
+          break;
+        }
+
+        // Move to backup
+        current = current.backupAddon;
+        depth++;
+      }
+
+      // The active addon is the last one in the chain (either first online, or last offline)
+      const activeAddon = chain[chain.length - 1];
+      const isUsingBackup = activeAddon.id !== addon.id;
+
+      res.json({
+        chain: chain,
+        activeAddon: activeAddon,
+        isUsingBackup: isUsingBackup,
+        totalChainLength: chain.length,
+        message: isUsingBackup
+          ? `Using backup: ${activeAddon.name}`
+          : `Using primary addon: ${activeAddon.name}`
+      });
+    } catch (error) {
+      console.error('Error checking active backup:', error);
+      res.status(500).json({ error: 'Failed to check active backup' });
+    }
+  });
+
+
   // Update addon
   router.put('/:id', async (req, res) => {
     try {
       const { id } = req.params;
       const { name, description, url, version, groupIds, resources, catalogs, iconUrl, customLogo } = req.body;
-      
+
 
       // Check if addon exists
-      const existingAddon = await prisma.addon.findUnique({
-        where: { 
+      const existingAddon = await prisma.addon.findFirst({
+        where: {
           id
         },
         include: { groupAddons: true }
@@ -1051,44 +1490,74 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
       // If URL is provided, validate scheme and fetch manifest to refresh fields
       let manifestData = null;
       let nextUrl = undefined;
+      let derivedName = null;
       let derivedDescription = null;
       let derivedVersion = null;
       let derivedIconUrl = null;
+      let derivedResources = null;
+      let derivedCatalogs = null;
+
+      // Check for duplicate name conflict BEFORE any database changes
+      let nameConflictResolved = false;
 
       if (url !== undefined) {
         const trimmedUrl = String(url).trim()
         let sanitizedUrl = trimmedUrl.replace(/^@+/, '')
-        
+
         // Convert stremio:// scheme to https://
         if (sanitizedUrl.toLowerCase().startsWith('stremio://')) {
           sanitizedUrl = sanitizedUrl.replace(/^stremio:\/\//i, 'https://')
         }
-        
+
         nextUrl = sanitizedUrl;
         try {
-          console.log(`🔍 Reloading manifest for updated URL: ${sanitizedUrl}`);
+          console.log(`🔍 Fetching manifest for updated URL: ${sanitizedUrl}`);
           const resp = await fetch(sanitizedUrl);
           if (!resp.ok) {
             return res.status(400).json({ message: 'Failed to fetch addon manifest. The add-on URL may be incorrect.' });
           }
           manifestData = await resp.json();
+
+          // Extract ALL metadata from manifest - manifest is the single source of truth
+          derivedName = manifestData?.name || null;
           derivedDescription = manifestData?.description ?? manifestData?.desc ?? null;
           derivedVersion = manifestData?.version ?? manifestData?.addonVersion ?? null;
           derivedIconUrl = manifestData?.logo ?? manifestData?.icon ?? manifestData?.images?.logo ?? null;
+          derivedResources = Array.isArray(manifestData?.resources) ? manifestData.resources : [];
+          derivedCatalogs = Array.isArray(manifestData?.catalogs) ? manifestData.catalogs : [];
+
+          console.log(`🔍 Manifest fetched: name="${derivedName}", version="${derivedVersion}", iconUrl="${derivedIconUrl}"`);
         } catch (e) {
           return res.status(400).json({ message: 'Failed to fetch addon manifest. The add-on URL may be incorrect.' });
         }
+
+        // Check for name conflict with other addons (when URL changes, name comes from manifest)
+        if (derivedName) {
+          const existingWithSameName = await prisma.addon.findFirst({
+            where: {
+              accountId: getAccountId(req),
+              name: derivedName,
+              id: { not: id } // Exclude current addon
+            }
+          });
+          if (existingWithSameName) {
+            // Append a suffix to make it unique
+            derivedName = `${derivedName} (${Date.now().toString(36)})`;
+            nameConflictResolved = true;
+            console.log(`🔍 Name conflict resolved by appending suffix: "${derivedName}"`);
+          }
+        }
       }
 
-      // If resources or catalogs provided, re-derive manifest from originalManifest and persist both fields
+      // If resources or catalogs provided without URL change, re-derive manifest from originalManifest
       let filtered = null
-      if (resources !== undefined || catalogs !== undefined) {
+      if ((resources !== undefined || catalogs !== undefined) && !manifestData) {
         try {
-          console.log('🔍 Resources provided, filtering manifest. existingAddon.originalManifest exists:', !!existingAddon.originalManifest)
-          
+          console.log('🔍 Resources/catalogs updated without URL change. existingAddon.originalManifest exists:', !!existingAddon.originalManifest)
+
           // Get the original manifest (unfiltered) to re-filter from
           let original = null
-          try { 
+          try {
             if (existingAddon.originalManifest) {
               original = JSON.parse(decrypt(existingAddon.originalManifest, req))
               console.log('🔍 Successfully decrypted originalManifest, has resources:', Array.isArray(original?.resources))
@@ -1096,10 +1565,10 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
           } catch (e) {
             console.error('🔍 Error decrypting originalManifest:', e.message)
           }
-          
+
           // Fallback: if no originalManifest, use decrypted current manifest
           if (!original) {
-            try { 
+            try {
               if (existingAddon.manifest) {
                 original = JSON.parse(decrypt(existingAddon.manifest, req))
                 console.log('🔍 Fallback to current manifest, has resources:', Array.isArray(original?.resources))
@@ -1108,26 +1577,31 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
               console.error('🔍 Error decrypting current manifest:', e.message)
             }
           }
-          
+
           if (original) {
             // Always set filtered when we have original manifest
             if (Array.isArray(original.resources)) {
-            const selected = Array.isArray(resources) ? resources : []
-            console.log('🔍 Filtering from original manifest with selected resources:', selected)
-            filtered = filterManifestByResources(original, selected) || { ...original, catalogs: [], addonCatalogs: [] }
-            console.log('🔍 Filtered manifest has catalogs:', Array.isArray(filtered?.catalogs) ? filtered.catalogs.length : 'no catalogs')
+              // Use provided resources if available, otherwise fall back to currently saved resources
+              const savedResources = (() => {
+                try { return existingAddon.resources ? JSON.parse(existingAddon.resources) : [] } catch { return [] }
+              })()
+              const selected = Array.isArray(resources) ? resources : savedResources
+
+              console.log('🔍 Filtering from original manifest with resources:', selected)
+              filtered = filterManifestByResources(original, selected) || { ...original, catalogs: [], addonCatalogs: [] }
+              console.log('🔍 Filtered manifest has catalogs:', Array.isArray(filtered?.catalogs) ? filtered.catalogs.length : 'no catalogs')
             } else {
               // No resources in original, use original as base
               filtered = original
               console.log('🔍 Using original manifest as base (no resources)')
             }
-            
-        // Note: Catalog filtering will be done after database update
+
+            // Note: Catalog filtering will be done after database update
           } else if (Array.isArray(resources)) {
             // If no original manifest available, create a minimal filtered manifest
             const names = resources.map(r => (typeof r === 'string' ? r : (r && (r.name || r.type)))).filter(Boolean)
             console.log('🔍 No original manifest, creating minimal filtered manifest with resources:', names)
-            filtered = { 
+            filtered = {
               id: existingAddon.name || 'unknown.addon',
               name: existingAddon.name || 'Unknown',
               version: existingAddon.version || null,
@@ -1137,70 +1611,79 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
               addonCatalogs: names.includes('addon_catalog') ? [] : []
             }
           }
-          
+
         } catch (e) {
           console.error('Error filtering manifest from original:', e)
         }
-      } else if (manifestData) {
-        // If URL changed and we fetched a fresh manifest, derive filtered manifest
-        const selected = Array.isArray(resources) ? resources : (() => {
-          try { return existingAddon.resources ? JSON.parse(existingAddon.resources) : [] } catch { return [] }
-        })()
-        if (Array.isArray(selected) && selected.length > 0) {
-          filtered = filterManifestByResources(manifestData, selected)
-        } else {
-          filtered = manifestData
-        }
       }
+      // Note: When URL changes (manifestData exists), we don't need filtering - we use the full manifest directly
 
       // Update addon
+      // When manifestData exists (URL changed), manifest is the single source of truth for all metadata
       // Note: customLogo is stored in DB and applied at runtime in sync.js (like custom names)
       const updatedAddon = await prisma.addon.update({
-        where: { 
+        where: {
           id,
           accountId: getAccountId(req)
         },
         data: {
-          ...(name !== undefined && { name: name.trim() }),
+          // When URL changed: use manifest-derived values for most fields, but keep original name
+          // Unless the name is explicitly provided in the request
           ...(manifestData
             ? {
-                description: description !== undefined ? description : (derivedDescription ?? existingAddon.description ?? ''),
-                version: version !== undefined ? version : (derivedVersion ?? existingAddon.version ?? null),
-                iconUrl: iconUrl !== undefined ? iconUrl : (derivedIconUrl ?? existingAddon.iconUrl ?? null),
+                // Manifest provides most fields, but preserve original name unless explicitly changed
+                name: name ? name.trim() : existingAddon.name,
+                description: derivedDescription ?? existingAddon.description ?? '',
+                version: derivedVersion ?? existingAddon.version ?? null,
+                iconUrl: derivedIconUrl ?? existingAddon.iconUrl ?? null,
+                // Resources and catalogs come from manifest (client selections don't apply to new addon identity)
+                resources: JSON.stringify(
+                  derivedResources.map(r => typeof r === 'string' ? r : (r?.name || r?.type)).filter(Boolean)
+                ),
+                catalogs: JSON.stringify(
+                  derivedCatalogs.map(c => ({
+                    type: c?.type || 'unknown',
+                    id: c?.id || 'unknown',
+                    search: c?.extra?.some((e) => e.name === 'search') || false
+                  }))
+                ),
               }
             : {
-                ...(description !== undefined && { description }),
-                ...(version !== undefined && { version }),
-                ...(iconUrl !== undefined && { iconUrl }),
+              // No URL change - use client-provided values
+              ...(name !== undefined && { name: name.trim() }),
+              ...(description !== undefined && { description }),
+              ...(version !== undefined && { version }),
+              ...(iconUrl !== undefined && { iconUrl }),
+              ...(resources !== undefined && {
+                resources: JSON.stringify(Array.isArray(resources) ? resources.map(r => {
+                  if (typeof r === 'string') return r
+                  if (r && typeof r === 'object' && r.name) return r.name
+                  return null
+                }).filter(Boolean) : [])
               }),
+              ...(catalogs !== undefined && {
+                catalogs: JSON.stringify(Array.isArray(catalogs) ? catalogs.map(c => {
+                  // Handle tuple format: [type, id, search]
+                  if (Array.isArray(c) && c.length >= 2) {
+                    return { type: c[0], id: c[1], search: c[2] || false }
+                  }
+                  // Handle object format: { type, id, search }
+                  else if (c && typeof c === 'object' && c.type && c.id) {
+                    return { type: c.type, id: c.id, search: c.search || false }
+                  }
+                  return null
+                }).filter(Boolean) : [])
+              }),
+            }),
           ...(nextUrl && {
             manifestUrl: encrypt(nextUrl, req),
             manifestUrlHash: manifestUrlHmac(req, nextUrl)
           }),
-          ...(resources !== undefined && { 
-            resources: JSON.stringify(Array.isArray(resources) ? resources.map(r => {
-              if (typeof r === 'string') return r
-              if (r && typeof r === 'object' && r.name) return r.name
-              return null
-            }).filter(Boolean) : []) 
-          }),
-          ...(catalogs !== undefined && { 
-            catalogs: JSON.stringify(Array.isArray(catalogs) ? catalogs.map(c => {
-              // Handle tuple format: [type, id, search]
-              if (Array.isArray(c) && c.length >= 2) {
-                return { type: c[0], id: c[1], search: c[2] || false }
-              }
-              // Handle object format: { type, id, search }
-              else if (c && typeof c === 'object' && c.type && c.id) {
-                return { type: c.type, id: c.id, search: c.search || false }
-              }
-              return null
-            }).filter(Boolean) : []) 
-          }),
           ...(manifestData && {
+            // When URL changes, store the full manifest as both original and filtered
             originalManifest: encrypt(JSON.stringify(manifestData), req),
-            manifest: encrypt(JSON.stringify(filtered), req),
-            manifestHash: manifestHash(filtered)
+            manifest: encrypt(JSON.stringify(manifestData), req),
+            manifestHash: manifestHash(manifestData)
           }),
           // Update manifest when only resources or catalogs are changed (without URL change)
           ...((resources !== undefined || catalogs !== undefined) && !manifestData && filtered && {
@@ -1236,14 +1719,14 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
         }
       }
 
-      // Apply catalog filtering using database state if catalogs were updated
-      if (catalogs !== undefined && filtered) {
+      // Apply catalog filtering using database state if catalogs were updated (only when URL not changed)
+      if (catalogs !== undefined && filtered && !manifestData) {
         // Read catalogs from database to get the correct search state
-        const updatedAddonWithCatalogs = await prisma.addon.findUnique({
+        const updatedAddonWithCatalogs = await prisma.addon.findFirst({
           where: { id },
           select: { catalogs: true }
         })
-        
+
         let databaseCatalogs = []
         if (updatedAddonWithCatalogs?.catalogs) {
           try {
@@ -1252,16 +1735,16 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
             console.log('🔍 Failed to parse database catalogs:', e)
           }
         }
-        
+
         console.log('🔍 Using database catalogs for filtering:', databaseCatalogs)
         console.log('🔍 Database catalogs type:', typeof databaseCatalogs, 'isArray:', Array.isArray(databaseCatalogs))
         if (Array.isArray(databaseCatalogs) && databaseCatalogs.length > 0) {
           console.log('🔍 First database catalog:', databaseCatalogs[0])
         }
-        
+
         filtered = filterManifestByCatalogs(filtered, databaseCatalogs)
         console.log('🔍 After catalog filtering, manifest has catalogs:', Array.isArray(filtered?.catalogs) ? filtered.catalogs.length : 'no catalogs')
-        
+
         // Update the manifest in the database with the filtered version
         await prisma.addon.update({
           where: { id },
@@ -1280,6 +1763,8 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
           description: updatedAddon.description,
           url: getDecryptedManifestUrl(updatedAddon, req),
           version: updatedAddon.version,
+          iconUrl: updatedAddon.iconUrl,
+          customLogo: updatedAddon.customLogo,
           status: updatedAddon.isActive ? 'active' : 'inactive',
           users: 0,
           groups: 0
@@ -1339,6 +1824,163 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
     } catch (error) {
       console.error('Error reloading all addons:', error);
       res.status(500).json({ message: 'Failed to reload all addons', error: error?.message });
+    }
+  });
+
+  // Enable proxy for addon - generates UUID and enables proxy access
+  router.post('/:id/proxy/enable', async (req, res) => {
+    try {
+      const { id } = req.params;
+      const crypto = require('crypto');
+
+      // Validate addon exists and belongs to account
+      const addon = await dbUtils.findEntity(prisma, 'addon', id, getAccountId(req));
+      if (!addon) {
+        return responseUtils.notFound(res, 'Addon');
+      }
+
+      // Generate a new UUID if one doesn't exist
+      const proxyUuid = addon.proxyUuid || crypto.randomUUID();
+
+      // Update addon with proxy enabled
+      const updated = await dbUtils.updateEntity(prisma, 'addon', id, {
+        proxyUuid,
+        proxyEnabled: true
+      }, getAccountId(req));
+
+      const proxyManifestUrl = `${req.protocol}://${req.get('host')}/proxy/${proxyUuid}/manifest.json`;
+
+      return responseUtils.success(res, {
+        id: updated.id,
+        name: updated.name,
+        proxyEnabled: true,
+        proxyUuid,
+        proxyManifestUrl
+      }, 'Proxy enabled successfully');
+    } catch (error) {
+      console.error('Error enabling proxy:', error);
+      return responseUtils.internalError(res, error.message);
+    }
+  });
+
+  // Disable proxy for addon - keeps UUID but disables access
+  router.post('/:id/proxy/disable', async (req, res) => {
+    try {
+      const { id } = req.params;
+
+      // Validate addon exists and belongs to account
+      const addon = await dbUtils.findEntity(prisma, 'addon', id, getAccountId(req));
+      if (!addon) {
+        return responseUtils.notFound(res, 'Addon');
+      }
+
+      // Update addon with proxy disabled (keep UUID for potential re-enable)
+      const updated = await dbUtils.updateEntity(prisma, 'addon', id, {
+        proxyEnabled: false
+      }, getAccountId(req));
+
+      return responseUtils.success(res, {
+        id: updated.id,
+        name: updated.name,
+        proxyEnabled: false,
+        proxyUuid: updated.proxyUuid
+      }, 'Proxy disabled successfully');
+    } catch (error) {
+      console.error('Error disabling proxy:', error);
+      return responseUtils.internalError(res, error.message);
+    }
+  });
+
+  // Regenerate proxy UUID - generates a new UUID (invalidates old links)
+  router.post('/:id/proxy/regenerate', async (req, res) => {
+    try {
+      const { id } = req.params;
+      const crypto = require('crypto');
+
+      // Validate addon exists and belongs to account
+      const addon = await dbUtils.findEntity(prisma, 'addon', id, getAccountId(req));
+      if (!addon) {
+        return responseUtils.notFound(res, 'Addon');
+      }
+
+      // Generate a new UUID
+      const proxyUuid = crypto.randomUUID();
+
+      // Update addon with new UUID
+      const updated = await dbUtils.updateEntity(prisma, 'addon', id, {
+        proxyUuid,
+        proxyEnabled: addon.proxyEnabled // Keep current enabled state
+      }, getAccountId(req));
+
+      const proxyManifestUrl = updated.proxyEnabled
+        ? `${req.protocol}://${req.get('host')}/proxy/${proxyUuid}/manifest.json`
+        : null;
+
+      return responseUtils.success(res, {
+        id: updated.id,
+        name: updated.name,
+        proxyEnabled: updated.proxyEnabled,
+        proxyUuid,
+        proxyManifestUrl
+      }, 'Proxy UUID regenerated successfully');
+    } catch (error) {
+      console.error('Error regenerating proxy UUID:', error);
+      return responseUtils.internalError(res, error.message);
+    }
+  });
+
+  // GET /addons/:id/proxy-logs - Get proxy request logs for an addon
+  router.get('/:id/proxy-logs', async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { limit = '100', offset = '0' } = req.query;
+
+      // Validate addon exists and belongs to account
+      const addon = await dbUtils.findEntity(prisma, 'addon', id, getAccountId(req));
+      if (!addon) {
+        return responseUtils.notFound(res, 'Addon');
+      }
+
+      // Read proxy logs from file for this addon
+      const { logs, total } = await readProxyLogs({
+        addonId: id,
+        limit: parseInt(limit),
+        offset: parseInt(offset)
+      });
+
+      return responseUtils.success(res, {
+        logs,
+        total,
+        limit: parseInt(limit),
+        offset: parseInt(offset)
+      });
+    } catch (error) {
+      console.error('Error fetching proxy logs:', error);
+      return responseUtils.internalError(res, error.message);
+    }
+  });
+
+  // GET /proxy-logs - Get ALL proxy request logs (admin only)
+  router.get('/proxy-logs/all', async (req, res) => {
+    try {
+      const { limit = '100', offset = '0', addonId } = req.query;
+
+      // Read all proxy logs from file (optionally filtered by addonId)
+      const { logs, total } = await readProxyLogs({
+        addonId: addonId || null,
+        limit: parseInt(limit),
+        offset: parseInt(offset)
+      });
+
+      return responseUtils.success(res, {
+        logs,
+        total,
+        limit: parseInt(limit),
+        offset: parseInt(offset)
+      });
+    } catch (error) {
+      console.error('Error fetching all proxy logs:', error);
+      return responseUtils.internalError(res, error.message);
     }
   });
 

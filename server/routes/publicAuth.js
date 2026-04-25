@@ -8,7 +8,7 @@ const { responseUtils, dbUtils } = require('../utils/routeUtils');
 const { validateStremioAuthKey } = require('../utils/stremio');
 const { encrypt } = require('../utils/encryption');
 
-module.exports = ({ prisma, getAccountId, AUTH_ENABLED, PRIVATE_AUTH_ENABLED, PRIVATE_AUTH_USERNAME, PRIVATE_AUTH_PASSWORD, DEFAULT_ACCOUNT_ID, issueAccessToken, issueRefreshToken, cookieName, isProdEnv, encrypt, decrypt, getDecryptedManifestUrl, scopedWhere, getAccountDek, decryptWithFallback, manifestUrlHmac, manifestHash, filterManifestByResources, filterManifestByCatalogs, parseCookies, JWT_SECRET }) => {
+module.exports = ({ prisma, getAccountId, INSTANCE_TYPE, PRIVATE_AUTH_ENABLED, PRIVATE_AUTH_USERNAME, PRIVATE_AUTH_PASSWORD, DEFAULT_ACCOUNT_ID, issueAccessToken, issueRefreshToken, cookieName, isProdEnv, encrypt, decrypt, getDecryptedManifestUrl, scopedWhere, getAccountDek, decryptWithFallback, manifestUrlHmac, manifestHash, filterManifestByResources, filterManifestByCatalogs, parseCookies, JWT_SECRET }) => {
   console.log('PublicAuth router initialized, prisma available:', !!prisma);
   const router = express.Router();
 
@@ -42,7 +42,7 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, PRIVATE_AUTH_ENABLED, PR
   async function repairAddonsForAccount(addonsList, req) {
     return await repairAddonsList({
       prisma,
-      AUTH_ENABLED,
+      INSTANCE_TYPE,
       getAccountDek,
       getDecryptedManifestUrl,
       filterManifestByResources,
@@ -100,24 +100,24 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, PRIVATE_AUTH_ENABLED, PR
     const user = await prisma.user.findFirst({
       where: { accountId, email }
     })
-    
+
     if (!user) {
       return { valid: false, user: null }
     }
-    
+
     if (!user.stremioAuthKey) {
       return { valid: false, user }
     }
-    
+
     try {
       const storedAuthKey = decrypt(user.stremioAuthKey, req)
       const storedAuthKeyInfo = await validateStremioAuthKey(storedAuthKey)
       const storedEmail = String(storedAuthKeyInfo?.user?.email || '').trim().toLowerCase()
-      
+
       if (storedEmail !== email) {
         return { valid: false, user }
       }
-      
+
       return { valid: true, user }
     } catch (error) {
       return { valid: false, user }
@@ -132,7 +132,7 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, PRIVATE_AUTH_ENABLED, PR
         uuid = crypto.randomUUID()
       } catch {
         // Fallback for older Node.js versions
-        uuid = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+        uuid = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
           const r = Math.random() * 16 | 0
           const v = c == 'x' ? r : (r & 0x3 | 0x8)
           return v.toString(16)
@@ -221,6 +221,7 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, PRIVATE_AUTH_ENABLED, PR
       res.cookie(cookieName('sfm_csrf'), csrf, { httpOnly: false, secure: isProdEnv(), sameSite: isProdEnv() ? 'strict' : 'lax', path: '/', maxAge: 30 * 24 * 60 * 60 * 1000 });
       return res.json({
         message: 'Login successful',
+        token: at,
         account: { id: account.id, uuid: account.uuid, email: account.email || null },
       });
     } catch (error) {
@@ -258,7 +259,7 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, PRIVATE_AUTH_ENABLED, PR
       res.cookie(cookieName('sfm_at'), at, { httpOnly: true, secure: isProdEnv(), sameSite: isProdEnv() ? 'strict' : 'lax', path: '/', maxAge: 30 * 24 * 60 * 60 * 1000 });
       res.cookie(cookieName('sfm_rt'), rt, { httpOnly: true, secure: isProdEnv(), sameSite: isProdEnv() ? 'strict' : 'lax', path: '/', maxAge: 365 * 24 * 60 * 60 * 1000 });
       res.cookie(cookieName('sfm_csrf'), csrf, { httpOnly: false, secure: isProdEnv(), sameSite: isProdEnv() ? 'strict' : 'lax', path: '/', maxAge: 30 * 24 * 60 * 60 * 1000 });
-      
+
       return res.json({
         message: 'Login successful',
         account: { id: accountId, uuid: null, email: null },
@@ -271,7 +272,7 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, PRIVATE_AUTH_ENABLED, PR
 
   router.post('/stremio-login', async (req, res) => {
     try {
-      if (!AUTH_ENABLED) {
+      if (INSTANCE_TYPE !== 'public') {
         return res.status(400).json({ message: 'Stremio login is only available in public auth mode' })
       }
 
@@ -296,11 +297,11 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, PRIVATE_AUTH_ENABLED, PR
       if (!email) {
         return res.status(400).json({ message: 'Stremio account email not available' })
       }
-      
+
       // Extract account ID from session cookies (since route is allowlisted, middleware might not set it)
       // Only extract if user is actually logged in (has valid session)
       let originalAccountId = req.appAccountId
-      if (!originalAccountId && AUTH_ENABLED && parseCookies && JWT_SECRET) {
+      if (!originalAccountId && INSTANCE_TYPE === 'public' && parseCookies && JWT_SECRET) {
         try {
           const cookies = parseCookies(req)
           const accessCookie = cookies[cookieName('sfm_at')] || cookies['sfm_at']
@@ -323,10 +324,10 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, PRIVATE_AUTH_ENABLED, PR
           // This is expected for normal login flow
         }
       }
-      
+
       let account
       let isNewAccount = false
-      
+
       // FIRST CHECK: If user is logged in and trying to link, verify Stremio account is not already linked to another account
       if (originalAccountId) {
         // Verify current account exists - if it doesn't, treat as not logged in (normal login flow)
@@ -338,51 +339,51 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, PRIVATE_AUTH_ENABLED, PR
           // Account exists - user is logged in, check if Stremio account is already linked elsewhere
           const existingAccountWithEmail = await prisma.appAccount.findUnique({ where: { email } })
           if (existingAccountWithEmail && existingAccountWithEmail.id !== originalAccountId) {
-            return res.status(409).json({ 
+            return res.status(409).json({
               message: 'This Stremio account is already linked to another Syncio account',
               error: 'EMAIL_ALREADY_LINKED'
             })
           }
-          
+
           // Check for legacy account with this email (uuid format: stremio:${email})
           const legacyUuid = `stremio:${email}`
           const legacyAccount = await prisma.appAccount.findUnique({ where: { uuid: legacyUuid } })
           if (legacyAccount && legacyAccount.id !== originalAccountId) {
-            return res.status(409).json({ 
+            return res.status(409).json({
               message: 'This Stremio account is already linked to another Syncio account',
               error: 'EMAIL_ALREADY_LINKED'
             })
           }
-          
+
           // If current account already has an email, it must match
           if (currentAccount.email && currentAccount.email !== email) {
-            return res.status(409).json({ 
+            return res.status(409).json({
               message: 'Your account is already linked to a different Stremio account',
               error: 'ACCOUNT_ALREADY_LINKED'
             })
           }
-          
+
           const validation = await validateUserStremioAuth(currentAccount.id, email, req)
-          
+
           if (!validation.user) {
             return res.status(400).json({
               message: 'No user found with this email address. Please create a user with this email first before linking your Stremio account.',
               error: 'NO_USER_WITH_EMAIL'
             })
           }
-          
+
           if (!validation.user.stremioAuthKey) {
             return res.status(400).json({
               message: 'User exists but has no Stremio authentication. Please connect the user to Stremio first before linking the account.',
               error: 'USER_NO_STREMIO_AUTH'
             })
           }
-          
+
           if (!validation.valid) {
-            const errorMsg = validation.user.stremioAuthKey 
+            const errorMsg = validation.user.stremioAuthKey
               ? 'A user with this email already exists in your account, but their Stremio authentication does not match. Please contact support.'
               : 'User exists but the stored Stremio authentication is invalid or expired. Please reconnect the user to Stremio first.'
-            const errorCode = validation.user.stremioAuthKey 
+            const errorCode = validation.user.stremioAuthKey
               ? 'STORED_AUTHKEY_EMAIL_MISMATCH'
               : 'INVALID_STORED_AUTHKEY'
             return res.status(validation.user.stremioAuthKey ? 409 : 400).json({
@@ -390,7 +391,7 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, PRIVATE_AUTH_ENABLED, PR
               error: errorCode
             })
           }
-          
+
           if (currentAccount.email == null) {
             account = await prisma.appAccount.update({
               where: { id: currentAccount.id },
@@ -400,33 +401,34 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, PRIVATE_AUTH_ENABLED, PR
             account = currentAccount
           }
           req.appAccountId = account.id
-          
+
           const encryptedAuthKey = encrypt(authKey.trim(), req)
           await prisma.user.update({
             where: { id: validation.user.id },
             data: { stremioAuthKey: encryptedAuthKey, isActive: true }
           })
-          
+
           const at = issueAccessToken(account.id)
           const rt = issueRefreshToken(account.id)
           const csrf = randomCsrfToken()
           res.cookie(cookieName('sfm_at'), at, { httpOnly: true, secure: isProdEnv(), sameSite: isProdEnv() ? 'strict' : 'lax', path: '/', maxAge: 30 * 24 * 60 * 60 * 1000 })
           res.cookie(cookieName('sfm_rt'), rt, { httpOnly: true, secure: isProdEnv(), sameSite: isProdEnv() ? 'strict' : 'lax', path: '/', maxAge: 365 * 24 * 60 * 60 * 1000 })
           res.cookie(cookieName('sfm_csrf'), csrf, { httpOnly: false, secure: isProdEnv(), sameSite: isProdEnv() ? 'strict' : 'lax', path: '/', maxAge: 30 * 24 * 60 * 60 * 1000 })
-          
+
           return res.json({
             message: 'Account already linked',
+            token: at,
             account: { id: account.id, uuid: account.uuid, email: account.email || null }
           })
         }
       }
-      
+
       // Normal login flow (user not logged in, or account from cookie doesn't exist)
       if (!account) {
         // Not logged in - normal login flow (find or create account with email)
-        
+
         account = await prisma.appAccount.findUnique({ where: { email } })
-        
+
         if (account) {
           const validation = await validateUserStremioAuth(account.id, email, req)
           if (!validation.valid) {
@@ -437,7 +439,7 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, PRIVATE_AUTH_ENABLED, PR
             account = null
           }
         }
-        
+
         if (!account) {
           const legacyUuid = `stremio:${email}`
           const legacyAccount = await prisma.appAccount.findUnique({ where: { uuid: legacyUuid } })
@@ -462,14 +464,11 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, PRIVATE_AUTH_ENABLED, PR
 
         // Create new account if none found or all were unlinked
         if (!account) {
-          const randomSecret = crypto.randomBytes(32).toString('hex')
-          const passwordHash = await bcrypt.hash(randomSecret, 12)
-          const newUuid = await generateUniqueAccountUuid()
           account = await prisma.appAccount.create({
             data: {
-              uuid: newUuid,
+              uuid: null,
               email,
-              passwordHash
+              passwordHash: null
             }
           })
           isNewAccount = true
@@ -480,7 +479,7 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, PRIVATE_AUTH_ENABLED, PR
             data: { email }
           })
         }
-        
+
         req.appAccountId = account.id
       }
 
@@ -525,6 +524,7 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, PRIVATE_AUTH_ENABLED, PR
 
       return res.json({
         message: 'Login successful',
+        token: at,
         account: { id: account.id, uuid: account.uuid, email: account.email || null },
         ...(user ? { user } : {})
       })
@@ -534,10 +534,62 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, PRIVATE_AUTH_ENABLED, PR
     }
   })
 
-  // Unlink Stremio account from current account
+  // Unlink Stremio account from current account (keep UUID only)
   router.post('/unlink-stremio', async (req, res) => {
     try {
-      if (!AUTH_ENABLED) {
+      if (INSTANCE_TYPE !== 'public') {
+        return res.status(400).json({ message: 'Unlinking is only available in public auth mode' })
+      }
+
+      const accountId = req.appAccountId
+      if (!accountId) {
+        return res.status(401).json({ message: 'Authentication required' })
+      }
+
+      const { password } = req.body || {}
+
+      const account = await prisma.appAccount.findUnique({ where: { id: accountId } })
+      if (!account) {
+        return res.status(404).json({ message: 'Account not found' })
+      }
+
+      if (!account.email) {
+        return res.status(400).json({ message: 'Account is not linked to a Stremio account' })
+      }
+
+      if (!account.uuid || !account.passwordHash) {
+        return res.status(400).json({
+          message: 'Cannot keep UUID-only — this account has no UUID/password set. Use "Add UUID & Password" first.',
+          error: 'NO_CREDENTIALS'
+        })
+      }
+
+      // Require password confirmation to prove user knows their credentials
+      if (!password) {
+        return res.status(400).json({ message: 'Password is required to confirm unlink', error: 'PASSWORD_REQUIRED' })
+      }
+
+      const passwordValid = await bcrypt.compare(password, account.passwordHash)
+      if (!passwordValid) {
+        return res.status(401).json({ message: 'Incorrect password', error: 'INVALID_PASSWORD' })
+      }
+
+      await prisma.appAccount.update({
+        where: { id: accountId },
+        data: { email: null }
+      })
+
+      return res.json({ message: 'Stremio account unlinked successfully. You can now log in with your UUID and password.', uuid: account.uuid })
+    } catch (error) {
+      console.error('Unlink Stremio error:', error)
+      return responseUtils.internalError(res, String(error && error.message || error))
+    }
+  })
+
+  // Unlink UUID from current account (keep Stremio only)
+  router.post('/unlink-uuid', async (req, res) => {
+    try {
+      if (INSTANCE_TYPE !== 'public') {
         return res.status(400).json({ message: 'Unlinking is only available in public auth mode' })
       }
 
@@ -552,17 +604,70 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, PRIVATE_AUTH_ENABLED, PR
       }
 
       if (!account.email) {
-        return res.status(400).json({ message: 'Account is not linked to a Stremio account' })
+        return res.status(400).json({
+          message: 'Cannot remove UUID — this account has no Stremio linked. You would be locked out.',
+          error: 'NO_STREMIO'
+        })
+      }
+
+      if (!account.uuid) {
+        return res.status(400).json({ message: 'Account already has no UUID', error: 'ALREADY_NO_UUID' })
       }
 
       await prisma.appAccount.update({
         where: { id: accountId },
-        data: { email: null }
+        data: { uuid: null, passwordHash: null }
       })
 
-      return res.json({ message: 'Stremio account unlinked successfully' })
+      return res.json({ message: 'UUID and password removed. You can now log in with Stremio only.' })
     } catch (error) {
-      console.error('Unlink Stremio error:', error)
+      console.error('Unlink UUID error:', error)
+      return responseUtils.internalError(res, String(error && error.message || error))
+    }
+  })
+
+  // Set credentials (add or change UUID + password)
+  router.post('/set-credentials', async (req, res) => {
+    try {
+      if (INSTANCE_TYPE !== 'public') {
+        return res.status(400).json({ message: 'Setting credentials is only available in public auth mode' })
+      }
+
+      const accountId = req.appAccountId
+      if (!accountId) {
+        return res.status(401).json({ message: 'Authentication required' })
+      }
+
+      const { password } = req.body || {}
+      if (!password || typeof password !== 'string' || password.trim().length < 4) {
+        return res.status(400).json({ message: 'Password must be at least 4 characters', error: 'WEAK_PASSWORD' })
+      }
+
+      const account = await prisma.appAccount.findUnique({ where: { id: accountId } })
+      if (!account) {
+        return res.status(404).json({ message: 'Account not found' })
+      }
+
+      const passwordHash = await bcrypt.hash(password.trim(), 12)
+
+      if (account.uuid) {
+        // Account already has a UUID — just update the password
+        await prisma.appAccount.update({
+          where: { id: accountId },
+          data: { passwordHash }
+        })
+        return res.json({ message: 'Password updated successfully.', uuid: account.uuid })
+      } else {
+        // Generate a new UUID
+        const newUuid = await generateUniqueAccountUuid()
+        await prisma.appAccount.update({
+          where: { id: accountId },
+          data: { uuid: newUuid, passwordHash }
+        })
+        return res.json({ message: 'UUID and password set successfully.', uuid: newUuid })
+      }
+    } catch (error) {
+      console.error('Set credentials error:', error)
       return responseUtils.internalError(res, String(error && error.message || error))
     }
   })
@@ -570,7 +675,7 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, PRIVATE_AUTH_ENABLED, PR
   // Session info endpoint
   router.get('/me', async (req, res) => {
     try {
-      if (!AUTH_ENABLED && !PRIVATE_AUTH_ENABLED) {
+      if (INSTANCE_TYPE !== 'public' && !PRIVATE_AUTH_ENABLED) {
         return res.json({ account: null, message: 'Auth disabled' });
       }
 
@@ -579,13 +684,13 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, PRIVATE_AUTH_ENABLED, PR
       }
 
       // For private auth, return a simple account object
-      if (PRIVATE_AUTH_ENABLED && !AUTH_ENABLED) {
-        return res.json({ 
-          account: { 
-            id: req.appAccountId, 
-            uuid: null, 
-            email: null 
-          } 
+      if (PRIVATE_AUTH_ENABLED && INSTANCE_TYPE !== 'public') {
+        return res.json({
+          account: {
+            id: req.appAccountId,
+            uuid: null,
+            email: null
+          }
         });
       }
 
@@ -616,11 +721,11 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, PRIVATE_AUTH_ENABLED, PR
   // Export all data for the logged-in account (config export)
   router.get('/config-export', async (req, res) => {
     try {
-      const whereScope = AUTH_ENABLED ? { accountId: req.appAccountId } : {}
-      if (AUTH_ENABLED && !req.appAccountId) return res.status(401).json({ error: 'Unauthorized' })
+      const whereScope = INSTANCE_TYPE === 'public' ? { accountId: req.appAccountId } : {}
+      if (INSTANCE_TYPE === 'public' && !req.appAccountId) return res.status(401).json({ error: 'Unauthorized' })
       // Ensure request-scoped DEK is available for decryption in public mode
       try {
-        if (AUTH_ENABLED && !req.accountDek && typeof getAccountDek === 'function') {
+        if (INSTANCE_TYPE === 'public' && !req.accountDek && typeof getAccountDek === 'function') {
           let dek = getAccountDek(req.appAccountId)
           if (!dek) {
             const acct = await prisma.appAccount.findUnique({ where: { id: req.appAccountId }, select: { uuid: true } })
@@ -630,21 +735,21 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, PRIVATE_AUTH_ENABLED, PR
           }
           if (dek) req.accountDek = dek
         }
-      } catch {}
+      } catch { }
       const [users, groups, addons, accountRec] = await Promise.all([
         prisma.user.findMany({ where: whereScope }),
-        prisma.group.findMany({ 
-          where: whereScope, 
-          include: { 
+        prisma.group.findMany({
+          where: whereScope,
+          include: {
             addons: { include: { addon: true } }
-          } 
+          }
         }),
         prisma.addon.findMany({ where: whereScope, include: { groupAddons: true } }),
-        AUTH_ENABLED ? prisma.appAccount.findUnique({ where: { id: req.appAccountId }, select: { sync: true } }) : null
+        INSTANCE_TYPE === 'public' ? prisma.appAccount.findUnique({ where: { id: req.appAccountId }, select: { sync: true } }) : null
       ])
       // Build addon id -> name map for user excludedAddons name resolution
       const addonIdToName = new Map(addons.map(a => [a.id, a.name]))
-      
+
       // Decrypt stremioAuthKey for each user before exporting
       const decryptedUsers = users.map(user => {
         const decryptedUser = { ...user }
@@ -665,7 +770,7 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, PRIVATE_AUTH_ENABLED, PR
               .filter(Boolean)
             decryptedUser.excludedAddons = JSON.stringify(names)
           }
-        } catch {}
+        } catch { }
         // Ensure protectedAddons remains a JSON string of names
         try {
           if (Array.isArray(user.protectedAddons)) {
@@ -673,7 +778,7 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, PRIVATE_AUTH_ENABLED, PR
           } else if (typeof user.protectedAddons !== 'string' && user.protectedAddons) {
             decryptedUser.protectedAddons = JSON.stringify([])
           }
-        } catch {}
+        } catch { }
         // Omit internal fields
         delete decryptedUser.id
         delete decryptedUser.accountId
@@ -681,35 +786,35 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, PRIVATE_AUTH_ENABLED, PR
         delete decryptedUser.stremioAddons
         return decryptedUser
       })
-      
+
       // Build addons with originalManifest and simplified resources/catalogs
       const exportedAddons = await Promise.all(addons.map(async (addon) => {
         // Get the original manifest (full, unfiltered)
         let originalManifest = null
         if (addon.originalManifest) {
-          try { 
-            originalManifest = JSON.parse(decrypt(addon.originalManifest, req)) 
+          try {
+            originalManifest = JSON.parse(decrypt(addon.originalManifest, req))
           } catch (e) {
             console.warn(`Failed to decrypt originalManifest for ${addon.name}:`, e.message)
           }
         }
-        
+
         // Fallback: if no originalManifest, try to get from current manifest
         if (!originalManifest && addon.manifest) {
-          try { 
-            originalManifest = JSON.parse(decrypt(addon.manifest, req)) 
+          try {
+            originalManifest = JSON.parse(decrypt(addon.manifest, req))
           } catch (e) {
             console.warn(`Failed to decrypt manifest for ${addon.name}:`, e.message)
           }
         }
-        
+
         // Last resort: fetch from URL if available
         if (!originalManifest) {
           const transportUrl = getDecryptedManifestUrl(addon, req)
           if (transportUrl) {
             try {
               const rsp = await fetch(transportUrl)
-              if (rsp.ok) { 
+              if (rsp.ok) {
                 originalManifest = await rsp.json()
                 console.log(`Fetched originalManifest for config export: ${originalManifest?.name}`)
               }
@@ -734,12 +839,12 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, PRIVATE_AUTH_ENABLED, PR
         }
 
         // Get current resource and catalog selections (already in simplified format)
-        const currentResources = (() => { 
-          try { return addon.resources ? JSON.parse(addon.resources) : [] } catch { return [] } 
+        const currentResources = (() => {
+          try { return addon.resources ? JSON.parse(addon.resources) : [] } catch { return [] }
         })()
-        
-        const currentCatalogs = (() => { 
-          try { return addon.catalogs ? JSON.parse(addon.catalogs) : [] } catch { return [] } 
+
+        const currentCatalogs = (() => {
+          try { return addon.catalogs ? JSON.parse(addon.catalogs) : [] } catch { return [] }
         })()
 
         // cleanedGroupAddons is only calculated for reference if needed but not exported in main payload
@@ -748,7 +853,7 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, PRIVATE_AUTH_ENABLED, PR
           isEnabled: ga.isEnabled
           // omit groupId, addonId and settings
         }))
-        
+
         return {
           name: addon.name,
           description: addon.description,
@@ -811,8 +916,8 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, PRIVATE_AUTH_ENABLED, PR
             accountSync = rawSync
           }
         }
-      } catch {}
-      
+      } catch { }
+
       // Ensure useCustomFields is included in export (default to true if not present)
       // Migrate old useCustomNames to useCustomFields if present
       if (accountSync && typeof accountSync === 'object') {
@@ -841,44 +946,44 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, PRIVATE_AUTH_ENABLED, PR
   // Export only addons for the logged-in account
   router.get('/addon-export', async (req, res) => {
     try {
-      const whereScope = AUTH_ENABLED ? { accountId: req.appAccountId } : {}
-      if (AUTH_ENABLED && !req.appAccountId) return res.status(401).json({ error: 'Unauthorized' })
+      const whereScope = INSTANCE_TYPE === 'public' ? { accountId: req.appAccountId } : {}
+      if (INSTANCE_TYPE === 'public' && !req.appAccountId) return res.status(401).json({ error: 'Unauthorized' })
       const addons = await prisma.addon.findMany({ where: whereScope })
 
       // Build addon objects with originalManifest and current selections
       const exported = await Promise.all(
         addons.map(async (addon) => {
           const transportUrl = getDecryptedManifestUrl(addon, req)
-          
+
           // Get the original manifest (full, unfiltered)
           let originalManifest = null
           if (addon.originalManifest) {
-            try { 
-              originalManifest = JSON.parse(decrypt(addon.originalManifest, req)) 
+            try {
+              originalManifest = JSON.parse(decrypt(addon.originalManifest, req))
             } catch (e) {
               console.warn(`Failed to decrypt originalManifest for ${addon.name}:`, e.message)
             }
           }
-          
+
           // Fallback: if no originalManifest, try to get from current manifest
           if (!originalManifest && addon.manifest) {
-            try { 
-              originalManifest = JSON.parse(decrypt(addon.manifest, req)) 
+            try {
+              originalManifest = JSON.parse(decrypt(addon.manifest, req))
             } catch (e) {
               console.warn(`Failed to decrypt manifest for ${addon.name}:`, e.message)
             }
           }
-          
+
           // Last resort: fetch from URL if available
           if (!originalManifest && transportUrl) {
-          try {
-            const rsp = await fetch(transportUrl)
-              if (rsp.ok) { 
+            try {
+              const rsp = await fetch(transportUrl)
+              if (rsp.ok) {
                 originalManifest = await rsp.json()
                 console.log(`Fetched originalManifest for export: ${originalManifest?.name}`)
               }
-          } catch (err) {
-            console.warn(`Failed to fetch manifest for ${transportUrl}:`, err?.message)
+            } catch (err) {
+              console.warn(`Failed to fetch manifest for ${transportUrl}:`, err?.message)
             }
           }
 
@@ -901,12 +1006,12 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, PRIVATE_AUTH_ENABLED, PR
           }
 
           // Get current resource and catalog selections (already in simplified format)
-          const currentResources = (() => { 
-            try { return addon.resources ? JSON.parse(addon.resources) : [] } catch { return [] } 
+          const currentResources = (() => {
+            try { return addon.resources ? JSON.parse(addon.resources) : [] } catch { return [] }
           })()
-          
-          const currentCatalogs = (() => { 
-            try { return addon.catalogs ? JSON.parse(addon.catalogs) : [] } catch { return [] } 
+
+          const currentCatalogs = (() => {
+            try { return addon.catalogs ? JSON.parse(addon.catalogs) : [] } catch { return [] }
           })()
 
           return {
@@ -933,7 +1038,7 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, PRIVATE_AUTH_ENABLED, PR
   router.post('/config-import', upload.single('file'), async (req, res) => {
     try {
       console.log('Config import started');
-      if (AUTH_ENABLED && !req.appAccountId) {
+      if (INSTANCE_TYPE === 'public' && !req.appAccountId) {
         return res.status(401).json({ message: 'Authentication required' });
       }
 
@@ -953,7 +1058,7 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, PRIVATE_AUTH_ENABLED, PR
       // Handle both wrapped and direct config formats
       let configData = jsonData.data || jsonData;
       console.log('Config data structure:', Object.keys(configData));
-      
+
       if (!configData || (!configData.users && !configData.addons)) {
         return responseUtils.badRequest(res, 'Invalid config format');
       }
@@ -972,7 +1077,7 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, PRIVATE_AUTH_ENABLED, PR
           if (typeof importedSync === 'string') {
             try { parsedSync = JSON.parse(importedSync) } catch { parsedSync = { enabled: true, frequency: '0' } }
           }
-          
+
           // Ensure useCustomFields is included (default to true if not present for backward compatibility)
           // Migrate old useCustomNames to useCustomFields if present
           if (typeof parsedSync === 'object' && parsedSync !== null) {
@@ -985,7 +1090,7 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, PRIVATE_AUTH_ENABLED, PR
               }
             }
           }
-          
+
           let valueToStore = parsedSync
           if (typeof acct?.sync === 'string') {
             // DB expects string (SQLite)
@@ -1001,7 +1106,7 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, PRIVATE_AUTH_ENABLED, PR
       }
 
       // Import in correct order: groups → addons → users
-      
+
       // 1. Import groups first (always new IDs, defer userIds mapping)
       const importedGroups = [];
       if (groups && Array.isArray(groups)) {
@@ -1014,8 +1119,8 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, PRIVATE_AUTH_ENABLED, PR
               // do not include userIds yet; we will remap after users are created
             }
           });
-          const groupWithAddons = { 
-            ...group, 
+          const groupWithAddons = {
+            ...group,
             addons: Array.isArray(addons) ? addons : [],
             users: Array.isArray(users) ? users : [] // Expect usernames only
           };
@@ -1033,7 +1138,7 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, PRIVATE_AUTH_ENABLED, PR
           try {
             // Get URL from manifestUrl (preferred) or legacy transportUrl
             const transportUrl = addonData.manifestUrl || addonData.transportUrl;
-            
+
             // Validate required fields
             if (!transportUrl) {
               console.warn('Skipping addon with missing URL:', addonData);
@@ -1042,7 +1147,7 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, PRIVATE_AUTH_ENABLED, PR
 
             // Use the new approach: prefer originalManifest from export, fallback to fetching
             let originalManifestObj = addonData.originalManifest || null
-            
+
             // If no originalManifest in export, try to fetch from URL
             if (!originalManifestObj) {
               try {
@@ -1081,18 +1186,35 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, PRIVATE_AUTH_ENABLED, PR
             })
 
             // Get selected resources and catalogs from export data
+            // If export data is empty, derive from originalManifest (select all)
             const selectedResources = (() => {
               const resources = Array.isArray(addonData.resources) ? addonData.resources : []
               // Ensure we only store resource names, not full objects
-              return resources.map(r => {
+              const parsed = resources.map(r => {
                 if (typeof r === 'string') return r
                 if (r && typeof r === 'object' && r.name) return r.name
                 return null
               }).filter(Boolean)
+              // Fallback: if empty, derive all resources from manifest
+              if (parsed.length === 0 && originalManifestObj && Array.isArray(originalManifestObj.resources)) {
+                return originalManifestObj.resources.map(r => typeof r === 'string' ? r : (r && (r.name || r.type))).filter(Boolean)
+              }
+              return parsed
             })()
-            
-            const selectedCatalogs = Array.isArray(addonData.catalogs) ? addonData.catalogs : []
-            
+
+            const selectedCatalogs = (() => {
+              const cats = Array.isArray(addonData.catalogs) ? addonData.catalogs : []
+              // Fallback: if empty, derive all catalogs from manifest
+              if (cats.length === 0 && originalManifestObj && Array.isArray(originalManifestObj.catalogs)) {
+                return originalManifestObj.catalogs.filter(c => c && c.type && c.id).map(c => ({
+                  type: c.type,
+                  id: c.id,
+                  search: c.extra ? c.extra.some(e => e.name === 'search') : false
+                }))
+              }
+              return cats
+            })()
+
             console.log(`Importing ${transportName} with resources:`, selectedResources, 'catalogs:', selectedCatalogs)
 
             // Apply filtering to create the filtered manifest (same logic as AddonDetailModal)
@@ -1111,8 +1233,8 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, PRIVATE_AUTH_ENABLED, PR
               try {
                 // If selectedCatalogs are already simplified (from export), use them directly
                 if (selectedCatalogs.length > 0 && typeof selectedCatalogs[0] === 'object' && selectedCatalogs[0].type && selectedCatalogs[0].id) {
-                  return selectedCatalogs.map(c => ({ 
-                    type: c.type, 
+                  return selectedCatalogs.map(c => ({
+                    type: c.type,
                     id: c.id,
                     search: c.search !== undefined ? c.search : false
                   }))
@@ -1121,17 +1243,17 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, PRIVATE_AUTH_ENABLED, PR
                 if (selectedCatalogs.length > 0 && typeof selectedCatalogs[0] === 'string') {
                   const originalCatalogs = Array.isArray(originalManifestObj?.catalogs) ? originalManifestObj.catalogs : []
                   const processedCatalogs = []
-                  
+
                   for (const id of selectedCatalogs) {
                     const catalog = originalCatalogs.find(c => c.id === id)
                     if (!catalog) continue
-                    
+
                     // Check if catalog has search functionality
                     const hasSearch = catalog?.extra?.some((extra) => extra.name === 'search')
                     const hasOtherExtras = catalog?.extra?.some((extra) => extra.name !== 'search')
                     const isEmbeddedSearch = hasSearch && hasOtherExtras
                     const isStandaloneSearch = hasSearch && !hasOtherExtras
-                    
+
                     if (isStandaloneSearch) {
                       // Standalone search catalog: add with original ID (no suffix)
                       processedCatalogs.push({
@@ -1156,7 +1278,7 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, PRIVATE_AUTH_ENABLED, PR
                       })
                     }
                   }
-                  
+
                   return processedCatalogs
                 }
                 return []
@@ -1275,13 +1397,13 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, PRIVATE_AUTH_ENABLED, PR
               try {
                 const byName = await prisma.addon.findFirst({ where: { accountId: getAccountId(req), name: val }, select: { id: true } })
                 if (byName?.id) resolvedId = byName.id
-              } catch {}
+              } catch { }
               // As a last resort, if val corresponds to an addon id in DB, accept it
               if (!resolvedId) {
                 try {
                   const byId = await prisma.addon.findFirst({ where: { accountId: getAccountId(req), id: val }, select: { id: true } })
                   if (byId?.id) resolvedId = byId.id
-                } catch {}
+                } catch { }
               }
             }
             if (resolvedId) normalizedExcludedIds.push(resolvedId)
@@ -1315,7 +1437,7 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, PRIVATE_AUTH_ENABLED, PR
         if (Array.isArray(g.users) && g.users.length > 0) {
           newUserIds = g.users.map(username => usernameToUserId.get(username)).filter(Boolean)
         }
-        
+
         if (newUserIds.length > 0) {
           try {
             await prisma.group.update({
@@ -1360,7 +1482,7 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, PRIVATE_AUTH_ENABLED, PR
             } else if (addonRef.addon && addonRef.addon.name) {
               resolvedAddonId = exportAddonNameToNewId.get(addonRef.addon.name)
             }
-            
+
             if (resolvedAddonId) {
               if (addedAddonIds.has(resolvedAddonId)) {
                 // Skip duplicates from mixed sources (addonIds + addons arrays)
@@ -1410,7 +1532,7 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, PRIVATE_AUTH_ENABLED, PR
       console.log('Reset endpoint called, prisma available:', !!prisma);
       const accountId = req.appAccountId || 'default';
       console.log('Account ID for reset:', accountId);
-      
+
       await resetAccountData(accountId);
 
       res.json({ message: 'Account data reset successfully' });
@@ -1423,7 +1545,7 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, PRIVATE_AUTH_ENABLED, PR
   // Import addons from JSON file
   router.post('/addon-import', upload.single('file'), async (req, res) => {
     try {
-      if (AUTH_ENABLED && !req.appAccountId) {
+      if (INSTANCE_TYPE === 'public' && !req.appAccountId) {
         return res.status(401).json({ message: 'Unauthorized' })
       }
       // Check if file was uploaded
@@ -1433,7 +1555,7 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, PRIVATE_AUTH_ENABLED, PR
 
       const file = req.file;
       const fileData = file.buffer.toString('utf8');
-      
+
       let importData;
       try {
         importData = JSON.parse(fileData);
@@ -1457,7 +1579,7 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, PRIVATE_AUTH_ENABLED, PR
         try {
           // Get URL from manifestUrl (preferred) or legacy transportUrl
           const transportUrl = addonData.manifestUrl || addonData.transportUrl;
-          
+
           // Validate required fields
           if (!transportUrl) {
             console.warn('Skipping addon with missing URL:', addonData);
@@ -1467,13 +1589,13 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, PRIVATE_AUTH_ENABLED, PR
 
           // Use the new approach: prefer originalManifest from export, fallback to fetching
           let originalManifestObj = addonData.originalManifest || null
-          
+
           // If no originalManifest in export, try to fetch from URL
           if (!originalManifestObj) {
-          try {
-            const resp = await fetch(transportUrl)
-            if (resp.ok) {
-              originalManifestObj = await resp.json()
+            try {
+              const resp = await fetch(transportUrl)
+              if (resp.ok) {
+                originalManifestObj = await resp.json()
                 console.log(`Fetched originalManifest for import: ${originalManifestObj?.name}`)
               }
             } catch (e) {
@@ -1484,9 +1606,9 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, PRIVATE_AUTH_ENABLED, PR
           // Create fallback manifest if nothing else works
           if (!originalManifestObj) {
             originalManifestObj = {
-                id: addonData.name || 'unknown.addon',
-                name: addonData.name || 'Unknown',
-                version: addonData.version || null,
+              id: addonData.name || 'unknown.addon',
+              name: addonData.name || 'Unknown',
+              version: addonData.version || null,
               description: addonData.description || null,
               logo: addonData.iconUrl || null,
               resources: [],
@@ -1511,20 +1633,37 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, PRIVATE_AUTH_ENABLED, PR
                 copyNumber++
               }
             }
-          } catch {}
+          } catch { }
 
           // Get selected resources and catalogs from export data
+          // If export data is empty, derive from originalManifest (select all)
           const selectedResources = (() => {
             const resources = Array.isArray(addonData.resources) ? addonData.resources : []
             // Ensure we only store resource names, not full objects
-            return resources.map(r => {
+            const parsed = resources.map(r => {
               if (typeof r === 'string') return r
               if (r && typeof r === 'object' && r.name) return r.name
               return null
             }).filter(Boolean)
+            // Fallback: if empty, derive all resources from manifest
+            if (parsed.length === 0 && originalManifestObj && Array.isArray(originalManifestObj.resources)) {
+              return originalManifestObj.resources.map(r => typeof r === 'string' ? r : (r && (r.name || r.type))).filter(Boolean)
+            }
+            return parsed
           })()
-          const selectedCatalogs = Array.isArray(addonData.catalogs) ? addonData.catalogs : []
-          
+          const selectedCatalogs = (() => {
+            const cats = Array.isArray(addonData.catalogs) ? addonData.catalogs : []
+            // Fallback: if empty, derive all catalogs from manifest
+            if (cats.length === 0 && originalManifestObj && Array.isArray(originalManifestObj.catalogs)) {
+              return originalManifestObj.catalogs.filter(c => c && c.type && c.id).map(c => ({
+                type: c.type,
+                id: c.id,
+                search: c.extra ? c.extra.some(e => e.name === 'search') : false
+              }))
+            }
+            return cats
+          })()
+
           console.log(`Importing ${transportName} with resources:`, selectedResources, 'catalogs:', selectedCatalogs)
 
           // Apply filtering to create the filtered manifest (same logic as AddonDetailModal)
@@ -1543,8 +1682,8 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, PRIVATE_AUTH_ENABLED, PR
             try {
               // If selectedCatalogs are already simplified (from export), use them directly
               if (selectedCatalogs.length > 0 && typeof selectedCatalogs[0] === 'object' && selectedCatalogs[0].type && selectedCatalogs[0].id) {
-                return selectedCatalogs.map(c => ({ 
-                  type: c.type, 
+                return selectedCatalogs.map(c => ({
+                  type: c.type,
                   id: c.id,
                   search: c.search !== undefined ? c.search : false
                 }))
@@ -1613,8 +1752,8 @@ module.exports = ({ prisma, getAccountId, AUTH_ENABLED, PRIVATE_AUTH_ENABLED, PR
   // Delete the logged-in account and all scoped data
   router.delete('/account', async (req, res) => {
     try {
-      if (!AUTH_ENABLED) return res.status(400).json({ error: 'Auth disabled' })
-      
+      if (INSTANCE_TYPE !== 'public') return res.status(400).json({ error: 'Account deletion only available in public mode' })
+
       if (!req.appAccountId) {
         return res.status(401).json({ message: 'Not authenticated' });
       }

@@ -7,13 +7,13 @@ const { findGroupById } = require('../utils/helpers');
 const { responseUtils, dbUtils } = require('../utils/routeUtils');
 
 // Export a function that returns the router, allowing dependency injection
-module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserToGroup, getDecryptedManifestUrl, manifestUrlHmac, decrypt }) => {
+module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, assignUserToGroup, getDecryptedManifestUrl, manifestUrlHmac, decrypt }) => {
   const router = express.Router();
 
   // Shared helper: reload (advanced mode) then sync all users in a group
   async function syncGroupUsers(groupId, req) {
     // Load group with scoped account
-    const group = await prisma.group.findUnique({
+    const group = await prisma.group.findFirst({
       where: { id: groupId, accountId: getAccountId(req) },
       select: { id: true, userIds: true, name: true }
     })
@@ -85,7 +85,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
     for (const uid of uniqueUserIds) {
       try {
         // Pre-compute current/desired and alreadySynced using the same comparator as the badge
-        const userRec = await prisma.user.findUnique({
+        const userRec = await prisma.user.findFirst({
           where: { id: uid, accountId: getAccountId(req) },
           select: { id: true, stremioAuthKey: true, excludedAddons: true, protectedAddons: true, isActive: true }
         })
@@ -135,7 +135,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
   // Get all groups
   router.get('/', async (req, res) => {
     try {
-      const whereScope = AUTH_ENABLED && req.appAccountId ? { accountId: req.appAccountId } : {}
+      const whereScope = INSTANCE_TYPE === 'public' && req.appAccountId ? { accountId: req.appAccountId } : {}
       const groups = await prisma.group.findMany({
         where: scopedWhere(req, {}),
         include: {
@@ -184,7 +184,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
         restrictions: 'none', // TODO: Implement restrictions logic
         isActive: group.isActive,
         // Expose color index for UI
-          colorIndex: group.colorIndex || 1,
+          colorIndex: group.colorIndex ?? 0,
           // Include userIds for SQLite compatibility
           userIds: group.userIds,
           // Activity visibility - 'public' or 'private'
@@ -210,7 +210,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
 
       // Check if group with same name exists
       const existingGroup = await prisma.group.findFirst({
-        where: { name: name.trim(), ...(AUTH_ENABLED && req.appAccountId ? { accountId: req.appAccountId } : {}) }
+        where: { name: name.trim(), ...(INSTANCE_TYPE === 'public' && req.appAccountId ? { accountId: req.appAccountId } : {}) }
       });
 
       if (existingGroup) {
@@ -221,7 +221,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
         data: {
           name: name.trim(),
           description: description || '',
-          colorIndex: colorIndex || 1,
+          colorIndex: colorIndex ?? 0,
           accountId: getAccountId(req),
         }
       });
@@ -234,7 +234,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
         addons: 0,
         restrictions: 'none',
         isActive: newGroup.isActive,
-        colorIndex: newGroup.colorIndex || 1,
+        colorIndex: newGroup.colorIndex ?? 0,
       });
     } catch (error) {
       console.error('Error creating group:', error);
@@ -252,7 +252,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
       }
 
       // Find the original group
-      const originalGroup = await prisma.group.findUnique({
+      const originalGroup = await prisma.group.findFirst({
         where: { 
           id: originalGroupId,
           accountId: getAccountId(req)
@@ -271,7 +271,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
         data: {
           name: `${originalGroup.name} (Copy)`,
           description: originalGroup.description,
-          colorIndex: originalGroup.colorIndex || 1,
+          colorIndex: originalGroup.colorIndex ?? 0,
           accountId: getAccountId(req),
         }
       });
@@ -300,7 +300,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
           addons: originalGroup.addons?.length || 0,
           restrictions: 'none',
           isActive: clonedGroup.isActive,
-          colorIndex: clonedGroup.colorIndex || 1,
+          colorIndex: clonedGroup.colorIndex ?? 0,
         }
       });
     } catch (error) {
@@ -314,7 +314,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
     try {
       const { id: groupId } = req.params;
       
-      const group = await prisma.group.findUnique({
+      const group = await prisma.group.findFirst({
         where: { 
           id: groupId,
           accountId: getAccountId(req)
@@ -367,7 +367,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
           data: {
             name: name.trim(),
             description: '',
-            colorIndex: 1,
+            colorIndex: 0,
             accountId: getAccountId(req),
           }
         });
@@ -381,7 +381,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
         addons: 0,
         restrictions: 'none',
         isActive: group.isActive,
-        colorIndex: group.colorIndex || 1,
+        colorIndex: group.colorIndex ?? 0,
       });
     } catch (error) {
       console.error('Error finding or creating group:', error);
@@ -440,7 +440,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
         addons: filteredAddonsSorted,
         restrictions: 'none',
         isActive: group.isActive,
-        colorIndex: group.colorIndex || 1,
+        colorIndex: group.colorIndex ?? 0,
         userIds: group.userIds,
         activityVisibility: group.activityVisibility || 'private'
       });
@@ -455,7 +455,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
     const { id } = req.params
     const { name, description, userIds, addonIds, colorIndex, activityVisibility } = req.body
     try {
-      const group = await prisma.group.findUnique({ 
+      const group = await prisma.group.findFirst({ 
         where: { 
           id,
           accountId: getAccountId(req)
@@ -544,7 +544,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
   router.delete('/:id', async (req, res) => {
     try {
       const { id } = req.params
-      const existing = await prisma.group.findUnique({ 
+      const existing = await prisma.group.findFirst({ 
         where: { 
           id,
           accountId: getAccountId(req)
@@ -579,9 +579,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
   // Remove user from group
   router.delete('/:groupId/users/:userId', async (req, res) => {
     try {
-      const { groupId, userId } = req.params
-      
-      const group = await prisma.group.findUnique({
+      const group = await prisma.group.findFirst({
         where: { 
           id: groupId,
           accountId: getAccountId(req)
@@ -608,6 +606,309 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
     }
   });
 
+  // GET /groups/:id/watch-time - Get watch time statistics for a group
+  router.get('/:id/watch-time', async (req, res) => {
+    try {
+      const { id: groupId } = req.params
+      const { period = '30d', startDate: queryStartDate, endDate: queryEndDate } = req.query
+      
+      const accountId = getAccountId(req)
+      const group = await prisma.group.findFirst({
+        where: { id: groupId, accountId },
+        select: { id: true, userIds: true, name: true }
+      })
+
+      if (!group) return responseUtils.notFound(res, 'Group')
+
+      // Resolve userIds
+      let userIds = []
+      try {
+        userIds = Array.isArray(group.userIds) ? group.userIds : JSON.parse(group.userIds || '[]')
+      } catch (e) {
+        console.error('Error parsing group userIds:', e)
+      }
+
+      if (userIds.length === 0) {
+        return res.json({ byDate: [], users: {} })
+      }
+
+      // Calculate date range
+      let start = new Date()
+      let end = new Date()
+      
+      if (queryStartDate && queryEndDate) {
+        start = new Date(queryStartDate)
+        end = new Date(queryEndDate)
+      } else {
+        // Use period logic if no explicit dates
+        switch (period) {
+          case '1h': start.setHours(start.getHours() - 1); break;
+          case '24h': start.setHours(start.getHours() - 24); break;
+          case '7d': start.setDate(start.getDate() - 7); break;
+          case '30d': start.setDate(start.getDate() - 30); break;
+          case '90d': start.setDate(start.getDate() - 90); break;
+          case '1y': start.setFullYear(start.getFullYear() - 1); break;
+          default: start.setDate(start.getDate() - 30);
+        }
+      }
+
+      // Fetch watch activity for all users in group
+      const activities = await prisma.watchActivity.findMany({
+        where: {
+          accountId,
+          userId: { in: userIds },
+          date: {
+            gte: start,
+            lte: end
+          }
+        },
+        select: {
+          date: true,
+          watchTimeSeconds: true,
+          userId: true,
+          itemType: true
+        },
+        orderBy: { date: 'asc' }
+      })
+
+      // Get user details for names/colors
+      const users = await prisma.user.findMany({
+        where: { id: { in: userIds } },
+        select: { id: true, username: true, email: true, colorIndex: true }
+      })
+      const userMap = new Map(users.map(u => [u.id, u]))
+
+      // Aggregate data
+      const byDate = new Map() // date -> { date, totalMinutes, users: { userId: minutes }, userItems: { userId: count }, content: { movies: count, series: count } }
+
+      for (const activity of activities) {
+        const date = new Date(activity.date).toISOString().split('T')[0]
+        if (!byDate.has(date)) {
+          byDate.set(date, { 
+            date, 
+            totalMinutes: 0, 
+            users: {},
+            userItems: {},
+            content: { movies: 0, series: 0 }
+          })
+        }
+
+        const entry = byDate.get(date)
+        const minutes = Math.round((activity.watchTimeSeconds || 0) / 60)
+        
+        entry.totalMinutes += minutes
+        
+        // Per-user watch time
+        if (!entry.users[activity.userId]) entry.users[activity.userId] = 0
+        entry.users[activity.userId] += minutes
+
+        // Per-user item count
+        if (!entry.userItems[activity.userId]) entry.userItems[activity.userId] = 0
+        entry.userItems[activity.userId] += 1
+
+        // Content breakdown (count activities)
+        if (activity.itemType === 'movie') entry.content.movies += 1
+        else if (activity.itemType === 'series') entry.content.series += 1
+      }
+
+      // Format response
+      const result = Array.from(byDate.values()).sort((a, b) => a.date.localeCompare(b.date))
+      
+      // Return user metadata too so frontend can map IDs to names/colors
+      const userMeta = users.reduce((acc, u) => {
+        acc[u.id] = { name: u.username || u.email, colorIndex: u.colorIndex }
+        return acc
+      }, {})
+
+      res.json({
+        byDate: result,
+        users: userMeta
+      })
+
+    } catch (error) {
+      console.error('Error fetching group watch time:', error)
+      res.status(500).json({ message: 'Failed to fetch group watch time', error: error.message })
+    }
+  })
+
+  // Reorder addons in group (by manifest URL order) and sync users
+  router.post('/:id/addons/reorder', async (req, res) => {
+    console.log('🔵 REORDER ENDPOINT HIT:', {
+      groupId: req.params.id,
+      body: req.body,
+      orderedAddonIds: req.body?.orderedAddonIds,
+      orderedManifestUrls: req.body?.orderedManifestUrls
+    })
+    try {
+      const { id: groupId } = req.params
+      const { orderedManifestUrls, orderedAddonIds } = req.body || {}
+
+      // Support both orderedManifestUrls (legacy) and orderedAddonIds (new)
+      const orderedIds = orderedAddonIds || orderedManifestUrls
+      if (!Array.isArray(orderedIds) || orderedIds.length === 0) {
+        return res.status(400).json({ message: 'orderedAddonIds or orderedManifestUrls array is required' })
+      }
+
+      // Ensure group exists and is scoped to the account
+      const group = await prisma.group.findFirst({
+        where: { id: groupId, accountId: getAccountId(req) }
+      })
+      if (!group) return responseUtils.notFound(res, 'Group')
+
+      console.log(`[Reorder] Group found: ${group.name} (${group.id})`)
+
+      // Fetch GroupAddon records separately to be safe
+      const allGroupAddons = await prisma.groupAddon.findMany({
+        where: { groupId },
+        include: { addon: true }
+      })
+      
+      const validGroupAddons = allGroupAddons.filter(ga => ga.addon !== null)
+      console.log(`[Reorder] Found ${allGroupAddons.length} GA records, ${validGroupAddons.length} have valid addons.`)
+      
+      // Build a map of addon ID to GroupAddon record for efficient lookup
+      const addonIdToGroupAddon = new Map()
+      
+      for (const ga of validGroupAddons) {
+        const aId = String(ga.addon.id)
+        const gaId = String(ga.addonId)
+        const recordId = String(ga.id)
+        
+        console.log(`[Reorder] Mapping: Addon=${ga.addon.name}, AddonID=${aId}, GA.addonId=${gaId}, RecordID=${recordId}`)
+        
+        addonIdToGroupAddon.set(aId, ga)
+        addonIdToGroupAddon.set(gaId, ga)
+        addonIdToGroupAddon.set(recordId, ga) // Also map by the GroupAddon record ID just in case
+      }
+      
+      const normalizedOrderedIds = orderedIds.map(id => String(id).trim()).filter(Boolean)
+      console.log(`[Reorder] Target IDs:`, normalizedOrderedIds)
+
+      // Use a transaction for reordering to ensure atomicity
+      await prisma.$transaction(async (tx) => {
+        let pos = 0
+        for (const addonId of normalizedOrderedIds) {
+          console.log(`[Reorder] Processing item ${pos}: ${addonId}`)
+          
+          let ga = addonIdToGroupAddon.get(addonId)
+          
+          // Exhaustive search if not found in map
+          if (!ga) {
+            console.log(`[Reorder] ${addonId} not in map, searching values...`)
+            ga = Array.from(addonIdToGroupAddon.values()).find(g => 
+              String(g.addonId) === addonId || 
+              String(g.addon?.id) === addonId || 
+              String(g.id) === addonId
+            )
+          }
+
+          if (!ga) {
+            const availableIds = Array.from(addonIdToGroupAddon.keys()).join(', ')
+            const errorMsg = `Addon ${addonId} not found in this group. Available IDs: ${availableIds}`
+            console.error(`❌ ${errorMsg}`)
+            const err = new Error(errorMsg)
+            err.code = 'ADDON_NOT_FOUND'
+            throw err
+          }
+
+          console.log(`[Reorder] Updating ${ga.addon.name} (GA:${ga.id}) to position ${pos}`)
+          await tx.groupAddon.update({
+            where: { id: ga.id },
+            data: { position: pos++ }
+          })
+        }
+      })
+
+      // After reordering, sync all users in this group to reflect the new order
+      console.log(`[Reorder] Success. Triggering group sync for ${groupId}`)
+      syncGroupUsers(groupId, req).catch(e => console.error('Post-reorder group sync failed:', e.message))
+
+      res.json({ message: 'Addons reordered successfully', groupId, reorderedCount: orderedIds.length })
+    } catch (error) {
+      console.error('Error reordering addons:', error.message)
+      
+      const isNotFound = error.code === 'P2025' || error.code === 'ADDON_NOT_FOUND' || error.message.includes('not found')
+      const status = isNotFound ? 404 : 500
+      
+      return res.status(status).json({ 
+        message: error.message || 'Failed to reorder addons',
+        error: error.code || 'INTERNAL_ERROR',
+        details: {
+          groupId,
+          orderedIds
+        }
+      })
+    }
+  })
+
+  // Alias route for compatibility: accept either orderedManifestUrls or addonIds
+  router.post('/:id/reorder-addons', async (req, res) => {
+    try {
+      const { id: groupId } = req.params
+      const { orderedManifestUrls, addonIds, orderedAddonIds } = req.body || {}
+      
+      // Use orderedAddonIds first, then orderedManifestUrls, then addonIds
+      const orderedIds = orderedAddonIds || (Array.isArray(orderedManifestUrls) && orderedManifestUrls.length > 0
+        ? orderedManifestUrls
+        : Array.isArray(addonIds) ? addonIds : [])
+      
+      if (!Array.isArray(orderedIds) || orderedIds.length === 0) {
+        return res.status(400).json({ message: 'orderedAddonIds or orderedManifestUrls array is required' })
+      }
+
+      // Ensure group exists and is scoped to the account
+      const group = await prisma.group.findFirst({
+        where: { id: groupId, accountId: getAccountId(req) }
+      })
+      if (!group) return responseUtils.notFound(res, 'Group')
+
+      console.log(`[Reorder-Alias] Group found: ${group.name} (${group.id})`)
+
+      // Fetch GroupAddon records separately
+      const allGroupAddons = await prisma.groupAddon.findMany({
+        where: { groupId },
+        include: { addon: true }
+      })
+      
+      const validGroupAddons = allGroupAddons.filter(ga => ga.addon !== null)
+      
+      // Build lookup map
+      const addonIdToGroupAddon = new Map()
+      for (const ga of validGroupAddons) {
+        addonIdToGroupAddon.set(String(ga.addon.id), ga)
+        addonIdToGroupAddon.set(String(ga.addonId), ga)
+        addonIdToGroupAddon.set(String(ga.id), ga)
+      }
+
+      const normalizedOrderedIds = orderedIds.map(id => String(id).trim()).filter(Boolean)
+
+      // Persist order
+      try {
+        let pos = 0
+        for (const addonId of normalizedOrderedIds) {
+          let ga = addonIdToGroupAddon.get(addonId)
+          if (!ga) {
+            // Exhaustive search
+            ga = Array.from(addonIdToGroupAddon.values()).find(g => 
+              String(g.addonId) === addonId || String(g.addon?.id) === addonId
+            )
+          }
+          
+          if (!ga) continue // Skip missing in alias route for better compatibility
+          
+          await prisma.groupAddon.update({ where: { id: ga.id }, data: { position: pos++ } })
+        }
+      } catch (e) {
+        console.error('[Reorder-Alias] Order persistence failed:', e.message)
+      }
+
+      res.json({ message: 'Addons reordered successfully', groupId, reorderedCount: orderedIds.length })
+    } catch (error) {
+      console.error('[Reorder-Alias] Error reordering addons:', error.message)
+      res.status(500).json({ message: 'Failed to reorder addons', error: error.message })
+    }
+  })
+
   // Add user to group
   router.post('/:groupId/users/:userId', async (req, res) => {
     try {
@@ -621,7 +922,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
       console.error('Error adding user to group:', error)
       res.status(500).json({ message: 'Failed to add user to group', error: error?.message })
     }
-  });
+  })
 
   // Add addon to group
   router.post('/:groupId/addons/:addonId', async (req, res) => {
@@ -629,7 +930,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
       const { groupId, addonId } = req.params
       
       // Check if group exists
-      const group = await prisma.group.findUnique({
+      const group = await prisma.group.findFirst({
         where: { 
           id: groupId,
           accountId: getAccountId(req)
@@ -641,7 +942,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
       }
 
       // Check if addon exists
-      const addon = await prisma.addon.findUnique({
+      const addon = await prisma.addon.findFirst({
         where: { 
           id: addonId,
           accountId: getAccountId(req)
@@ -695,7 +996,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
       const { groupId, addonId } = req.params
       
       // Check if group exists
-      const group = await prisma.group.findUnique({
+      const group = await prisma.group.findFirst({
         where: { 
           id: groupId,
           accountId: getAccountId(req)
@@ -739,7 +1040,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
     try {
       const { id } = req.params
       
-      const group = await prisma.group.findUnique({
+      const group = await prisma.group.findFirst({
         where: { 
           id,
           accountId: getAccountId(req)
@@ -770,7 +1071,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
     try {
       const { id } = req.params
       
-      const group = await prisma.group.findUnique({
+      const group = await prisma.group.findFirst({
         where: { 
           id,
           accountId: getAccountId(req)
@@ -813,7 +1114,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
   router.get('/:id/sync-status', async (req, res) => {
     try {
       const { id } = req.params
-      const group = await prisma.group.findUnique({
+      const group = await prisma.group.findFirst({
         where: { id, accountId: getAccountId(req) },
         include: { addons: { include: { addon: true } } }
       })
@@ -845,186 +1146,6 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
   })
 
   // Reorder addons in group (by manifest URL order) and sync users
-  router.post('/:id/addons/reorder', async (req, res) => {
-    try {
-      const { id: groupId } = req.params
-      const { orderedManifestUrls, orderedAddonIds } = req.body || {}
-
-      // Support both orderedManifestUrls (legacy) and orderedAddonIds (new)
-      const orderedIds = orderedAddonIds || orderedManifestUrls
-      if (!Array.isArray(orderedIds) || orderedIds.length === 0) {
-        return res.status(400).json({ message: 'orderedAddonIds or orderedManifestUrls array is required' })
-      }
-
-      // Ensure group exists and is scoped to the account
-      const group = await prisma.group.findUnique({
-        where: { id: groupId, accountId: getAccountId(req) },
-        include: { addons: { include: { addon: true } } }
-      })
-      if (!group) return responseUtils.notFound(res, 'Group')
-
-      console.log(`Reordering group ${group.name}:`)
-
-      // Validate addon IDs against current addons list
-      const currentAddonIds = new Set((group.addons || []).map(ga => ga.addonId))
-      const invalid = orderedIds.filter(id => !currentAddonIds.has(id))
-      if (invalid.length) {
-        return res.status(400).json({ message: 'Some addon IDs are not in group addons', invalid })
-      }
-
-      // Persist order by storing position Int on GroupAddon
-      try {
-        const addonIdToGroupAddon = new Map()
-        for (const ga of group.addons) {
-          addonIdToGroupAddon.set(ga.addonId, ga)
-        }
-        
-        let pos = 0
-        const oldOrder = []
-        const newOrder = []
-        
-        // Build old order from current positions
-        const sortedByPosition = [...group.addons].sort((a, b) => (a.position || 0) - (b.position || 0))
-        for (const ga of sortedByPosition) {
-          oldOrder.push(ga.addon.name)
-        }
-        
-        // Update positions and build new order
-        for (const addonId of orderedIds) {
-          const ga = addonIdToGroupAddon.get(addonId)
-          if (!ga) continue
-          newOrder.push(ga.addon.name)
-          await prisma.groupAddon.update({ where: { id: ga.id }, data: { position: pos++ } })
-        }
-        
-        console.log('Current order:')
-        oldOrder.forEach(name => console.log(`- ${name}`))
-        console.log('New order:')
-        newOrder.forEach(name => console.log(`- ${name}`))
-      } catch (e) {
-        console.warn('Order persistence failed (position):', e?.message)
-      }
-
-      // Optional: trigger sync for all active users of this group
-      try {
-        const userIds = Array.isArray(group.userIds) ? group.userIds : JSON.parse(group.userIds || '[]')
-        if (Array.isArray(userIds) && userIds.length > 0) {
-          // Fire-and-forget; don’t block response
-          setTimeout(async () => {
-            try {
-              for (const uid of userIds) {
-                // We avoid importing here; just ask users router to sync using default mode
-                await prisma.$executeRaw`SELECT 1` // noop to keep connection alive in some pools
-              }
-            } catch {}
-          }, 0)
-        }
-      } catch {}
-
-      res.json({ message: 'Addons reordered successfully', groupId, reorderedCount: orderedIds.length })
-    } catch (error) {
-      console.error('Error reordering addons:', error)
-      res.status(500).json({ message: 'Failed to reorder addons', error: error?.message })
-    }
-  });
-
-  // Alias route for compatibility: accept either orderedManifestUrls or addonIds
-  router.post('/:id/reorder-addons', async (req, res) => {
-    try {
-      const { id } = req.params
-      const { orderedManifestUrls, addonIds, orderedAddonIds } = req.body || {}
-      
-      // Use orderedAddonIds first, then orderedManifestUrls, then addonIds
-      const urls = orderedAddonIds || (Array.isArray(orderedManifestUrls) && orderedManifestUrls.length > 0
-        ? orderedManifestUrls
-        : Array.isArray(addonIds) ? addonIds : [])
-      
-      if (!Array.isArray(urls) || urls.length === 0) {
-        return res.status(400).json({ message: 'orderedAddonIds or orderedManifestUrls array is required' })
-      }
-
-      const group = await prisma.group.findUnique({
-        where: { id, accountId: getAccountId(req) },
-        include: { addons: { include: { addon: true } } }
-      })
-      if (!group) return responseUtils.notFound(res, 'Group')
-
-      console.log(`Reordering group ${group.name}:`)
-
-      // Detect whether payload items are addon IDs or URLs
-      const looksLikeId = urls[0] && /^[a-zA-Z0-9]+$/.test(urls[0])
-
-      // Validate
-      if (looksLikeId) {
-        const currentAddonIds = new Set((group.addons || []).map(ga => ga.addonId))
-        const invalid = urls.filter(id2 => !currentAddonIds.has(id2))
-        if (invalid.length) {
-          return res.status(400).json({ message: 'Some addon IDs are not in group addons', invalid })
-        }
-      } else {
-      const currentUrls = (group.addons || [])
-        .map(ga => { try { return getDecryptedManifestUrl(ga.addon, req) } catch { return ga.addon?.manifestUrl } })
-        .filter(Boolean)
-        const invalid = urls.filter(u => !currentUrls.includes(u))
-        if (invalid.length) {
-          return res.status(400).json({ message: 'Some URLs are not in group addons', invalid })
-        }
-      }
-
-      // Persist order
-      try {
-        const oldOrder = []
-        const newOrder = []
-        const sortedByPosition = [...group.addons].sort((a, b) => (a.position || 0) - (b.position || 0))
-        for (const ga of sortedByPosition) oldOrder.push(ga.addon.name)
-
-        if (looksLikeId) {
-          const addonIdToGroupAddon = new Map()
-          for (const ga of group.addons) addonIdToGroupAddon.set(ga.addonId, ga)
-          let pos = 0
-          for (const addonId of urls) {
-            const ga = addonIdToGroupAddon.get(addonId)
-            if (!ga) continue
-            newOrder.push(ga.addon.name)
-            await prisma.groupAddon.update({ where: { id: ga.id }, data: { position: pos++ } })
-          }
-        } else {
-          const urlToGroupAddons = new Map()
-        for (const ga of group.addons) {
-          const url = (() => { try { return getDecryptedManifestUrl(ga.addon, req) } catch { return ga.addon?.manifestUrl } })()
-            if (!url) continue
-            if (!urlToGroupAddons.has(url)) urlToGroupAddons.set(url, [])
-            urlToGroupAddons.get(url).push(ga)
-        }
-        let pos = 0
-          const processed = new Set()
-          for (const url of urls) {
-            const list = urlToGroupAddons.get(url) || []
-            for (const ga of list) {
-              if (processed.has(ga.id)) continue
-              newOrder.push(ga.addon.name)
-          await prisma.groupAddon.update({ where: { id: ga.id }, data: { position: pos++ } })
-              processed.add(ga.id)
-              break
-            }
-          }
-        }
-
-        console.log('Current order:')
-        oldOrder.forEach(name => console.log(`- ${name}`))
-        console.log('New order:')
-        newOrder.forEach(name => console.log(`- ${name}`))
-      } catch (e) {
-        console.error('Order persistence failed (position):', e?.message)
-      }
-
-      res.json({ message: 'Addons reordered successfully', groupId: id, reorderedCount: urls.length })
-    } catch (error) {
-      console.error('Error reordering addons (alias):', error)
-      res.status(500).json({ message: 'Failed to reorder addons', error: error?.message })
-    }
-  })
-
   // Simple health probe for groups router
   router.get('/health', (req, res) => {
     return res.json({ ok: true })
@@ -1037,7 +1158,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
       const { excludedAddons } = req.body
       
       // Check if group exists
-      const group = await prisma.group.findUnique({
+      const group = await prisma.group.findFirst({
         where: { 
           id: groupId,
           accountId: getAccountId(req)
@@ -1049,7 +1170,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
       }
 
       // Check if user exists
-      const user = await prisma.user.findUnique({
+      const user = await prisma.user.findFirst({
         where: { 
           id: userId,
           accountId: getAccountId(req)
@@ -1115,7 +1236,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
         return res.status(400).json({ error: 'Invalid activityVisibility value. Must be "public" or "private".' })
       }
 
-      const group = await prisma.group.findUnique({
+      const group = await prisma.group.findFirst({
         where: { 
           id,
           accountId: getAccountId(req)
@@ -1217,7 +1338,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, AUTH_ENABLED, assignUserT
   // Exportable helper to sync one group's users (used by scheduler)
   async function externalSyncGroupUsers(prismaDep, getAccountIdDep, scopedWhereDep, decryptDep, groupId, reqDep) {
     // Load group
-    const group = await prismaDep.group.findUnique({ where: { id: groupId, accountId: getAccountIdDep(reqDep) }, select: { id: true, userIds: true, name: true } })
+    const group = await prismaDep.group.findFirst({ where: { id: groupId, accountId: getAccountIdDep(reqDep) }, select: { id: true, userIds: true, name: true } })
     if (!group) return { error: 'Group not found', groupId }
     // Parse users
     let userIds = []

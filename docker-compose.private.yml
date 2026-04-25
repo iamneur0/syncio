@@ -1,6 +1,11 @@
 services:
   syncio:
-    image: ghcr.io/iamneur0/syncio:private
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        INSTANCE: private
+        NEXT_PUBLIC_API_URL: ''
     environment:
       JWT_SECRET: 'temp-jwt-secret-key'
       ENCRYPTION_KEY: 'temp-encryption-key-32-chars-long'

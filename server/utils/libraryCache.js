@@ -1,6 +1,6 @@
 /**
  * Libraries cache utility - stores user library data for fast queries
- * Organizes files by account ID: CACHE_DIR/account-{accountId}/user-{userId}.json
+ * Organizes files by account ID: CACHE_DIR/account-{accountId}/library-{email}.json
  */
 
 const fs = require('fs')
@@ -32,9 +32,21 @@ function getAccountCacheDir(accountId) {
 
 /**
  * Get cache file path for a user within an account folder
+ * Prefers email-based naming: library-{email}.json
+ * Falls back to user-{userId}.json if email not available
  */
-function getCacheFilePath(accountId, userId) {
+function getCacheFilePath(accountId, user) {
   const accountDir = getAccountCacheDir(accountId)
+  
+  // If user object has email, use it
+  if (user && user.email) {
+    // Sanitize email for filename (replace special chars just in case, though usually fine)
+    const safeEmail = user.email.replace(/[^a-zA-Z0-9@._-]/g, '_')
+    return path.join(accountDir, `library-${safeEmail}.json`)
+  }
+  
+  // Fallback to userId
+  const userId = user && user.id ? user.id : user
   return path.join(accountDir, `user-${userId}.json`)
 }
 
@@ -42,12 +54,23 @@ function getCacheFilePath(accountId, userId) {
  * Read cached library data for a user
  * Cache files are stored as plain arrays (compatible with stremthru restore format)
  * @param {string} accountId - Account ID
- * @param {string} userId - User ID
+ * @param {object|string} user - User object {id, email} or userId string
  * @returns {Array|null} - Cached library array or null
  */
-function getCachedLibrary(accountId, userId) {
+function getCachedLibrary(accountId, user) {
   try {
-    const cachePath = getCacheFilePath(accountId, userId)
+    let cachePath = getCacheFilePath(accountId, user)
+    
+    // If email-based file doesn't exist, try legacy ID-based file
+    if (!fs.existsSync(cachePath) && typeof user === 'object' && user.id && user.email) {
+      const legacyPath = path.join(getAccountCacheDir(accountId), `user-${user.id}.json`)
+      if (fs.existsSync(legacyPath)) {
+        cachePath = legacyPath
+        // Optionally migrate immediately?
+        // Let's just read from it for now. Write will happen on next update.
+      }
+    }
+
     if (!fs.existsSync(cachePath)) {
       return null
     }
@@ -66,14 +89,14 @@ function getCachedLibrary(accountId, userId) {
       try {
         fs.writeFileSync(cachePath, JSON.stringify(parsed.library, null, 2), 'utf8')
       } catch (migrateError) {
-        console.warn(`Failed to migrate cache file for user ${userId} in account ${accountId}:`, migrateError.message)
+        console.warn(`Failed to migrate cache file for user ${user.id || user} in account ${accountId}:`, migrateError.message)
       }
       return parsed.library
     }
 
     return null
   } catch (error) {
-    console.warn(`Failed to read cache for user ${userId} in account ${accountId}:`, error.message)
+    console.warn(`Failed to read cache for user ${user.id || user} in account ${accountId}:`, error.message)
     return null
   }
 }
@@ -81,33 +104,54 @@ function getCachedLibrary(accountId, userId) {
 /**
  * Cache library data for a user
  * @param {string} accountId - Account ID
- * @param {string} userId - User ID
+ * @param {object|string} user - User object {id, email} or userId string
  * @param {Array} library - Library data to cache
  */
-function setCachedLibrary(accountId, userId, library) {
+function setCachedLibrary(accountId, user, library) {
   try {
-    const cachePath = getCacheFilePath(accountId, userId)
+    const cachePath = getCacheFilePath(accountId, user)
+    
     // Store as plain array (compatible with stremthru restore format)
     const data = Array.isArray(library) ? library : []
     fs.writeFileSync(cachePath, JSON.stringify(data, null, 2), 'utf8')
+    
+    // If we successfully wrote a new email-based file, check for and delete the old ID-based file to avoid duplicates
+    if (typeof user === 'object' && user.id && user.email) {
+      const legacyPath = path.join(getAccountCacheDir(accountId), `user-${user.id}.json`)
+      if (fs.existsSync(legacyPath) && legacyPath !== cachePath) {
+        try {
+          fs.unlinkSync(legacyPath)
+        } catch (e) {
+          // Ignore delete error
+        }
+      }
+    }
   } catch (error) {
-    console.warn(`Failed to write cache for user ${userId} in account ${accountId}:`, error.message)
+    console.warn(`Failed to write cache for user ${user.id || user} in account ${accountId}:`, error.message)
   }
 }
 
 /**
  * Clear cache for a user
  * @param {string} accountId - Account ID
- * @param {string} userId - User ID
+ * @param {object|string} user - User object {id, email} or userId string
  */
-function clearCache(accountId, userId) {
+function clearCache(accountId, user) {
   try {
-    const cachePath = getCacheFilePath(accountId, userId)
+    const cachePath = getCacheFilePath(accountId, user)
     if (fs.existsSync(cachePath)) {
       fs.unlinkSync(cachePath)
     }
+    
+    // Also clear legacy file if it exists
+    if (typeof user === 'object' && user.id) {
+        const legacyPath = path.join(getAccountCacheDir(accountId), `user-${user.id}.json`)
+        if (fs.existsSync(legacyPath)) {
+            fs.unlinkSync(legacyPath)
+        }
+    }
   } catch (error) {
-    console.warn(`Failed to clear cache for user ${userId} in account ${accountId}:`, error.message)
+    console.warn(`Failed to clear cache for user ${user.id || user} in account ${accountId}:`, error.message)
   }
 }
 
@@ -124,7 +168,7 @@ function clearAllCaches(accountId) {
       if (fs.existsSync(accountDir)) {
         const files = fs.readdirSync(accountDir)
         files.forEach(file => {
-          if (file.startsWith('user-') && file.endsWith('.json')) {
+          if (file.endsWith('.json')) { // Clear all json files (both user- and library-)
             try {
               fs.unlinkSync(path.join(accountDir, file))
             } catch (error) {
@@ -141,7 +185,7 @@ function clearAllCaches(accountId) {
           const accountDir = path.join(CACHE_DIR, accountFolder)
           const files = fs.readdirSync(accountDir)
           files.forEach(file => {
-            if (file.startsWith('user-') && file.endsWith('.json')) {
+            if (file.endsWith('.json')) {
               try {
                 fs.unlinkSync(path.join(accountDir, file))
               } catch (error) {
@@ -160,23 +204,25 @@ function clearAllCaches(accountId) {
 /**
  * Load cached libraries for multiple users within an account
  * @param {string} accountId - Account ID
- * @param {string[]} userIds - Array of user IDs
+ * @param {Array<object|string>} users - Array of user objects or IDs
  * @returns {Map<string, Array>} - Map of userId -> library array
  */
-function getAllCachedLibraries(accountId, userIds) {
+function getAllCachedLibraries(accountId, users) {
   const result = new Map()
-  if (!Array.isArray(userIds) || userIds.length === 0) {
+  if (!Array.isArray(users) || users.length === 0) {
     return result
   }
   
-  for (const userId of userIds) {
+  for (const user of users) {
     try {
-      const library = getCachedLibrary(accountId, userId)
+      const library = getCachedLibrary(accountId, user)
       if (library && Array.isArray(library) && library.length > 0) {
+        const userId = typeof user === 'object' ? user.id : user
         result.set(userId, library)
       }
     } catch (error) {
       // Skip users with invalid cache
+      const userId = typeof user === 'object' ? user.id : user
       console.warn(`Failed to load cache for user ${userId} in account ${accountId}:`, error.message)
     }
   }
@@ -199,7 +245,7 @@ function getCacheStats(accountId) {
       const accountDir = path.join(CACHE_DIR, `account-${accountId}`)
       if (fs.existsSync(accountDir)) {
         const files = fs.readdirSync(accountDir)
-        cacheFiles = files.filter(f => f.startsWith('user-') && f.endsWith('.json'))
+        cacheFiles = files.filter(f => f.endsWith('.json'))
           .map(f => path.join(accountDir, f))
       }
     } else {
@@ -209,7 +255,7 @@ function getCacheStats(accountId) {
         if (accountFolder.startsWith('account-')) {
           const accountDir = path.join(CACHE_DIR, accountFolder)
           const files = fs.readdirSync(accountDir)
-          cacheFiles.push(...files.filter(f => f.startsWith('user-') && f.endsWith('.json'))
+          cacheFiles.push(...files.filter(f => f.endsWith('.json'))
             .map(f => path.join(accountDir, f)))
         }
       })
@@ -253,3 +299,4 @@ module.exports = {
   getCacheStats,
   CACHE_TTL_MS
 }
+

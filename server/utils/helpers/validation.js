@@ -93,8 +93,8 @@ function hasPermission(user, requiredPermission) {
 /**
  * Validate account context for authenticated requests
  */
-function validateAccountContext(req, AUTH_ENABLED) {
-  if (AUTH_ENABLED && !req.appAccountId) {
+function validateAccountContext(req, isPublicInstance) {
+  if (isPublicInstance && !req.appAccountId) {
     return {
       isValid: false,
       error: 'Unauthorized - missing account context'

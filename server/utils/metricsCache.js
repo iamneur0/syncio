@@ -3,7 +3,7 @@
 // and read by both /users/metrics and /ext/metrics.json routes.
 
 const metricsCache = new Map()
-const METRICS_TTL_MS = 60 * 1000 // 1 minute TTL for cached metrics
+const METRICS_TTL_MS = 5 * 60 * 1000 // 5 minute TTL for cached metrics
 
 function makeKey(accountId, period) {
   return `${accountId || 'default'}::${period || '30d'}`

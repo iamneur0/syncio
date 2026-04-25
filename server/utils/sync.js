@@ -75,7 +75,7 @@ async function getUserAddons(user, req, { decrypt, StremioAPIClient }) {
 /**
  * Get desired addons for a user (group addons + protected addons from Stremio)
  */
-async function getDesiredAddons(user, req, { prisma, getAccountId, decrypt, parseAddonIds, parseProtectedAddons, canonicalizeManifestUrl, StremioAPIClient, unsafeMode = false, useCustomFields = true }) {
+async function getDesiredAddons(user, req, { prisma, getAccountId, decrypt, parseAddonIds, parseProtectedAddons, canonicalizeManifestUrl, StremioAPIClient, unsafeMode = false, useCustomFields = true, _prefetchedUserAddons = null }) {
   try {
     // Get group addons
     const groups = await prisma.group.findMany({
@@ -98,21 +98,27 @@ async function getDesiredAddons(user, req, { prisma, getAccountId, decrypt, pars
     // groupAddons are returned in collection shape: { transportUrl, transportName, manifest }
     const groupAddons = groups.length > 0 ? await getGroupAddons(prisma, groups[0].id, req) : []
 
-    // Get user's Stremio addons
-    const { success, addons: userAddonsResponse, error } = await getUserAddons(user, req, { decrypt, StremioAPIClient })
-    if (!success) {
-      return { success: false, addons: [], error }
-    }
-    
-    // Extract the addons array from the complete response (collection shape)
-    // Ensure we always get an array, even if the response structure is unexpected
+    // Use prefetched user addons if provided, otherwise fetch from Stremio
+    // This avoids making duplicate API calls which can return inconsistent results
     let userAddons = []
-    if (Array.isArray(userAddonsResponse)) {
-      userAddons = userAddonsResponse
-    } else if (userAddonsResponse && typeof userAddonsResponse === 'object') {
-      // Handle collection shape: { addons: [...] }
-      if (Array.isArray(userAddonsResponse.addons)) {
-        userAddons = userAddonsResponse.addons
+    if (_prefetchedUserAddons && Array.isArray(_prefetchedUserAddons)) {
+      userAddons = _prefetchedUserAddons
+    } else {
+      // Get user's Stremio addons
+      const { success, addons: userAddonsResponse, error } = await getUserAddons(user, req, { decrypt, StremioAPIClient })
+      if (!success) {
+        return { success: false, addons: [], error }
+      }
+      
+      // Extract the addons array from the complete response (collection shape)
+      // Ensure we always get an array, even if the response structure is unexpected
+      if (Array.isArray(userAddonsResponse)) {
+        userAddons = userAddonsResponse
+      } else if (userAddonsResponse && typeof userAddonsResponse === 'object') {
+        // Handle collection shape: { addons: [...] }
+        if (Array.isArray(userAddonsResponse.addons)) {
+          userAddons = userAddonsResponse.addons
+        }
       }
     }
 
@@ -265,7 +271,7 @@ function createGetUserSyncStatus({ prisma, getAccountId, decrypt, parseAddonIds,
   }
 
   return async function getUserSyncStatus(userId, { groupId = undefined, unsafe = false } = {}, req) {
-    const user = await prisma.user.findUnique({
+    const user = await prisma.user.findFirst({
       where: { id: userId, accountId: getAccountId(req) },
       select: { id: true, stremioAuthKey: true, isActive: true, excludedAddons: true, protectedAddons: true }
     })
@@ -275,7 +281,7 @@ function createGetUserSyncStatus({ prisma, getAccountId, decrypt, parseAddonIds,
     // Derive unsafe and useCustomFields from DB-backed account sync (single source of truth)
     let useCustomFields = true
     try {
-      const acc = await prisma.appAccount.findUnique({ where: { id: getAccountId(req) }, select: { sync: true } })
+      const acc = await prisma.appAccount.findFirst({ where: { id: getAccountId(req) }, select: { sync: true } })
       let cfg = acc?.sync
       if (typeof cfg === 'string') { try { cfg = JSON.parse(cfg) } catch { cfg = null } }
       if (cfg && typeof cfg === 'object') {
@@ -320,6 +326,8 @@ function createGetUserSyncStatus({ prisma, getAccountId, decrypt, parseAddonIds,
     }
 
     // Get desired addons (group addons + protected addons)
+    // IMPORTANT: Pass the already-fetched userAddons to avoid making a second Stremio API call
+    // Making two separate calls can return different results due to race conditions, causing inconsistent sync status
     const { success: desiredAddonsSuccess, addons: desiredAddons, error: desiredAddonsError } = await getDesiredAddons(user, req, {
       prisma,
       getAccountId,
@@ -329,7 +337,8 @@ function createGetUserSyncStatus({ prisma, getAccountId, decrypt, parseAddonIds,
       canonicalizeManifestUrl,
       StremioAPIClient,
       unsafeMode: unsafe,
-      useCustomFields
+      useCustomFields,
+      _prefetchedUserAddons: userAddons
     })
     if (!desiredAddonsSuccess) {
       return { isSynced: false, status: 'error', message: desiredAddonsError }
@@ -356,7 +365,7 @@ function createGetGroupSyncStatus(deps) {
   const getUserSyncStatus = createGetUserSyncStatus(deps)
   const { prisma, getAccountId } = deps
   return async function getGroupSyncStatus(groupId, req) {
-    const group = await prisma.group.findUnique({ where: { id: groupId, accountId: getAccountId(req) } })
+    const group = await prisma.group.findFirst({ where: { id: groupId, accountId: getAccountId(req) } })
     if (!group) return { error: 'Group not found' }
     let userIds = []
     try { userIds = Array.isArray(group.userIds) ? group.userIds : JSON.parse(group.userIds || '[]') } catch {}
@@ -386,8 +395,8 @@ async function computeUserSyncPlan(user, req, { prisma, getAccountId, decrypt, p
   const currentRes = await getUserAddons(user, req, { decrypt, StremioAPIClient })
   if (!currentRes.success) return { success: false, error: currentRes.error, alreadySynced: false, current: [], desired: [] }
   const current = currentRes.addons?.addons || currentRes.addons || []
-  // 2) Desired
-  const desiredRes = await getDesiredAddons(user, req, { prisma, getAccountId, decrypt, parseAddonIds, parseProtectedAddons, canonicalizeManifestUrl, StremioAPIClient, unsafeMode, useCustomFields: useCustomFieldsValue })
+  // 2) Desired - pass prefetched current addons to avoid duplicate Stremio API calls
+  const desiredRes = await getDesiredAddons(user, req, { prisma, getAccountId, decrypt, parseAddonIds, parseProtectedAddons, canonicalizeManifestUrl, StremioAPIClient, unsafeMode, useCustomFields: useCustomFieldsValue, _prefetchedUserAddons: current })
   if (!desiredRes.success) return { success: false, error: desiredRes.error, alreadySynced: false, current, desired: [] }
   const desired = desiredRes.addons || []
   
@@ -399,6 +408,20 @@ async function computeUserSyncPlan(user, req, { prisma, getAccountId, decrypt, p
   const bKeys = desired.map(fingerprint)
   const alreadySynced = aKeys.length === bKeys.length && aKeys.every((k, i) => k === bKeys[i])
   return { success: true, alreadySynced, current, desired }
+}
+
+// Helper to recursively sort object keys for stable JSON serialization
+// This ensures JSON.stringify always produces the same output for equivalent objects
+function sortObjectKeys(obj) {
+  if (obj === null || obj === undefined) return obj
+  if (Array.isArray(obj)) return obj.map(sortObjectKeys)
+  if (typeof obj !== 'object') return obj
+  
+  const sorted = {}
+  Object.keys(obj).sort().forEach(key => {
+    sorted[key] = sortObjectKeys(obj[key])
+  })
+  return sorted
 }
 
 // Build a stable fingerprint for an addon entry based on its manifest and canonical URL
@@ -417,6 +440,7 @@ function createManifestFingerprint(canonicalizeManifestUrl) {
       
       // Sort arrays that should be order-independent for comparison
       if (Array.isArray(normalized.catalogs)) {
+        // Sort catalogs by type+id for consistent comparison
         normalized.catalogs = normalized.catalogs
           .map(c => ({ type: c?.type, id: c?.id, name: c?.name, extra: c?.extra, extraSupported: c?.extraSupported }))
           .sort((a, b) => String(a.type + a.id).localeCompare(String(b.type + b.id)))
@@ -438,10 +462,31 @@ function createManifestFingerprint(canonicalizeManifestUrl) {
   }
   
   return (addon) => {
-    const url = normalizeUrl(addon?.transportUrl || addon?.manifestUrl || addon?.url || '')
+    // Extract just the addon ID from the URL path (e.g., /stremio/b2341edd-01be-4317-97b0-ba7afb1e1326/...)
+    // The URL may contain encrypted tokens that change on each request, so we can't use the full URL
+    let url = addon?.transportUrl || addon?.manifestUrl || addon?.url || ''
+    try {
+      const urlObj = new URL(url)
+      const pathParts = urlObj.pathname.split('/').filter(Boolean) // split and remove empty
+      // Find the addon ID (UUID format: 8-4-4-4-12)
+      const uuidMatch = pathParts.find(part => /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}/i.test(part))
+      if (uuidMatch) {
+        url = uuidMatch
+      } else if (pathParts.length > 0) {
+        // Use the last path segment as identifier
+        url = pathParts[pathParts.length - 1]
+      } else {
+        url = normalizeUrl(url)
+      }
+    } catch {
+      url = normalizeUrl(url)
+    }
+    
     const manifestNorm = normalizeManifest(addon?.manifest || addon)
+    // Sort object keys recursively for stable JSON serialization
+    const stableManifest = sortObjectKeys(manifestNorm)
     // Compare entire manifest - this catches all changes including name, description, and any other fields
-    return url + '|' + JSON.stringify(manifestNorm)
+    return url + '|' + JSON.stringify(stableManifest)
   }
 }
 
@@ -451,6 +496,7 @@ module.exports = {
   createGetUserSyncStatus,
   createGetGroupSyncStatus,
   computeUserSyncPlan,
+  createManifestFingerprint,
 }
 
 

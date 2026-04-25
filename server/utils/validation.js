@@ -94,6 +94,9 @@ function filterManifestByResources(manifestObj, selectedResourceNames) {
       .map((r) => (typeof r === 'string' ? r : (r && (r.name || r.type))))
       .filter(Boolean)
   )
+  console.log('🔍 FILTER DEBUG: selectedNames:', Array.from(selectedNames))
+  console.log('🔍 FILTER DEBUG: has catalog?', selectedNames.has('catalog'))
+  console.log('🔍 FILTER DEBUG: original catalogs count:', manifestObj?.catalogs?.length || 0)
   const clone = JSON.parse(JSON.stringify(manifestObj))
   if (Array.isArray(clone.resources)) {
     clone.resources = clone.resources.filter((r) => {
@@ -101,86 +104,74 @@ function filterManifestByResources(manifestObj, selectedResourceNames) {
       return label && selectedNames.has(label)
     })
   }
-  if (!selectedNames.has('catalog')) clone.catalogs = []
+  if (!selectedNames.has('catalog')) {
+    console.log('🔍 FILTER DEBUG: CLEARING CATALOGS because catalog not in selectedNames')
+    clone.catalogs = []
+  }
   if (!selectedNames.has('addon_catalog')) clone.addonCatalogs = []
+  console.log('🔍 FILTER DEBUG: final catalogs count:', clone?.catalogs?.length || 0)
   return clone
 }
 
 function filterManifestByCatalogs(manifestObj, selectedCatalogIds) {
   if (!manifestObj || typeof manifestObj !== 'object') return null
-  
-  // Parse selected catalog tuples: (type, id, search)
-  const selectedCatalogs = new Map()
-  
-  if (Array.isArray(selectedCatalogIds)) {
-    selectedCatalogIds.forEach(catalog => {
-      if (Array.isArray(catalog) && catalog.length >= 2) {
-        // Format: [type, id, search] where search is optional (defaults to false)
-        const [type, id, search = false] = catalog
-        const catalogKey = `${id}:${type}`
-        selectedCatalogs.set(catalogKey, { type, id, search })
-      } else if (typeof catalog === 'string') {
-        // Legacy string format - assume no search
-        selectedCatalogs.set(catalog, { type: 'unknown', id: catalog, search: false })
-      } else if (catalog && catalog.id) {
-        // Database object format: { type, id, search }
-        const catalogKey = `${catalog.id}:${catalog.type || 'unknown'}`
-        selectedCatalogs.set(catalogKey, { 
-          type: catalog.type || 'unknown', 
-          id: catalog.id, 
-          search: catalog.search || false 
-        })
-      }
-    })
-  }
-  
+  if (!Array.isArray(manifestObj.catalogs)) return manifestObj
+
   const clone = JSON.parse(JSON.stringify(manifestObj))
-  if (Array.isArray(clone.catalogs)) {
-    clone.catalogs = clone.catalogs.filter((catalog) => {
-      const catalogId = typeof catalog === 'string' ? catalog : (catalog && catalog.id)
-      const catalogType = typeof catalog === 'string' ? 'unknown' : (catalog && catalog.type) || 'unknown'
-      const catalogKey = `${catalogId}:${catalogType}`
-      
-      // Check if this catalog is selected
-      const selectedCatalog = selectedCatalogs.get(catalogKey)
-      // catalog selection debug removed (noise)
-      if (!selectedCatalog) return false
-      
-      // If this catalog has search functionality, check if search is enabled
-      if (catalog.extra && Array.isArray(catalog.extra)) {
-        const hasSearch = catalog.extra.some((extra) => extra.name === 'search')
-        const hasOtherExtras = catalog.extra.some((extra) => extra.name !== 'search')
-        const isEmbeddedSearch = hasSearch && hasOtherExtras
+  const originalCatalogs = manifestObj.catalogs
+  const orderedCatalogs = []
+
+  if (Array.isArray(selectedCatalogIds)) {
+    selectedCatalogIds.forEach(selected => {
+      // Normalize selected entry
+      let sType, sId, sSearch = false
+      if (Array.isArray(selected) && selected.length >= 2) {
+        // Format: [type, id, search]
+        sType = selected[0]
+        sId = selected[1]
+        sSearch = selected[2] !== undefined ? selected[2] : false
+      } else if (typeof selected === 'string') {
+        // Legacy string format
+        sId = selected
+        sType = 'unknown'
+      } else if (selected && selected.id) {
+        // Database object format: { type, id, search }
+        sId = selected.id
+        sType = selected.type || 'unknown'
+        sSearch = selected.search || false
+      }
+
+      if (!sId) return
+
+      // Find matching catalog in original manifest
+      const match = originalCatalogs.find(c => {
+        const cId = typeof c === 'string' ? c : (c && c.id)
+        const cType = typeof c === 'string' ? 'unknown' : (c && c.type) || 'unknown'
+        return cId === sId && (sType === 'unknown' || cType === sType)
+      })
+
+      if (match) {
+        const catalogClone = JSON.parse(JSON.stringify(match))
         
-        if (isEmbeddedSearch) {
-          // For embedded search catalogs, check if search is enabled in the tuple
-          // embedded search selection debug removed
+        // If this catalog has search functionality, check if search is enabled
+        if (catalogClone.extra && Array.isArray(catalogClone.extra)) {
+          const hasSearch = catalogClone.extra.some((extra) => extra.name === 'search')
           
-          if (!selectedCatalog.search) {
+          if (hasSearch && !sSearch) {
             // Remove search functionality from this catalog
-            // removing search flag (no log)
-            // Only remove the extra object with name: "search", keep extraSupported intact
-            catalog.extra = catalog.extra.filter((extra) => extra.name !== 'search')
-            // Don't modify extraSupported - keep it as is
-          } else {
-          // keep search
-          }
-        } else if (hasSearch && !hasOtherExtras) {
-          // For standalone search catalogs, check if search is enabled
-          // standalone search selection
-          
-          if (!selectedCatalog.search) {
-            // Remove search functionality from this catalog (silent)
-            catalog.extra = catalog.extra.filter((extra) => extra.name !== 'search')
-          } else {
-            // keep search for standalone
+            catalogClone.extra = catalogClone.extra.filter((extra) => extra.name !== 'search')
           }
         }
+        
+        orderedCatalogs.push(catalogClone)
       }
-      
-      return true
     })
+  } else {
+    // If no selections provided, return manifest as-is
+    return manifestObj
   }
+
+  clone.catalogs = orderedCatalogs
   return clone
 }
 

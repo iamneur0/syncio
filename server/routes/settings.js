@@ -6,7 +6,7 @@ const { decrypt, encrypt } = require('../utils/encryption')
 const { DEFAULT_ACCOUNT_ID, DEFAULT_ACCOUNT_UUID } = require('../utils/config')
 const { postDiscord } = require('../utils/notify')
 
-module.exports = ({ prisma, AUTH_ENABLED, getAccountDek, getDecryptedManifestUrl, getAccountId }) => {
+module.exports = ({ prisma, INSTANCE_TYPE, getAccountDek, getDecryptedManifestUrl, getAccountId }) => {
   const router = express.Router();
 
   const ensureDefaultAccount = async () => {
@@ -47,7 +47,7 @@ module.exports = ({ prisma, AUTH_ENABLED, getAccountDek, getDecryptedManifestUrl
 
   router.get('/account-info', async (req, res) => {
     try {
-      if (!AUTH_ENABLED) {
+      if (INSTANCE_TYPE !== 'public') {
         const account = await ensureDefaultAccount()
         return res.json({
           id: DEFAULT_ACCOUNT_ID,
@@ -70,7 +70,7 @@ module.exports = ({ prisma, AUTH_ENABLED, getAccountDek, getDecryptedManifestUrl
   })
 
   // Backup settings endpoints - only available in private mode
-  if (!AUTH_ENABLED) {
+  if (INSTANCE_TYPE !== 'public') {
     // Use centralized backup utilities
     const { 
       ensureBackupDir, 
@@ -119,6 +119,49 @@ module.exports = ({ prisma, AUTH_ENABLED, getAccountDek, getDecryptedManifestUrl
     })
   }
 
+  // Backup frequency endpoints - available in all modes (public returns disabled)
+  router.get('/backup-frequency', async (req, res) => {
+    try {
+      if (INSTANCE_TYPE === 'public') {
+        // Backups are not supported in public mode
+        return res.json({ days: 0 })
+      }
+      const { readBackupFrequencyDays } = require('../utils/backup')
+      return res.json({ days: readBackupFrequencyDays() })
+    } catch {
+      return res.status(500).json({ message: 'Failed to read backup frequency' })
+    }
+  })
+
+  router.put('/backup-frequency', async (req, res) => {
+    try {
+      if (INSTANCE_TYPE === 'public') {
+        return res.status(403).json({ message: 'Backups are not available in public mode' })
+      }
+      const { writeBackupFrequencyDays, scheduleBackups } = require('../utils/backup')
+      const days = Number(req.body?.days || 0)
+      if (!Number.isFinite(days) || days < 0) return res.status(400).json({ message: 'Invalid days' })
+      writeBackupFrequencyDays(days)
+      scheduleBackups(days)
+      return res.json({ message: 'Backup frequency updated', days })
+    } catch {
+      return res.status(500).json({ message: 'Failed to update backup frequency' })
+    }
+  })
+
+  router.post('/backup-now', async (req, res) => {
+    try {
+      if (INSTANCE_TYPE === 'public') {
+        return res.status(403).json({ message: 'Backups are not available in public mode' })
+      }
+      const { performBackupOnce } = require('../utils/backup')
+      await performBackupOnce()
+      return res.json({ message: 'Backup started' })
+    } catch {
+      return res.status(500).json({ message: 'Failed to start backup' })
+    }
+  })
+
   // Sync settings endpoints - available in all modes
   const { 
     readSyncFrequencyMinutes,
@@ -130,7 +173,7 @@ module.exports = ({ prisma, AUTH_ENABLED, getAccountDek, getDecryptedManifestUrl
   // Per-account sync settings (AUTH mode)
   router.get('/account-sync', async (req, res) => {
     try {
-      if (!AUTH_ENABLED) {
+      if (INSTANCE_TYPE !== 'public') {
         const account = await ensureDefaultAccount()
         let syncCfg = account?.sync
         if (syncCfg && typeof syncCfg === 'string') {
@@ -180,7 +223,7 @@ module.exports = ({ prisma, AUTH_ENABLED, getAccountDek, getDecryptedManifestUrl
       const { enabled, frequency, mode, unsafe, safe, webhookUrl, useCustomFields, useCustomNames } = req.body || {}
       // Support both useCustomFields (new) and useCustomNames (old) for backward compatibility
       const useCustomFieldsValue = useCustomFields !== undefined ? useCustomFields : useCustomNames
-      if (!AUTH_ENABLED) {
+      if (INSTANCE_TYPE !== 'public') {
         await ensureDefaultAccount()
         const safeMinutes = (() => {
           if (frequency === undefined || frequency === null) return null
@@ -300,7 +343,7 @@ module.exports = ({ prisma, AUTH_ENABLED, getAccountDek, getDecryptedManifestUrl
       }
 
       if (!targetUrl) {
-        if (AUTH_ENABLED) {
+        if (INSTANCE_TYPE === 'public') {
           if (!req.appAccountId) {
             return res.status(401).json({ message: 'Unauthorized' })
           }
@@ -331,9 +374,9 @@ module.exports = ({ prisma, AUTH_ENABLED, getAccountDek, getDecryptedManifestUrl
       const decrypt = require('../utils/encryption').decrypt;
       
       const schedulerReq = {
-        appAccountId: AUTH_ENABLED ? req.appAccountId : DEFAULT_ACCOUNT_ID
+        appAccountId: INSTANCE_TYPE === 'public' ? req.appAccountId : DEFAULT_ACCOUNT_ID
       };
-      const result = await performSyncOnce(prisma, getAccountId, scopedWhere, decrypt, reloadGroupAddons, schedulerReq, AUTH_ENABLED)
+      const result = await performSyncOnce(prisma, getAccountId, scopedWhere, decrypt, reloadGroupAddons, schedulerReq, INSTANCE_TYPE)
       return res.json({ message: 'Sync started', result })
     } catch (e) {
       return res.status(500).json({ message: 'Failed to start sync', error: e?.message })
@@ -397,12 +440,12 @@ module.exports = ({ prisma, AUTH_ENABLED, getAccountDek, getDecryptedManifestUrl
   // Scopes to current account when AUTH is enabled
   router.post('/repair-addons', async (req, res) => {
     try {
-      const whereScope = AUTH_ENABLED && req.appAccountId ? { accountId: req.appAccountId } : {}
+      const whereScope = INSTANCE_TYPE === 'public' && req.appAccountId ? { accountId: req.appAccountId } : {}
       const addons = await prisma.addon.findMany({ where: whereScope })
       const { repairAddonsList } = require('../utils/repair')
       const result = await repairAddonsList({
         prisma,
-        AUTH_ENABLED,
+        INSTANCE_TYPE,
         getAccountDek,
         getDecryptedManifestUrl,
         filterManifestByResources: require('../utils/stremio').filterManifestByResources,
@@ -416,6 +459,66 @@ module.exports = ({ prisma, AUTH_ENABLED, getAccountDek, getDecryptedManifestUrl
       return res.status(500).json({ message: 'Failed to repair addons', error: e?.message })
     }
   })
+
+  // Addon health check settings endpoints
+  const { 
+    getHealthCheckIntervalMinutes,
+    triggerManualHealthCheck 
+  } = require('../utils/addonHealthCheck');
+
+  // Get health check interval setting
+  router.get('/addon-health-check', async (req, res) => {
+    try {
+      const intervalMinutes = getHealthCheckIntervalMinutes();
+      return res.json({ 
+        enabled: intervalMinutes >= 1,
+        intervalMinutes 
+      });
+    } catch (e) {
+      return res.status(500).json({ message: 'Failed to read health check settings' });
+    }
+  });
+
+  // Update health check interval (requires restart to take effect)
+  router.put('/addon-health-check', async (req, res) => {
+    try {
+      const { intervalMinutes } = req.body || {};
+      
+      if (intervalMinutes === undefined) {
+        return res.status(400).json({ message: 'intervalMinutes is required' });
+      }
+      
+      const parsed = parseInt(intervalMinutes, 10);
+      if (isNaN(parsed) || parsed < 0) {
+        return res.status(400).json({ message: 'Invalid intervalMinutes value' });
+      }
+      
+      // Store in environment variable for now
+      // In production, this would ideally be stored in the database
+      process.env.ADDON_HEALTH_CHECK_INTERVAL_MINUTES = String(parsed);
+      
+      return res.json({ 
+        message: 'Health check interval updated. Restart server to apply changes.',
+        intervalMinutes: parsed,
+        enabled: parsed >= 1
+      });
+    } catch (e) {
+      return res.status(500).json({ message: 'Failed to update health check settings', error: e?.message });
+    }
+  });
+
+  // Trigger manual health check
+  router.post('/addon-health-check/now', async (req, res) => {
+    try {
+      // Run in background
+      const accountId = INSTANCE_TYPE === 'public' ? req.appAccountId : DEFAULT_ACCOUNT_ID;
+      triggerManualHealthCheck(prisma, accountId);
+      
+      return res.json({ message: 'Health check started' });
+    } catch (e) {
+      return res.status(500).json({ message: 'Failed to start health check', error: e?.message });
+    }
+  });
 
   return router;
 };

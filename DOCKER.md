@@ -55,13 +55,13 @@ make prod
 docker-compose up -d
 
 # Run migrations
-docker-compose exec app npx prisma migrate deploy
+docker-compose exec app bunx prisma migrate deploy
 ```
 
 ## 🔧 How It Works
 
 ### Build Process
-1. **Dependencies Stage**: Installs all npm dependencies for both frontend and backend
+1. **Dependencies Stage**: Installs all bun dependencies for both frontend and backend
 2. **Build Stage**: Builds the Next.js frontend and generates Prisma client
 3. **Production Stage**: Creates optimized runtime image with both services
 
@@ -130,8 +130,8 @@ docker-compose -f docker-compose.dev.yml logs -f app
 docker-compose exec app sh
 
 # Run database commands
-docker-compose exec app npx prisma studio
-docker-compose exec app npx prisma migrate status
+docker-compose exec app bunx prisma studio
+docker-compose exec app bunx prisma migrate status
 
 # Check processes
 docker-compose exec app ps aux
@@ -172,10 +172,8 @@ NEXT_PUBLIC_API_URL=http://localhost:3001/api
 ```yaml
 volumes:
   - ./server:/app/server              # Backend hot reload
-  - ./client/src:/app/client/src      # Frontend hot reload
   - ./prisma:/app/prisma              # Database schema
   - /app/node_modules                 # Preserve dependencies
-  - /app/client/node_modules          # Preserve dependencies
 ```
 
 ## 🚀 Deployment
@@ -199,24 +197,5 @@ docker build -t syncio .
 docker-compose up -d
 
 # 3. Run migrations
-docker-compose exec app npx prisma migrate deploy
+docker-compose exec app bunx prisma migrate deploy
 ```
-
-## 💡 Benefits of Single Dockerfile
-
-1. **Simplified Deployment**: One image to build and deploy
-2. **Consistent Environment**: Frontend and backend always in sync
-3. **Easier Management**: Single container to monitor and scale
-4. **Reduced Complexity**: No inter-container communication issues
-5. **Faster Startup**: No waiting for multiple services to coordinate
-
-## 🔄 Migration from Multiple Dockerfiles
-
-If you had separate Dockerfiles before, the new approach:
-- ✅ Builds faster (shared dependencies)
-- ✅ Deploys simpler (single container)
-- ✅ Uses less resources (no duplicate base images)
-- ✅ Maintains same functionality
-- ✅ Keeps development hot-reloading
-
-The unified approach provides the same functionality with significantly less complexity!

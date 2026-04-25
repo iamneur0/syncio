@@ -1,8 +1,12 @@
 // Configuration constants and variables
 const path = require('path');
 
-// Auth configuration
-const AUTH_ENABLED = String(process.env.AUTH_ENABLED || 'false').toLowerCase() === 'true';
+// Instance type configuration
+const INSTANCE_TYPE = process.env.INSTANCE_TYPE || process.env.INSTANCE || 'private';
+if (INSTANCE_TYPE !== 'public' && INSTANCE_TYPE !== 'private') {
+  throw new Error(`Invalid INSTANCE_TYPE: ${INSTANCE_TYPE}. Must be 'public' or 'private'`);
+}
+
 const JWT_SECRET = process.env.JWT_SECRET || 'syncio-dev-secret-change-me';
 const DEFAULT_ACCOUNT_ID = 'default';
 const DEFAULT_ACCOUNT_UUID = '00000000-0000-4000-8000-000000000000';
@@ -10,7 +14,7 @@ const DEFAULT_ACCOUNT_UUID = '00000000-0000-4000-8000-000000000000';
 // Private instance auth (username/password from env vars)
 const PRIVATE_AUTH_USERNAME = process.env.SYNCIO_PRIVATE_USERNAME || null;
 const PRIVATE_AUTH_PASSWORD = process.env.SYNCIO_PRIVATE_PASSWORD || null;
-const PRIVATE_AUTH_ENABLED = !AUTH_ENABLED && PRIVATE_AUTH_USERNAME && PRIVATE_AUTH_PASSWORD;
+const PRIVATE_AUTH_ENABLED = INSTANCE_TYPE !== 'public' && PRIVATE_AUTH_USERNAME && PRIVATE_AUTH_PASSWORD;
 
 // Default Stremio addons that should be ignored in sync checks
 const defaultAddons = {
@@ -38,6 +42,7 @@ const AUTH_ALLOWLIST = [
   '/api/public-auth/suggest-uuid',
   '/api/public-auth/private-login', // Private instance username/password login
   '/invite', // Public invitation endpoints (request submission, status check, OAuth completion)
+  '/proxy', // Addon proxy routes (UUID serves as bearer token)
   // Stremio endpoints require auth now (no allowlist)
 ];
 
@@ -85,7 +90,7 @@ const DEBUG_ENABLED = process.env.NEXT_PUBLIC_DEBUG === 'true' || process.env.NE
 const PORT = process.env.PORT || 4000;
 
 module.exports = {
-  AUTH_ENABLED,
+  INSTANCE_TYPE,
   PRIVATE_AUTH_ENABLED,
   PRIVATE_AUTH_USERNAME,
   PRIVATE_AUTH_PASSWORD,

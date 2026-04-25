@@ -67,18 +67,18 @@ down:
 # Database commands
 migrate:
 	@echo "Running database migrations..."
-	docker-compose exec app npx prisma migrate dev
-	docker-compose exec app npx prisma generate
+	docker-compose exec app bunx prisma migrate dev
+	docker-compose exec app bunx prisma generate
 
 migrate-prod:
 	@echo "Running production database migrations..."
-	docker-compose exec app npx prisma migrate deploy
-	docker-compose exec app npx prisma generate
+	docker-compose exec app bunx prisma migrate deploy
+	docker-compose exec app bunx prisma generate
 
 db-reset:
 	@echo "Resetting database (development only)..."
-	docker-compose exec app npx prisma migrate reset --force
-	docker-compose exec app npx prisma generate
+	docker-compose exec app bunx prisma migrate reset --force
+	docker-compose exec app bunx prisma generate
 
 # Build commands
 build:
@@ -99,7 +99,7 @@ restart:
 # Install dependencies
 install:
 	@echo "Installing dependencies..."
-	npm install
+	bun install
 	cd client && npm install
 
 # Setup environment

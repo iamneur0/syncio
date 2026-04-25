@@ -7,7 +7,7 @@
  */
 async function findUserById(prisma, userId, accountId, include = {}) {
   return await prisma.user.findUnique({
-    where: { 
+    where: {
       id: userId,
       accountId: accountId
     },
@@ -20,7 +20,7 @@ async function findUserById(prisma, userId, accountId, include = {}) {
  */
 async function findGroupById(prisma, groupId, accountId, include = {}) {
   return await prisma.group.findUnique({
-    where: { 
+    where: {
       id: groupId,
       accountId: accountId
     },
@@ -33,7 +33,7 @@ async function findGroupById(prisma, groupId, accountId, include = {}) {
  */
 async function findAddonById(prisma, addonId, accountId, include = {}) {
   return await prisma.addon.findUnique({
-    where: { 
+    where: {
       id: addonId,
       accountId: accountId
     },
@@ -79,7 +79,7 @@ async function getAllAddons(prisma, accountId, include = {}) {
  */
 async function isUserActive(prisma, userId, accountId) {
   const user = await prisma.user.findUnique({
-    where: { 
+    where: {
       id: userId,
       accountId: accountId
     },
@@ -93,7 +93,7 @@ async function isUserActive(prisma, userId, accountId) {
  */
 async function isGroupActive(prisma, groupId, accountId) {
   const group = await prisma.group.findUnique({
-    where: { 
+    where: {
       id: groupId,
       accountId: accountId
     },
@@ -125,9 +125,9 @@ async function getGroupUsers(prisma, groupId, accountId, include = {}) {
     where: { id: groupId, accountId },
     select: { userIds: true }
   });
-  
+
   if (!group?.userIds) return [];
-  
+
   const userIds = JSON.parse(group.userIds);
   return await prisma.user.findMany({
     where: {
@@ -142,9 +142,9 @@ async function getGroupUsers(prisma, groupId, accountId, include = {}) {
  * Get account ID for private mode
  */
 function getAccountId(req) {
-  const { AUTH_ENABLED, DEFAULT_ACCOUNT_ID } = require('../config');
-  
-  if (AUTH_ENABLED) {
+  const { INSTANCE_TYPE, DEFAULT_ACCOUNT_ID } = require('../config');
+
+  if (INSTANCE_TYPE === 'public') {
     return req.appAccountId || null;
   }
   return DEFAULT_ACCOUNT_ID;
@@ -165,25 +165,69 @@ function scopedWhere(req, extra = {}) {
 async function getGroupAddons(prisma, groupId, req) {
   const accId = getAccountId(req);
   if (!accId) return [];
-  
+
   const group = await prisma.group.findUnique({
     where: { id: groupId, accountId: accId },
     include: { addons: { include: { addon: true } } }
   });
-  
+
   if (!group) return [];
-  
+
   const { decrypt } = require('../encryption');
-  
+
   const filtered = (group.addons || []).filter(ga => ga?.addon && ga.addon.isActive !== false && (!accId || ga.addon.accountId === accId))
   const sorted = filtered.slice().sort((a, b) => ((a?.position ?? 0) - (b?.position ?? 0)))
-  
-  
-  return sorted.map(ga => {
-    // Decrypt and parse manifest from the database
+
+  // Function to recursively find the best addon (online one in the chain).
+  // Uses the stored isOnline value from the periodic health checker rather than
+  // doing a live HTTP check on every sync — live checks cause false negatives
+  // when an addon is momentarily slow, incorrectly triggering the backup.
+  const findBestAddonInChain = async (addon, depth = 0) => {
+    if (depth > 5) {
+      console.warn(`[getGroupAddons] Backup chain too deep for ${addon.name}, stopping recursion`);
+      return addon;
+    }
+
+    // Trust the health checker's stored status (isOnline defaults to true)
+    const isAddonOnline = addon.isOnline !== false;
+
+    if (isAddonOnline) {
+      return addon;
+    }
+
+    // Addon is marked offline by health checker — check for a backup
+    if (addon.backupAddonId) {
+      const backupAddon = await prisma.addon.findUnique({
+        where: { id: addon.backupAddonId }
+      });
+
+      if (backupAddon && backupAddon.isActive) {
+        console.log(`[getGroupAddons] Primary ${addon.name} is offline, switching to backup ${backupAddon.name}`);
+        return findBestAddonInChain(backupAddon, depth + 1);
+      }
+    }
+
+    // No backup or chain exhausted — return the offline addon as-is
+    return addon;
+  };
+
+  // Process all addons in parallel
+  const processedAddons = await Promise.all(sorted.map(async ga => {
+    // Find the best addon in the chain (may be a backup)
+    const bestAddon = await findBestAddonInChain(ga.addon);
+    const isBackup = bestAddon.id !== ga.addon.id;
+
+    if (isBackup) {
+      console.log(`[getGroupAddons] Using backup addon ${bestAddon.name} for primary ${ga.addon.name}`);
+    }
+
+    // Always use the DB-stored manifest for consistent fingerprint comparison.
+    // The DB manifest is kept current by the health checker (reloadAddon on status change)
+    // and manual reloads from the UI. Using live-fetched manifests caused intermittent
+    // synced/unsynced flicker when the fetch occasionally failed and fell back to a stale DB copy.
     const manifest = (() => {
       try {
-        const raw = ga.addon.manifest
+        const raw = bestAddon.manifest
         if (!raw) return null
         let dec = null
         try { dec = decrypt(raw, req) } catch { dec = raw }
@@ -195,7 +239,7 @@ async function getGroupAddons(prisma, groupId, req) {
 
     // Decrypt manifestUrl for transportUrl
     const transportUrl = (() => {
-      try { return decrypt(ga.addon.manifestUrl, req) } catch { return ga.addon.manifestUrl }
+      try { return decrypt(bestAddon.manifestUrl, req) } catch { return bestAddon.manifestUrl }
     })()
 
     // Set transportName to empty string
@@ -205,15 +249,24 @@ async function getGroupAddons(prisma, groupId, req) {
     const { manifestUrl: _omitManifestUrl, ...cleanManifest } = (manifest && typeof manifest === 'object') ? manifest : {}
 
     return {
-      id: ga.addon.id,
-      name: ga.addon.name,
-      description: ga.addon.description || null,
-      customLogo: ga.addon.customLogo || null,
+      id: bestAddon.id,
+      name: bestAddon.name,
+      description: bestAddon.description || null,
+      version: bestAddon.version || cleanManifest.version || null,
+      resources: bestAddon.resources ? JSON.parse(bestAddon.resources) : (cleanManifest.resources || []),
+      logo: bestAddon.iconUrl || bestAddon.customLogo || null,
+      customLogo: bestAddon.customLogo || null,
       transportUrl,
       transportName,
-      manifest: cleanManifest
+      manifest: cleanManifest,
+      // Include info about whether we're using backup
+      isBackup,
+      primaryAddonId: isBackup ? ga.addon.id : undefined,
+      primaryAddonName: isBackup ? ga.addon.name : undefined,
     }
-  }).filter(Boolean)
+  }));
+
+  return processedAddons.filter(Boolean)
 }
 
 /**
@@ -274,7 +327,7 @@ async function assignUserToGroup(userId, groupId, req) {
  */
 async function ensureEmailUniqueness(prisma, email, targetAccountId) {
   const normalizedEmail = email.trim().toLowerCase()
-  
+
   // Find all users with this email (across all accounts)
   const existingUsers = await prisma.user.findMany({
     where: {
@@ -285,16 +338,16 @@ async function ensureEmailUniqueness(prisma, email, targetAccountId) {
       accountId: true
     }
   })
-  
+
   // Filter out users that are already in the target account (they're fine)
   const usersToDelete = existingUsers.filter(user => user.accountId !== targetAccountId)
-  
+
   if (usersToDelete.length === 0) {
     return // No duplicates, nothing to do
   }
-  
+
   console.log(`[ensureEmailUniqueness] Found ${usersToDelete.length} duplicate user(s) with email ${normalizedEmail}, removing from other accounts...`)
-  
+
   // For each duplicate user, remove them from all groups and then delete them
   for (const userToDelete of usersToDelete) {
     // Find all groups in the user's account
@@ -308,7 +361,7 @@ async function ensureEmailUniqueness(prisma, email, targetAccountId) {
         userIds: true
       }
     })
-    
+
     // Remove user from all groups
     for (const group of groups) {
       if (group.userIds) {
@@ -327,7 +380,7 @@ async function ensureEmailUniqueness(prisma, email, targetAccountId) {
         }
       }
     }
-    
+
     // Delete the duplicate user
     await prisma.user.delete({
       where: { id: userToDelete.id }

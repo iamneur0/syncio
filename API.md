@@ -90,7 +90,7 @@ Reload addons by Stremio addon ID, then sync all groups containing those addons.
 }
 ```
 
-![Addon Sync API Example](client/public/assets/syncio-api-addon-sync.png)
+<!-- Image temporarily unavailable - was in deleted client folder -->
 
 #### `POST /api/ext/groups/sync`
 Sync all groups.

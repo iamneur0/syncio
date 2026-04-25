@@ -1,9 +1,9 @@
 const { buildAddonDbData } = require('./stremio')
 const { decrypt, encrypt } = require('./encryption')
 
-async function ensureDek(req, prisma, AUTH_ENABLED, getAccountDek) {
+async function ensureDek(req, prisma, INSTANCE_TYPE, getAccountDek) {
   try {
-    if (AUTH_ENABLED && !req.accountDek && typeof getAccountDek === 'function') {
+    if (INSTANCE_TYPE === 'public' && !req.accountDek && typeof getAccountDek === 'function') {
       let dek = getAccountDek(req.appAccountId)
       if (!dek && req.appAccountId) {
         const acct = await prisma.appAccount.findUnique({ where: { id: req.appAccountId }, select: { uuid: true } })
@@ -16,7 +16,7 @@ async function ensureDek(req, prisma, AUTH_ENABLED, getAccountDek) {
 
 async function repairAddonsList({
   prisma,
-  AUTH_ENABLED,
+  INSTANCE_TYPE,
   getAccountDek,
   getDecryptedManifestUrl,
   filterManifestByResources,
@@ -24,7 +24,7 @@ async function repairAddonsList({
   manifestHash,
   encrypt
 }, req, addonsList) {
-  await ensureDek(req, prisma, AUTH_ENABLED, getAccountDek)
+  await ensureDek(req, prisma, INSTANCE_TYPE, getAccountDek)
 
   let updated = 0
   let inspected = 0

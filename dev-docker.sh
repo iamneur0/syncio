@@ -1,7 +1,7 @@
 #!/bin/bash
 
 echo "🚀 Starting Syncio in Docker Development Mode"
-echo "This mimics your working 'npm run dev' setup"
+echo "This mimics your working 'bun run dev' setup"
 echo ""
 
 # Stop any existing containers

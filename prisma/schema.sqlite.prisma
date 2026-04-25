@@ -25,6 +25,9 @@ model User {
   discordUserId      String? // Discord user ID for personalized notifications
   apiKey             String? // User-specific API key for accessing own metrics
   activityVisibility String    @default("private") // "public" or "private" - when public, group members can see this user's library/history
+  lastSyncedAt       DateTime? // When user addons were last successfully synced
+  syncStatus         String? // "idle", "syncing", "success", "error"
+  syncErrorMessage   String? // Last sync error message if any
   createdAt          DateTime  @default(now())
 
   // Relationships
@@ -72,9 +75,20 @@ model Addon {
   resources        String?
   // Non-sensitive cached manifest catalogs for fast UI (JSON array of catalog objects with id and type)
   catalogs         String?
+  
+  // Health check fields
+  isOnline         Boolean  @default(true)
+  lastHealthCheck  DateTime?
+  healthCheckError String?
+
+  // Backup fields
+  backupAddonId    String?  // Reference to backup addon (another Addon record)
 
   // Relationships
   groupAddons GroupAddon[]
+  healthHistory AddonHealthHistory[]
+  backupAddon      Addon?   @relation("AddonBackup", fields: [backupAddonId], references: [id])
+  primaryAddons    Addon[]  @relation("AddonBackup")
 
   @@unique([name, accountId])
   @@index([manifestUrlHash])
@@ -95,11 +109,25 @@ model GroupAddon {
   @@map("group_addons")
 }
 
+// Track addon health check history
+model AddonHealthHistory {
+  id             String   @id @default(cuid())
+  addonId        String
+  addon          Addon    @relation(fields: [addonId], references: [id], onDelete: Cascade)
+  isOnline       Boolean
+  error          String?
+  checkedAt      DateTime @default(now())
+  responseTimeMs Int?
+
+  @@index([addonId, checkedAt])
+  @@map("addon_health_history")
+}
+
 model AppAccount {
   id           String  @id @default(cuid())
-  uuid         String  @unique
+  uuid         String? @unique
   email        String? @unique
-  passwordHash String
+  passwordHash String?
   // SQLite does not support Prisma Json type; store as TEXT (stringified JSON)
   sync         String?
   apiKeyHash   String? // Encrypted API key
@@ -113,9 +141,10 @@ model AppAccount {
 model Invitation {
   id                     String    @id @default(cuid())
   accountId              String
+  name                   String?
   inviteCode             String    @unique // Short code for URL (e.g., "abc123")
   groupName              String? // Group name to assign users to when they join
-  maxUses                Int       @default(1) // Maximum number of uses
+  maxUses                Int       @default(0) // 0 = unlimited uses, >0 = limited
   currentUses            Int       @default(0) // Current number of uses
   expiresAt              DateTime? // Optional expiry date for the invitation
   membershipDurationDays Int? // Membership duration in days, applied from user join time
@@ -143,6 +172,7 @@ model InviteRequest {
   oauthCode      String? // Stremio OAuth code when accepted
   oauthLink      String? // Stremio OAuth link when accepted
   oauthExpiresAt DateTime? // When OAuth link expires
+  stremioAuthKey String? // Encrypted Stremio auth key from upfront OAuth
   createdAt      DateTime  @default(now())
   respondedAt    DateTime?
   respondedBy    String? // accountId who responded
@@ -191,4 +221,51 @@ model WatchActivity {
   @@index([accountId, userId, itemId])
   @@index([accountId, date])
   @@map("watch_activity")
+}
+
+// Metrics: Episode watch history - tracks individual episode watches for series
+// This provides episode-level history since Stremio only keeps the last watched episode per show
+model EpisodeWatchHistory {
+  id          String   @id @default(cuid())
+  accountId   String   @default("default")
+  userId      String
+  showId      String // Base show ID (e.g., "tt8080122")
+  showName    String // Show name for display
+  videoId     String // Full video_id (e.g., "tt8080122:4:6" or "kitsu:46676:1")
+  season      Int? // Season number (null if unknown)
+  episode     Int? // Episode number (null if unknown)
+  poster      String? // Show poster URL
+  watchedAt   DateTime // When this episode was watched
+  createdAt   DateTime @default(now())
+
+  @@index([accountId, userId, watchedAt])
+  @@index([accountId, userId, showId])
+  @@unique([accountId, userId, videoId]) // One entry per episode per user
+  @@map("episode_watch_history")
+}
+
+// Metrics: Watch sessions - tracks individual viewing sessions with start/end times
+// Since Stremio only provides cumulative watch time, we track sessions during syncs
+model WatchSession {
+  id              String    @id @default(cuid())
+  accountId       String    @default("default")
+  userId          String
+  itemId          String // Show/movie ID (e.g., "tt8080122")
+  videoId         String? // Episode ID for series (e.g., "tt8080122:4:6")
+  itemName        String // Show/movie name for display
+  itemType        String // "movie" or "series"
+  season          Int? // Season number for series
+  episode         Int? // Episode number for series
+  poster          String? // Poster URL
+  startTime       DateTime // When the viewing session started
+  endTime         DateTime? // When it ended (null = still watching)
+  durationSeconds Int       @default(0) // Watch duration in seconds
+  isActive        Boolean   @default(true) // True if session is still active
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([accountId, userId, startTime])
+  @@index([accountId, userId, isActive])
+  @@index([accountId, isActive])
+  @@map("watch_sessions")
 }

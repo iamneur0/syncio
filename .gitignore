@@ -130,3 +130,8 @@ nodemon.json
 syncio/
 docker-compose.yml
 test/
+client/debug*
+server/test*
+client/test*
+*.sh
+client/scripts

@@ -1,12 +1,9 @@
 # Multi-stage Dockerfile for Syncio
-FROM node:18-alpine AS base
+FROM oven/bun:1-alpine AS base
 
 # Install dependencies only when needed
 FROM base AS deps
 RUN apk add --no-cache libc6-compat openssl3 curl
-# Update npm to latest 10.x version (compatible with Node.js 18)
-# npm 11+ requires Node.js 20.17.0+ or 22.9.0+, so we use npm 10.x
-RUN npm install -g npm@10.9.2
 WORKDIR /app
 
 # Copy package files for both frontend and backend
@@ -15,8 +12,8 @@ COPY client/package*.json ./client/
 COPY prisma ./prisma/
 
 # Install all dependencies
-RUN npm install --no-package-lock
-RUN cd client && npm install --no-package-lock
+RUN bun install --frozen-lockfile
+RUN cd client && bun install --frozen-lockfile
 
 # Build stage
 FROM base AS builder
@@ -38,7 +35,7 @@ RUN if [ "$INSTANCE" = "public" ]; then \
         cp prisma/schema.sqlite.prisma prisma/schema.prisma; \
     fi
 # Use the main schema file for generation
-RUN npx prisma generate --schema=prisma/schema.prisma
+RUN bunx prisma generate --schema=prisma/schema.prisma
 
 # Set environment variables
 ARG NEXT_PUBLIC_API_URL
@@ -46,11 +43,10 @@ ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-}
 ENV INSTANCE=$INSTANCE
 
 # Build Next.js frontend with derived NEXT_PUBLIC_AUTH_ENABLED
-RUN --mount=type=cache,target=/app/client/.next/cache \
-    cd client && \
+RUN cd client && \
     NEXT_PUBLIC_AUTH_ENABLED=$( [ "$INSTANCE" = "public" ] && echo true || echo false ) \
     NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-} \
-    npm run build
+    bun run build
 
 # Production stage
 FROM base AS production
@@ -60,8 +56,8 @@ WORKDIR /app
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 appuser
 
-# Create data directory (permissions will be set by docker-compose user setting)
-RUN mkdir -p /app/data
+# Create data and logs directories with proper ownership for appuser
+RUN mkdir -p /app/data /app/logs && chown -R appuser:nodejs /app/data /app/logs
 
 # Install runtime dependencies
 RUN apk add --no-cache curl openssl3
@@ -90,7 +86,7 @@ COPY --from=builder --chown=appuser:nodejs /app/client/.next ./client/.next
 COPY --from=builder --chown=appuser:nodejs /app/client/package*.json ./client/
 COPY --from=builder --chown=appuser:nodejs /app/client/node_modules ./client/node_modules
 COPY --from=builder --chown=appuser:nodejs /app/client/public ./client/public
-COPY --from=builder --chown=appuser:nodejs /app/client/next.config.js ./client/
+COPY --from=builder --chown=appuser:nodejs /app/client/next.config.ts ./client/
 
 # Ensure standalone server can serve static and public assets correctly
 RUN mkdir -p /app/client/.next/standalone/public/_next/static && \

@@ -7,14 +7,14 @@ echo "INSTANCE=${INSTANCE:-unknown}"
 # Set configuration based on INSTANCE
 case "$INSTANCE" in
   'private')
-    export AUTH_ENABLED="false"
-    export NEXT_PUBLIC_AUTH_ENABLED="false"
-    export DATABASE_URL="file:/app/data/sqlite.db"
+    export INSTANCE_TYPE="private"
+    export NEXT_PUBLIC_INSTANCE_TYPE="private"
+    export DATABASE_URL="file:///app/data/sqlite.db"
     export SCHEMA="/app/prisma/schema.sqlite.prisma"
     ;;
   'public')
-    export AUTH_ENABLED="true"
-    export NEXT_PUBLIC_AUTH_ENABLED="true"
+    export INSTANCE_TYPE="public"
+    export NEXT_PUBLIC_INSTANCE_TYPE="public"
     export SCHEMA="/app/prisma/schema.postgres.prisma"
     # DATABASE_URL should be set by compose file
     ;;
@@ -26,7 +26,7 @@ esac
 
 export PRISMA_SCHEMA_PATH="$SCHEMA"
 echo "Using Prisma schema: $PRISMA_SCHEMA_PATH"
-echo "AUTH_ENABLED=${AUTH_ENABLED} DATABASE_URL=${DATABASE_URL}"
+echo "INSTANCE_TYPE=${INSTANCE_TYPE} DATABASE_URL=${DATABASE_URL}"
 
 # Ensure SQLite dir exists and is writable if using file: URL
 if echo "$DATABASE_URL" | grep -q '^file:'; then
@@ -46,12 +46,12 @@ fi
 
 echo "📊 Prisma client already generated in Docker build..."
 # Skip Prisma generation since it's already done in the Docker build stage
-# npx prisma generate --schema "$PRISMA_SCHEMA_PATH"
+# bunx prisma generate --schema "$PRISMA_SCHEMA_PATH"
 
 echo "📊 Applying Prisma schema..."
 if [ "$INSTANCE" = "public" ]; then
   echo "➡️ Running migrate deploy (Postgres)"
-  npx prisma migrate deploy --schema "$PRISMA_SCHEMA_PATH" || true
+  bunx prisma migrate deploy --schema "$PRISMA_SCHEMA_PATH" || true
 else
   echo "➡️ Skipping migrate deploy for SQLite (private)"
   # Clean up any migration conflicts for SQLite (ignore permission errors)
@@ -65,7 +65,7 @@ else
   fi
 fi
 echo "➡️ Ensuring schema is applied (db push)"
-npx prisma db push --schema "$PRISMA_SCHEMA_PATH" --accept-data-loss || true
+bunx prisma db push --schema "$PRISMA_SCHEMA_PATH" --accept-data-loss || true
 
 export NODE_OPTIONS="--dns-result-order=ipv4first"
 
@@ -79,9 +79,9 @@ else
   echo "🚀 Running Next.js in PRODUCTION mode"
   # Use Next.js standalone output if available
   if [ -f "/app/client/.next/standalone/server.js" ]; then
-    cd /app/client && HOSTNAME=0.0.0.0 node .next/standalone/server.js -p ${FRONTEND_PORT:-3000} &
+    cd /app/client && HOSTNAME=0.0.0.0 bun .next/standalone/server.js -p ${FRONTEND_PORT:-3000} &
   else
-    cd /app/client && HOSTNAME=0.0.0.0 PORT=${FRONTEND_PORT:-3000} npm start &
+    cd /app/client && HOSTNAME=0.0.0.0 PORT=${FRONTEND_PORT:-3000} bun run start &
   fi
 fi
 FRONTEND_PID=$!
@@ -89,7 +89,7 @@ FRONTEND_PID=$!
 sleep 2
 
 echo "🔧 Starting backend server on port ${BACKEND_PORT:-4000}..."
-cd /app && HOST=0.0.0.0 PORT=${BACKEND_PORT:-4000} AUTH_ENABLED=${AUTH_ENABLED} DATABASE_URL=${DATABASE_URL} node server/index.js &
+cd /app && HOST=0.0.0.0 PORT=${BACKEND_PORT:-4000} INSTANCE_TYPE=${INSTANCE_TYPE} DATABASE_URL=${DATABASE_URL} bun server/index.js &
 BACKEND_PID=$!
 
 cleanup() {
