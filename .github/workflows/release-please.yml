@@ -2,9 +2,8 @@ name: release-please
 
 on:
   push:
-    branches:
-      - main
-      - master
+    tags:
+      - 'release-*'
   workflow_dispatch:
 
 permissions:
