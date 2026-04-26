@@ -18,6 +18,7 @@ function pathIsAllowlisted(path) {
     '/api/public-auth/generate-uuid',
     '/api/public-auth/stremio-login',
     '/api/public-auth/private-login', // Private instance username/password login
+    '/api/auth/private-login', // Private instance username/password login (alt path)
     '/api/public-auth/suggest-uuid',
     '/api/ext', // External API uses API key auth (handled by externalApi router)
     '/invite', // Public invitation endpoints (request submission, status check, OAuth completion)
