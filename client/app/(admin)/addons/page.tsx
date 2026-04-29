@@ -24,7 +24,21 @@ import {
   DocumentDuplicateIcon,
   PencilIcon,
   UsersIcon,
+  Cog6ToothIcon,
 } from '@heroicons/react/24/outline';
+
+// Helper to compute configure URL from addon object
+function getConfigureUrl(addon: any): string | null {
+  const manifestUrl = addon?.manifestUrl || addon?.url;
+  if (!manifestUrl) return null;
+  try {
+    const url = new URL(manifestUrl);
+    const baseUrl = `${url.origin}${url.pathname.replace(/\/manifest(\.[^/?#]+)?$/i, '').replace(/\/$/, '')}`;
+    return baseUrl.endsWith('/configure') ? baseUrl : `${baseUrl}/configure`;
+  } catch {
+    return null;
+  }
+}
 
 // Addon display type
 interface AddonDisplay {
@@ -753,6 +767,16 @@ function AddonCard({
     onDelete();
   };
 
+  const handleOpenConfigure = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const configUrl = getConfigureUrl(addon);
+    if (configUrl) {
+      window.open(configUrl, '_blank', 'noopener,noreferrer');
+    }
+  };
+
+  const configUrl = getConfigureUrl(addon);
+
   return (
     <>
       <Card
@@ -849,6 +873,16 @@ function AddonCard({
           </div>
 
           <div className="flex items-center gap-2">
+            {configUrl && (
+              <button
+                onClick={handleOpenConfigure}
+                onPointerDown={(e) => e.stopPropagation()}
+                className="p-2 rounded-lg hover:bg-surface-hover transition-colors"
+                title="Open configure page"
+              >
+                <Cog6ToothIcon className="w-4 h-4 text-muted" />
+              </button>
+            )}
             <span className="text-sm text-muted">Active</span>
             <ToggleSwitch
               checked={addon.isActive !== false}
@@ -880,6 +914,19 @@ function AddonCard({
           <EyeIcon className="w-4 h-4" />
           View Details
         </Link>
+        {configUrl && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              close();
+              handleOpenConfigure(e);
+            }}
+            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-default hover:bg-surface-hover transition-colors"
+          >
+            <Cog6ToothIcon className="w-4 h-4" />
+            Open Configure
+          </button>
+        )}
         <button
           onClick={handleReload}
           className="w-full flex items-center gap-2 px-3 py-2 text-sm text-default hover:bg-surface-hover transition-colors"

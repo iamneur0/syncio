@@ -29,7 +29,22 @@ import {
   BookOpenIcon,
   ChevronDownIcon,
   CodeBracketIcon,
+  Cog6ToothIcon,
 } from '@heroicons/react/24/outline';
+
+// Helper to compute configure URL from manifest URL
+function getConfigureUrl(addon: any): string | null {
+  const manifestUrl = addon?.manifestUrl || addon?.url;
+  if (!manifestUrl) return null;
+  try {
+    const url = new URL(manifestUrl);
+    const baseUrl = `${url.origin}${url.pathname.replace(/\/manifest(\.[^/?#]+)?$/i, '').replace(/\/$/, '')}`;
+    return baseUrl.endsWith('/configure') ? baseUrl : `${baseUrl}/configure`;
+  } catch {
+    return null;
+  }
+}
+
 import {
   DndContext,
   closestCenter,
@@ -1207,6 +1222,20 @@ export default function AddonDetailPage() {
             >
               Reload Addon
             </Button>
+            {getConfigureUrl(addon) && (
+              <Button
+                variant="glass"
+                leftIcon={<Cog6ToothIcon className="w-5 h-5" />}
+                onClick={() => {
+                  const configUrl = getConfigureUrl(addon);
+                  if (configUrl) {
+                    window.open(configUrl, '_blank', 'noopener,noreferrer');
+                  }
+                }}
+              >
+                Configure
+              </Button>
+            )}
             <Button
               variant="glass"
               leftIcon={<ArrowUturnLeftIcon className="w-5 h-5" />}
@@ -1278,22 +1307,25 @@ export default function AddonDetailPage() {
                     {addon.version && (
                       <VersionBadge version={addon.version} size="sm" />
                     )}
-                    {/* Health Status */}
                     {addon.lastHealthCheck && (
                       <div 
-                        className={`flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-medium ${
-                          addon.isOnline 
-                            ? 'bg-success/10 text-success border border-success/20' 
-                            : 'bg-danger/10 text-danger border border-danger/20'
-                        }`}
-                        title={addon.isOnline 
-                          ? `Online - Last checked: ${new Date(addon.lastHealthCheck).toLocaleString()}` 
-                          : `Offline${addon.healthCheckError ? `: ${addon.healthCheckError}` : ''} - Last checked: ${new Date(addon.lastHealthCheck).toLocaleString()}`
-                        }
+                        className={`w-2.5 h-2.5 rounded-full ${addon.isOnline ? 'bg-success' : 'bg-danger'}`}
+                        title={addon.isOnline ? 'Online' : 'Offline'}
+                      />
+                    )}
+                    {getConfigureUrl(addon) && (
+                      <button
+                        onClick={() => {
+                          const configUrl = getConfigureUrl(addon);
+                          if (configUrl) {
+                            window.open(configUrl, '_blank', 'noopener,noreferrer');
+                          }
+                        }}
+                        className="p-1.5 rounded-lg hover:bg-surface-hover transition-colors"
+                        title="Open configure page"
                       >
-                        <span className={`w-1.5 h-1.5 rounded-full ${addon.isOnline ? 'bg-success' : 'bg-danger'}`} />
-                        {addon.isOnline ? 'Online' : 'Offline'}
-                      </div>
+                        <Cog6ToothIcon className="w-5 h-5 text-muted" />
+                      </button>
                     )}
                   </div>
                   <div className="mb-4">
@@ -1329,23 +1361,7 @@ export default function AddonDetailPage() {
                         Created: {addon.createdAt ? new Date(addon.createdAt).toLocaleDateString() : 'Unknown'}
                       </span>
                     </div>
-                    {/* Health Check Status */}
-                    {addon.lastHealthCheck && (
-                      <div className="flex items-center gap-2">
-                        <div className={`w-2 h-2 rounded-full ${addon.isOnline ? 'bg-success' : 'bg-danger'}`} />
-                        <span className={addon.isOnline ? 'text-success' : 'text-danger'}>
-                          {addon.isOnline ? 'Online' : 'Offline'}
-                        </span>
-                        <span className="text-muted text-sm">
-                          (checked {new Date(addon.lastHealthCheck).toLocaleString()})
-                        </span>
-                        {addon.healthCheckError && !addon.isOnline && (
-                          <span className="text-danger text-sm" title={addon.healthCheckError}>
-                            - {addon.healthCheckError.length > 30 ? addon.healthCheckError.substring(0, 30) + '...' : addon.healthCheckError}
-                          </span>
-                        )}
-                      </div>
-                    )}
+                    
                   </div>
                 </div>
 
