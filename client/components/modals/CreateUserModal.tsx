@@ -36,15 +36,19 @@ export function CreateUserModal({
   const logoSrc = isDark ? '/logo-white.png' : '/logo-black.png';
 
   const isReconnect = mode === 'reconnect';
-  const [step, setStep] = useState<'select' | 'oauth' | 'manual' | 'details' | 'success'>('select');
+  const [step, setStep] = useState<'tabs' | 'oauth' | 'details' | 'success'>('tabs');
+  const [authMethod, setAuthMethod] = useState<'credentials' | 'authKey' | 'oauth'>('oauth');
 
   // Shared identity fields
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
 
-  // Manual-only field
+  // Auth key field
   const [authKey, setAuthKey] = useState('');
   const [password, setPassword] = useState('');
+
+  // Credentials only - register new Stremio account
+  const [registerNew, setRegisterNew] = useState(false);
 
   // OAuth flow state
   const [oauthCode, setOauthCode] = useState<string | null>(null);
@@ -64,11 +68,13 @@ export function CreateUserModal({
   useEffect(() => {
     if (!isOpen) {
       setTimeout(() => {
-        setStep('select');
+        setStep('tabs');
+        setAuthMethod('oauth');
         setUsername('');
         setEmail('');
         setAuthKey('');
         setPassword('');
+        setRegisterNew(false);
         setOauthCode(null);
         setOauthLink(null);
         setOauthExpiresAt(null);
@@ -221,33 +227,46 @@ export function CreateUserModal({
       return;
     }
 
-    // Create mode
-    if (step === 'details' && oauthAuthKey) {
-      if (!username.trim()) {
-        toast.error('Please enter a username');
-        return;
-      }
-    } else if (step === 'manual') {
-      if (!username.trim()) {
-        toast.error('Username is required');
-        return;
-      }
+    // Create mode - validate username
+    if (!username.trim()) {
+      toast.error('Username is required');
+      return;
     }
 
     setIsSubmitting(true);
     try {
       let created: any;
-      if (oauthAuthKey) {
+      if (authMethod === 'oauth' && oauthAuthKey) {
+        // OAuth method
         created = await api.createUserWithStremio({
           authKey: oauthAuthKey,
           username: username.trim(),
           email: (email || '').trim(),
         });
-      } else {
-        created = await api.createUser({
-          name: username.trim(),
-          email: email || undefined,
-          authKey: authKey || undefined,
+      } else if (authMethod === 'authKey') {
+        // Auth Key method
+        if (!authKey.trim()) {
+          toast.error('Auth key is required');
+          setIsSubmitting(false);
+          return;
+        }
+        created = await api.createUserWithStremio({
+          authKey: authKey.trim(),
+          username: username.trim(),
+          email: (email || '').trim(),
+        });
+      } else if (authMethod === 'credentials') {
+        // Credentials method (email/password)
+        if (!email.trim() || !password) {
+          toast.error('Email and password are required');
+          setIsSubmitting(false);
+          return;
+        }
+        created = await api.createUserWithCredentials({
+          email: email.trim(),
+          password: password,
+          username: username.trim(),
+          registerNew: registerNew,
         });
       }
       setStep('success');
@@ -315,16 +334,16 @@ export function CreateUserModal({
               {/* Content */}
               <div className="p-8">
                 <AnimatePresence mode="wait">
-                  {/* Step: Select Method */}
-                  {step === 'select' && (
+                  {/* Step: Select Method - 3 Tabs */}
+                  {step === 'tabs' && (
                     <motion.div
-                      key="select"
+                      key="tabs"
                       initial={{ opacity: 0, x: -20 }}
                       animate={{ opacity: 1, x: 0 }}
                       exit={{ opacity: 0, x: 20 }}
                       transition={{ duration: 0.2 }}
                     >
-                      <div className="text-center mb-8">
+                      <div className="text-center mb-6">
                         <motion.div
                           initial={{ scale: 0 }}
                           animate={{ scale: 1 }}
@@ -351,20 +370,93 @@ export function CreateUserModal({
                         </p>
                       </div>
 
+                      {/* 3 Tab Options */}
                       <div className="space-y-3">
-                        {/* OAuth Option */}
+                        {/* Credentials Option (Email/Password) */}
+                        <motion.button
+                          type="button"
+                          whileHover={{ scale: 1.02, y: -2 }}
+                          whileTap={{ scale: 0.98 }}
+                          onClick={() => setAuthMethod('credentials')}
+                          className="w-full p-4 rounded-2xl text-left transition-all group relative overflow-hidden"
+                          style={{
+                            background: authMethod === 'credentials' ? 'var(--color-primary)' : 'var(--color-surfaceHover)',
+                            border: `1px solid ${authMethod === 'credentials' ? 'var(--color-primary)' : 'var(--color-surfaceBorder)'}`,
+                            opacity: authMethod === 'credentials' ? 1 : 0.85
+                          }}
+                        >
+                          <div className="relative flex items-center gap-4">
+                            <div
+                              className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
+                              style={{
+                                background: authMethod === 'credentials' ? 'rgba(255,255,255,0.2)' : 'var(--color-subtle)'
+                              }}
+                            >
+                              <svg className="w-5 h-5" style={{ color: authMethod === 'credentials' ? 'white' : 'var(--color-textMuted)' }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" />
+                              </svg>
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <span className="font-semibold" style={{ color: authMethod === 'credentials' ? 'white' : 'var(--color-text)' }}>
+                                Credentials
+                              </span>
+                              <p className="text-sm mt-0.5" style={{ color: authMethod === 'credentials' ? 'rgba(255,255,255,0.8)' : 'var(--color-textMuted)' }}>
+                                Email and password
+                              </p>
+                            </div>
+                          </div>
+                        </motion.button>
+
+                        {/* Auth Key Option */}
+                        <motion.button
+                          type="button"
+                          whileHover={{ scale: 1.02, y: -2 }}
+                          whileTap={{ scale: 0.98 }}
+                          onClick={() => setAuthMethod('authKey')}
+                          className="w-full p-4 rounded-2xl text-left transition-all group relative overflow-hidden"
+                          style={{
+                            background: authMethod === 'authKey' ? 'var(--color-primary)' : 'var(--color-surfaceHover)',
+                            border: `1px solid ${authMethod === 'authKey' ? 'var(--color-primary)' : 'var(--color-surfaceBorder)'}`,
+                            opacity: authMethod === 'authKey' ? 1 : 0.85
+                          }}
+                        >
+                          <div className="relative flex items-center gap-4">
+                            <div
+                              className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
+                              style={{
+                                background: authMethod === 'authKey' ? 'rgba(255,255,255,0.2)' : 'var(--color-subtle)'
+                              }}
+                            >
+                              <svg className="w-5 h-5" style={{ color: authMethod === 'authKey' ? 'white' : 'var(--color-textMuted)' }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+                              </svg>
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <span className="font-semibold" style={{ color: authMethod === 'authKey' ? 'white' : 'var(--color-text)' }}>
+                                Auth Key
+                              </span>
+                              <p className="text-sm mt-0.5" style={{ color: authMethod === 'authKey' ? 'rgba(255,255,255,0.8)' : 'var(--color-textMuted)' }}>
+                                Paste from Stremio settings
+                              </p>
+                            </div>
+                          </div>
+                        </motion.button>
+
+                        {/* Stremio OAuth Option */}
                         <motion.button
                           type="button"
                           whileHover={{ scale: 1.02, y: -2 }}
                           whileTap={{ scale: 0.98 }}
                           onClick={() => {
+                            setAuthMethod('oauth');
                             setStep('oauth');
                             handleStartOAuth();
                           }}
-                          className="w-full p-5 rounded-2xl text-left transition-all group relative overflow-hidden"
+                          className="w-full p-4 rounded-2xl text-left transition-all group relative overflow-hidden"
                           style={{
-                            background: 'var(--color-surfaceHover)',
-                            border: '1px solid var(--color-surfaceBorder)'
+                            background: authMethod === 'oauth' ? 'var(--color-primary)' : 'var(--color-surfaceHover)',
+                            border: `1px solid ${authMethod === 'oauth' ? 'var(--color-primary)' : 'var(--color-surfaceBorder)'}`,
+                            opacity: authMethod === 'oauth' ? 1 : 0.85
                           }}
                         >
                           <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity"
@@ -374,84 +466,164 @@ export function CreateUserModal({
                           />
                           <div className="relative flex items-center gap-4">
                             <div
-                              className="w-12 h-12 rounded-xl flex items-center justify-center shrink-0"
+                              className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
                               style={{
-                                background: 'linear-gradient(135deg, var(--color-primary) 0%, color-mix(in srgb, var(--color-primary) 80%, var(--color-secondary)) 100%)'
+                                background: authMethod === 'oauth' ? 'rgba(255,255,255,0.2)' : 'linear-gradient(135deg, var(--color-primary) 0%, color-mix(in srgb, var(--color-primary) 80%, var(--color-secondary)) 100%)'
                               }}
                             >
-                              <svg className="w-6 h-6 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <svg className="w-5 h-5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
                               </svg>
                             </div>
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2">
-                                <span className="font-semibold" style={{ color: 'var(--color-text)' }}>
-                                  Connect with Stremio
+                                <span className="font-semibold" style={{ color: authMethod === 'oauth' ? 'white' : 'var(--color-text)' }}>
+                                  Stremio OAuth
                                 </span>
                                 <span
                                   className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded-full"
                                   style={{
-                                    background: 'var(--color-primary)',
-                                    color: 'white'
+                                    background: authMethod === 'oauth' ? 'rgba(255,255,255,0.3)' : 'var(--color-primary)',
+                                    color: authMethod === 'oauth' ? 'white' : 'white'
                                   }}
                                 >
                                   Recommended
                                 </span>
                               </div>
-                              <p className="text-sm mt-0.5" style={{ color: 'var(--color-textMuted)' }}>
-                                Securely link via OAuth - no credentials needed
+                              <p className="text-sm mt-0.5" style={{ color: authMethod === 'oauth' ? 'rgba(255,255,255,0.8)' : 'var(--color-textMuted)' }}>
+                                Securely link via OAuth
                               </p>
                             </div>
-                            <svg className="w-5 h-5 text-muted group-hover:translate-x-1 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                            </svg>
-                          </div>
-                        </motion.button>
-
-                        {/* Manual Option */}
-                        <motion.button
-                          type="button"
-                          whileHover={{ scale: 1.02, y: -2 }}
-                          whileTap={{ scale: 0.98 }}
-                          onClick={() => setStep('manual')}
-                          className="w-full p-5 rounded-2xl text-left transition-all group relative overflow-hidden"
-                          style={{
-                            background: 'var(--color-surfaceHover)',
-                            border: '1px solid var(--color-surfaceBorder)'
-                          }}
-                        >
-                          <div className="relative flex items-center gap-4">
-                            <div
-                              className="w-12 h-12 rounded-xl flex items-center justify-center shrink-0"
-                              style={{ background: 'var(--color-subtle)' }}
-                            >
-                              <svg className="w-6 h-6" style={{ color: 'var(--color-textMuted)' }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
-                              </svg>
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <span className="font-semibold" style={{ color: 'var(--color-text)' }}>
-                                Manual Entry
-                              </span>
-                              <p className="text-sm mt-0.5" style={{ color: 'var(--color-textMuted)' }}>
-                                {isReconnect ? 'Enter email and password' : 'Enter username and optional auth key'}
-                              </p>
-                            </div>
-                            <svg className="w-5 h-5 text-muted group-hover:translate-x-1 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                            </svg>
                           </div>
                         </motion.button>
                       </div>
 
-                      <button
-                        type="button"
-                        onClick={onClose}
-                        className="w-full mt-6 py-3 text-sm font-medium rounded-xl transition-colors"
-                        style={{ color: 'var(--color-textMuted)' }}
-                      >
-                        Cancel
-                      </button>
+                      {/* Show form based on selected auth method (except OAuth which goes to separate step) */}
+                      {authMethod !== 'oauth' && (
+                        <div className="mt-6 p-4 rounded-xl" style={{ background: 'var(--color-subtle)' }}>
+                          <div className="space-y-4">
+                            {!isReconnect && (
+                              <div>
+                                <label className="block text-sm font-medium mb-2" style={{ color: 'var(--color-textMuted)' }}>
+                                  Username <span style={{ color: 'var(--color-error)' }}>*</span>
+                                </label>
+                                <input
+                                  type="text"
+                                  placeholder="Enter a unique username"
+                                  value={username}
+                                  onChange={(e) => setUsername(e.target.value)}
+                                  className="w-full px-4 py-3 rounded-xl transition-all duration-200 focus:outline-none"
+                                  style={{
+                                    background: 'var(--color-surfaceHover)',
+                                    border: '1px solid var(--color-surfaceBorder)',
+                                    color: 'var(--color-text)'
+                                  }}
+                                />
+                              </div>
+                            )}
+
+                            {authMethod === 'credentials' && (
+                              <>
+                                <div>
+                                  <label className="block text-sm font-medium mb-2" style={{ color: 'var(--color-textMuted)' }}>
+                                    Email <span style={{ color: 'var(--color-error)' }}>*</span>
+                                  </label>
+                                  <input
+                                    type="email"
+                                    placeholder={isReconnect ? "Enter Stremio email" : "Enter Stremio account email"}
+                                    value={email}
+                                    onChange={(e) => setEmail(e.target.value)}
+                                    className="w-full px-4 py-3 rounded-xl transition-all duration-200 focus:outline-none"
+                                    style={{
+                                      background: 'var(--color-surfaceHover)',
+                                      border: '1px solid var(--color-surfaceBorder)',
+                                      color: 'var(--color-text)'
+                                    }}
+                                  />
+                                </div>
+
+                                <div>
+                                  <label className="block text-sm font-medium mb-2" style={{ color: 'var(--color-textMuted)' }}>
+                                    Password <span style={{ color: 'var(--color-error)' }}>*</span>
+                                  </label>
+                                  <input
+                                    type="password"
+                                    placeholder={isReconnect ? "Enter Stremio password" : "Enter password"}
+                                    value={password}
+                                    onChange={(e) => setPassword(e.target.value)}
+                                    className="w-full px-4 py-3 rounded-xl transition-all duration-200 focus:outline-none"
+                                    style={{
+                                      background: 'var(--color-surfaceHover)',
+                                      border: '1px solid var(--color-surfaceBorder)',
+                                      color: 'var(--color-text)'
+                                    }}
+                                  />
+                                </div>
+
+                                {!isReconnect && (
+                                  <div className="flex items-center gap-2">
+                                    <input
+                                      id="register-new"
+                                      type="checkbox"
+                                      checked={registerNew}
+                                      onChange={(e) => setRegisterNew(e.target.checked)}
+                                      className="w-4 h-4 rounded"
+                                    />
+                                    <label htmlFor="register-new" className="text-sm" style={{ color: 'var(--color-textMuted)' }}>
+                                      Register new Stremio account
+                                    </label>
+                                  </div>
+                                )}
+                              </>
+                            )}
+
+                            {authMethod === 'authKey' && (
+                              <div>
+                                <label className="block text-sm font-medium mb-2" style={{ color: 'var(--color-textMuted)' }}>
+                                  Stremio Auth Key
+                                </label>
+                                <input
+                                  type="password"
+                                  placeholder="Paste from Stremio settings"
+                                  value={authKey}
+                                  onChange={(e) => setAuthKey(e.target.value)}
+                                  className="w-full px-4 py-3 rounded-xl transition-all duration-200 focus:outline-none"
+                                  style={{
+                                    background: 'var(--color-surfaceHover)',
+                                    border: '1px solid var(--color-surfaceBorder)',
+                                    color: 'var(--color-text)'
+                                  }}
+                                />
+                                <p className="mt-2 text-xs" style={{ color: 'var(--color-textSubtle)' }}>
+                                  Find this in Stremio → Settings → Account
+                                </p>
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="flex gap-3 mt-6">
+                            <button
+                              type="button"
+                              onClick={onClose}
+                              className="flex-1 py-3 text-sm font-medium rounded-xl transition-colors"
+                              style={{
+                                background: 'var(--color-surfaceHover)',
+                                color: 'var(--color-text)'
+                              }}
+                            >
+                              Cancel
+                            </button>
+                            <Button
+                              variant="primary"
+                              className="flex-1"
+                              onClick={handleSubmit}
+                              isLoading={isSubmitting}
+                            >
+                              {isReconnect ? 'Reconnect' : 'Add User'}
+                            </Button>
+                          </div>
+                        </div>
+                      )}
                     </motion.div>
                   )}
 
@@ -572,7 +744,7 @@ export function CreateUserModal({
                       <div className="flex gap-3">
                         <button
                           type="button"
-                          onClick={() => setStep('select')}
+                          onClick={() => setStep('tabs')}
                           className="flex-1 py-3 text-sm font-medium rounded-xl transition-colors"
                           style={{
                             background: 'var(--color-subtle)',
@@ -603,160 +775,7 @@ export function CreateUserModal({
                     </motion.div>
                   )}
 
-                  {/* Step: Manual Entry */}
-                  {step === 'manual' && (
-                    <motion.div
-                      key="manual"
-                      initial={{ opacity: 0, x: 20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      exit={{ opacity: 0, x: -20 }}
-                      transition={{ duration: 0.2 }}
-                    >
-                      <button
-                        type="button"
-                        onClick={() => setStep('select')}
-                        className="flex items-center gap-2 text-sm mb-6 group"
-                        style={{ color: 'var(--color-textMuted)' }}
-                      >
-                        <svg className="w-4 h-4 group-hover:-translate-x-1 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                        </svg>
-                        Back
-                      </button>
-
-                      <h2 className="text-xl font-bold mb-1" style={{ color: 'var(--color-text)' }}>
-                        Manual Entry
-                      </h2>
-                      <p className="text-sm mb-6" style={{ color: 'var(--color-textMuted)' }}>
-                        {isReconnect ? 'Reconnect using Stremio credentials' : 'Create a user with optional Stremio integration'}
-                      </p>
-
-                      <div className="space-y-4">
-                        {!isReconnect && (
-                          <div>
-                            <label className="block text-sm font-medium mb-2" style={{ color: 'var(--color-textMuted)' }}>
-                              Username <span style={{ color: 'var(--color-error)' }}>*</span>
-                            </label>
-                            <input
-                              type="text"
-                              placeholder="Enter a unique username"
-                              value={username}
-                              onChange={(e) => setUsername(e.target.value)}
-                              className="w-full px-4 py-3.5 rounded-xl transition-all duration-200 focus:outline-none"
-                              style={{
-                                background: 'var(--color-subtle)',
-                                border: '1px solid var(--color-surfaceBorder)',
-                                color: 'var(--color-text)'
-                              }}
-                            />
-                          </div>
-                        )}
-
-                        {isReconnect ? (
-                          <>
-                            <div>
-                              <label className="block text-sm font-medium mb-2" style={{ color: 'var(--color-textMuted)' }}>
-                                Email <span style={{ color: 'var(--color-error)' }}>*</span>
-                              </label>
-                              <input
-                                type="email"
-                                placeholder="Enter Stremio email"
-                                value={email}
-                                onChange={(e) => setEmail(e.target.value)}
-                                className="w-full px-4 py-3.5 rounded-xl transition-all duration-200 focus:outline-none"
-                                style={{
-                                  background: 'var(--color-subtle)',
-                                  border: '1px solid var(--color-surfaceBorder)',
-                                  color: 'var(--color-text)'
-                                }}
-                              />
-                            </div>
-
-                            <div>
-                              <label className="block text-sm font-medium mb-2" style={{ color: 'var(--color-textMuted)' }}>
-                                Password <span style={{ color: 'var(--color-error)' }}>*</span>
-                              </label>
-                              <input
-                                type="password"
-                                placeholder="Enter Stremio password"
-                                value={password}
-                                onChange={(e) => setPassword(e.target.value)}
-                                className="w-full px-4 py-3.5 rounded-xl transition-all duration-200 focus:outline-none"
-                                style={{
-                                  background: 'var(--color-subtle)',
-                                  border: '1px solid var(--color-surfaceBorder)',
-                                  color: 'var(--color-text)'
-                                }}
-                              />
-                            </div>
-                          </>
-                        ) : (
-                          <>
-                            <div>
-                              <label className="block text-sm font-medium mb-2" style={{ color: 'var(--color-textMuted)' }}>
-                                Email
-                              </label>
-                              <input
-                                type="email"
-                                placeholder="Optional email address"
-                                value={email}
-                                onChange={(e) => setEmail(e.target.value)}
-                                className="w-full px-4 py-3.5 rounded-xl transition-all duration-200 focus:outline-none"
-                                style={{
-                                  background: 'var(--color-subtle)',
-                                  border: '1px solid var(--color-surfaceBorder)',
-                                  color: 'var(--color-text)'
-                                }}
-                              />
-                            </div>
-
-                            <div>
-                              <label className="block text-sm font-medium mb-2" style={{ color: 'var(--color-textMuted)' }}>
-                                Stremio Auth Key
-                              </label>
-                              <input
-                                type="password"
-                                placeholder="Paste from Stremio settings"
-                                value={authKey}
-                                onChange={(e) => setAuthKey(e.target.value)}
-                                className="w-full px-4 py-3.5 rounded-xl transition-all duration-200 focus:outline-none"
-                                style={{
-                                  background: 'var(--color-subtle)',
-                                  border: '1px solid var(--color-surfaceBorder)',
-                                  color: 'var(--color-text)'
-                                }}
-                              />
-                              <p className="mt-2 text-xs" style={{ color: 'var(--color-textSubtle)' }}>
-                                Find this in Stremio → Settings → Account
-                              </p>
-                            </div>
-                          </>
-                        )}
-                      </div>
-
-                      <div className="flex gap-3 mt-8">
-                        <button
-                          type="button"
-                          onClick={onClose}
-                          className="flex-1 py-3.5 text-sm font-medium rounded-xl transition-colors"
-                          style={{
-                            background: 'var(--color-subtle)',
-                            color: 'var(--color-text)'
-                          }}
-                        >
-                          Cancel
-                        </button>
-                        <Button
-                          variant="primary"
-                          className="flex-1"
-                          onClick={handleSubmit}
-                          isLoading={isSubmitting}
-                        >
-                          {isReconnect ? 'Reconnect' : 'Create User'}
-                        </Button>
-                      </div>
-                    </motion.div>
-                  )}
+                  
 
                   {/* Step: Details (after OAuth) - only for create mode */}
                   {!isReconnect && step === 'details' && (

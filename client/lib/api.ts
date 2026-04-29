@@ -838,6 +838,19 @@ class ApiClient {
     return results;
   }
 
+  // Metrics Migration
+  async getMetricsMigrationPreview() {
+    return this.fetch<{
+      migrationStatus: { hasExistingData: boolean; alreadyMigrated: boolean; sessionsCount: number; episodesCount: number; activitiesCount: number };
+      users: { userId: string; username: string; movies: number; shows: number; watchTimeHours: number; dateRange: { earliest: string; latest: string } | null }[];
+      totals: { users: number; movies: number; shows: number; watchTimeHours: number; pendingMigration: boolean };
+    }>('/users/metrics-migration-preview');
+  }
+
+  async runMetricsMigration() {
+    return this.fetch<{ migrated: boolean; sessionsCreated: number; episodesCreated: number; reason?: string }>('/users/metrics-migration', { method: 'POST' });
+  }
+
   async deleteAllAddons() {
     const addons = await this.getAddons();
     const results = { success: 0, failed: 0 };
@@ -1076,6 +1089,31 @@ class ApiClient {
       body: JSON.stringify(payload),
     });
     // Normalize to plain User
+    return (result?.user || result) as User;
+  }
+
+  async createUserWithCredentials(data: {
+    email: string;
+    password: string;
+    username: string;
+    groupName?: string;
+    colorIndex?: number;
+    registerNew?: boolean;
+  }) {
+    const payload = {
+      email: data.email,
+      password: data.password,
+      username: data.username,
+      groupName: data.groupName,
+      colorIndex: data.colorIndex,
+      registerNew: data.registerNew,
+    };
+
+    const endpoint = data.registerNew ? '/stremio/register' : '/stremio/connect';
+    const result = await this.fetch<any>(endpoint, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
     return (result?.user || result) as User;
   }
 
