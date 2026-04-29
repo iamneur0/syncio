@@ -269,6 +269,14 @@ async function bootstrap() {
       console.error('⚠️ Failed to initialize activity monitor:', err)
     }
 
+    // Metrics migration: backfill watchSessions and episodeWatchHistory from historical WatchActivity
+    try {
+      const { runMetricsMigration } = require('./utils/metricsMigration')
+      await runMetricsMigration(prisma, decrypt, getAccountId, INSTANCE_TYPE)
+    } catch (err) {
+      console.error('⚠️ Failed to run metrics migration:', err)
+    }
+
     // Schedule addon health checker (checks if addon manifests are reachable)
     try {
       const { startHealthCheckScheduler } = require('./utils/addonHealthCheck')

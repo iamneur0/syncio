@@ -140,6 +140,8 @@ async function fetchMetadata(itemId, itemType, videoId) {
         const meta = data?.meta
         if (meta) {
           const result = {
+            title: meta.name || meta.title || null,
+            poster: meta.poster || null,
             description: meta.description || null,
             cast: meta.credits_cast || meta.cast || [],
             imdb_id: meta.imdb_id || null,

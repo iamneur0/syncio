@@ -241,6 +241,131 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
     }
   })
 
+  // GET /users/metrics-migration-preview - Preview what would be migrated
+  router.get('/metrics-migration-preview', async (req, res) => {
+    try {
+      const accountId = getAccountId(req)
+      if (!accountId) {
+        return res.status(401).json({ error: 'Unauthorized' })
+      }
+
+      const accountIdValue = accountId || 'default'
+
+      // Check current migration status
+      const [sessionCount, episodeCount, activityCount] = await Promise.all([
+        prisma.watchSession.count({ where: { accountId: accountIdValue } }),
+        prisma.episodeWatchHistory.count({ where: { accountId: accountIdValue } }),
+        prisma.watchActivity.count({ where: { accountId: accountIdValue } })
+      ])
+
+      // Get watch activity grouped by user
+      const activities = await prisma.watchActivity.findMany({
+        where: { accountId: accountIdValue },
+        select: {
+          userId: true,
+          itemId: true,
+          itemType: true,
+          watchTimeSeconds: true,
+          date: true
+        },
+        orderBy: { date: 'asc' }
+      })
+
+      // Group by user
+      const userActivityMap = {}
+      for (const activity of activities) {
+        if (!userActivityMap[activity.userId]) {
+          userActivityMap[activity.userId] = {
+            userId: activity.userId,
+            movies: 0,
+            shows: 0,
+            watchTime: 0,
+            dates: []
+          }
+        }
+        if (activity.itemType === 'movie') {
+          userActivityMap[activity.userId].movies++
+        } else if (activity.itemType === 'series') {
+          userActivityMap[activity.userId].shows++
+        }
+        userActivityMap[activity.userId].watchTime += activity.watchTimeSeconds || 0
+        userActivityMap[activity.userId].dates.push(activity.date)
+      }
+
+      // Get user info
+      const userIds = Object.keys(userActivityMap)
+      const users = await prisma.user.findMany({
+        where: { id: { in: userIds } },
+        select: { id: true, username: true, email: true }
+      })
+
+      // Build user preview data
+      const userPreviews = users.map(user => {
+        const activity = userActivityMap[user.id]
+        const dates = activity.dates.map(d => new Date(d)).sort((a, b) => a - b)
+        return {
+          userId: user.id,
+          username: user.username || user.email,
+          movies: activity.movies,
+          shows: activity.shows,
+          watchTimeSeconds: activity.watchTime,
+          watchTimeHours: Math.round((activity.watchTime / 3600) * 100) / 100,
+          dateRange: dates.length > 0 ? {
+            earliest: dates[0].toISOString().split('T')[0],
+            latest: dates[dates.length - 1].toISOString().split('T')[0]
+          } : null
+        }
+      })
+
+      const totalMovies = Object.values(userActivityMap).reduce((sum, u) => sum + u.movies, 0)
+      const totalShows = Object.values(userActivityMap).reduce((sum, u) => sum + u.shows, 0)
+      const totalWatchTime = Object.values(userActivityMap).reduce((sum, u) => sum + u.watchTime, 0)
+
+      return res.json({
+        migrationStatus: {
+          hasExistingData: sessionCount > 0 || episodeCount > 0,
+          alreadyMigrated: sessionCount > 0,
+          sessionsCount: sessionCount,
+          episodesCount: episodeCount,
+          activitiesCount: activityCount
+        },
+        users: userPreviews,
+        totals: {
+          users: userPreviews.length,
+          movies: totalMovies,
+          shows: totalShows,
+          watchTimeSeconds: totalWatchTime,
+          watchTimeHours: Math.round((totalWatchTime / 3600) * 100) / 100,
+          pendingMigration: activityCount > 0 && sessionCount === 0
+        }
+      })
+    } catch (error) {
+      console.error('Error fetching migration preview:', error)
+      res.status(500).json({ error: 'Failed to fetch migration preview' })
+    }
+  })
+
+  // POST /users/metrics-migration - Execute the migration
+  router.post('/metrics-migration', async (req, res) => {
+    try {
+      const accountId = getAccountId(req)
+      if (!accountId) {
+        return res.status(401).json({ error: 'Unauthorized' })
+      }
+
+      const { migrateAccountMetrics } = require('../utils/metricsMigration')
+      const result = await migrateAccountMetrics(prisma, accountId)
+
+      return res.json({
+        success: true,
+        ...result
+      })
+    } catch (error) {
+      console.error('Error executing migration:', error)
+      res.status(500).json({ error: 'Failed to execute migration' })
+    }
+  })
+
   // GET /users/:id/watch-time - Get watch time for a specific user
   router.get('/:id/watch-time', async (req, res) => {
     try {

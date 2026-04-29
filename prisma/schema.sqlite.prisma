@@ -264,6 +264,7 @@ model WatchSession {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
+  @@unique([accountId, userId, itemId])
   @@index([accountId, userId, startTime])
   @@index([accountId, userId, isActive])
   @@index([accountId, isActive])

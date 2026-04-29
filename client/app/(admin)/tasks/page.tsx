@@ -122,6 +122,16 @@ export default function TasksPage() {
   const [backupDays, setBackupDays] = useState(0);
   const [healthCheckMinutes, setHealthCheckMinutes] = useState(30);
   const [isHealthCheckLoading, setIsHealthCheckLoading] = useState(false);
+
+  // Metrics migration
+  const [migrationPreview, setMigrationPreview] = useState<{
+    migrationStatus: { hasExistingData: boolean; alreadyMigrated: boolean; sessionsCount: number; episodesCount: number; activitiesCount: number };
+    users: { userId: string; username: string; movies: number; shows: number; watchTimeHours: number; dateRange: { earliest: string; latest: string } | null }[];
+    totals: { users: number; movies: number; shows: number; watchTimeHours: number; pendingMigration: boolean };
+  } | null>(null);
+  const [isLoadingMigration, setIsLoadingMigration] = useState(false);
+  const [isMigrating, setIsMigrating] = useState(false);
+  const [showMigrationConfirm, setShowMigrationConfirm] = useState(false);
   const [isRunningHealthCheck, setIsRunningHealthCheck] = useState(false);
   
   // Confirm dialog
@@ -175,6 +185,37 @@ export default function TasksPage() {
   const openConfirm = (config: typeof confirmConfig) => {
     setConfirmConfig(config);
     setConfirmOpen(true);
+  };
+
+  // Metrics migration handlers
+  const handleLoadMigrationPreview = async () => {
+    setIsLoadingMigration(true);
+    try {
+      const preview = await api.getMetricsMigrationPreview();
+      setMigrationPreview(preview);
+    } catch (e: any) {
+      toast.error(e.message || 'Failed to load migration preview');
+    } finally {
+      setIsLoadingMigration(false);
+    }
+  };
+
+  const handleRunMigration = async () => {
+    setIsMigrating(true);
+    try {
+      const result = await api.runMetricsMigration();
+      if (result.migrated) {
+        toast.success(`Migration complete: ${result.sessionsCreated} sessions, ${result.episodesCreated} episodes created`);
+        setMigrationPreview(null);
+        setShowMigrationConfirm(false);
+      } else {
+        toast.success(result.reason === 'already_has_data' ? 'Data already migrated' : 'No data to migrate');
+      }
+    } catch (e: any) {
+      toast.error(e.message || 'Failed to run migration');
+    } finally {
+      setIsMigrating(false);
+    }
   };
 
   // User actions
@@ -1041,6 +1082,116 @@ export default function TasksPage() {
             <p className="text-xs text-muted mt-2">
               Checks if addon manifests are reachable and tracks online/offline status
             </p>
+          </Card>
+        </PageSection>
+
+        {/* Data Migration */}
+        <PageSection delay={0.38}>
+          <Card padding="lg" className="mb-6">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-amber-500/20">
+                <ArrowPathIcon className="w-5 h-5 text-amber-400" />
+              </div>
+              <div>
+                <h3 className="text-base font-semibold font-display text-default">Data Migration</h3>
+                <p className="text-xs text-muted">Import old metrics from previous Syncio version</p>
+              </div>
+            </div>
+            
+            {!migrationPreview ? (
+              <div className="flex items-center gap-3">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={handleLoadMigrationPreview}
+                  isLoading={isLoadingMigration}
+                  leftIcon={!isLoadingMigration ? <ArrowPathIcon className="w-4 h-4" /> : undefined}
+                >
+                  Check for Migration
+                </Button>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {migrationPreview.totals.pendingMigration ? (
+                  <>
+                    <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/30">
+                      <p className="text-sm text-amber-400 font-medium">Migration Available</p>
+                      <p className="text-xs text-muted mt-1">
+                        Found {migrationPreview.totals.movies} movies, {migrationPreview.totals.shows} shows, 
+                        {migrationPreview.totals.watchTimeHours}h watch time across {migrationPreview.totals.users} users
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        onClick={() => setShowMigrationConfirm(true)}
+                      >
+                        Migrate Now
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setMigrationPreview(null)}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  </>
+                ) : (
+                  <div className="p-3 rounded-lg bg-green-500/10 border border-green-500/30">
+                    <p className="text-sm text-green-400 font-medium">Already Migrated</p>
+                    <p className="text-xs text-muted mt-1">
+                      {migrationPreview.migrationStatus.sessionsCount} sessions, {migrationPreview.migrationStatus.episodesCount} episodes
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Migration Confirm Modal */}
+            {showMigrationConfirm && migrationPreview && (
+              <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+                <div className="bg-surface border border-default rounded-xl p-6 max-w-md w-full mx-4">
+                  <h3 className="text-lg font-semibold text-default mb-2">Confirm Migration</h3>
+                  <p className="text-sm text-muted mb-4">
+                    This will import {migrationPreview.totals.movies} movies, {migrationPreview.totals.shows} shows, 
+                    and {migrationPreview.totals.watchTimeHours}h of watch time into the new metrics system.
+                  </p>
+                  {migrationPreview.users.length > 0 && (
+                    <div className="mb-4 max-h-40 overflow-y-auto">
+                      <p className="text-xs text-muted mb-2">Users to migrate:</p>
+                      {migrationPreview.users.slice(0, 5).map((u) => (
+                        <div key={u.userId} className="text-xs text-default flex justify-between py-1">
+                          <span>{u.username}</span>
+                          <span className="text-muted">{u.movies + u.shows} items, {u.watchTimeHours}h</span>
+                        </div>
+                      ))}
+                      {migrationPreview.users.length > 5 && (
+                        <p className="text-xs text-muted">...and {migrationPreview.users.length - 5} more</p>
+                      )}
+                    </div>
+                  )}
+                  <div className="flex justify-end gap-3">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setShowMigrationConfirm(false)}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      onClick={handleRunMigration}
+                      isLoading={isMigrating}
+                    >
+                      Migrate
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )}
           </Card>
         </PageSection>
 
