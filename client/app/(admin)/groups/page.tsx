@@ -719,16 +719,20 @@ function GroupCard({
         {/* Footer with avatars, summary stats, optional sync time, and toggle */}
         <div className="flex items-center justify-between mt-4 pt-3 border-t border-default">
           <div className="flex items-center gap-3">
-            <AvatarGroup users={group.users} max={4} size="xs" />
-            <div className="flex items-center gap-4 text-sm text-muted">
+            <div className="hidden md:block">
+              <AvatarGroup users={group.users} max={4} size="xs" />
+            </div>
+            <div className="flex items-center gap-2 md:gap-4 text-sm text-muted">
               <span className="flex items-center gap-1.5">
                 <UsersIcon className="w-4 h-4 text-secondary" />
-                {group.userCount} user{group.userCount !== 1 ? 's' : ''}
+                <span className="md:hidden">{group.userCount}</span>
+                <span className="hidden md:inline">{group.userCount} user{group.userCount !== 1 ? 's' : ''}</span>
               </span>
-              <span>•</span>
+              <span className="hidden md:inline">•</span>
               <span className="flex items-center gap-1.5">
                 <PuzzlePieceIcon className="w-4 h-4 text-secondary" />
-                {group.addonCount} addon{group.addonCount !== 1 ? 's' : ''}
+                <span className="md:hidden">{group.addonCount}</span>
+                <span className="hidden md:inline">{group.addonCount} addon{group.addonCount !== 1 ? 's' : ''}</span>
               </span>
             </div>
           </div>
