@@ -11,8 +11,8 @@ WORKDIR /app
 COPY package*.json ./
 COPY client/package*.json ./client/
 COPY prisma ./prisma/
-RUN npm ci --legacy-peer-deps
-RUN cd client && npm ci --legacy-peer-deps
+RUN bun install --frozen-lockfile
+RUN cd client && bun install --frozen-lockfile
 
 # Build stage
 FROM base AS builder
