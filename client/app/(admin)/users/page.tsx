@@ -329,13 +329,6 @@ export default function UsersPage() {
             >
               {isSyncing ? 'Syncing...' : 'Sync All'}
             </Button>
-            <Button
-              variant="primary"
-              leftIcon={<PlusIcon className="w-5 h-5" />}
-              onClick={() => setIsCreateModalOpen(true)}
-            >
-              Add User
-            </Button>
           </>
         }
       />
@@ -481,7 +474,7 @@ export default function UsersPage() {
                                 >
                                   <UserAvatar userId={user.id} name={user.name} email={user.email} colorIndex={user.colorIndex} size="sm" />
                                   <div>
-                                    <p className="font-medium transition-colors group-hover:text-primary text-default">
+                                    <p className="font-medium transition-colors group-hover:text-primary text-default truncate">
                                       {user.name}
                                     </p>
                                     <p className="text-sm text-subtle">

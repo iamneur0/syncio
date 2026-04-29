@@ -403,7 +403,7 @@ export default function InvitationDetailPage() {
                       initial={{ opacity: 0, y: 10 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ delay: index * 0.05 }}
-                      className="flex items-center gap-4 p-4 rounded-xl bg-surface-hover border border-default"
+                      className="flex items-center gap-4 p-4 rounded-xl bg-surface-hover border border-default overflow-hidden"
                     >
                       <UserAvatar 
                         userId={request.id} 

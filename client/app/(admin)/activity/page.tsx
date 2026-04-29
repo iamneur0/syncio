@@ -340,7 +340,7 @@ const ActivityCard = memo(function ActivityCard({
       {/* Activity details */}
       <div className="flex-1 min-w-0">
         <p className="text-sm text-muted">
-          <Link href={`/users/${activity.userId}`} className="font-medium text-default hover:text-primary transition-colors">
+          <Link href={`/users/${activity.userId}`} className="font-medium text-default hover:text-primary transition-colors truncate">
             {activity.userName}
           </Link>{' '}
           {getActivityText(activity)}

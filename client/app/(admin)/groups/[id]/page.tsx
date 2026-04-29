@@ -407,7 +407,7 @@ function SortableAddonItem({ addon, onRemove }: SortableAddonItemProps) {
     <motion.div
       ref={setNodeRef}
       style={style}
-      className={`flex items-center gap-4 p-4 rounded-xl bg-surface-hover hover:bg-surface border transition-all group ${
+      className={`flex items-center gap-4 p-4 rounded-xl bg-surface-hover hover:bg-surface border transition-all group overflow-hidden ${
         isDragging
           ? 'border-primary shadow-lg shadow-primary/25 scale-[1.01]'
           : 'border-default hover:border-primary hover:shadow-md'
@@ -1202,7 +1202,7 @@ export default function GroupDetailPage() {
                     <StaggerItem key={user.id}>
                       <motion.div
                         whileHover={{ x: 4 }}
-                        className="flex items-center gap-4 p-4 rounded-xl bg-surface-hover hover:bg-surface transition-colors group"
+                        className="flex items-center gap-4 p-4 rounded-xl bg-surface-hover hover:bg-surface transition-colors group overflow-hidden"
                       >
                         <UserAvatar userId={user.id} name={displayName} email={user.email} size="md" />
 

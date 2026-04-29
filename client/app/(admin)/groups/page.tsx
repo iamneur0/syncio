@@ -284,13 +284,6 @@ export default function GroupsPage() {
             >
               {isSyncing ? 'Syncing...' : 'Sync All'}
             </Button>
-            <Button
-              variant="primary"
-              leftIcon={<PlusIcon className="w-5 h-5" />}
-              onClick={() => setIsCreateModalOpen(true)}
-            >
-              Create Group
-            </Button>
           </>
         }
       />
@@ -431,7 +424,7 @@ export default function GroupsPage() {
                                     colorIndex={group.colorIndex ?? 0}
                                   />
                                   <div>
-                                    <p className="font-medium transition-colors group-hover:text-primary text-default">
+                                    <p className="font-medium transition-colors group-hover:text-primary text-default truncate max-w-[200px]">
                                       {group.name}
                                     </p>
                                     <p className="text-sm text-muted truncate max-w-[200px]">

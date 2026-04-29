@@ -296,15 +296,6 @@ export default function InvitationsPage() {
       <Header
         title="Invitations"
         subtitle={isLoading ? 'Loading...' : `${invitations.length} active invite${invitations.length !== 1 ? 's' : ''} • ${pendingRequests.length} pending request${pendingRequests.length !== 1 ? 's' : ''}`}
-        actions={
-          <Button
-            variant="primary"
-            leftIcon={<PlusIcon className="w-5 h-5" />}
-            onClick={() => setIsCreateModalOpen(true)}
-          >
-            Create Invite
-          </Button>
-        }
       />
 
       <div className="p-8">
@@ -441,7 +432,7 @@ export default function InvitationsPage() {
                                   </td>
                                   <td className="px-6 py-4">
                                     <div>
-                                      <p className="font-medium text-default">{invite.name || invite.code}</p>
+                                      <p className="font-medium text-default truncate max-w-[200px]">{invite.name || invite.code}</p>
                                       <p className="text-sm text-muted font-mono">{invite.code}</p>
                                     </div>
                                   </td>

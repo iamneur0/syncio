@@ -1390,7 +1390,7 @@ function ScheduledTasksSection({ syncFrequency, backupDays, healthCheckMinutes }
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2">
-                <h4 className="text-sm font-medium text-default">{task.name}</h4>
+                <h4 className="text-sm font-medium text-default truncate">{task.name}</h4>
                 <Badge variant="muted" size="sm">{task.frequency}</Badge>
               </div>
               <p className="text-xs text-muted">{task.description}</p>

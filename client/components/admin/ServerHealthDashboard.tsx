@@ -136,7 +136,7 @@ function HealthCheckCard({ title, icon, check }: HealthCheckCardProps) {
             {icon}
           </div>
           <div>
-            <p className="font-medium text-default">{title}</p>
+            <p className="font-medium text-default truncate">{title}</p>
             <p className="text-sm text-muted">{check?.message || 'Status unknown'}</p>
           </div>
         </div>

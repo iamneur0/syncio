@@ -41,7 +41,7 @@ export function AtRiskUsersTable({
 
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
-              <span className="font-medium text-default">{user.username}</span>
+              <span className="font-medium text-default truncate">{user.username}</span>
               {user.neverWatched ? (
                 <Badge variant="error" size="sm">
                   Never Watched

@@ -361,7 +361,7 @@ export function NotificationsDropdown({ activities, inviteHistory, taskHistory }
                                 </div>
                               )}
                               <div className="flex-1 min-w-0">
-                                <p className="text-sm font-medium text-default">{notification.title}</p>
+                                <p className="text-sm font-medium text-default truncate">{notification.title}</p>
                                 <p className="text-xs text-muted mt-0.5 truncate">{notification.message}</p>
                                 <p className="text-xs text-subtle mt-1">{formatNotificationTime(notification.timestamp)}</p>
                               </div>

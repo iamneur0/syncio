@@ -95,7 +95,7 @@ export function Header({
           {/* Actions */}
           {actions ? (
             <div 
-              className="hidden md:flex items-center gap-2 pl-3"
+              className="flex items-center gap-2 pl-3"
               style={{ borderLeft: '1px solid var(--color-surfaceBorder)' }}
             >
               {actions}

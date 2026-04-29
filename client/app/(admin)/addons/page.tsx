@@ -297,13 +297,6 @@ export default function AddonsPage() {
             >
               {isReloading ? 'Reloading...' : 'Reload All'}
             </Button>
-            <Button
-              variant="primary"
-              leftIcon={<PlusIcon className="w-5 h-5" />}
-              onClick={() => setIsAddModalOpen(true)}
-            >
-              Add Addon
-            </Button>
           </>
         }
       />
@@ -469,7 +462,7 @@ export default function AddonsPage() {
                                     )}
                                   </div>
                                   <div>
-                                    <p className="font-medium transition-colors group-hover:text-primary text-default">
+                                    <p className="font-medium transition-colors group-hover:text-primary text-default truncate max-w-[200px]">
                                       {addon.name}
                                     </p>
                                     <p className="text-sm text-muted truncate max-w-[200px]">

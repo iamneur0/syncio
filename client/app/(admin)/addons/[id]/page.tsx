@@ -1770,7 +1770,7 @@ export default function AddonDetailPage() {
                      <Link href={`/groups/${group.id}`}>
                        <motion.div
                          whileHover={{ x: 4 }}
-                         className="flex items-center gap-4 p-4 rounded-xl bg-surface-hover hover:bg-surface border border-default hover:border-primary transition-all group cursor-pointer"
+                         className="flex items-center gap-4 p-4 rounded-xl bg-surface-hover hover:bg-surface border border-default hover:border-primary transition-all group cursor-pointer overflow-hidden"
                        >
                          {/* Group colored avatar with first letter */}
                          <div
@@ -2617,7 +2617,7 @@ function AddonHealthHistorySection({ addonId }: { addonId: string }) {
         </div>
         <div className="space-y-3 max-h-[340px] overflow-y-auto">
           {[1, 2, 3].map((i) => (
-            <div key={i} className="flex items-center gap-4 p-4 rounded-xl bg-surface-hover border border-default animate-pulse">
+            <div key={i} className="flex items-center gap-4 p-4 rounded-xl bg-surface-hover border border-default animate-pulse overflow-hidden">
               <div className="w-10 h-10 rounded-lg bg-muted shrink-0" />
               <div className="flex-1 space-y-2">
                 <div className="h-4 bg-muted rounded w-24" />
@@ -2700,7 +2700,7 @@ function AddonHealthHistorySection({ addonId }: { addonId: string }) {
               initial={{ opacity: 0, x: -20 }}
               animate={{ opacity: 1, x: 0 }}
               transition={{ delay: index * 0.05 }}
-              className="flex items-center gap-4 p-4 rounded-xl bg-surface-hover hover:bg-surface-hover/80 border border-default hover:border-primary transition-all"
+              className="flex items-center gap-4 p-4 rounded-xl bg-surface-hover hover:bg-surface-hover/80 border border-default hover:border-primary transition-all overflow-hidden"
             >
               <div
                 className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${

@@ -359,11 +359,11 @@ export default function MetricsPage() {
                       <StaggerItem key={user.id}>
                         <motion.div
                           whileHover={{ x: 4 }}
-                          className="flex items-center gap-4 p-4 rounded-xl transition-colors bg-surface-hover"
+                          className="flex items-center gap-4 p-4 rounded-xl transition-colors bg-surface-hover overflow-hidden"
                         >
                           {/* Rank */}
                           <div
-                            className="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold"
+                            className="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold shrink-0"
                             style={{
                               background: index === 0
                                 ? 'var(--color-warning-muted)'
@@ -385,19 +385,19 @@ export default function MetricsPage() {
                           </div>
 
                           {/* Avatar & Name */}
-                          <UserAvatar userId={user.id} name={user.name} email={user.email} size="md" />
-                          <div className="flex-1">
-                            <p className="font-medium text-default">{user.name}</p>
+                          <UserAvatar userId={user.id} name={user.name} email={user.email} size="md" className="shrink-0" />
+                          <div className="flex-1 min-w-0">
+                            <p className="font-medium text-default truncate">{user.name}</p>
                             <div className="flex items-center gap-4 text-sm text-muted">
-                              <span className="flex items-center gap-1">
+                              <span className="flex items-center gap-1 shrink-0">
                                 <FilmIcon className="w-4 h-4" />
                                 {user.movies}
                               </span>
-                              <span className="flex items-center gap-1">
+                              <span className="flex items-center gap-1 shrink-0">
                                 <TvIcon className="w-4 h-4" />
                                 {user.series}
                               </span>
-                              <span className="flex items-center gap-1">
+                              <span className="flex items-center gap-1 shrink-0">
                                 <FireIcon className="w-4 h-4" />
                                 {user.streak} {user.streak === 1 ? 'day' : 'days'}
                               </span>
@@ -405,7 +405,7 @@ export default function MetricsPage() {
                           </div>
 
                           {/* Watch Time */}
-                          <div className="text-right">
+                          <div className="text-right shrink-0">
                             <p className="text-lg font-bold text-default">{formatMinutes(user.watchTime)}</p>
                             <div className="flex items-center justify-end gap-1 text-sm">
                               {user.trend === 'up' ? (

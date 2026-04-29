@@ -94,7 +94,7 @@ export function UserStreaksList({ users }: UserStreaksListProps) {
           initial={{ opacity: 0, x: -20 }}
           animate={{ opacity: 1, x: 0 }}
           transition={{ delay: index * 0.1 }}
-          className="flex items-center gap-4 p-4 rounded-xl bg-surface-hover"
+          className="flex items-center gap-4 p-4 rounded-xl bg-surface-hover overflow-hidden"
         >
           <div className="flex-shrink-0">
             <UserAvatar userId={user.userId} name={user.username} email={user.email} size="md" />
