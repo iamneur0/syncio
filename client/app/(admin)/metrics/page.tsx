@@ -244,6 +244,7 @@ export default function MetricsPage() {
   const topUsersData = useMemo(() => {
     if (!metricsData?.watchActivity?.byUser) return [];
     return metricsData.watchActivity.byUser
+      .sort((a, b) => (b.watchTimeHours || 0) - (a.watchTimeHours || 0))
       .slice(0, 5)
       .map((user) => ({
         id: user.id,
