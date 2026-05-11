@@ -579,6 +579,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, assignUser
   // Remove user from group
   router.delete('/:groupId/users/:userId', async (req, res) => {
     try {
+      const { groupId, userId } = req.params
       const group = await prisma.group.findFirst({
         where: { 
           id: groupId,

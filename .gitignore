@@ -107,6 +107,8 @@ temp/
 ehthumbs.db
 Thumbs.db
 
+*.tsbuildinfo
+
 # Docker
 .dockerignore
 

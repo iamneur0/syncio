@@ -1418,10 +1418,10 @@ export default function GroupDetailPage() {
           groupId={params.id as string}
           existingUserIds={groupUsers.map(u => u.id)}
           onClose={() => setIsAddMemberModalOpen(false)}
-          onUsersChanged={() => {
+          onUsersChanged={async () => {
             setUsersSyncing(true);
-            // Reset after a delay to trigger badge refresh
-            setTimeout(() => setUsersSyncing(false), 500);
+            await refetchData();
+            setUsersSyncing(false);
           }}
         />
       </Modal>
