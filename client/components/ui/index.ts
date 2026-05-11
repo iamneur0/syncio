@@ -18,3 +18,4 @@ export * from './SelectAllCheckbox';
 export * from './SelectionCheckbox';
 export * from './FilterTabs';
 export * from './PageToolbar';
+export * from './DragSortable';

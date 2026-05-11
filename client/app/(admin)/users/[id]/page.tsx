@@ -40,6 +40,7 @@ import {
   closestCenter,
   KeyboardSensor,
   PointerSensor,
+  TouchSensor,
   useSensor,
   useSensors,
   DragEndEvent,
@@ -53,6 +54,7 @@ import {
   useSortable,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+import { DraggableList, useSortableSensors } from '@/components/ui/DragSortable';
 import { format } from 'date-fns';
 import {
   AreaChart,
@@ -221,11 +223,12 @@ function SortableGroupAddonItem({ addon, isExcluded, onToggleExclude }: Sortable
     isDragging,
   } = useSortable({ id: addon.id });
 
-  const style = {
+const style = {
     transform: CSS.Transform.toString(transform),
-    transition,
-    zIndex: isDragging ? 50 : undefined,
-  };
+    transition: isDragging ? 'none' : transition,
+    zIndex: isDragging ? 100 : undefined,
+    isolation: 'isolate',
+  } as React.CSSProperties;
 
   return (
     <motion.div
@@ -240,6 +243,7 @@ function SortableGroupAddonItem({ addon, isExcluded, onToggleExclude }: Sortable
         {...attributes}
         {...listeners}
         className="cursor-grab active:cursor-grabbing p-1 rounded hover:bg-surface-hover"
+        style={{ touchAction: 'none' }}
       >
         <Bars3Icon className="w-5 h-5 text-subtle" />
       </div>
@@ -321,11 +325,12 @@ function SortableStremioAddonItem({ addon, index, isProtected, onToggleProtect, 
     isDragging,
   } = useSortable({ id: uniqueId });
 
-  const style = {
+const style = {
     transform: CSS.Transform.toString(transform),
-    transition,
-    zIndex: isDragging ? 50 : undefined,
-  };
+    transition: isDragging ? 'none' : transition,
+    zIndex: isDragging ? 100 : undefined,
+    isolation: 'isolate',
+  } as React.CSSProperties;
 
   const name = addon.manifest?.name || 'Unknown Addon';
   const version = addon.manifest?.version;
@@ -345,6 +350,7 @@ function SortableStremioAddonItem({ addon, index, isProtected, onToggleProtect, 
         {...attributes}
         {...listeners}
         className="cursor-grab active:cursor-grabbing p-1 rounded hover:bg-surface-hover"
+        style={{ touchAction: 'none' }}
       >
         <Bars3Icon className="w-5 h-5 text-subtle" />
       </div>
@@ -582,6 +588,12 @@ export default function UserDetailPage() {
   // DnD sensors
   const sensors = useSensors(
     useSensor(PointerSensor),
+    useSensor(TouchSensor, {
+      activationConstraint: {
+        delay: 0,
+        distance: 0,
+      },
+    }),
     useSensor(KeyboardSensor, {
       coordinateGetter: sortableKeyboardCoordinates,
     })
@@ -1508,28 +1520,71 @@ export default function UserDetailPage() {
                     </div>
 
                     {groupAddons.length > 0 ? (
-                      <DndContext
-                        sensors={sensors}
-                        collisionDetection={closestCenter}
-                        modifiers={[restrictToParentElement]}
+                      <DraggableList
+                        items={groupAddons.map(addon => addon.id)}
                         onDragEnd={handleGroupAddonDragEnd}
-                      >
-                        <SortableContext
-                          items={groupAddons.map(addon => addon.id)}
-                          strategy={verticalListSortingStrategy}
-                        >
-                          <div className="space-y-3">
-                            {groupAddons.map((addon) => (
-                              <SortableGroupAddonItem
-                                key={addon.id}
-                                addon={addon}
-                                isExcluded={excludedAddonIds.has(addon.id)}
-                                onToggleExclude={handleToggleExclude}
-                              />
-                            ))}
-                          </div>
-                        </SortableContext>
-                      </DndContext>
+                        renderItem={({ id, dragHandleProps, itemProps, isDragging }) => {
+                          const addon = groupAddons.find(a => a.id === id);
+                          if (!addon) return null;
+                          const isExcluded = excludedAddonIds.has(addon.id);
+                          return (
+                            <motion.div
+                              ref={itemProps.ref}
+                              style={itemProps.style}
+                              className={`flex items-center gap-3 p-4 rounded-xl border transition-all group bg-surface-hover hover:bg-surface ${
+                                isExcluded ? 'opacity-50 border-default' : 'border-default hover:border-primary'
+                              } ${isDragging ? 'shadow-lg ring-2 ring-primary' : ''}`}
+                            >
+                              <div {...dragHandleProps} className="cursor-grab active:cursor-grabbing p-1 rounded hover:bg-surface-hover">
+                                <Bars3Icon className="w-5 h-5 text-subtle" />
+                              </div>
+                              <div className="w-10 h-10 rounded-lg bg-primary-muted flex items-center justify-center shrink-0">
+                                {(addon as any).customLogo ? (
+                                  <img src={(addon as any).customLogo} alt={addon.name} className="w-6 h-6 object-contain" />
+                                ) : addon.logo ? (
+                                  <img src={addon.logo} alt={addon.name} className="w-6 h-6 object-contain" />
+                                ) : (
+                                  <PuzzlePieceIcon className="w-5 h-5 text-primary" />
+                                )}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 mb-1">
+                                  <h4 className={`font-medium truncate ${isExcluded ? 'text-muted line-through' : 'text-default'}`}>
+                                    {addon.name}
+                                  </h4>
+                                  {addon.version && <VersionBadge version={addon.version} size="sm" />}
+                                  {(addon as any).isBackup && <Badge variant="warning" size="sm" title={`Primary (${(addon as any).primaryAddonName}) is offline`}>Backup</Badge>}
+                                  {isExcluded && <Badge variant="error" size="sm">Excluded</Badge>}
+                                </div>
+                                {(addon as any).isBackup && (addon as any).primaryAddonName && (
+                                  <p className="text-xs text-warning truncate mb-1">Primary offline: {(addon as any).primaryAddonName}</p>
+                                )}
+                                {addon.description && (
+                                  <p className="text-xs text-muted truncate mb-1">{addon.description}</p>
+                                )}
+                                {addon.resources && addon.resources.length > 0 && (
+                                  <div className="flex flex-wrap gap-1.5 mt-1">
+                                    {addon.resources.slice(0, 4).map((res: string) => (
+                                      <ResourceBadge key={res} resource={res} />
+                                    ))}
+                                    {addon.resources.length > 4 && (
+                                      <Badge variant="muted" size="sm" className="bg-surface">+{addon.resources.length - 4}</Badge>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                              <button
+                                onClick={() => handleToggleExclude(addon.id)}
+                                className={`p-2 rounded-lg transition-colors ${
+                                  isExcluded ? 'text-error bg-error-muted' : 'text-muted hover:text-error hover:bg-error-muted'
+                                }`}
+                              >
+                                {isExcluded ? <ArrowPathIcon className="w-4 h-4" /> : <XMarkIcon className="w-4 h-4" />}
+                              </button>
+                            </motion.div>
+                          );
+                        }}
+                      />
                     ) : (
                       <div className="text-center py-8">
                         <PuzzlePieceIcon className="w-12 h-12 mx-auto mb-4 text-muted opacity-50" />
@@ -1568,30 +1623,80 @@ export default function UserDetailPage() {
                     </div>
 
                     {stremioAddons.length > 0 ? (
-                      <DndContext
-                        sensors={sensors}
-                        collisionDetection={closestCenter}
-                        modifiers={[restrictToParentElement]}
+                      <DraggableList
+                        items={stremioAddons.map((addon, index) => `${index}-${addon.transportUrl}`)}
                         onDragEnd={handleStremioAddonDragEnd}
-                      >
-                        <SortableContext
-                          items={stremioAddons.map((addon, index) => `${index}-${addon.transportUrl}`)}
-                          strategy={verticalListSortingStrategy}
-                        >
-                          <div className="space-y-3">
-                            {stremioAddons.map((addon, index) => (
-                              <SortableStremioAddonItem
-                                key={`${index}-${addon.transportUrl}`}
-                                addon={addon}
-                                index={index}
-                                isProtected={protectedAddonNames.has(addon.manifest?.name || '')}
-                                onToggleProtect={handleToggleProtect}
-                                onRemove={handleRemoveStremioAddon}
-                              />
-                            ))}
-                          </div>
-                        </SortableContext>
-                      </DndContext>
+                        renderItem={({ id, dragHandleProps, itemProps, isDragging }) => {
+                          const index = stremioAddons.findIndex((a, i) => `${i}-${a.transportUrl}` === id);
+                          if (index === -1) return null;
+                          const addon = stremioAddons[index];
+                          const name = addon.manifest?.name || 'Unknown Addon';
+                          const version = addon.manifest?.version;
+                          const description = addon.manifest?.description;
+                          const logo = addon.manifest?.logo;
+                          const isProtected = protectedAddonNames.has(addon.manifest?.name || '');
+                          return (
+                            <motion.div
+                              ref={itemProps.ref}
+                              style={itemProps.style}
+                              className={`flex items-center gap-3 p-4 rounded-xl bg-surface-hover hover:bg-surface transition-all border border-default group ${
+                                isDragging ? 'shadow-lg ring-2 ring-primary' : ''
+                              }`}
+                            >
+                              <div {...dragHandleProps} className="cursor-grab active:cursor-grabbing p-1 rounded hover:bg-surface-hover">
+                                <Bars3Icon className="w-5 h-5 text-subtle" />
+                              </div>
+                              <div className="w-10 h-10 rounded-lg bg-primary-muted flex items-center justify-center shrink-0">
+                                {logo ? (
+                                  <img src={logo} alt={name} className="w-6 h-6 object-contain" />
+                                ) : (
+                                  <PuzzlePieceIcon className="w-5 h-5 text-primary" />
+                                )}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 mb-1">
+                                  <h4 className="font-medium text-default truncate">{name}</h4>
+                                  {version && <VersionBadge version={version} size="sm" />}
+                                  {isProtected && (
+                                    <Badge variant="success" size="sm">
+                                      <ShieldCheckIcon className="w-3 h-3 mr-1" />
+                                      Protected
+                                    </Badge>
+                                  )}
+                                </div>
+                                {description && <p className="text-xs text-muted truncate mb-1">{description}</p>}
+                                {addon.manifest?.resources && addon.manifest.resources.length > 0 && (
+                                  <div className="flex flex-wrap gap-1.5 mt-1">
+                                    {addon.manifest.resources.slice(0, 4).map((res: any) => {
+                                      const resName = typeof res === 'string' ? res : res.name;
+                                      return <ResourceBadge key={resName} resource={resName} />;
+                                    })}
+                                    {addon.manifest.resources.length > 4 && (
+                                      <Badge variant="muted" size="sm" className="bg-surface">+{addon.manifest.resources.length - 4}</Badge>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <button
+                                  onClick={() => handleToggleProtect(name)}
+                                  className={`p-2 rounded-lg transition-colors ${
+                                    isProtected ? 'text-success hover:bg-success-muted' : 'text-muted hover:text-success hover:bg-success-muted'
+                                  }`}
+                                >
+                                  <ShieldCheckIcon className="w-4 h-4" />
+                                </button>
+                                <button
+                                  onClick={() => handleRemoveStremioAddon(addon.transportUrl)}
+                                  className="p-2 rounded-lg text-muted hover:text-error hover:bg-error-muted transition-colors"
+                                >
+                                  <XMarkIcon className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </motion.div>
+                          );
+                        }}
+                      />
                     ) : (
                       <div className="text-center py-8">
                         <PuzzlePieceIcon className="w-12 h-12 mx-auto mb-4 text-muted opacity-50" />

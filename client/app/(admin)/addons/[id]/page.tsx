@@ -50,6 +50,7 @@ import {
   closestCenter,
   KeyboardSensor,
   PointerSensor,
+  TouchSensor,
   useSensor,
   useSensors,
   DragStartEvent,
@@ -63,6 +64,7 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+import { DraggableList, useSortableSensors, DragOverlay } from '@/components/ui/DragSortable';
 
 interface AddonWithGroups extends Addon {
   groups?: Array<{
@@ -343,34 +345,33 @@ function SortableCatalogItem({ catalog, isSelected, onToggle }: { catalog: any; 
 
   const style = {
     transform: CSS.Transform.toString(transform),
-    transition,
-    zIndex: isDragging ? 50 : 1,
-  };
+    transition: isDragging ? 'none' : transition,
+    zIndex: isDragging ? 100 : undefined,
+    opacity: isDragging ? 0 : 1,
+  } as React.CSSProperties;
 
   return (
     <motion.div
       ref={setNodeRef}
       style={style}
-      {...attributes}
-      {...listeners}
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      onClick={onToggle}
       className={`group flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-all duration-200 bg-surface-hover hover:bg-surface border border-default hover:border-primary ${
-        isDragging ? 'shadow-2xl ring-2 ring-primary/30 scale-[1.02]' : ''
+        isDragging ? 'shadow-lg ring-2 ring-primary' : ''
       }`}
     >
 
       {/* Drag handle */}
-      <div 
-        className="text-muted/50 cursor-grab active:cursor-grabbing"
+      <div
+        {...attributes}
+        {...listeners}
+        className="cursor-grab active:cursor-grabbing p-1 rounded hover:bg-surface-hover"
+        style={{ touchAction: 'none' }}
         onClick={(e) => e.stopPropagation()}
       >
-        <Bars3Icon className="w-5 h-5" />
+        <Bars3Icon className="w-5 h-5 text-subtle" />
       </div>
 
       {/* Content */}
-      <div className="flex-1 min-w-0">
+      <div className="flex-1 min-w-0" onClick={onToggle}>
         <div className="flex items-center gap-2">
           <span className={`font-medium truncate ${isSelected ? 'text-default' : 'text-subtle group-hover:text-default'}`}>
             {catalog.name || catalog.id}
@@ -448,14 +449,7 @@ export default function AddonDetailPage() {
   const [isRegeneratingProxy, setIsRegeneratingProxy] = useState(false);
 
   // Drag sensors
-  const sensors = useSensors(
-    useSensor(PointerSensor, {
-      activationConstraint: { distance: 5 },
-    }),
-    useSensor(KeyboardSensor, {
-      coordinateGetter: sortableKeyboardCoordinates,
-    })
-  );
+  const sensors = useSortableSensors();
 
   // Fetch addon data
   const fetchAddon = useCallback(async (skipLoading = false) => {
@@ -1675,7 +1669,7 @@ export default function AddonDetailPage() {
               onDragStart={handleDragStart}
               onDragEnd={handleDragEnd}
             >
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6" style={{ userSelect: 'none' }}>
                 {/* Regular Catalogs */}
                 {orderedRegularCatalogs.length > 0 && (
                   <div>
@@ -1750,6 +1744,21 @@ export default function AddonDetailPage() {
                   <p className="text-sm text-subtle col-span-2">No catalogs available</p>
                 )}
               </div>
+              <DragOverlay>
+                {(() => {
+                  if (!activeCatalogId) return null;
+                  const allCatalogs = [...orderedRegularCatalogs, ...orderedSearchCatalogs];
+                  const activeCatalog = allCatalogs.find((c: any) => getCatalogKey(c) === activeCatalogId);
+                  if (!activeCatalog) return null;
+                  return (
+                    <SortableCatalogItem
+                      catalog={activeCatalog}
+                      isSelected={selectedCatalogs.has(getCatalogKey(activeCatalog) || '')}
+                      onToggle={() => handleCatalogToggle(getCatalogKey(activeCatalog) || '')}
+                    />
+                  );
+                })()}
+              </DragOverlay>
             </DndContext>
           </Card>
         </PageSection>

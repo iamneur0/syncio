@@ -45,9 +45,11 @@ import {
   closestCenter,
   KeyboardSensor,
   PointerSensor,
+  TouchSensor,
   useSensor,
   useSensors,
   DragEndEvent,
+  DragOverlay,
 } from '@dnd-kit/core';
 import { restrictToParentElement } from '@dnd-kit/modifiers';
 import {
@@ -58,6 +60,7 @@ import {
   useSortable,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+import { DraggableList } from '@/components/ui/DragSortable';
 
 const colorOptions = [
   '#7c3aed', '#06b6d4', '#10b981', '#f59e0b', '#f43f5e', '#8b5cf6', '#ec4899', '#14b8a6',
@@ -399,9 +402,10 @@ function SortableAddonItem({ addon, onRemove }: SortableAddonItemProps) {
 
   const style = {
     transform: CSS.Transform.toString(transform),
-    transition,
-    zIndex: isDragging ? 50 : undefined,
-  };
+    transition: isDragging ? 'none' : transition,
+    zIndex: isDragging ? 100 : undefined,
+    isolation: 'isolate',
+  } as React.CSSProperties;
 
   return (
     <motion.div
@@ -418,6 +422,7 @@ function SortableAddonItem({ addon, onRemove }: SortableAddonItemProps) {
         {...attributes}
         {...listeners}
         className="cursor-grab active:cursor-grabbing p-1 rounded hover:bg-surface-hover shrink-0"
+        style={{ touchAction: 'none' }}
       >
         <Bars3Icon className="w-5 h-5 text-subtle" />
       </div>
@@ -534,6 +539,12 @@ export default function GroupDetailPage() {
   // DnD sensors
   const sensors = useSensors(
     useSensor(PointerSensor),
+    useSensor(TouchSensor, {
+      activationConstraint: {
+        delay: 0,
+        distance: 0,
+      },
+    }),
     useSensor(KeyboardSensor, {
       coordinateGetter: sortableKeyboardCoordinates,
     })
@@ -1300,42 +1311,96 @@ export default function GroupDetailPage() {
               </div>
             </div>
 
-            {isLoading ? (
+{isLoading ? (
               <div className="text-center py-8 text-sm text-muted">Loading...</div>
             ) : addons.length > 0 ? (
-              <DndContext
-                sensors={sensors}
-                collisionDetection={closestCenter}
-                modifiers={[restrictToParentElement]}
-                onDragEnd={handleDragEnd}
-              >
-                <SortableContext
-                  items={addons
-                    .filter(addon => addon.id) // Only include addons with valid IDs
-                    .map(addon => String(addon.id))} // Ensure string IDs
-                  strategy={verticalListSortingStrategy}
-                >
-                  <div className="space-y-3">
-                    {addons
-                      .filter(addon => addon.id) // Only render addons with valid IDs
-                      .map((addon) => {
-                        // Ensure we have a valid ID (should always be true after filter)
-                        if (!addon.id) {
-                          console.error('Addon without ID in render:', addon);
-                          return null;
-                        }
-                        return (
-                          <SortableAddonItem
-                            key={addon.id}
-                            addon={addon}
-                            onRemove={handleRemoveAddon}
-                          />
-                        );
-                      })
-                      .filter(Boolean)}
-                  </div>
-                </SortableContext>
-              </DndContext>
+              (() => {
+                const addonIds = addons.filter(addon => addon.id).map(addon => String(addon.id));
+                return (
+                  <DraggableList
+                    items={addonIds}
+                    onDragEnd={handleDragEnd}
+                    renderItem={({ id, dragHandleProps, itemProps, isDragging }) => {
+                      const addon = addons.find(a => String(a.id) === id);
+                      if (!addon) return null;
+                      const anyAddon = addon as any;
+                      const logo = anyAddon.customLogo || anyAddon.manifest?.logo || addon.logo || anyAddon.iconUrl;
+                      return (
+                        <motion.div
+                          ref={itemProps.ref}
+                          style={itemProps.style}
+                          className={`flex items-center gap-4 p-4 rounded-xl bg-surface-hover hover:bg-surface border transition-all group overflow-hidden ${
+                            isDragging
+                              ? 'border-primary shadow-lg shadow-primary/25 scale-[1.01]'
+                              : 'border-default hover:border-primary hover:shadow-md'
+                          }`}
+                        >
+                          <div
+                            {...dragHandleProps}
+                            className="cursor-grab active:cursor-grabbing p-1 rounded hover:bg-surface-hover shrink-0"
+                          >
+                            <Bars3Icon className="w-5 h-5 text-subtle" />
+                          </div>
+                          <Link
+                            href={`/addons/${addon.id}`}
+                            className="flex items-center gap-4 flex-1 min-w-0 cursor-pointer"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <div className="shrink-0 w-10 h-10 rounded-lg flex items-center justify-center bg-surface-hover">
+                              {logo ? (
+                                <img src={logo} alt={addon.name} className="w-8 h-8 object-contain" />
+                              ) : (
+                                <PuzzlePieceIcon className="w-6 h-6 text-primary" />
+                              )}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 mb-1">
+                                <h4 className="font-semibold text-default truncate text-base">
+                                  {addon.name || 'Unnamed Addon'}
+                                </h4>
+                                {addon.version && (
+                                  <VersionBadge version={addon.version} size="sm" />
+                                )}
+                              </div>
+                              {addon.description && (
+                                <p className="text-sm text-muted truncate mb-2">{addon.description}</p>
+                              )}
+                              {(addon.resources || []).length > 0 && (
+                                <div className="flex flex-wrap gap-1.5 mt-1">
+                                  {(addon.resources || []).slice(0, 4).map((res: string) => (
+                                    <ResourceBadge key={res} resource={res} />
+                                  ))}
+                                  {(addon.resources || []).length > 4 && (
+                                    <Badge variant="muted" size="sm">
+                                      +{(addon.resources || []).length - 4}
+                                    </Badge>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          </Link>
+                          <div className="flex items-center gap-2 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onMouseDown={(e) => e.stopPropagation()}
+                              onTouchStart={(e) => e.stopPropagation()}
+                              onClick={() => {
+                                if (addon.id) {
+                                  handleRemoveAddon(addon.id);
+                                }
+                              }}
+                              className="text-error hover:bg-error-muted rounded-lg"
+                            >
+                              <XMarkIcon className="w-5 h-5" />
+                            </Button>
+                          </div>
+                        </motion.div>
+                      );
+                    }}
+                  />
+                );
+              })()
             ) : (
               <div className="text-center py-8">
                 <PuzzlePieceIcon className="w-12 h-12 mx-auto mb-4 text-muted opacity-50" />
