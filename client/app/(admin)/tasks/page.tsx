@@ -106,6 +106,7 @@ export default function TasksPage() {
   const [repairingAddons, setRepairingAddons] = useState(false);
   const [resettingConfig, setResettingConfig] = useState(false);
   const [isBackupRunning, setIsBackupRunning] = useState(false);
+  const [isSyncRunning, setIsSyncRunning] = useState(false);
   const [isExportingLibrary, setIsExportingLibrary] = useState(false);
   const [isExportingHistory, setIsExportingHistory] = useState(false);
   const [isImportingHistory, setIsImportingHistory] = useState(false);
@@ -557,6 +558,19 @@ export default function TasksPage() {
       toast.success('Backup schedule updated');
     } catch (e: any) {
       toast.error(e.message || 'Failed to update backup schedule');
+    }
+  };
+
+  // Sync actions
+  const handleSyncNow = async () => {
+    setIsSyncRunning(true);
+    try {
+      const result = await api.syncAllGroups();
+      toast.success(`Sync completed: ${result.syncedGroups} synced, ${result.failedGroups} failed`);
+    } catch (e: any) {
+      toast.error(e.message || 'Failed to start sync');
+    } finally {
+      setIsSyncRunning(false);
     }
   };
 
@@ -1035,6 +1049,16 @@ export default function TasksPage() {
                 <option value="15d">Every 15 days</option>
                 <option value="30d">Every 30 days</option>
               </select>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleSyncNow}
+                isLoading={isSyncRunning}
+                leftIcon={!isSyncRunning ? <ArrowPathIcon className="w-4 h-4" /> : undefined}
+                title="Run sync now"
+              >
+                Sync Now
+              </Button>
             </div>
           </Card>
         </PageSection>

@@ -163,11 +163,10 @@ module.exports = ({ prisma, INSTANCE_TYPE, getAccountDek, getDecryptedManifestUr
   })
 
   // Sync settings endpoints - available in all modes
-  const { 
+  const {
     readSyncFrequencyMinutes,
     writeSyncFrequencyMinutes,
-    scheduleSyncs,
-    performSyncOnce 
+    scheduleSyncs
   } = require('../utils/syncScheduler');
 
   // Per-account sync settings (AUTH mode)
@@ -369,15 +368,44 @@ module.exports = ({ prisma, INSTANCE_TYPE, getAccountDek, getDecryptedManifestUr
   // Manual sync trigger
   router.post('/sync-now', async (req, res) => {
     try {
-      const { reloadGroupAddons } = require('../routes/users');
+      const { syncGroupUsers } = require('../routes/groups');
       const scopedWhere = require('../utils/helpers').scopedWhere;
       const decrypt = require('../utils/encryption').decrypt;
-      
-      const schedulerReq = {
-        appAccountId: INSTANCE_TYPE === 'public' ? req.appAccountId : DEFAULT_ACCOUNT_ID
-      };
-      const result = await performSyncOnce(prisma, getAccountId, scopedWhere, decrypt, reloadGroupAddons, schedulerReq, INSTANCE_TYPE)
-      return res.json({ message: 'Sync started', result })
+
+      const accountId = INSTANCE_TYPE === 'public' ? req.appAccountId : DEFAULT_ACCOUNT_ID;
+      const syncReq = { appAccountId: accountId, headers: {}, body: {} };
+
+      const groups = await prisma.group.findMany({
+        where: scopedWhere(syncReq, {}),
+        select: { id: true }
+      });
+
+      if (groups.length === 0) {
+        return res.json({ message: 'No groups found to sync', syncedGroups: 0, failedGroups: 0, totalGroups: 0 });
+      }
+
+      let syncedGroups = 0;
+      let failedGroups = 0;
+
+      for (const group of groups) {
+        try {
+          const result = await syncGroupUsers(prisma, getAccountId, scopedWhere, decrypt, group.id, syncReq);
+          if (result?.error) {
+            failedGroups++;
+          } else {
+            syncedGroups++;
+          }
+        } catch (e) {
+          failedGroups++;
+        }
+      }
+
+      return res.json({
+        message: 'Sync completed',
+        syncedGroups,
+        failedGroups,
+        totalGroups: groups.length
+      });
     } catch (e) {
       return res.status(500).json({ message: 'Failed to start sync', error: e?.message })
     }
