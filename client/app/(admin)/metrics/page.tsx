@@ -7,7 +7,6 @@ import { Card, StatCard, Badge, UserAvatar, PageToolbar } from '@/components/ui'
 import { PageSection, StaggerContainer, StaggerItem } from '@/components/layout/PageContainer';
 import { api, MetricsData, AtRiskUser } from '@/lib/api';
 import {
-  AlertBanner,
   UserLifecycleCard,
   HourlyHeatmap,
   AtRiskUsersTable,
@@ -282,11 +281,6 @@ export default function MetricsPage() {
       />
 
       <div className="p-8">
-        {/* Admin Alerts */}
-        {metricsData?.admin?.alerts && (
-          <AlertBanner alerts={metricsData.admin.alerts} />
-        )}
-
         {/* View Mode Toggle - Centered */}
         <PageSection className="mb-6">
           <PageToolbar

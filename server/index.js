@@ -227,6 +227,15 @@ async function bootstrap() {
     await ensureDefaultAccount(prisma)
   }
 
+  // Run metrics migration to convert WatchActivity to WatchSession
+  // This only runs once - subsequent runs are no-ops
+  try {
+    const { runMetricsMigration } = require('./utils/metricsMigration')
+    await runMetricsMigration(prisma)
+  } catch (err) {
+    console.error('⚠️ Failed to run metrics migration:', err.message)
+  }
+
   // Defer heavy startup tasks to avoid blocking the main thread during boot
   setTimeout(async () => {
     // Import schedulers here to break circular dependencies

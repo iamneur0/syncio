@@ -275,20 +275,20 @@ async function migrateAccountMetrics(prisma, accountId) {
     const itemId = activity.itemId
     const isSeries = activity.itemType === 'series'
 
-    // Session key is just userId:itemId (one session per item per user)
-    const sessionKey = `${activity.userId}:${itemId}`
+    // Session key includes date - one session per user+item+date
+    // This properly distributes historical watch time across actual days
+    const sessionKey = `${activity.userId}:${itemId}:${activity.date}`
     if (existingSessionSet.has(sessionKey)) {
       // Already have this session, skip
     } else {
       existingSessionSet.add(sessionKey)
 
+      // Use the actual date from the activity
       const startTime = new Date(activity.date)
       startTime.setHours(Math.floor(Math.random() * 12) + 8, Math.floor(Math.random() * 60), 0, 0)
 
-      // Sum up all watch time for this user+item combination
-      const totalWatchTime = activities
-        .filter(a => a.userId === activity.userId && a.itemId === itemId)
-        .reduce((sum, a) => sum + a.watchTimeSeconds, 0)
+      // Use just this day's watch time, not cumulative
+      const totalWatchTime = activity.watchTimeSeconds || 0
       
       const endTime = new Date(startTime.getTime() + (totalWatchTime * 1000))
 
