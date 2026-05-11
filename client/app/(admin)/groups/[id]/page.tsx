@@ -6,7 +6,7 @@ import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { api, User, Group, Addon } from '@/lib/api';
 import { Header, Breadcrumbs } from '@/components/layout/Header';
-import { Button, Card, Avatar, AvatarGroup, Badge, Modal, ConfirmModal, Input, ColorPicker, InlineEdit, ToggleSwitch, SyncBadge, VersionBadge, ResourceBadge, UserAvatar } from '@/components/ui';
+import { Button, Card, Avatar, AvatarGroup, Badge, Modal, ConfirmModal, Input, ColorPicker, InlineEdit, ToggleSwitch, SyncBadge, VersionBadge, ResourceBadge, UserAvatar, SelectionCheckbox } from '@/components/ui';
 import { PageSection, StaggerContainer, StaggerItem } from '@/components/layout/PageContainer';
 import { toast } from '@/components/ui/Toast';
 import {
@@ -1544,14 +1544,15 @@ function EditGroupForm({ group, onClose }: { group: Group | null; onClose: () =>
 }
 
 // Add Member Form Component
-function AddMemberForm({ groupId, existingUserIds, onClose, onUsersChanged }: { 
-  groupId: string; 
-  existingUserIds: string[]; 
+function AddMemberForm({ groupId, existingUserIds, onClose, onUsersChanged }: {
+  groupId: string;
+  existingUserIds: string[];
   onClose: () => void;
   onUsersChanged?: () => void;
 }) {
   const [isLoading, setIsLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [selectedUserIds, setSelectedUserIds] = useState<Set<string>>(new Set());
 
   // Fetch available users
   const [availableUsers, setAvailableUsers] = useState<User[]>([]);
@@ -1572,16 +1573,37 @@ function AddMemberForm({ groupId, existingUserIds, onClose, onUsersChanged }: {
     }
   );
 
-  const handleAddUser = async (userId: string, userName: string) => {
+  const toggleUser = (userId: string) => {
+    setSelectedUserIds(prev => {
+      const next = new Set(prev);
+      if (next.has(userId)) {
+        next.delete(userId);
+      } else {
+        next.add(userId);
+      }
+      return next;
+    });
+  };
+
+  const handleAddSelected = async () => {
+    if (selectedUserIds.size === 0) return;
+
+    setIsLoading(true);
     try {
-      await api.addUserToGroup(groupId, userId);
-      toast.success(`${userName} added to group`);
+      const usersToAdd = availableUsers.filter(u => selectedUserIds.has(u.id));
+      for (const userId of selectedUserIds) {
+        await api.addUserToGroup(groupId, userId);
+      }
+      const count = selectedUserIds.size;
+      toast.success(`${count} user${count > 1 ? 's' : ''} added to group`);
       onClose();
       if (onUsersChanged) {
         onUsersChanged();
       }
     } catch (err: any) {
-      toast.error(err.message || `Failed to add ${userName} to group`);
+      toast.error(err.message || `Failed to add users to group`);
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -1596,19 +1618,26 @@ function AddMemberForm({ groupId, existingUserIds, onClose, onUsersChanged }: {
       <div className="space-y-2 max-h-64 overflow-y-auto">
         {filteredUsers.map((user) => {
           const displayName = user.name || user.username || 'Unknown';
+          const isSelected = selectedUserIds.has(user.id);
           return (
             <motion.div
               key={user.id}
-              whileHover={{ x: 4 }}
-              className="flex items-center gap-3 p-3 rounded-xl bg-surface-hover hover:bg-surface transition-colors cursor-pointer"
-              onClick={() => handleAddUser(user.id, displayName)}
+              className={`flex items-center gap-3 p-3 rounded-xl transition-colors cursor-pointer ${
+                isSelected
+                  ? 'bg-primary/10 border border-primary'
+                  : 'bg-surface-hover hover:bg-surface'
+              }`}
+              onClick={() => toggleUser(user.id)}
             >
+              <SelectionCheckbox
+                checked={isSelected}
+                onChange={() => toggleUser(user.id)}
+              />
               <UserAvatar userId={user.id} name={displayName} email={user.email} size="sm" />
               <div className="flex-1 min-w-0">
                 <p className="font-medium text-default truncate">{displayName}</p>
                 <p className="text-sm text-muted truncate">{user.email}</p>
               </div>
-              <UserPlusIcon className="w-5 h-5 text-primary" />
             </motion.div>
           );
         })}
@@ -1621,9 +1650,17 @@ function AddMemberForm({ groupId, existingUserIds, onClose, onUsersChanged }: {
         )}
       </div>
 
-      <div className="flex justify-end pt-4">
+      <div className="flex justify-between pt-4">
         <Button variant="secondary" onClick={onClose}>
           Cancel
+        </Button>
+        <Button
+          variant="primary"
+          onClick={handleAddSelected}
+          disabled={selectedUserIds.size === 0}
+          isLoading={isLoading}
+        >
+          Add {selectedUserIds.size > 0 ? `(${selectedUserIds.size})` : ''}
         </Button>
       </div>
     </div>
