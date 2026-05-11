@@ -40,26 +40,8 @@ import {
   Line,
   LabelList,
 } from 'recharts';
-import {
-  DndContext,
-  closestCenter,
-  KeyboardSensor,
-  PointerSensor,
-  TouchSensor,
-  useSensor,
-  useSensors,
-  DragEndEvent,
-  DragOverlay,
-} from '@dnd-kit/core';
-import { restrictToParentElement } from '@dnd-kit/modifiers';
-import {
-  arrayMove,
-  SortableContext,
-  sortableKeyboardCoordinates,
-  verticalListSortingStrategy,
-  useSortable,
-} from '@dnd-kit/sortable';
-import { CSS } from '@dnd-kit/utilities';
+import { DragEndEvent } from '@dnd-kit/core';
+import { arrayMove } from '@dnd-kit/sortable';
 import { DraggableList } from '@/components/ui/DragSortable';
 
 const colorOptions = [
@@ -373,129 +355,6 @@ const GroupContentBreakdownChart = memo(function GroupContentBreakdownChart({
 });
 
 // Sortable Addon Item Component with clean draggable card design
-interface SortableAddonItemProps {
-  addon: Addon;
-  onRemove: (addonId: string) => void;
-}
-
-function SortableAddonItem({ addon, onRemove }: SortableAddonItemProps) {
-  // Ensure we have a valid ID for sorting (should always exist after filtering)
-  if (!addon.id) {
-    console.error('SortableAddonItem received addon without ID:', addon);
-    return null;
-  }
-
-  const sortableId = String(addon.id); // Always use string ID
-
-  // Extract logo from various sources: customLogo > manifest.logo > logo > iconUrl
-  const anyAddon = addon as any;
-  const logo = anyAddon.customLogo || anyAddon.manifest?.logo || addon.logo || anyAddon.iconUrl;
-
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    transform,
-    transition,
-    isDragging,
-  } = useSortable({ id: sortableId });
-
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition: isDragging ? 'none' : transition,
-    zIndex: isDragging ? 100 : undefined,
-    isolation: 'isolate',
-  } as React.CSSProperties;
-
-  return (
-    <motion.div
-      ref={setNodeRef}
-      style={style}
-      className={`flex items-center gap-4 p-4 rounded-xl bg-surface-hover hover:bg-surface border transition-all group overflow-hidden ${
-        isDragging
-          ? 'border-primary shadow-lg shadow-primary/25 scale-[1.01]'
-          : 'border-default hover:border-primary hover:shadow-md'
-      }`}
-    >
-      {/* Drag Handle */}
-      <div
-        {...attributes}
-        {...listeners}
-        className="cursor-grab active:cursor-grabbing p-1 rounded hover:bg-surface-hover shrink-0"
-        style={{ touchAction: 'none' }}
-      >
-        <Bars3Icon className="w-5 h-5 text-subtle" />
-      </div>
-
-      {/* Addon Content - Clickable to go to addon detail */}
-      <Link
-        href={`/addons/${addon.id}`}
-        className="flex items-center gap-4 flex-1 min-w-0 cursor-pointer"
-        onClick={(e) => {
-          // Don't navigate if clicking the remove button
-          e.stopPropagation();
-        }}
-      >
-        {/* Addon Logo */}
-        <div className="shrink-0 w-10 h-10 rounded-lg flex items-center justify-center bg-surface-hover">
-          {logo ? (
-            <img src={logo} alt={addon.name} className="w-8 h-8 object-contain" />
-          ) : (
-            <PuzzlePieceIcon className="w-6 h-6 text-primary" />
-          )}
-        </div>
-
-        {/* Addon Info */}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-1">
-            <h4 className="font-semibold text-default truncate text-base">
-              {addon.name || 'Unnamed Addon'}
-            </h4>
-            {addon.version && (
-              <VersionBadge version={addon.version} size="sm" />
-            )}
-          </div>
-          {addon.description && (
-            <p className="text-sm text-muted truncate mb-2">{addon.description}</p>
-          )}
-          {(addon.resources || []).length > 0 && (
-            <div className="flex flex-wrap gap-1.5 mt-1">
-              {(addon.resources || []).slice(0, 4).map((res: string) => (
-                <ResourceBadge key={res} resource={res} />
-              ))}
-              {(addon.resources || []).length > 4 && (
-                <Badge variant="muted" size="sm">
-                  +{(addon.resources || []).length - 4}
-                </Badge>
-              )}
-            </div>
-          )}
-        </div>
-      </Link>
-
-      {/* Actions */}
-      <div className="flex items-center gap-2 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-        <Button
-          variant="ghost"
-          size="sm"
-          onMouseDown={(e) => e.stopPropagation()}
-          onTouchStart={(e) => e.stopPropagation()}
-          onClick={() => {
-            if (addon.id) {
-              onRemove(addon.id);
-            } else {
-              console.error('Cannot remove addon without ID:', addon);
-            }
-          }}
-          className="text-error hover:bg-error-muted rounded-lg"
-        >
-          <XMarkIcon className="w-5 h-5" />
-        </Button>
-      </div>
-    </motion.div>
-  );
-}
-
 export default function GroupDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -536,19 +395,7 @@ export default function GroupDetailPage() {
   const [contentBreakdownData, setContentBreakdownData] = useState<AggregatedContentData[]>([]);
   const [isLoadingCharts, setIsLoadingCharts] = useState(false);
 
-  // DnD sensors
-  const sensors = useSensors(
-    useSensor(PointerSensor),
-    useSensor(TouchSensor, {
-      activationConstraint: {
-        delay: 0,
-        distance: 0,
-      },
-    }),
-    useSensor(KeyboardSensor, {
-      coordinateGetter: sortableKeyboardCoordinates,
-    })
-  );
+  // DnD sensors (now handled by DraggableList)
 
   // Fetch watch time data for all group users
   const fetchWatchTimeData = useCallback(async (userIds: string[]) => {
