@@ -594,3 +594,24 @@ body {
   background-color: var(--color-primary-muted);
   color: var(--color-text);
 }
+
+/* ===== PREVENT HORIZONTAL OVERFLOW ===== */
+html {
+  overflow-x: hidden;
+  max-width: 100vw;
+}
+
+body {
+  overflow-x: hidden;
+  max-width: 100vw;
+}
+
+/* Prevent any child from causing horizontal scroll */
+* {
+  max-width: 100vw;
+}
+
+/* Allow horizontal scroll only for explicit overflow-x-auto containers */
+.overflow-x-auto {
+  max-width: none;
+}

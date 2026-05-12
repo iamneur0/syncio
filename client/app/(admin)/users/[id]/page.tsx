@@ -1317,7 +1317,7 @@ export default function UserDetailPage() {
                               </div>
                               <div className="flex-1 min-w-0">
                                 <div className="flex items-center gap-2 mb-1">
-                                  <h4 className={`font-medium truncate ${isExcluded ? 'text-muted line-through' : 'text-default'}`}>
+                                  <h4 className={`font-medium truncate flex-1 min-w-0 ${isExcluded ? 'text-muted line-through' : 'text-default'}`}>
                                     {addon.name}
                                   </h4>
                                   {addon.version && <VersionBadge version={addon.version} size="sm" />}
@@ -1423,7 +1423,7 @@ export default function UserDetailPage() {
                               </div>
                               <div className="flex-1 min-w-0">
                                 <div className="flex items-center gap-2 mb-1">
-                                  <h4 className="font-medium text-default truncate">{name}</h4>
+                                  <h4 className="font-medium text-default truncate flex-1 min-w-0">{name}</h4>
                                   {version && <VersionBadge version={version} size="sm" />}
                                   {isProtected && (
                                     <Badge variant="success" size="sm">

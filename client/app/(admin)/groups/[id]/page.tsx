@@ -1202,7 +1202,7 @@ export default function GroupDetailPage() {
                             </div>
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2 mb-1">
-                                <h4 className="font-semibold text-default truncate text-base">
+                                <h4 className="font-semibold text-default truncate text-base flex-1 min-w-0">
                                   {addon.name || 'Unnamed Addon'}
                                 </h4>
                                 {addon.version && (

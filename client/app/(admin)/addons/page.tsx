@@ -818,8 +818,8 @@ function AddonCard({
 
             {/* Info */}
             <div className="flex-1 min-w-0 pr-8">
-              <div className="flex items-center gap-2 mb-1 flex-wrap">
-                <h3 className="text-lg font-semibold transition-all truncate group-hover:text-primary text-default">
+              <div className="flex items-center gap-2 mb-1">
+                <h3 className="text-lg font-semibold transition-all truncate group-hover:text-primary text-default flex-1 min-w-0">
                   {addon.name}
                 </h3>
                 {addon.version && (

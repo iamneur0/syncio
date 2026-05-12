@@ -2,6 +2,10 @@
 
 import { useState, useRef, useLayoutEffect, useEffect, useId } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { 
+  ChevronDownIcon,
+  CheckIcon 
+} from '@heroicons/react/24/outline';
 
 export interface FilterTabOption {
   key: string;
@@ -106,7 +110,7 @@ export function FilterTabs({
   return (
     <div
       ref={containerRef}
-      className={`relative flex ${styles.container} rounded-xl bg-surface border border-default ${className}`}
+      className={`relative flex ${styles.container} rounded-xl bg-surface border border-default w-full sm:w-auto ${className}`}
       role="tablist"
       aria-label="Filter options"
     >
@@ -137,22 +141,22 @@ export function FilterTabs({
         const isActive = activeKey === option.key;
         
         return (
-          <button
-            key={option.key}
-            data-tab-key={option.key}
-            onClick={() => onChange(option.key)}
-            role="tab"
-            aria-selected={isActive}
-            aria-controls={`panel-${option.key}`}
-            className={`
-              relative z-10 flex items-center gap-2 ${styles.button} rounded-lg font-medium 
-              transition-colors duration-150 ease-out
-              ${isActive 
-                ? 'text-primary' 
-                : 'text-muted hover:text-default'
-              }
-            `}
-          >
+            <button
+              key={option.key}
+              data-tab-key={option.key}
+              onClick={() => onChange(option.key)}
+              role="tab"
+              aria-selected={isActive}
+              aria-controls={`panel-${option.key}`}
+              className={`
+                relative z-10 flex items-center justify-center gap-2 flex-1 min-w-0 ${styles.button} rounded-lg font-medium 
+                transition-colors duration-150 ease-out
+                ${isActive 
+                  ? 'text-primary' 
+                  : 'text-muted hover:text-default'
+                }
+              `}
+            >
             {/* Icon */}
             {option.icon && (
               <span className={`${styles.icon} shrink-0`}>
@@ -223,7 +227,7 @@ export function FilterTabsSimple({
 
   return (
     <div
-      className={`flex ${styles.container} rounded-xl bg-surface border border-default ${className}`}
+      className={`flex flex-wrap ${styles.container} rounded-xl bg-surface border border-default ${className}`}
       role="tablist"
     >
       {options.map((option) => {
@@ -252,6 +256,171 @@ export function FilterTabsSimple({
           </button>
         );
       })}
+    </div>
+  );
+}
+
+/**
+ * FilterTabsResponsive - Shows dropdown on mobile, tabs on desktop
+ * Perfect for pages with many filter options that don't fit on mobile
+ */
+export function FilterTabsResponsive({
+  options,
+  activeKey,
+  onChange,
+  size = 'sm',
+  className = '',
+  layoutId,
+}: FilterTabsProps) {
+  const [isOpen, setIsOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  const activeOption = options.find(opt => opt.key === activeKey);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+
+    if (isOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (isOpen) {
+      const originalStyle = document.body.style.overflow;
+      document.body.style.overflow = 'hidden';
+      return () => {
+        document.body.style.overflow = originalStyle;
+      };
+    }
+  }, [isOpen]);
+
+  const sizeClasses = {
+    sm: {
+      trigger: 'px-3 py-2 text-sm',
+      option: 'px-3 py-2.5 text-sm',
+      icon: 'w-4 h-4',
+    },
+    md: {
+      trigger: 'px-4 py-2.5 text-sm',
+      option: 'px-4 py-3 text-sm',
+      icon: 'w-5 h-5',
+    },
+  };
+
+  const styles = sizeClasses[size];
+
+  return (
+    <div ref={dropdownRef} className={`relative w-full md:w-auto ${className}`}>
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className={`
+          md:hidden w-full flex items-center justify-between
+          ${styles.trigger} rounded-lg font-medium
+          bg-surface border border-default
+          text-default transition-colors duration-150
+          hover:bg-surface-hover
+        `}
+        aria-label="Select filter"
+        aria-haspopup="listbox"
+        aria-expanded={isOpen}
+      >
+        <span className="flex items-center gap-1.5 truncate">
+          {activeOption?.icon && (
+            <span className={`${styles.icon} shrink-0 text-primary`}>
+              {activeOption.icon}
+            </span>
+          )}
+          <span className="truncate">{activeOption?.label || 'Select'}</span>
+          {activeOption?.count !== undefined && (
+            <span className="text-xs text-muted">({activeOption.count})</span>
+          )}
+        </span>
+        <ChevronDownIcon className={`w-4 h-4 text-muted shrink-0 ml-1 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
+      </button>
+
+      <AnimatePresence>
+        {isOpen && (
+          <>
+            {/* Backdrop - fixed on mobile to cover entire screen */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/60 z-40 md:hidden"
+              onClick={() => setIsOpen(false)}
+            />
+            
+            {/* Dropdown panel - fixed on mobile to escape overflow containers */}
+            <motion.div
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              transition={{ duration: 0.15 }}
+              className="fixed left-4 right-4 top-1/2 -translate-y-1/2 z-50 md:hidden"
+            >
+              <div className="bg-surface border border-default rounded-xl overflow-hidden shadow-xl max-h-[70vh] overflow-y-auto">
+                {options.map((option) => {
+                  const isActive = activeKey === option.key;
+                  
+                  return (
+                    <button
+                      key={option.key}
+                      onClick={() => {
+                        onChange(option.key);
+                        setIsOpen(false);
+                      }}
+                      role="option"
+                      aria-selected={isActive}
+                      className={`
+                        w-full flex items-center justify-between gap-3
+                        ${styles.option} font-medium
+                        transition-colors duration-150
+                        ${isActive 
+                          ? 'bg-primary-muted text-primary' 
+                          : 'text-default hover:bg-surface-hover'
+                        }
+                      `}
+                    >
+                      <span className="flex items-center gap-2">
+                        {option.icon && (
+                          <span className={`${styles.icon} shrink-0 ${isActive ? 'text-primary' : 'text-muted'}`}>
+                            {option.icon}
+                          </span>
+                        )}
+                        <span>{option.label}</span>
+                        {option.count !== undefined && (
+                          <span className={`text-xs ${isActive ? 'text-primary/60' : 'text-muted'}`}>
+                            ({option.count})
+                          </span>
+                        )}
+                      </span>
+                      {isActive && (
+                        <CheckIcon className="w-4 h-4 text-primary shrink-0" />
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      <div className="hidden md:block">
+        <FilterTabs
+          options={options}
+          activeKey={activeKey}
+          onChange={onChange}
+          size={size}
+          layoutId={layoutId}
+        />
+      </div>
     </div>
   );
 }
