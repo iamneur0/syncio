@@ -316,16 +316,17 @@ export function FilterTabsResponsive({
   const styles = sizeClasses[size];
 
   return (
-    <div ref={dropdownRef} className={`relative w-full md:w-auto ${className}`}>
+    <div ref={dropdownRef} className={`relative md:w-auto ${className}`}>
       <button
         onClick={() => setIsOpen(!isOpen)}
         className={`
-          md:hidden w-full flex items-center justify-between
+          md:hidden w-full h-9 flex items-center justify-between
           ${styles.trigger} rounded-lg font-medium
           bg-surface border border-default
           text-default transition-colors duration-150
           hover:bg-surface-hover
         `}
+        style={{ minHeight: '36px' }}
         aria-label="Select filter"
         aria-haspopup="listbox"
         aria-expanded={isOpen}

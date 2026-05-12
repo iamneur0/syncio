@@ -191,7 +191,7 @@ interface VersionBadgeProps {
 
 export function VersionBadge({ version, size = 'sm', className }: VersionBadgeProps) {
   return (
-    <Badge variant="primary" size={size} className={className}>
+    <Badge variant="primary" size={size} className={`whitespace-nowrap ${className || ''}`}>
       v{version}
     </Badge>
   );

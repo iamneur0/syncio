@@ -474,11 +474,13 @@ export default function SettingsPage() {
                 title="Default View Mode"
                 description="Choose how lists are displayed by default"
               >
-                <ViewModeToggle
-                  mode={viewMode}
-                  onChange={setViewMode}
-                  showLabels={false}
-                />
+                <div className="hidden md:block">
+                  <ViewModeToggle
+                    mode={viewMode}
+                    onChange={setViewMode}
+                    showLabels={false}
+                  />
+                </div>
               </SettingRow>
             </div>
           </Card>

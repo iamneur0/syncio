@@ -303,6 +303,15 @@ export default function GroupsPage() {
             onChange: (value) => setSearchQuery(value),
             placeholder: 'Search groups...',
           }}
+          primaryAction={
+            <Button
+              variant="primary"
+              leftIcon={<PlusIcon className="w-5 h-5" />}
+              onClick={() => setIsCreateModalOpen(true)}
+            >
+              Add
+            </Button>
+          }
         />
 
         {/* Loading state */}
@@ -665,12 +674,25 @@ function GroupCard({
         onTouchStart={handleTouchStart}
         onTouchEnd={handleTouchEnd}
       >
-        {/* Selection indicator - visible on hover or when selected */}
+        {/* Selection indicator & Toggle - visible on hover or when selected */}
         <div className="absolute top-4 right-4 flex items-center gap-2">
           <SelectionCheckbox
             checked={isSelected}
             onChange={onToggleSelect}
             visible={isSelected}
+          />
+          <ToggleSwitch
+            checked={group.isActive !== false}
+            onChange={async () => {
+              try {
+                const newStatus = !(group as any).isActive;
+                await api.toggleGroupStatus(group.id, newStatus);
+                toast.success(`Group ${newStatus ? 'activated' : 'deactivated'}`);
+                onToggleStatus?.(group.id, newStatus);
+              } catch (err: any) {
+                toast.error(err.message || `Failed to toggle ${group.name}`);
+              }
+            }}
           />
         </div>
 
@@ -682,10 +704,10 @@ function GroupCard({
             colorIndex={group.colorIndex ?? 0}
           />
 
-          {/* Main content */}
+          {/* Main content - stats moved here */}
           <div className="flex-1 min-w-0">
             {/* Header row with name and sync badge */}
-            <div className="flex items-center gap-2 mb-1 pr-8 flex-wrap">
+            <div className="flex items-center gap-2 mb-2 flex-wrap">
               <Link
                 href={`/groups/${group.id}`}
                 className="font-semibold truncate transition-colors hover:text-primary text-default"
@@ -705,22 +727,12 @@ function GroupCard({
                 }}
                 size="sm"
               />
+              {group.lastSync && (
+                <span className="text-xs text-subtle ml-1">Synced {group.lastSync}</span>
+              )}
             </div>
-
-            {/* Description (single line with ellipsis, reserved space even if empty) */}
-            <p className="text-sm truncate mb-3 text-muted min-h-[1.25rem]">
-              {group.description || '\u00A0'}
-            </p>
-          </div>
-        </div>
-
-        {/* Footer with avatars, summary stats, optional sync time, and toggle */}
-        <div className="flex items-center justify-between mt-4 pt-3 border-t border-default">
-          <div className="flex items-center gap-3">
-            <div className="hidden md:block">
-              <AvatarGroup users={group.users} max={4} size="xs" />
-            </div>
-            <div className="flex items-center gap-2 md:gap-4 text-sm text-muted">
+            {/* Stats inline */}
+            <div className="flex items-center gap-3 text-sm text-muted">
               <span className="flex items-center gap-1.5">
                 <UsersIcon className="w-4 h-4 text-secondary" />
                 <span className="md:hidden">{group.userCount}</span>
@@ -733,29 +745,6 @@ function GroupCard({
                 <span className="hidden md:inline">{group.addonCount} addon{group.addonCount !== 1 ? 's' : ''}</span>
               </span>
             </div>
-          </div>
-          <div className="flex items-center gap-2">
-            {group.lastSync && (
-              <>
-                <span className="text-xs text-subtle">Synced {group.lastSync}</span>
-                <span className="text-xs text-muted">•</span>
-              </>
-            )}
-            <span className="text-sm text-muted">Active</span>
-            <ToggleSwitch
-              checked={group.isActive !== false}
-              onChange={async () => {
-                try {
-                  const newStatus = !(group as any).isActive;
-                  await api.toggleGroupStatus(group.id, newStatus);
-                  toast.success(`Group ${newStatus ? 'activated' : 'deactivated'}`);
-                  onToggleStatus?.(group.id, newStatus);
-                } catch (err: any) {
-                  toast.error(err.message || 'Failed to toggle group status');
-                }
-              }}
-              size="sm"
-            />
           </div>
         </div>
       </Card>

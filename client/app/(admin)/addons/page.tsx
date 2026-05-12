@@ -344,6 +344,15 @@ export default function AddonsPage() {
             onChange: setActiveFilter,
             layoutId: 'addons-filter-tabs',
           }}
+          primaryAction={
+            <Button
+              variant="primary"
+              leftIcon={<PlusIcon className="w-5 h-5" />}
+              onClick={() => setIsAddModalOpen(true)}
+            >
+              Add
+            </Button>
+          }
         />
 
         {/* Loading state */}
@@ -785,13 +794,28 @@ function AddonCard({
         onTouchStart={handleTouchStart}
         onTouchEnd={handleTouchEnd}
       >
-        {/* Selection indicator */}
-        <div className="absolute top-4 right-4 z-10 flex items-center gap-2">
+        {/* Selection indicator & Toggle - hidden on mobile, use context menu */}
+        <div className="absolute top-4 right-4 z-10 flex items-center gap-3">
           <SelectionCheckbox
             checked={isSelected}
             onChange={onToggleSelect}
             visible={isSelected}
           />
+          <div className="hidden md:block">
+            <ToggleSwitch
+              checked={addon.isActive !== false}
+              onChange={async () => {
+                try {
+                  const newStatus = !addon.isActive;
+                  await api.toggleAddonStatus(addon.id, newStatus);
+                  toast.success(`Addon ${newStatus ? 'activated' : 'deactivated'}`);
+                  onToggleStatus?.(addon.id, newStatus);
+                } catch (err: any) {
+                  toast.error(err.message || `Failed to toggle ${addon.name}`);
+                }
+              }}
+            />
+          </div>
         </div>
 
         {/* Header */}
@@ -814,39 +838,60 @@ function AddonCard({
             </div>
 
             {/* Info */}
-            <div className="flex-1 min-w-0 pr-8">
-              <div className="flex items-center gap-2 mb-1">
-                <h3 className="text-lg font-semibold transition-all truncate group-hover:text-primary text-default flex-1 min-w-0">
-                  {addon.name}
-                </h3>
-                {addon.version && (
-                  <VersionBadge version={addon.version} size="sm" />
+            <div className="flex-1 min-w-0">
+              {/* Single row: name → health dot → version → protected */}
+              <div className="flex items-center gap-2 mb-2 min-w-0">
+                {configUrl ? (
+                  <button
+                    onClick={handleOpenConfigure}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    className="text-lg font-semibold transition-all truncate group-hover:text-primary text-default min-w-0 text-left"
+                    title="Open configure page"
+                  >
+                    {addon.name}
+                  </button>
+                ) : (
+                  <h3 className="text-lg font-semibold transition-all truncate group-hover:text-primary text-default min-w-0">
+                    {addon.name}
+                  </h3>
                 )}
-                {addon.isProtected && (
-                  <ShieldCheckIcon className="w-5 h-5 shrink-0 text-success" title="Protected" />
-                )}
-                {/* Health Status Indicator */}
                 {addon.lastHealthCheck && (
                   <div
-                    className={`w-2 h-2 rounded-full ${addon.isOnline ? 'bg-success' : 'bg-danger'}`}
+                    className={`w-2 h-2 rounded-full shrink-0 ${addon.isOnline ? 'bg-success' : 'bg-danger'}`}
                     title={addon.isOnline
                       ? `Online - Last checked: ${new Date(addon.lastHealthCheck).toLocaleString()}`
                       : `Offline${addon.healthCheckError ? `: ${addon.healthCheckError}` : ''} - Last checked: ${new Date(addon.lastHealthCheck).toLocaleString()}`
                     }
                   />
                 )}
+                {addon.version && (
+                  <VersionBadge version={addon.version.slice(0, 7)} size="sm" />
+                )}
+                {addon.isProtected && (
+                  <ShieldCheckIcon className="w-5 h-5 shrink-0 text-success" title="Protected" />
+                )}
               </div>
-              {/* Description (single line with ellipsis, reserved space even if empty) */}
-              <p className="text-sm line-clamp-1 text-muted min-h-[1.25rem]">
-                {addon.description || '\u00A0'}
-              </p>
+              {/* Stats inline */}
+              <div className="flex items-center gap-3 text-sm text-muted">
+                <span className="flex items-center gap-1.5">
+                  <UsersIcon className="w-4 h-4 text-secondary" />
+                  <span className="md:hidden">{addon.userCount || 0}</span>
+                  <span className="hidden md:inline">{addon.userCount || 0} user{addon.userCount !== 1 ? 's' : ''}</span>
+                </span>
+                <span className="hidden md:inline">•</span>
+                <span className="flex items-center gap-1.5">
+                  <PuzzlePieceIcon className="w-4 h-4 text-secondary" />
+                  <span className="md:hidden">{addon.groupCount}</span>
+                  <span className="hidden md:inline">{addon.groupCount} group{addon.groupCount !== 1 ? 's' : ''}</span>
+                </span>
+              </div>
             </div>
           </div>
         </div>
 
-        {/* Resources */}
+        {/* Resources - hidden on mobile */}
         {addon.resources.length > 0 && (
-          <div className="px-6 pb-4">
+          <div className="hidden md:block px-6 pb-4">
             <div className="flex flex-wrap gap-2">
               {addon.resources.map((resource) => (
                 <ResourceBadge key={resource} resource={resource} />
@@ -854,49 +899,6 @@ function AddonCard({
             </div>
           </div>
         )}
-
-        {/* Footer with stats and controls */}
-        <div className="px-6 py-4 flex items-center justify-between border-t border-default">
-          <div className="flex items-center gap-4 text-sm text-muted">
-            <span className="flex items-center gap-1.5">
-              <UsersIcon className="w-4 h-4 text-secondary" />
-              {addon.userCount || 0} user{addon.userCount !== 1 ? 's' : ''}
-            </span>
-            <span>•</span>
-            <span className="flex items-center gap-1.5">
-              <PuzzlePieceIcon className="w-4 h-4 text-secondary" />
-              {addon.groupCount} group{addon.groupCount !== 1 ? 's' : ''}
-            </span>
-          </div>
-
-          <div className="flex items-center gap-2">
-            {configUrl && (
-              <button
-                onClick={handleOpenConfigure}
-                onPointerDown={(e) => e.stopPropagation()}
-                className="p-2 rounded-lg hover:bg-surface-hover transition-colors"
-                title="Open configure page"
-              >
-                <Cog6ToothIcon className="w-4 h-4 text-muted" />
-              </button>
-            )}
-            <span className="text-sm text-muted">Active</span>
-            <ToggleSwitch
-              checked={addon.isActive !== false}
-              onChange={async () => {
-                try {
-                  const newStatus = !addon.isActive;
-                  await api.toggleAddonStatus(addon.id, newStatus);
-                  toast.success(`Addon ${newStatus ? 'activated' : 'deactivated'}`);
-                  onToggleStatus?.(addon.id, newStatus);
-                } catch (err: any) {
-                  toast.error(err.message || 'Failed to toggle addon status');
-                }
-              }}
-              size="sm"
-            />
-          </div>
-        </div>
       </Card>
 
       <ContextMenu isOpen={isOpen} position={position} onClose={close}>
@@ -937,6 +939,33 @@ function AddonCard({
         >
           <DocumentDuplicateIcon className="w-4 h-4" />
           Clone Addon
+        </button>
+        <button
+          onClick={async (e) => {
+            e.stopPropagation();
+            close();
+            try {
+              const newStatus = !addon.isActive;
+              await api.toggleAddonStatus(addon.id, newStatus);
+              toast.success(`Addon ${newStatus ? 'activated' : 'deactivated'}`);
+              onToggleStatus?.(addon.id, newStatus);
+            } catch (err: any) {
+              toast.error(err.message || `Failed to toggle ${addon.name}`);
+            }
+          }}
+          className="w-full flex items-center gap-2 px-3 py-2 text-sm text-default hover:bg-surface-hover transition-colors"
+        >
+          {addon.isActive ? (
+            <>
+              <XMarkIcon className="w-4 h-4" />
+              Disable
+            </>
+          ) : (
+            <>
+              <CheckIcon className="w-4 h-4" />
+              Enable
+            </>
+          )}
         </button>
         <div className="my-1 border-t border-default" />
         <button

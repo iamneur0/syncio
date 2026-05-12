@@ -321,11 +321,15 @@ export default function InvitationsPage() {
             onChange: (key) => handleTabChange(key as 'invitations' | 'requests'),
             layoutId: 'invitations-filter-tabs',
           }}
-          viewModeConfig={activeTab === 'invitations' ? {
-            mode: viewMode,
-            onChange: setViewMode,
-            showLabels: false,
-          } : undefined}
+          primaryAction={
+            <Button
+              variant="primary"
+              leftIcon={<PlusIcon className="w-5 h-5" />}
+              onClick={() => setIsCreateModalOpen(true)}
+            >
+              Add
+            </Button>
+          }
         />
 
         <AnimatePresence mode="wait">

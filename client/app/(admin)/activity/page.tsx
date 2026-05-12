@@ -5,7 +5,7 @@ import { motion } from 'framer-motion';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { Header } from '@/components/layout/Header';
-import { Button, Card, Badge, Avatar, UserAvatar, StatCard, SearchInput, PageToolbar, ViewModeToggle } from '@/components/ui';
+import { Button, Card, Badge, Avatar, UserAvatar, StatCard, SearchInput, PageToolbar } from '@/components/ui';
 import { PageSection, StaggerContainer, StaggerItem } from '@/components/layout/PageContainer';
 import { api, MetricsData, Invitation } from '@/lib/api';
 import { useDefaultViewMode } from '@/lib/viewMode';
@@ -797,13 +797,7 @@ function ActivityPageContent() {
     episode?: number;
   } | null>(null);
   const [viewMode, setViewMode] = useState<'watch' | 'tasks' | 'invites' | 'proxy'>('watch');
-  const [watchActivityViewMode, setWatchActivityViewMode] = useState<'grid' | 'list'>(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('watch-activity-view-mode');
-      return saved === 'grid' ? 'grid' : 'list';
-    }
-    return 'list';
-  });
+  const { viewMode: watchActivityViewMode, setViewMode: setWatchActivityViewMode } = useDefaultViewMode();
   const [visibleCount, setVisibleCount] = useState(50); // lazy-load activity in chunks
   const [isLoadingMore, setIsLoadingMore] = useState(false);
 
@@ -1132,10 +1126,10 @@ function ActivityPageContent() {
           animate={false}
           filterTabs={{
             options: [
-              { key: 'watch', label: 'Watch Activity', icon: <PlayIcon className="w-4 h-4" /> },
-              { key: 'tasks', label: 'Task History', icon: <ClockIcon className="w-4 h-4" /> },
-              { key: 'invites', label: 'Invitation History', icon: <EnvelopeIcon className="w-4 h-4" /> },
-              { key: 'proxy', label: 'Proxy History', icon: <ShieldCheckIcon className="w-4 h-4" /> },
+              { key: 'watch', label: 'Watch', icon: <PlayIcon className="w-4 h-4" /> },
+              { key: 'tasks', label: 'Tasks', icon: <ClockIcon className="w-4 h-4" /> },
+              { key: 'invites', label: 'Invites', icon: <EnvelopeIcon className="w-4 h-4" /> },
+              { key: 'proxy', label: 'Proxy', icon: <ShieldCheckIcon className="w-4 h-4" /> },
             ],
             activeKey: viewMode,
             onChange: (key) => setViewMode(key as 'watch' | 'tasks' | 'invites' | 'proxy'),
@@ -1385,14 +1379,6 @@ function ActivityPageContent() {
                     </Badge>
                   )}
                 </div>
-                <ViewModeToggle
-                  mode={watchActivityViewMode}
-                  onChange={(mode) => {
-                    setWatchActivityViewMode(mode);
-                    localStorage.setItem('watch-activity-view-mode', mode);
-                  }}
-                  showLabels={false}
-                />
               </div>
             </PageSection>
 

@@ -59,6 +59,9 @@ export interface PageToolbarProps {
   /** View mode toggle configuration (grid/list) */
   viewModeConfig?: PageToolbarViewConfig;
   
+  /** Primary action button (e.g., "Add" button) */
+  primaryAction?: React.ReactNode;
+  
   /** Additional actions to render on the right side (before view toggle) */
   rightActions?: React.ReactNode;
   
@@ -132,6 +135,7 @@ export function PageToolbar({
   primaryTabs,
   filterTabs,
   viewModeConfig,
+  primaryAction,
   rightActions,
   leftContent,
   centerContent,
@@ -149,9 +153,9 @@ export function PageToolbar({
   const showFilterTabs = filterTabs && filterTabs.visible !== false;
 
   const toolbarContent = (
-    <div className="flex flex-row items-center justify-between gap-2 min-h-[40px] max-w-full">
-      {/* Left Section: Selection + Search + Filter */}
-      <div className="flex items-center gap-2 shrink min-w-0">
+    <div className="relative flex items-center justify-between gap-4 min-h-[44px]">
+      {/* Left Section: Selection + Search */}
+      <div className="flex items-center gap-3 shrink-0">
         {leftContent ? (
           leftContent
         ) : (
@@ -172,7 +176,7 @@ export function PageToolbar({
               />
             )}
             {searchConfig && (
-              <div className="min-w-[100px] max-w-[200px] sm:min-w-[120px] sm:max-w-[240px] md:min-w-[140px] md:max-w-[280px] lg:min-w-[180px] lg:max-w-[320px] shrink">
+              <div className="h-11 w-40 md:w-48 lg:w-56 flex items-center">
                 <SearchInput
                   size="sm"
                   value={searchConfig.value}
@@ -181,9 +185,69 @@ export function PageToolbar({
                 />
               </div>
             )}
-            {/* Filter - component handles showing dropdown on mobile, tabs on desktop */}
-            {filterTabs && (
-              <FilterTabsResponsive
+          </>
+        )}
+      </div>
+
+      {/* Mobile Filter Dropdown - right aligned */}
+      <div className="md:hidden flex items-center shrink-0 ml-auto">
+        {filterTabs && (
+          <FilterTabsResponsive
+            options={filterTabs.options}
+            activeKey={filterTabs.activeKey}
+            onChange={filterTabs.onChange}
+            layoutId={filterTabs.layoutId}
+            size="sm"
+          />
+        )}
+      </div>
+
+      {/* Center Section: Primary Tabs + Filter Tabs - Absolutely centered on desktop */}
+      <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-3 hidden md:flex">
+        {centerContent ? (
+          centerContent
+        ) : (
+          <>
+            {/* Primary Tabs (larger, always visible) */}
+            {primaryTabs && (
+              <FilterTabs
+                options={primaryTabs.options}
+                activeKey={primaryTabs.activeKey}
+                onChange={primaryTabs.onChange}
+                layoutId={primaryTabs.layoutId || 'primary-tabs'}
+                size="md"
+              />
+            )}
+            
+            {/* Divider + Filter Tabs (animated visibility) */}
+            <AnimatePresence mode="wait">
+              {showFilterTabs && (
+                <motion.div
+                  initial={{ opacity: 0, width: 0, marginLeft: 0 }}
+                  animate={{ opacity: 1, width: 'auto', marginLeft: primaryTabs ? 12 : 0 }}
+                  exit={{ opacity: 0, width: 0, marginLeft: 0 }}
+                  transition={{ duration: 0.2, ease: 'easeInOut' }}
+                  className="flex items-center gap-3 overflow-hidden"
+                >
+                  {/* Subtle divider between primary and filter tabs */}
+                  {primaryTabs && (
+                    <div className="h-6 w-px bg-default/50 shrink-0" />
+                  )}
+
+                  <FilterTabs
+                    options={filterTabs.options}
+                    activeKey={filterTabs.activeKey}
+                    onChange={filterTabs.onChange}
+                    layoutId={filterTabs.layoutId || 'filter-tabs'}
+                    size="sm"
+                  />
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* Fallback: Show filter tabs without animation if no primaryTabs */}
+            {!primaryTabs && filterTabs && filterTabs.visible !== false && !showFilterTabs && (
+              <FilterTabs
                 options={filterTabs.options}
                 activeKey={filterTabs.activeKey}
                 onChange={filterTabs.onChange}
@@ -195,59 +259,14 @@ export function PageToolbar({
         )}
       </div>
 
-      {/* Right Section: Primary Tabs (if any) + View Toggle */}
-      <div className="flex items-center gap-2 shrink-0">
-        {centerContent ? (
-          centerContent
-        ) : (
-          <>
-            {/* Primary Tabs (larger tabs for top-level navigation) - show on desktop only */}
-            {primaryTabs && (
-              <div className="hidden md:block">
-                <FilterTabs
-                  options={primaryTabs.options}
-                  activeKey={primaryTabs.activeKey}
-                  onChange={primaryTabs.onChange}
-                  layoutId={primaryTabs.layoutId || 'primary-tabs'}
-                  size="md"
-                />
-              </div>
-            )}
-
-            {/* Filter tabs that accompany primary tabs - component handles mobile/desktop */}
-            {primaryTabs && showFilterTabs && (
-              <AnimatePresence mode="wait">
-                <motion.div
-                  initial={{ opacity: 0, width: 0, marginLeft: 0 }}
-                  animate={{ opacity: 1, width: 'auto', marginLeft: 12 }}
-                  exit={{ opacity: 0, width: 0, marginLeft: 0 }}
-                  transition={{ duration: 0.2, ease: 'easeInOut' }}
-                  className="flex items-center gap-3 overflow-hidden"
-                >
-                  <div className="h-6 w-px bg-default/50 shrink-0 hidden md:block" />
-                  <FilterTabsResponsive
-                    options={filterTabs.options}
-                    activeKey={filterTabs.activeKey}
-                    onChange={filterTabs.onChange}
-                    layoutId={filterTabs.layoutId || 'filter-tabs'}
-                    size="sm"
-                  />
-                </motion.div>
-              </AnimatePresence>
-            )}
-          </>
+      {/* Right Section: Actions */}
+      <div className="flex justify-end items-center gap-3 shrink-0">
+        {primaryAction && (
+          <div className="hidden md:block">
+            {primaryAction}
+          </div>
         )}
-      </div>
-
-      {/* Right Section: Actions + View Toggle */}
-      <div className="flex justify-end items-center gap-2 shrink-0">
-        {rightContent ? (
-          rightContent
-        ) : (
-          <>
-            {rightActions}
-          </>
-        )}
+        {rightContent ? rightContent : rightActions}
       </div>
     </div>
   );

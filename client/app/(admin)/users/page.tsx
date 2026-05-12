@@ -348,6 +348,15 @@ export default function UsersPage() {
             onChange: (value) => setSearchQuery(value),
             placeholder: 'Search users...',
           }}
+          primaryAction={
+            <Button
+              variant="primary"
+              leftIcon={<PlusIcon className="w-5 h-5" />}
+              onClick={() => setIsCreateModalOpen(true)}
+            >
+              Add
+            </Button>
+          }
         />
 
         {/* Loading state */}
@@ -773,12 +782,25 @@ function UserCard({
         onTouchStart={handleTouchStart}
         onTouchEnd={handleTouchEnd}
       >
-        {/* Selection indicator */}
+        {/* Selection indicator & Toggle */}
         <div className="absolute top-4 right-4 flex items-center gap-2">
           <SelectionCheckbox
             checked={isSelected}
             onChange={onToggleSelect}
             visible={isSelected}
+          />
+          <ToggleSwitch
+            checked={user.status === 'active'}
+            onChange={async () => {
+              try {
+                const newStatus = user.status === 'active' ? false : true;
+                await api.toggleUserStatus(user.id, newStatus);
+                toast.success(`User ${newStatus ? 'activated' : 'deactivated'}`);
+                onToggleStatus?.(user.id, newStatus);
+              } catch (err: any) {
+                toast.error(err.message || 'Failed to toggle user status');
+              }
+            }}
           />
         </div>
 
@@ -786,10 +808,10 @@ function UserCard({
           {/* Avatar */}
           <UserAvatar userId={user.id} name={user.name} email={user.email} colorIndex={user.colorIndex} size="lg" />
 
-          {/* Main content */}
+          {/* Main content - stats moved here */}
           <div className="flex-1 min-w-0">
             {/* Header row with name and sync badge */}
-            <div className="flex items-center gap-2 mb-1 pr-8 flex-wrap">
+            <div className="flex items-center gap-2 mb-2 flex-wrap">
               <Link
                 href={`/users/${user.id}`}
                 className="font-semibold truncate transition-colors hover:text-primary text-default"
@@ -820,48 +842,32 @@ function UserCard({
                 size="sm"
               />
             </div>
+            {/* Stats below */}
+            <div className="flex items-center gap-3 text-sm text-muted">
+              <span className="flex items-center gap-1.5">
+                <UserGroupIcon className="w-4 h-4 text-secondary" />
+                {user.groups.length > 0 ? (
+                  <>
+                    {user.groups[0]}
+                    {user.groups.length > 1 && ` +${user.groups.length - 1}`}
+                  </>
+                ) : (
+                  'No group'
+                )}
+              </span>
+              <span className="hidden md:inline">•</span>
+              <span className="flex items-center gap-1.5">
+                <PuzzlePieceIcon className="w-4 h-4 text-secondary" />
+                <span className="md:hidden">{user.addonCount || 0}</span>
+                <span className="hidden md:inline">{user.addonCount || 0} addon{user.addonCount !== 1 ? 's' : ''}</span>
+              </span>
+              <span className="hidden md:inline">•</span>
+              <span className="flex items-center gap-1.5">
+                <ClockIcon className="w-4 h-4 text-secondary" />
+                <span className="hidden md:inline">{formatWatchTime(user.watchTime)}</span>
+              </span>
+            </div>
           </div>
-        </div>
-
-        {/* Footer with summary stats and toggle */}
-        <div className="flex items-center justify-between mt-4 pt-3 border-t border-default">
-          <div className="flex items-center gap-4 text-sm text-muted">
-            <span className="flex items-center gap-1.5">
-              <UserGroupIcon className="w-4 h-4 text-secondary" />
-              {user.groups.length > 0 ? (
-                <>
-                  {user.groups[0]}
-                  {user.groups.length > 1 && ` +${user.groups.length - 1}`}
-                </>
-              ) : (
-                'No group'
-              )}
-            </span>
-            <span>•</span>
-            <span className="flex items-center gap-1.5">
-              <PuzzlePieceIcon className="w-4 h-4 text-secondary" />
-              {user.addonCount || 0} addon{user.addonCount !== 1 ? 's' : ''}
-            </span>
-            <span>•</span>
-            <span className="flex items-center gap-1.5">
-              <ClockIcon className="w-4 h-4 text-secondary" />
-              {formatWatchTime(user.watchTime)}
-            </span>
-          </div>
-          <ToggleSwitch
-            checked={user.status === 'active'}
-            onChange={async () => {
-              try {
-                const newStatus = user.status === 'active' ? false : true;
-                await api.toggleUserStatus(user.id, newStatus);
-                toast.success(`User ${newStatus ? 'activated' : 'deactivated'}`);
-                onToggleStatus?.(user.id, newStatus);
-              } catch (err: any) {
-                toast.error(err.message || 'Failed to toggle user status');
-              }
-            }}
-            size="sm"
-          />
         </div>
       </Card>
 

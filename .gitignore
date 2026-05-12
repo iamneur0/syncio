@@ -137,3 +137,4 @@ server/test*
 client/test*
 *.sh
 client/scripts
+client/next-env.d.ts
