@@ -8,6 +8,8 @@ import { PageSection } from '@/components/layout/PageContainer';
 import { useTheme, themeMeta, themeIds, ThemeId } from '@/lib/theme';
 import { api, SyncSettings } from '@/lib/api';
 import { toast } from '@/components/ui/Toast';
+import { useDefaultViewMode } from '@/lib/viewMode';
+import { ViewModeToggle } from '@/components/ui/ViewModeToggle';
 import {
   PaintBrushIcon,
   BellIcon,
@@ -206,6 +208,7 @@ function SettingRow({
 
 export default function SettingsPage() {
   const { themeId, setTheme, hideSensitive, toggleHideSensitive } = useTheme();
+  const { viewMode, setViewMode } = useDefaultViewMode();
   const [isResetModalOpen, setIsResetModalOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   
@@ -448,6 +451,34 @@ export default function SettingsPage() {
                     label="Toggle unsafe mode"
                   />
                 </div>
+              </SettingRow>
+            </div>
+          </Card>
+        </PageSection>
+
+        {/* Other Settings */}
+        <PageSection delay={0.12} className="mb-6">
+          <Card padding="lg">
+            <div className="flex items-center gap-3 mb-5">
+              <div className="w-9 h-9 rounded-lg flex items-center justify-center bg-primary-muted">
+                <CogIcon className="w-5 h-5 text-primary" />
+              </div>
+              <div>
+                <h3 className="text-base font-semibold font-display text-default">Other Settings</h3>
+                <p className="text-xs text-muted">Miscellaneous preferences</p>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <SettingRow
+                title="Default View Mode"
+                description="Choose how lists are displayed by default"
+              >
+                <ViewModeToggle
+                  mode={viewMode}
+                  onChange={setViewMode}
+                  showLabels={false}
+                />
               </SettingRow>
             </div>
           </Card>

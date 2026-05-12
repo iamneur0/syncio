@@ -5,12 +5,13 @@ import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence, LayoutGroup } from 'framer-motion';
 import Link from 'next/link';
 import { Header } from '@/components/layout/Header';
-import { Button, Card, Avatar, Badge, StatusBadge, SearchInput, ConfirmModal, SyncBadge, ToggleSwitch, Modal, Input, UserAvatar, ContextMenu, useContextMenu, ViewModeToggle, SelectAllCheckbox, SelectionCheckbox, PageToolbar } from '@/components/ui';
+import { Button, Card, Avatar, Badge, StatusBadge, SearchInput, ConfirmModal, SyncBadge, ToggleSwitch, Modal, Input, UserAvatar, ContextMenu, useContextMenu, SelectAllCheckbox, SelectionCheckbox, PageToolbar } from '@/components/ui';
 import { Dialog, DialogPanel } from '@headlessui/react';
 import { StaggerContainer, StaggerItem } from '@/components/layout/PageContainer';
 import { toast } from '@/components/ui/Toast';
 import { api, User, Group } from '@/lib/api';
 import { useTheme } from '@/lib/theme';
+import { useDefaultViewMode } from '@/lib/viewMode';
 import { CreateUserModal } from '@/components/modals/CreateUserModal';
 import {
   PlusIcon,
@@ -56,7 +57,7 @@ function formatWatchTime(minutes: number): string {
 export default function UsersPage() {
   const { hideSensitive } = useTheme();
   const [searchQuery, setSearchQuery] = useState('');
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const { viewMode, setViewMode } = useDefaultViewMode();
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
 
   // Data state
@@ -346,11 +347,6 @@ export default function UsersPage() {
             value: searchQuery,
             onChange: (value) => setSearchQuery(value),
             placeholder: 'Search users...',
-          }}
-          viewModeConfig={{
-            mode: viewMode,
-            onChange: setViewMode,
-            showLabels: false,
           }}
         />
 

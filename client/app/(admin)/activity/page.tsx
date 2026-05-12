@@ -8,6 +8,7 @@ import { Header } from '@/components/layout/Header';
 import { Button, Card, Badge, Avatar, UserAvatar, StatCard, SearchInput, PageToolbar, ViewModeToggle } from '@/components/ui';
 import { PageSection, StaggerContainer, StaggerItem } from '@/components/layout/PageContainer';
 import { api, MetricsData, Invitation } from '@/lib/api';
+import { useDefaultViewMode } from '@/lib/viewMode';
 import {
   ClockIcon,
   FilmIcon,

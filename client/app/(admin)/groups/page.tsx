@@ -5,11 +5,12 @@ import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence, LayoutGroup } from 'framer-motion';
 import Link from 'next/link';
 import { Header } from '@/components/layout/Header';
-import { Button, Card, Avatar, UserAvatar, AvatarGroup, Badge, SearchInput, Input, ConfirmModal, SyncBadge, ToggleSwitch, ContextMenu, useContextMenu, ViewModeToggle, SelectAllCheckbox, SelectionCheckbox, PageToolbar } from '@/components/ui';
+import { Button, Card, Avatar, UserAvatar, AvatarGroup, Badge, SearchInput, Input, ConfirmModal, SyncBadge, ToggleSwitch, ContextMenu, useContextMenu, SelectAllCheckbox, SelectionCheckbox, PageToolbar } from '@/components/ui';
 import { Dialog, DialogPanel } from '@headlessui/react';
 import { StaggerContainer, StaggerItem } from '@/components/layout/PageContainer';
 import { toast } from '@/components/ui/Toast';
 import { api, Group, User } from '@/lib/api';
+import { useDefaultViewMode } from '@/lib/viewMode';
 import {
   PlusIcon,
   ArrowPathIcon,
@@ -50,7 +51,7 @@ const colorOptions = [
 
 export default function GroupsPage() {
   const [searchQuery, setSearchQuery] = useState('');
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const { viewMode, setViewMode } = useDefaultViewMode();
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
 
   // Data state
@@ -301,11 +302,6 @@ export default function GroupsPage() {
             value: searchQuery,
             onChange: (value) => setSearchQuery(value),
             placeholder: 'Search groups...',
-          }}
-          viewModeConfig={{
-            mode: viewMode,
-            onChange: setViewMode,
-            showLabels: false,
           }}
         />
 

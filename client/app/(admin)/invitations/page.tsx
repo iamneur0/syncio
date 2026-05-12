@@ -5,11 +5,12 @@ import { motion, AnimatePresence, LayoutGroup } from 'framer-motion';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Header } from '@/components/layout/Header';
-import { Button, Card, Badge, Avatar, Modal, Input, Select, ConfirmModal, ToggleSwitch, DateTimePicker, UserAvatar, ContextMenu, useContextMenu, SelectAllCheckbox, SelectionCheckbox, PageToolbar, ViewModeToggle } from '@/components/ui';
+import { Button, Card, Badge, Avatar, Modal, Input, Select, ConfirmModal, ToggleSwitch, DateTimePicker, UserAvatar, ContextMenu, useContextMenu, SelectAllCheckbox, SelectionCheckbox, PageToolbar } from '@/components/ui';
 import { Dialog, DialogPanel } from '@headlessui/react';
 import { StaggerContainer, StaggerItem } from '@/components/layout/PageContainer';
 import { toast } from '@/components/ui/Toast';
 import { api, Invitation, Group } from '@/lib/api';
+import { useDefaultViewMode } from '@/lib/viewMode';
 import {
   PlusIcon,
   EnvelopeIcon,
@@ -62,7 +63,7 @@ interface RequestDisplay {
 
 export default function InvitationsPage() {
   const [activeTab, setActiveTab] = useState<'invitations' | 'requests'>('invitations');
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const { viewMode, setViewMode } = useDefaultViewMode();
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
 
   // Data state

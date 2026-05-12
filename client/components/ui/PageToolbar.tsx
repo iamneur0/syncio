@@ -4,7 +4,6 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { FilterTabs, FilterTabsResponsive, FilterTabOption } from './FilterTabs';
 import { SearchInput } from './Input';
 import { SelectAllCheckbox } from './SelectAllCheckbox';
-import { ViewModeToggle } from './ViewModeToggle';
 import { Card } from './Card';
 
 export interface PageToolbarSelectionConfig {
@@ -247,13 +246,6 @@ export function PageToolbar({
         ) : (
           <>
             {rightActions}
-            {viewModeConfig && (
-              <ViewModeToggle
-                mode={viewModeConfig.mode}
-                onChange={viewModeConfig.onChange}
-                showLabels={viewModeConfig.showLabels ?? false}
-              />
-            )}
           </>
         )}
       </div>
@@ -330,13 +322,6 @@ export function PageToolbarCompact({
       {/* Right side */}
       <div className="flex items-center gap-2">
         {rightActions}
-        {viewModeConfig && (
-          <ViewModeToggle
-            mode={viewModeConfig.mode}
-            onChange={viewModeConfig.onChange}
-            showLabels={false}
-          />
-        )}
       </div>
     </motion.div>
   );

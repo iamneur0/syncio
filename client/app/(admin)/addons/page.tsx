@@ -5,11 +5,12 @@ import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence, LayoutGroup } from 'framer-motion';
 import Link from 'next/link';
 import { Header } from '@/components/layout/Header';
-import { Button, Card, Badge, ResourceBadge, SearchInput, Modal, Input, ConfirmModal, VersionBadge, ToggleSwitch, ContextMenu, useContextMenu, ViewModeToggle, SelectAllCheckbox, SelectionCheckbox, PageToolbar } from '@/components/ui';
+import { Button, Card, Badge, ResourceBadge, SearchInput, Modal, Input, ConfirmModal, VersionBadge, ToggleSwitch, ContextMenu, useContextMenu, SelectAllCheckbox, SelectionCheckbox, PageToolbar } from '@/components/ui';
 import { Dialog, DialogPanel } from '@headlessui/react';
 import { StaggerContainer, StaggerItem } from '@/components/layout/PageContainer';
 import { toast } from '@/components/ui/Toast';
 import { api, Addon } from '@/lib/api';
+import { useDefaultViewMode } from '@/lib/viewMode';
 import {
   PlusIcon,
   ArrowPathIcon,
@@ -62,7 +63,7 @@ interface AddonDisplay {
 
 export default function AddonsPage() {
   const [searchQuery, setSearchQuery] = useState('');
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const { viewMode, setViewMode } = useDefaultViewMode();
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [selectedAddon, setSelectedAddon] = useState<AddonDisplay | null>(null);
   const [activeFilter, setActiveFilter] = useState('all');
@@ -342,10 +343,6 @@ export default function AddonsPage() {
             activeKey: activeFilter,
             onChange: setActiveFilter,
             layoutId: 'addons-filter-tabs',
-          }}
-          viewModeConfig={{
-            mode: viewMode,
-            onChange: setViewMode,
           }}
         />
 
