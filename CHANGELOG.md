@@ -1,5 +1,33 @@
 # Changelog
 
+## [1.1.0](https://github.com/iamneur0/syncio/compare/v1.0.0...v1.1.0) (2026-05-12)
+
+
+### Features
+
+* added back add button on mobile ([31e73ea](https://github.com/iamneur0/syncio/commit/31e73eaa665777bd9bae76713145150d834b0ccc))
+* adding multiple users to group + fixing the animation ([fe231d8](https://github.com/iamneur0/syncio/commit/fe231d8d13e770bd723b1db7814ab876b499b969))
+* configure addon button easter egg added back because of the hamster threats ([1c903a7](https://github.com/iamneur0/syncio/commit/1c903a78b8ce4b510c1995d3a0f301ec5cbbf239))
+* improved mobile UI ([368baaa](https://github.com/iamneur0/syncio/commit/368baaa26372ded5d69e2bcaf2ec99871707ab47))
+* leaderboard now in watch time ([adec8f4](https://github.com/iamneur0/syncio/commit/adec8f4e10c79732ee812d75ded88f017573cfaa))
+* reworked dnd for better drag on components, fixed mobile ([3182db0](https://github.com/iamneur0/syncio/commit/3182db00660045ffdfb067f2a5ee2eec69abae35))
+* user history migration from old activity to new watch session ([62d2d15](https://github.com/iamneur0/syncio/commit/62d2d1514c8070b674bd0191875babb6bb37bc9b))
+* view mode now persistent and in settings for cleaner pages ([c1b430b](https://github.com/iamneur0/syncio/commit/c1b430b15f68856a164a60dc942d9b33cf631b7d))
+
+
+### Bug Fixes
+
+* added back cred auth ([6d11da0](https://github.com/iamneur0/syncio/commit/6d11da060b97ff7945d9662d7d8f2297f635b3ff))
+* admin connection in private mode ([855c84f](https://github.com/iamneur0/syncio/commit/855c84fa67dc74250a5af18c5fcef50a5c8d64d1))
+* metrics now correctly migrating ([32954fe](https://github.com/iamneur0/syncio/commit/32954fe9653ba766da0b2b1ca06fc9dd7ef46061))
+* mobile elements coming out of cards ([4b04cf9](https://github.com/iamneur0/syncio/commit/4b04cf9ffefff41802bca6ae21970f46521d5482))
+* mobile now has items containerised in cards + other mobile visual bugs ([5fc31a5](https://github.com/iamneur0/syncio/commit/5fc31a520cba9686bc2ce22d1e7a59d6245f1b6e))
+* more ui fixes for desktop and mobile ([d536a83](https://github.com/iamneur0/syncio/commit/d536a8308ce5fff6a7375bdcb5d1ec12d1706e7f))
+* scheduled sync now working properly, with new sync now button in tasks ([4326b2c](https://github.com/iamneur0/syncio/commit/4326b2c4302f1ddec1794cf986bd26c8c6f9c20b))
+* trigger release-please only on release-* tags to prevent double workflow runs ([5b8e9ce](https://github.com/iamneur0/syncio/commit/5b8e9cef9827285addb562d45f5d4d7c4cef371f))
+* use npm instead of bun in Dockerfile to avoid segfault during build ([b754cb5](https://github.com/iamneur0/syncio/commit/b754cb59e8f8c3684a7f58a42fbcca722e32af5b))
+* user removal from groups ([55a832c](https://github.com/iamneur0/syncio/commit/55a832c6070e48e796cf92265f8374f3d84131a0))
+
 ## [1.0.0](https://github.com/iamneur0/syncio/compare/v0.4.0...v1.0.0) (2026-04-25)
 
 
