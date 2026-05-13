@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.2.0](https://github.com/iamneur0/syncio/compare/v1.1.0...v1.2.0) (2026-05-13)
+
+
+### Features
+
+* webhooks are back and more customisable ([7eafad1](https://github.com/iamneur0/syncio/commit/7eafad1647f8a61716a72c1a8d132bc7e4ab3827))
+
+
+### Bug Fixes
+
+* stremio auth for public instances ([35ba736](https://github.com/iamneur0/syncio/commit/35ba7363d3596d86f7021983681ee49487f3dfd3))
+
 ## [1.1.0](https://github.com/iamneur0/syncio/compare/v1.0.0...v1.1.0) (2026-05-12)
 
 
