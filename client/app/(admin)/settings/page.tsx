@@ -187,18 +187,20 @@ function ToggleSwitch({
 
 // Setting row component
 function SettingRow({
-  title,
+  label,
   description,
   children,
+  disabled,
 }: {
-  title: string;
+  label: string;
   description: string;
   children: React.ReactNode;
+  disabled?: boolean;
 }) {
   return (
-    <div className="flex items-center justify-between p-4 rounded-lg bg-subtle">
+    <div className={`flex items-center justify-between p-4 rounded-lg bg-subtle ${disabled ? 'opacity-50 pointer-events-none' : ''}`}>
       <div>
-        <p className="font-medium text-sm text-default">{title}</p>
+        <p className="font-medium text-sm text-default">{label}</p>
         <p className="text-xs text-muted">{description}</p>
       </div>
       {children}
@@ -218,6 +220,9 @@ export default function SettingsPage() {
     safe: true,
     useCustomFields: false,
     webhookUrl: '',
+    notifyOnActivity: false,
+    notifyOnSync: false,
+    notifyOnInvite: false,
   });
   
   // API Key state
@@ -238,6 +243,9 @@ export default function SettingsPage() {
           safe: settings.safe !== false,
           useCustomFields: settings.useCustomFields || false,
           webhookUrl: settings.webhookUrl || '',
+          notifyOnActivity: settings.notifyOnActivity || false,
+          notifyOnSync: settings.notifyOnSync || false,
+          notifyOnInvite: settings.notifyOnInvite || false,
         });
       } catch (e) {
         // Settings may not exist yet, use defaults
@@ -319,6 +327,9 @@ export default function SettingsPage() {
       safe: true,
       useCustomFields: false,
       webhookUrl: '',
+      notifyOnActivity: false,
+      notifyOnSync: false,
+      notifyOnInvite: false,
     });
     try {
       await api.updateSyncSettings({
@@ -326,6 +337,9 @@ export default function SettingsPage() {
         safe: true,
         useCustomFields: false,
         webhookUrl: '',
+        notifyOnActivity: false,
+        notifyOnSync: false,
+        notifyOnInvite: false,
       });
       toast.success('Settings reset to defaults');
     } catch (e: any) {
@@ -388,7 +402,7 @@ export default function SettingsPage() {
 
             <div className="space-y-3">
               <SettingRow
-                title="Private Mode"
+                label="Private Mode"
                 description="Hide sensitive information like emails, IPs, and API keys"
               >
                 <ToggleSwitch
@@ -399,7 +413,7 @@ export default function SettingsPage() {
               </SettingRow>
 
               <SettingRow
-                title="Custom Addon Names"
+                label="Custom Addon Names"
                 description="Show custom names instead of original addon names"
               >
                 <ToggleSwitch
@@ -427,7 +441,7 @@ export default function SettingsPage() {
 
             <div className="space-y-3">
               <SettingRow
-                title="Advanced Sync"
+                label="Advanced Sync"
                 description="Enable advanced sync features for more control over addon syncing"
               >
                 <ToggleSwitch
@@ -438,7 +452,7 @@ export default function SettingsPage() {
               </SettingRow>
 
               <SettingRow
-                title="Unsafe Mode"
+                label="Unsafe Mode"
                 description="Allow destructive operations without confirmation (not recommended)"
               >
                 <div className="flex items-center gap-2">
@@ -471,7 +485,7 @@ export default function SettingsPage() {
 
             <div className="space-y-3">
               <SettingRow
-                title="Default View Mode"
+                label="Default View Mode"
                 description="Choose how lists are displayed by default"
               >
                 <div className="hidden md:block">
@@ -486,7 +500,7 @@ export default function SettingsPage() {
           </Card>
         </PageSection>
 
-        {/* Discord Webhook */}
+        {/* Notifications */}
         <PageSection delay={0.15} className="mb-6">
           <Card padding="lg">
             <div className="flex items-center gap-3 mb-5">
@@ -494,7 +508,7 @@ export default function SettingsPage() {
                 <GlobeAltIcon className="w-5 h-5 text-indigo-400" />
               </div>
               <div>
-                <h3 className="text-base font-semibold font-display text-default">Discord Webhook</h3>
+                <h3 className="text-base font-semibold font-display text-default">Notifications</h3>
                 <p className="text-xs text-muted">Receive notifications via Discord</p>
               </div>
             </div>
@@ -522,8 +536,46 @@ export default function SettingsPage() {
                   </Button>
                 </div>
                 <p className="text-xs text-muted mt-2">
-                  Create a webhook in your Discord server settings to receive sync notifications
+                  Create a webhook in your Discord server settings to receive notifications
                 </p>
+              </div>
+
+              <div className="space-y-3">
+                <SettingRow
+                  label="Activity notifications"
+                  description="Notify when users start watching"
+                  disabled={!syncSettings.webhookUrl?.trim()}
+                >
+                  <ToggleSwitch
+                    enabled={syncSettings.notifyOnActivity || false}
+                    onChange={(v) => handleSaveSetting('notifyOnActivity', v)}
+                    label="Toggle activity notifications"
+                  />
+                </SettingRow>
+
+                <SettingRow
+                  label="Sync notifications"
+                  description="Notify when sync completes"
+                  disabled={!syncSettings.webhookUrl?.trim()}
+                >
+                  <ToggleSwitch
+                    enabled={syncSettings.notifyOnSync || false}
+                    onChange={(v) => handleSaveSetting('notifyOnSync', v)}
+                    label="Toggle sync notifications"
+                  />
+                </SettingRow>
+
+                <SettingRow
+                  label="Invite notifications"
+                  description="Notify for invitations and user joins"
+                  disabled={!syncSettings.webhookUrl?.trim()}
+                >
+                  <ToggleSwitch
+                    enabled={syncSettings.notifyOnInvite || false}
+                    onChange={(v) => handleSaveSetting('notifyOnInvite', v)}
+                    label="Toggle invite notifications"
+                  />
+                </SettingRow>
               </div>
             </div>
           </Card>
@@ -601,7 +653,7 @@ export default function SettingsPage() {
             </div>
 
             <div className="space-y-3">
-              <div className="flex items-center justify-between p-4 rounded-lg bg-error-muted border border-error/30">
+              <div className="flex items-center justify-between p-4 rounded-lg bg-error-muted">
                 <div>
                   <p className="font-medium text-sm text-default">Reset All Settings</p>
                   <p className="text-xs text-muted">Restore all settings to their defaults</p>

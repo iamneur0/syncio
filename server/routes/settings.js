@@ -11,7 +11,7 @@ module.exports = ({ prisma, INSTANCE_TYPE, getAccountDek, getDecryptedManifestUr
 
   const ensureDefaultAccount = async () => {
     const privatePassword = process.env.PRIVATE_ACCOUNT_PASSWORD || 'private-mode'
-    const defaultSyncPayload = JSON.stringify({ enabled: false, frequency: '0', safe: true, mode: 'normal', webhookUrl: null })
+    const defaultSyncPayload = JSON.stringify({ enabled: false, frequency: '0', safe: true, mode: 'normal', webhookUrl: null, notifyOnActivity: false, notifyOnSync: false, notifyOnInvite: false })
 
     let account = await prisma.appAccount.findUnique({ where: { id: DEFAULT_ACCOUNT_ID } })
     if (!account) {
@@ -192,7 +192,10 @@ module.exports = ({ prisma, INSTANCE_TYPE, getAccountDek, getDecryptedManifestUr
           safe: (syncCfg && typeof syncCfg === 'object' && typeof syncCfg.safe === 'boolean') ? syncCfg.safe : true,
           mode: (syncCfg && typeof syncCfg === 'object' && syncCfg.mode === 'advanced') ? 'advanced' : 'normal',
           webhookUrl: (syncCfg && typeof syncCfg === 'object' && typeof syncCfg.webhookUrl === 'string') ? syncCfg.webhookUrl : '',
-          useCustomFields: (syncCfg && typeof syncCfg === 'object' && typeof syncCfg.useCustomFields === 'boolean') ? syncCfg.useCustomFields : ((syncCfg && typeof syncCfg === 'object' && typeof syncCfg.useCustomNames === 'boolean') ? syncCfg.useCustomNames : false)
+          useCustomFields: (syncCfg && typeof syncCfg === 'object' && typeof syncCfg.useCustomFields === 'boolean') ? syncCfg.useCustomFields : ((syncCfg && typeof syncCfg === 'object' && typeof syncCfg.useCustomNames === 'boolean') ? syncCfg.useCustomNames : false),
+          notifyOnActivity: (syncCfg && typeof syncCfg === 'object') ? syncCfg.notifyOnActivity === true : false,
+          notifyOnSync: (syncCfg && typeof syncCfg === 'object') ? syncCfg.notifyOnSync === true : false,
+          notifyOnInvite: (syncCfg && typeof syncCfg === 'object') ? syncCfg.notifyOnInvite === true : false
         }
 
         return res.json(response)
@@ -208,10 +211,10 @@ module.exports = ({ prisma, INSTANCE_TYPE, getAccountDek, getDecryptedManifestUr
         const frequency = (typeof syncCfg.frequency === 'string' && syncCfg.frequency.trim())
           ? syncCfg.frequency.trim()
           : '0'
-        const resp = { enabled: syncCfg.enabled !== false, safe, mode, frequency, lastRunAt: syncCfg.lastRunAt, webhookUrl: syncCfg.webhookUrl || '', useCustomFields: (typeof syncCfg.useCustomFields === 'boolean') ? syncCfg.useCustomFields : ((typeof syncCfg.useCustomNames === 'boolean') ? syncCfg.useCustomNames : false) }
+        const resp = { enabled: syncCfg.enabled !== false, safe, mode, frequency, lastRunAt: syncCfg.lastRunAt, webhookUrl: syncCfg.webhookUrl || '', useCustomFields: (typeof syncCfg.useCustomFields === 'boolean') ? syncCfg.useCustomFields : ((typeof syncCfg.useCustomNames === 'boolean') ? syncCfg.useCustomNames : false), notifyOnActivity: syncCfg.notifyOnActivity === true, notifyOnSync: syncCfg.notifyOnSync === true, notifyOnInvite: syncCfg.notifyOnInvite === true }
         return res.json(resp)
       }
-      return res.json({ enabled: false, frequency: 0, safe: true, mode: 'normal', useCustomFields: false })
+      return res.json({ enabled: false, frequency: 0, safe: true, mode: 'normal', useCustomFields: false, notifyOnActivity: false, notifyOnSync: false, notifyOnInvite: false })
     } catch (e) {
       return res.status(500).json({ message: 'Failed to read account sync settings' })
     }
@@ -219,7 +222,7 @@ module.exports = ({ prisma, INSTANCE_TYPE, getAccountDek, getDecryptedManifestUr
 
   router.put('/account-sync', async (req, res) => {
     try {
-      const { enabled, frequency, mode, unsafe, safe, webhookUrl, useCustomFields, useCustomNames } = req.body || {}
+      const { enabled, frequency, mode, unsafe, safe, webhookUrl, useCustomFields, useCustomNames, notifyOnActivity, notifyOnSync, notifyOnInvite } = req.body || {}
       // Support both useCustomFields (new) and useCustomNames (old) for backward compatibility
       const useCustomFieldsValue = useCustomFields !== undefined ? useCustomFields : useCustomNames
       if (INSTANCE_TYPE !== 'public') {
@@ -271,7 +274,10 @@ module.exports = ({ prisma, INSTANCE_TYPE, getAccountDek, getDecryptedManifestUr
           safe: safe !== undefined ? !!safe : (unsafe !== undefined ? !unsafe : baseCfg.safe !== false),
           mode: mode === 'advanced' ? 'advanced' : baseCfg.mode === 'advanced' ? 'advanced' : 'normal',
           webhookUrl: webhookUrl !== undefined ? (webhookUrl || null) : (baseCfg.webhookUrl || null),
-          useCustomFields: useCustomFieldsValue !== undefined ? !!useCustomFieldsValue : ((baseCfg.useCustomFields !== undefined ? baseCfg.useCustomFields : (baseCfg.useCustomNames !== undefined ? baseCfg.useCustomNames : false)))
+          useCustomFields: useCustomFieldsValue !== undefined ? !!useCustomFieldsValue : ((baseCfg.useCustomFields !== undefined ? baseCfg.useCustomFields : (baseCfg.useCustomNames !== undefined ? baseCfg.useCustomNames : false))),
+          notifyOnActivity: notifyOnActivity !== undefined ? !!notifyOnActivity : ((baseCfg.notifyOnActivity !== undefined) ? baseCfg.notifyOnActivity : false),
+          notifyOnSync: notifyOnSync !== undefined ? !!notifyOnSync : ((baseCfg.notifyOnSync !== undefined) ? baseCfg.notifyOnSync : false),
+          notifyOnInvite: notifyOnInvite !== undefined ? !!notifyOnInvite : ((baseCfg.notifyOnInvite !== undefined) ? baseCfg.notifyOnInvite : false)
         }
 
         try {
@@ -302,6 +308,9 @@ module.exports = ({ prisma, INSTANCE_TYPE, getAccountDek, getDecryptedManifestUr
       else if (unsafe !== undefined) partial.safe = !unsafe
       if (webhookUrl !== undefined) partial.webhookUrl = webhookUrl || null
       if (useCustomFieldsValue !== undefined) partial.useCustomFields = !!useCustomFieldsValue
+      if (notifyOnActivity !== undefined) partial.notifyOnActivity = !!notifyOnActivity
+      if (notifyOnSync !== undefined) partial.notifyOnSync = !!notifyOnSync
+      if (notifyOnInvite !== undefined) partial.notifyOnInvite = !!notifyOnInvite
 
       const nextCfg = { ...base, ...partial }
 

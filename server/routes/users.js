@@ -5041,6 +5041,22 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       })
       const targetUserMap = new Map(targetUsers.map(u => [u.id, u]))
 
+      // Get account sync config for account-level webhook
+      let accountWebhookUrl = null
+      try {
+        const account = await prisma.appAccount.findUnique({
+          where: { id: accountId },
+          select: { sync: true }
+        })
+        let syncCfg = account?.sync
+        if (typeof syncCfg === 'string') {
+          try { syncCfg = JSON.parse(syncCfg) } catch { syncCfg = null }
+        }
+        if (syncCfg && typeof syncCfg === 'object' && syncCfg.notifyOnActivity === true && syncCfg.webhookUrl) {
+          accountWebhookUrl = syncCfg.webhookUrl
+        }
+      } catch {}
+
       // Verify all target users exist and are in the same group
       const groupMembers = await getGroupMembers(prisma, accountId, userId)
       const groupMemberIds = new Set(groupMembers.map(u => u.id))
@@ -5138,6 +5154,15 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
                 item
               })
             }
+
+            // Also queue account-level notification if enabled
+            if (accountWebhookUrl) {
+              notificationsToSend.push({
+                webhookUrl: accountWebhookUrl,
+                item,
+                isAccountNotification: true
+              })
+            }
           } catch (error) {
             if (error.message.includes('already shared')) {
               // Skip duplicates silently
@@ -5154,10 +5179,15 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
         setImmediate(async () => {
           for (const notification of notificationsToSend) {
             try {
+              const isAccount = notification.isAccountNotification
+              const username = isAccount
+                ? `${sender.username} shared with ${targetUserMap.get(notification.item.targetUserId)?.username || 'a user'}`
+                : sender.username
+              const email = isAccount ? sender.email : sender.email
               await sendShareNotification(
                 notification.webhookUrl,
-                sender.username,
-                sender.email,
+                username,
+                email,
                 sender.colorIndex,
                 notification.item
               )

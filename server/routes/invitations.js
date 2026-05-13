@@ -93,7 +93,7 @@ module.exports = ({ prisma, getAccountId, INSTANCE_TYPE, encrypt, decrypt, assig
         })
         const syncCfg = parseSyncConfig(account?.sync)
         const webhookUrl = syncCfg?.webhookUrl
-        if (webhookUrl) {
+        if (syncCfg?.notifyOnInvite === true && webhookUrl) {
           // build the invite link
           const originHeader = (req.headers?.origin || '').trim()
           const hostHeader = req.get('host')
@@ -467,7 +467,7 @@ module.exports = ({ prisma, getAccountId, INSTANCE_TYPE, encrypt, decrypt, assig
           })
           const syncCfg = parseSyncConfig(account?.sync)
           const webhookUrl = syncCfg?.webhookUrl
-          if (webhookUrl) {
+          if (syncCfg?.notifyOnInvite === true && webhookUrl) {
             const hasLimit = updatedInvitation.maxUses != null && updatedInvitation.maxUses > 0
             const usesLeft = hasLimit
               ? Math.max(0, updatedInvitation.maxUses - updatedInvitation.currentUses)
@@ -1307,7 +1307,7 @@ module.exports.createPublicRouter = ({ prisma, encrypt, assignUserToGroup, decry
 
           const syncCfg = parseSyncConfig(account?.sync)
           const webhookUrl = syncCfg?.webhookUrl
-          if (webhookUrl) {
+          if (syncCfg?.notifyOnInvite === true && webhookUrl) {
             const embed = {
               title: `User ${request.username} used different emails`,
               description: `The user has used different emails for the Stremio account and its request.`,
@@ -1506,7 +1506,7 @@ module.exports.createPublicRouter = ({ prisma, encrypt, assignUserToGroup, decry
 
         const syncCfg = parseSyncConfig(account?.sync)
         const webhookUrl = syncCfg?.webhookUrl
-        if (webhookUrl) {
+        if (syncCfg?.notifyOnInvite === true && webhookUrl) {
           // uses left after incrementing
           const hasLimit = updatedInvitation.maxUses != null && updatedInvitation.maxUses > 0
           const usesLeft = hasLimit

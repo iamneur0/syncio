@@ -264,7 +264,7 @@ function scheduleSyncs(frequency, prisma, getAccountId, scopedWhere, decrypt, re
 
         // Send webhook notification
         const webhookUrl = syncCfg?.webhookUrl
-        if (webhookUrl && groups.length > 0) {
+        if (syncCfg?.notifyOnSync === true && webhookUrl && groups.length > 0) {
           try {
             if (!QUIET && mode === 'advanced') {
               console.log(`📤 Sending webhook notification with ${allReloadDiffs.length} diff(s)`)

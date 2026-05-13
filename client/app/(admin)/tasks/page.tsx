@@ -101,7 +101,9 @@ export default function TasksPage() {
   const [deletingAddons, setDeletingAddons] = useState(false);
   const [clearingUserAddons, setClearingUserAddons] = useState(false);
   const [importingAddons, setImportingAddons] = useState(false);
+  const [isDraggingAddons, setIsDraggingAddons] = useState(false);
   const [importingConfig, setImportingConfig] = useState(false);
+  const [isDraggingConfig, setIsDraggingConfig] = useState(false);
   const [reloadingAddons, setReloadingAddons] = useState(false);
   const [repairingAddons, setRepairingAddons] = useState(false);
   const [resettingConfig, setResettingConfig] = useState(false);
@@ -112,6 +114,16 @@ export default function TasksPage() {
   const [isImportingHistory, setIsImportingHistory] = useState(false);
   const [isClearingLibrary, setIsClearingLibrary] = useState(false);
   const [isClearingHistory, setIsClearingHistory] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmConfig, setConfirmConfig] = useState({
+    title: '',
+    description: '',
+    variant: 'default' as 'default' | 'warning' | 'danger',
+    onConfirm: () => {},
+  });
+  const addonFileInputRef = useRef<HTMLInputElement | null>(null);
+  const configFileInputRef = useRef<HTMLInputElement | null>(null);
+  const historyFileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Users for library/history export
   const [users, setUsers] = useState<User[]>([]);
@@ -123,71 +135,55 @@ export default function TasksPage() {
   const [backupDays, setBackupDays] = useState(0);
   const [healthCheckMinutes, setHealthCheckMinutes] = useState(30);
   const [isHealthCheckLoading, setIsHealthCheckLoading] = useState(false);
-
-  // Metrics migration
-  const [migrationPreview, setMigrationPreview] = useState<{
-    migrationStatus: { hasExistingData: boolean; alreadyMigrated: boolean; sessionsCount: number; episodesCount: number; activitiesCount: number };
-    users: { userId: string; username: string; movies: number; shows: number; watchTimeHours: number; dateRange: { earliest: string; latest: string } | null }[];
-    totals: { users: number; movies: number; shows: number; watchTimeHours: number; pendingMigration: boolean };
-  } | null>(null);
-  const [isLoadingMigration, setIsLoadingMigration] = useState(false);
-  const [isMigrating, setIsMigrating] = useState(false);
-  const [showMigrationConfirm, setShowMigrationConfirm] = useState(false);
   const [isRunningHealthCheck, setIsRunningHealthCheck] = useState(false);
-  
-  // Confirm dialog
-  const [confirmOpen, setConfirmOpen] = useState(false);
-  const [confirmConfig, setConfirmConfig] = useState<{
-    title: string;
-    description: string;
-    onConfirm: () => void;
-    variant?: 'danger' | 'warning' | 'default';
-  }>({ title: '', description: '', onConfirm: () => {} });
-  
-  // File input refs
-  const addonFileInputRef = useRef<HTMLInputElement>(null);
-  const configFileInputRef = useRef<HTMLInputElement>(null);
-  const historyFileInputRef = useRef<HTMLInputElement>(null);
-  
-  // Drag state
-  const [isDraggingAddons, setIsDraggingAddons] = useState(false);
-  const [isDraggingConfig, setIsDraggingConfig] = useState(false);
 
-  // Load users and settings
-  useEffect(() => {
-    const loadData = async () => {
-      try {
-        const usersData = await api.getUsers();
-        setUsers(usersData);
-      } catch (e) {
-        // Users may not be available
-      }
-      
-      try {
-        const settings = await api.getSyncSettings();
-        if (settings.enabled && settings.frequency) {
-          setSyncFrequency(settings.frequency);
-        }
-      } catch (e) {}
-      
-      try {
-        const backup = await api.getBackupFrequency();
-        setBackupDays(backup.days || 0);
-      } catch (e) {}
-      
-      try {
-        const healthCheck = await api.getAddonHealthCheckSettings();
-        setHealthCheckMinutes(healthCheck.intervalMinutes || 30);
-      } catch (e) {}
-    };
-    loadData();
-  }, []);
+// Metrics migration - DISABLED
+  // const [migrationPreview, setMigrationPreview] = useState<{
+  //   migrationStatus: { hasExistingData: boolean; alreadyMigrated: boolean; sessionsCount: number; episodesCount: number; activitiesCount: number };
+  //   users: { userId: string; username: string; movies: number; shows: number; watchTimeHours: number }[];
+  //   totals: { users: number; movies: number; shows: number; watchTimeHours: number; pendingMigration: boolean };
+  // } | null>(null);
+  // const [isLoadingMigration, setIsLoadingMigration] = useState(false);
+  // const [isRunningMigration, setIsRunningMigration] = useState(false);
+  // const [showMigrationConfirm, setShowMigrationConfirm] = useState(false);
+
+  // // Metrics migration handlers
+  // const handleLoadMigrationPreview = async () => {
+  //   setIsLoadingMigration(true);
+  //   try {
+  //     const preview = await api.getMetricsMigrationPreview();
+  //     setMigrationPreview(preview);
+  //   } catch (e: any) {
+  //     toast.error(e.message || 'Failed to load migration preview');
+  //   } finally {
+  //     setIsLoadingMigration(false);
+  //   }
+  // };
+  //
+  // const handleRunMigration = async () => {
+  //   setIsRunningMigration(true);
+  //   try {
+  //     const result = await api.runMetricsMigration();
+  //     if (result.migrated) {
+  //       toast.success(`Migration complete: ${result.sessionsCreated} sessions, ${result.episodesCreated} episodes created`);
+  //       setMigrationPreview(null);
+  //       setShowMigrationConfirm(false);
+  //     } else {
+  //       toast.info(result.reason || 'Migration skipped');
+  //     }
+  //   } catch (e: any) {
+  //     toast.error(e.message || 'Failed to run migration');
+  //   } finally {
+  //     setIsRunningMigration(false);
+  //   }
+  // };
 
   const openConfirm = (config: typeof confirmConfig) => {
     setConfirmConfig(config);
     setConfirmOpen(true);
   };
 
+  /*
   // Metrics migration handlers
   const handleLoadMigrationPreview = async () => {
     setIsLoadingMigration(true);
@@ -218,6 +214,7 @@ export default function TasksPage() {
       setIsMigrating(false);
     }
   };
+  */
 
   // User actions
   const handleSyncAllUsers = async () => {
@@ -1109,7 +1106,7 @@ export default function TasksPage() {
           </Card>
         </PageSection>
 
-        {/* Data Migration */}
+{/*
         <PageSection delay={0.38}>
           <Card padding="lg" className="mb-6">
             <div className="flex items-center gap-3 mb-4">
@@ -1173,7 +1170,7 @@ export default function TasksPage() {
               </div>
             )}
 
-            {/* Migration Confirm Modal */}
+            // Migration Confirm Modal
             {showMigrationConfirm && migrationPreview && (
               <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
                 <div className="bg-surface border border-default rounded-xl p-6 max-w-md w-full mx-4">
@@ -1208,9 +1205,9 @@ export default function TasksPage() {
                       variant="primary"
                       size="sm"
                       onClick={handleRunMigration}
-                      isLoading={isMigrating}
+                      isLoading={isRunningMigration}
                     >
-                      Migrate
+                      Run Migration
                     </Button>
                   </div>
                 </div>
@@ -1218,6 +1215,7 @@ export default function TasksPage() {
             )}
           </Card>
         </PageSection>
+        */}
 
         {/* Scheduled Tasks */}
         <PageSection delay={0.4}>

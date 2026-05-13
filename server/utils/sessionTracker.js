@@ -224,6 +224,22 @@ async function processUserSessions(prisma, accountId, userId, library, now = new
     select: { id: true, username: true, email: true, colorIndex: true, discordWebhookUrl: true }
   })
 
+  // Fetch account sync config for webhook notifications
+  let accountWebhookUrl = null
+  try {
+    const account = await prisma.appAccount.findUnique({
+      where: { id: accountId },
+      select: { sync: true }
+    })
+    let syncCfg = account?.sync
+    if (typeof syncCfg === 'string') {
+      try { syncCfg = JSON.parse(syncCfg) } catch { syncCfg = null }
+    }
+    if (syncCfg && typeof syncCfg === 'object' && syncCfg.notifyOnActivity === true && syncCfg.webhookUrl) {
+      accountWebhookUrl = syncCfg.webhookUrl
+    }
+  } catch {}
+
   // Get all active sessions for this user
   const activeSessions = await prisma.watchSession.findMany({
     where: {
@@ -399,8 +415,8 @@ async function processUserSessions(prisma, accountId, userId, library, now = new
           console.log(`[SessionTracker] Session created successfully`)
           
           // Send Discord webhook notification when session starts (now playing)
-          if (user?.discordWebhookUrl) {
-            await sendSessionStartNotification(user.discordWebhookUrl, newSession, user)
+          if (accountWebhookUrl) {
+            await sendSessionStartNotification(accountWebhookUrl, newSession, user)
           }
         } catch (error) {
           // Ignore duplicate errors

@@ -1330,6 +1330,9 @@ export interface SyncSettings {
   frequency: string;
   webhookUrl?: string;
   useCustomFields?: boolean;
+  notifyOnActivity?: boolean;
+  notifyOnSync?: boolean;
+  notifyOnInvite?: boolean;
 }
 
 export interface ExportedConfig {
