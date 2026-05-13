@@ -17,6 +17,7 @@ function pathIsAllowlisted(path) {
     '/api/public-auth/register',
     '/api/public-auth/generate-uuid',
     '/api/public-auth/stremio-login',
+    '/api/auth/stremio-login',
     '/api/public-auth/private-login', // Private instance username/password login
     '/api/auth/private-login', // Private instance username/password login (alt path)
     '/api/public-auth/suggest-uuid',
